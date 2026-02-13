@@ -95,6 +95,66 @@ pub enum TabulaError {
     #[error("param schema mismatch: {0}")]
     ParamSchemaMismatch(String),
 
+    /// NF-1: duplicate Read to the same (table, col, row) in one tx body.
+    #[error(
+        "NF-1 unique-read: instructions {first} and {second} both read (table {table:?}, col {col:?})"
+    )]
+    NfUniqueRead {
+        /// First Read instruction index.
+        first: usize,
+        /// Second Read instruction index.
+        second: usize,
+        /// Table of the duplicated access.
+        table: TableId,
+        /// Column of the duplicated access.
+        col: ColId,
+    },
+
+    /// NF-2: duplicate Write to the same (table, col, row) in one tx body.
+    #[error(
+        "NF-2 unique-write: instructions {first} and {second} both write (table {table:?}, col {col:?})"
+    )]
+    NfUniqueWrite {
+        /// First Write instruction index.
+        first: usize,
+        /// Second Write instruction index.
+        second: usize,
+        /// Table of the duplicated access.
+        table: TableId,
+        /// Column of the duplicated access.
+        col: ColId,
+    },
+
+    /// NF-3: Read after a prior Write to the same (table, col, row).
+    #[error(
+        "NF-3 read-after-write: read at {read_at} after write at {write_at} to (table {table:?}, col {col:?})"
+    )]
+    NfReadAfterWrite {
+        /// Write instruction index.
+        write_at: usize,
+        /// Read instruction index (must be > write_at).
+        read_at: usize,
+        /// Table of the access.
+        table: TableId,
+        /// Column of the access.
+        col: ColId,
+    },
+
+    /// NF-4: two accesses to the same (table, col) have unresolvable row expressions.
+    #[error(
+        "NF-4 ambiguous-alias: instructions {first} and {second} access (table {table:?}, col {col:?}) with unresolvable row expressions"
+    )]
+    NfAmbiguousAlias {
+        /// First access instruction index.
+        first: usize,
+        /// Second access instruction index.
+        second: usize,
+        /// Table of the access.
+        table: TableId,
+        /// Column of the access.
+        col: ColId,
+    },
+
     /// Custom error for extension points.
     #[error("{0}")]
     Custom(String),

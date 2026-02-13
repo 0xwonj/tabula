@@ -53,6 +53,7 @@ impl Program {
     /// body contains out-of-bounds param/slot references or type mismatches.
     pub fn register(&mut self, def: TxTypeDef) -> Result<(), TabulaError> {
         let info = compile_body(&def, &self.schemas)?;
+        validate_normal_form(&def.body)?;
         self.type_info.insert(def.id, info);
         self.types.insert(def.id, def);
         Ok(())
@@ -83,6 +84,162 @@ impl Default for Program {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Normal-form validation (§2.3–2.6 of semantics-spec)
+// ---------------------------------------------------------------------------
+
+/// Result of comparing two `RowExpr`s for alias resolution (§2.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowRelation {
+    /// Provably the same row key.
+    Equal,
+    /// Provably different row keys.
+    Distinct,
+    /// Cannot determine — program must be rejected.
+    Ambiguous,
+}
+
+/// Determine the static relationship between two row expressions.
+///
+/// - `Lit(a) == Lit(a)` → Equal
+/// - `Param(p) == Param(p)` → Equal
+/// - `Slot(s) == Slot(s)` → Equal
+/// - `Lit(a) vs Lit(b)` where `a ≠ b` → Distinct
+/// - Everything else → Ambiguous
+fn row_relation(a: &RowExpr, b: &RowExpr) -> RowRelation {
+    match (a, b) {
+        (RowExpr::Literal(x), RowExpr::Literal(y)) => {
+            if x == y {
+                RowRelation::Equal
+            } else {
+                RowRelation::Distinct
+            }
+        }
+        (RowExpr::Param(x), RowExpr::Param(y)) => {
+            if x == y {
+                RowRelation::Equal
+            } else {
+                RowRelation::Ambiguous
+            }
+        }
+        (RowExpr::Slot(x), RowExpr::Slot(y)) => {
+            if x == y {
+                RowRelation::Equal
+            } else {
+                RowRelation::Ambiguous
+            }
+        }
+        _ => RowRelation::Ambiguous,
+    }
+}
+
+/// Whether a state access is a Read or Write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AccessKind {
+    Read,
+    Write,
+}
+
+/// A state access record extracted from the instruction stream.
+struct StateAccess<'a> {
+    table: TableId,
+    col: ColId,
+    row: &'a RowExpr,
+    instr_idx: usize,
+    kind: AccessKind,
+}
+
+/// Validate all four normal-form rules on the instruction body.
+///
+/// Called from `register()` after `compile_body()` succeeds.
+/// Rejects programs that violate NF-1 through NF-4.
+fn validate_normal_form(body: &[Instruction]) -> Result<(), TabulaError> {
+    // Collect state accesses (Read and Write only — Lookup is not stateful).
+    let mut accesses: Vec<StateAccess<'_>> = Vec::new();
+    for (i, instr) in body.iter().enumerate() {
+        match instr {
+            Instruction::Read {
+                table, col, row, ..
+            } => accesses.push(StateAccess {
+                table: *table,
+                col: *col,
+                row,
+                instr_idx: i,
+                kind: AccessKind::Read,
+            }),
+            Instruction::Write {
+                table, col, row, ..
+            } => accesses.push(StateAccess {
+                table: *table,
+                col: *col,
+                row,
+                instr_idx: i,
+                kind: AccessKind::Write,
+            }),
+            _ => {}
+        }
+    }
+
+    // Group by (table, col) and check every pair within each group.
+    let mut by_tc: BTreeMap<(TableId, ColId), Vec<&StateAccess<'_>>> = BTreeMap::new();
+    for acc in &accesses {
+        by_tc.entry((acc.table, acc.col)).or_default().push(acc);
+    }
+
+    for (&(table, col), group) in &by_tc {
+        for i in 0..group.len() {
+            for j in (i + 1)..group.len() {
+                let a = group[i];
+                let b = group[j];
+                match row_relation(a.row, b.row) {
+                    RowRelation::Ambiguous => {
+                        return Err(TabulaError::NfAmbiguousAlias {
+                            first: a.instr_idx,
+                            second: b.instr_idx,
+                            table,
+                            col,
+                        });
+                    }
+                    RowRelation::Equal => match (a.kind, b.kind) {
+                        (AccessKind::Read, AccessKind::Read) => {
+                            return Err(TabulaError::NfUniqueRead {
+                                first: a.instr_idx,
+                                second: b.instr_idx,
+                                table,
+                                col,
+                            });
+                        }
+                        (AccessKind::Write, AccessKind::Write) => {
+                            return Err(TabulaError::NfUniqueWrite {
+                                first: a.instr_idx,
+                                second: b.instr_idx,
+                                table,
+                                col,
+                            });
+                        }
+                        (AccessKind::Write, AccessKind::Read) => {
+                            return Err(TabulaError::NfReadAfterWrite {
+                                write_at: a.instr_idx,
+                                read_at: b.instr_idx,
+                                table,
+                                col,
+                            });
+                        }
+                        (AccessKind::Read, AccessKind::Write) => {
+                            // Read then Write to the same cell is allowed.
+                        }
+                    },
+                    RowRelation::Distinct => {
+                        // Different cells — no aliasing concern.
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -491,63 +648,56 @@ mod tests {
     use tabula_core::ir::{Instruction, Predicate, RowExpr, ValueExpr};
     use tabula_core::schema::{ColumnDef, TableSchema};
     use tabula_core::tx::{ParamDef, TxTypeDef};
+    use tabula_core::types::RowKey;
 
+    /// NF-compliant transfer: reads row 0 and row 1 of (table 1, col 0),
+    /// transfers `amount` (param 0) from row 0 to row 1.
     fn transfer_def() -> TxTypeDef {
         TxTypeDef {
             id: TxTypeId(1),
             name: "transfer".into(),
-            param_schema: vec![
-                ParamDef {
-                    name: "from".into(),
-                    value_type: ValueType::U64,
-                },
-                ParamDef {
-                    name: "to".into(),
-                    value_type: ValueType::U64,
-                },
-                ParamDef {
-                    name: "amount".into(),
-                    value_type: ValueType::U64,
-                },
-            ],
+            param_schema: vec![ParamDef {
+                name: "amount".into(),
+                value_type: ValueType::U64,
+            }],
             body: vec![
                 Instruction::Read {
                     dst_val: 0,
                     dst_is_null: 1,
                     table: TableId(1),
-                    row: RowExpr::Param(0),
+                    row: RowExpr::Literal(RowKey(0)),
                     col: ColId(0),
                 },
                 Instruction::Read {
                     dst_val: 2,
                     dst_is_null: 3,
                     table: TableId(1),
-                    row: RowExpr::Param(1),
+                    row: RowExpr::Literal(RowKey(1)),
                     col: ColId(0),
                 },
                 Instruction::Assert {
-                    predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(2)),
+                    predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(0)),
                 },
                 Instruction::Sub {
                     dst: 4,
                     lhs: ValueExpr::Slot(0),
-                    rhs: ValueExpr::Param(2),
+                    rhs: ValueExpr::Param(0),
                 },
                 Instruction::Add {
                     dst: 5,
                     lhs: ValueExpr::Slot(2),
-                    rhs: ValueExpr::Param(2),
+                    rhs: ValueExpr::Param(0),
                 },
                 Instruction::Write {
                     table: TableId(1),
-                    row: RowExpr::Param(0),
+                    row: RowExpr::Literal(RowKey(0)),
                     col: ColId(0),
                     src_val: ValueExpr::Slot(4),
                     src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
                 Instruction::Write {
                     table: TableId(1),
-                    row: RowExpr::Param(1),
+                    row: RowExpr::Literal(RowKey(1)),
                     col: ColId(0),
                     src_val: ValueExpr::Slot(5),
                     src_is_null: ValueExpr::Literal(Value::Bool(false)),
@@ -575,15 +725,12 @@ mod tests {
         assert_eq!(info.slot_types[1], Some(ValueType::Bool));
         assert_eq!(info.slot_types[2], None);
         assert_eq!(info.slot_types[3], Some(ValueType::Bool));
-        // Slot 4 = Sub(Slot(0), Param(2)) → Param(2) is U64 → U64
+        // Slot 4 = Sub(Slot(0), Param(0)) → Param(0) is U64 → U64
         assert_eq!(info.slot_types[4], Some(ValueType::U64));
-        // Slot 5 = Add(Slot(2), Param(2)) → Param(2) is U64 → U64
+        // Slot 5 = Add(Slot(2), Param(0)) → Param(0) is U64 → U64
         assert_eq!(info.slot_types[5], Some(ValueType::U64));
         assert_eq!(info.max_slot, Some(5));
-        assert_eq!(
-            info.param_types,
-            vec![ValueType::U64, ValueType::U64, ValueType::U64]
-        );
+        assert_eq!(info.param_types, vec![ValueType::U64]);
     }
 
     #[test]
@@ -783,7 +930,7 @@ mod tests {
     }
 
     #[test]
-    fn test_no_schema_backward_compatible() {
+    fn test_no_schema_read_type_unknown() {
         // Without schema, Read val slots have no type, but is_null slots are always Bool.
         let mut prog = Program::new();
         prog.register(transfer_def()).unwrap();
@@ -1024,5 +1171,359 @@ mod tests {
         let mut prog = Program::new();
         let err = prog.register(def).unwrap_err();
         assert!(matches!(err, TabulaError::InvalidIr(ref msg) if msg.contains("SSA violation")));
+    }
+
+    // -----------------------------------------------------------------------
+    // Normal-form validation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_nf_transfer_passes() {
+        // transfer_def uses Literal row keys → NF-compliant
+        let mut prog = Program::new();
+        prog.register(transfer_def()).unwrap();
+    }
+
+    #[test]
+    fn test_nf1_duplicate_read_rejected() {
+        // Two Reads to the same (table, col) with same Literal row → NF-1
+        let def = TxTypeDef {
+            id: TxTypeId(30),
+            name: "dup_read".into(),
+            param_schema: vec![],
+            body: vec![
+                Instruction::Read {
+                    dst_val: 0,
+                    dst_is_null: 1,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Literal(RowKey(0)),
+                },
+                Instruction::Read {
+                    dst_val: 2,
+                    dst_is_null: 3,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Literal(RowKey(0)), // same cell
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        let err = prog.register(def).unwrap_err();
+        assert!(matches!(
+            err,
+            TabulaError::NfUniqueRead {
+                first: 0,
+                second: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_nf2_duplicate_write_rejected() {
+        // Two Writes to the same (table, col, row) → NF-2
+        let def = TxTypeDef {
+            id: TxTypeId(31),
+            name: "dup_write".into(),
+            param_schema: vec![ParamDef {
+                name: "v".into(),
+                value_type: ValueType::U64,
+            }],
+            body: vec![
+                Instruction::Write {
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Param(0),
+                    src_val: ValueExpr::Literal(Value::U64(1)),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                },
+                Instruction::Write {
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Param(0), // same param → provably equal
+                    src_val: ValueExpr::Literal(Value::U64(2)),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        let err = prog.register(def).unwrap_err();
+        assert!(matches!(
+            err,
+            TabulaError::NfUniqueWrite {
+                first: 0,
+                second: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_nf3_read_after_write_rejected() {
+        // Write then Read to the same (table, col, row) → NF-3
+        let def = TxTypeDef {
+            id: TxTypeId(32),
+            name: "raw".into(),
+            param_schema: vec![],
+            body: vec![
+                Instruction::Write {
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Literal(RowKey(5)),
+                    src_val: ValueExpr::Literal(Value::U64(42)),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                },
+                Instruction::Read {
+                    dst_val: 0,
+                    dst_is_null: 1,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Literal(RowKey(5)), // read after write
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        let err = prog.register(def).unwrap_err();
+        assert!(matches!(
+            err,
+            TabulaError::NfReadAfterWrite {
+                write_at: 0,
+                read_at: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_nf4_ambiguous_alias_rejected() {
+        // Read(Slot(1)) + Write(Param(0)) to same (t, c) → ambiguous
+        let def = TxTypeDef {
+            id: TxTypeId(33),
+            name: "ambiguous".into(),
+            param_schema: vec![ParamDef {
+                name: "row".into(),
+                value_type: ValueType::U64,
+            }],
+            body: vec![
+                Instruction::Add {
+                    dst: 0,
+                    lhs: ValueExpr::Param(0),
+                    rhs: ValueExpr::Literal(Value::U64(1)),
+                },
+                Instruction::Read {
+                    dst_val: 1,
+                    dst_is_null: 2,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Slot(0), // Slot(0)
+                },
+                Instruction::Write {
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Param(0), // Param(0) — Slot vs Param → ambiguous
+                    src_val: ValueExpr::Literal(Value::U64(99)),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        let err = prog.register(def).unwrap_err();
+        assert!(matches!(
+            err,
+            TabulaError::NfAmbiguousAlias {
+                first: 1,
+                second: 2,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_nf4_different_params_ambiguous() {
+        // Two Reads to same (t, c) with Param(0) and Param(1) → ambiguous
+        let def = TxTypeDef {
+            id: TxTypeId(34),
+            name: "diff_params".into(),
+            param_schema: vec![
+                ParamDef {
+                    name: "a".into(),
+                    value_type: ValueType::U64,
+                },
+                ParamDef {
+                    name: "b".into(),
+                    value_type: ValueType::U64,
+                },
+            ],
+            body: vec![
+                Instruction::Read {
+                    dst_val: 0,
+                    dst_is_null: 1,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Param(0),
+                },
+                Instruction::Read {
+                    dst_val: 2,
+                    dst_is_null: 3,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Param(1), // different param → ambiguous
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        let err = prog.register(def).unwrap_err();
+        assert!(matches!(err, TabulaError::NfAmbiguousAlias { .. }));
+    }
+
+    #[test]
+    fn test_nf_distinct_literal_rows_accepted() {
+        // Read(Lit(0)) + Write(Lit(1)) to same (t, c) → provably distinct → OK
+        let def = TxTypeDef {
+            id: TxTypeId(35),
+            name: "distinct_lit".into(),
+            param_schema: vec![],
+            body: vec![
+                Instruction::Read {
+                    dst_val: 0,
+                    dst_is_null: 1,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Literal(RowKey(0)),
+                },
+                Instruction::Write {
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Literal(RowKey(1)), // different literal → distinct
+                    src_val: ValueExpr::Slot(0),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        prog.register(def).unwrap();
+    }
+
+    #[test]
+    fn test_nf_read_then_write_same_cell_accepted() {
+        // Read then Write to the same cell → allowed (standard pattern)
+        let def = TxTypeDef {
+            id: TxTypeId(36),
+            name: "read_write".into(),
+            param_schema: vec![],
+            body: vec![
+                Instruction::Read {
+                    dst_val: 0,
+                    dst_is_null: 1,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Literal(RowKey(0)),
+                },
+                Instruction::Write {
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Literal(RowKey(0)), // same cell, but Read before Write
+                    src_val: ValueExpr::Slot(0),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        prog.register(def).unwrap();
+    }
+
+    #[test]
+    fn test_nf_different_tables_no_conflict() {
+        // Two Reads to same col/row but different tables → no aliasing
+        let def = TxTypeDef {
+            id: TxTypeId(37),
+            name: "diff_tables".into(),
+            param_schema: vec![ParamDef {
+                name: "r".into(),
+                value_type: ValueType::U64,
+            }],
+            body: vec![
+                Instruction::Read {
+                    dst_val: 0,
+                    dst_is_null: 1,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Param(0),
+                },
+                Instruction::Read {
+                    dst_val: 2,
+                    dst_is_null: 3,
+                    table: TableId(2), // different table
+                    col: ColId(0),
+                    row: RowExpr::Param(0),
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        prog.register(def).unwrap();
+    }
+
+    #[test]
+    fn test_nf_different_columns_no_conflict() {
+        // Two Reads to same table/row but different columns → no aliasing
+        let def = TxTypeDef {
+            id: TxTypeId(38),
+            name: "diff_cols".into(),
+            param_schema: vec![ParamDef {
+                name: "r".into(),
+                value_type: ValueType::U64,
+            }],
+            body: vec![
+                Instruction::Read {
+                    dst_val: 0,
+                    dst_is_null: 1,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Param(0),
+                },
+                Instruction::Read {
+                    dst_val: 2,
+                    dst_is_null: 3,
+                    table: TableId(1),
+                    col: ColId(1), // different column
+                    row: RowExpr::Param(0),
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        prog.register(def).unwrap();
+    }
+
+    #[test]
+    fn test_nf_same_param_read_is_duplicate() {
+        // Two Reads to same (t,c) with same Param(0) → provably equal → NF-1
+        let def = TxTypeDef {
+            id: TxTypeId(39),
+            name: "same_param_read".into(),
+            param_schema: vec![ParamDef {
+                name: "r".into(),
+                value_type: ValueType::U64,
+            }],
+            body: vec![
+                Instruction::Read {
+                    dst_val: 0,
+                    dst_is_null: 1,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Param(0),
+                },
+                Instruction::Read {
+                    dst_val: 2,
+                    dst_is_null: 3,
+                    table: TableId(1),
+                    col: ColId(0),
+                    row: RowExpr::Param(0), // same param → duplicate read
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        let err = prog.register(def).unwrap_err();
+        assert!(matches!(err, TabulaError::NfUniqueRead { .. }));
     }
 }

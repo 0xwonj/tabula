@@ -9,62 +9,54 @@ use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency;
 use tabula_executor::program::Program;
 
-fn transfer_def() -> TxTypeDef {
+/// NF-compliant transfer: reads `from_row` and `to_row` of (table 1, col 0),
+/// transfers `amount` (param 0) from `from_row` to `to_row`.
+fn transfer_def(id: u32, from_row: u64, to_row: u64) -> TxTypeDef {
     TxTypeDef {
-        id: TxTypeId(1),
-        name: "transfer".into(),
-        param_schema: vec![
-            ParamDef {
-                name: "from".into(),
-                value_type: ValueType::U64,
-            },
-            ParamDef {
-                name: "to".into(),
-                value_type: ValueType::U64,
-            },
-            ParamDef {
-                name: "amount".into(),
-                value_type: ValueType::U64,
-            },
-        ],
+        id: TxTypeId(id),
+        name: format!("transfer_{from_row}_to_{to_row}"),
+        param_schema: vec![ParamDef {
+            name: "amount".into(),
+            value_type: ValueType::U64,
+        }],
         body: vec![
             Instruction::Read {
                 dst_val: 0,
                 dst_is_null: 1,
                 table: TableId(1),
-                row: RowExpr::Param(0),
+                row: RowExpr::Literal(RowKey(from_row)),
                 col: ColId(0),
             },
             Instruction::Read {
                 dst_val: 2,
                 dst_is_null: 3,
                 table: TableId(1),
-                row: RowExpr::Param(1),
+                row: RowExpr::Literal(RowKey(to_row)),
                 col: ColId(0),
             },
             Instruction::Assert {
-                predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(2)),
+                predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(0)),
             },
             Instruction::Sub {
                 dst: 4,
                 lhs: ValueExpr::Slot(0),
-                rhs: ValueExpr::Param(2),
+                rhs: ValueExpr::Param(0),
             },
             Instruction::Add {
                 dst: 5,
                 lhs: ValueExpr::Slot(2),
-                rhs: ValueExpr::Param(2),
+                rhs: ValueExpr::Param(0),
             },
             Instruction::Write {
                 table: TableId(1),
-                row: RowExpr::Param(0),
+                row: RowExpr::Literal(RowKey(from_row)),
                 col: ColId(0),
                 src_val: ValueExpr::Slot(4),
                 src_is_null: ValueExpr::Literal(Value::Bool(false)),
             },
             Instruction::Write {
                 table: TableId(1),
-                row: RowExpr::Param(1),
+                row: RowExpr::Literal(RowKey(to_row)),
                 col: ColId(0),
                 src_val: ValueExpr::Slot(5),
                 src_is_null: ValueExpr::Literal(Value::Bool(false)),
@@ -73,10 +65,10 @@ fn transfer_def() -> TxTypeDef {
     }
 }
 
-fn make_tx(from: u64, to: u64, amount: u64, nonce: u64) -> Transaction {
+fn make_tx(tx_type_id: u32, amount: u64, nonce: u64) -> Transaction {
     Transaction {
-        tx_type: TxTypeId(1),
-        params: vec![Value::U64(from), Value::U64(to), Value::U64(amount)],
+        tx_type: TxTypeId(tx_type_id),
+        params: vec![Value::U64(amount)],
         sender: [1u8; 32],
         nonce,
         signature: vec![],
@@ -116,13 +108,15 @@ fn setup_state() -> InMemoryState {
 fn test_multi_tx_mixed_outcomes() {
     let state = setup_state();
     let mut prog = Program::new();
-    prog.register(transfer_def()).unwrap();
+    prog.register(transfer_def(1, 0, 1)).unwrap(); // 0→1
+    prog.register(transfer_def(2, 0, 2)).unwrap(); // 0→2
+    prog.register(transfer_def(3, 1, 2)).unwrap(); // 1→2
 
     let batch = Batch {
         transactions: vec![
-            make_tx(0, 1, 300, 0), // OK: Alice 1000 -> 700, Bob 500 -> 800
-            make_tx(0, 2, 800, 1), // FAIL: Alice only has 700
-            make_tx(1, 2, 100, 1), // OK (nonce 1 since tx1 failed): Bob 800 -> 700, Charlie 200 -> 300
+            make_tx(1, 300, 0), // OK: Alice 1000 -> 700, Bob 500 -> 800
+            make_tx(2, 800, 1), // FAIL: Alice only has 700
+            make_tx(3, 100, 1), // OK (nonce 1 since tx1 failed): Bob 800 -> 700, Charlie 200 -> 300
         ],
     };
 
@@ -178,10 +172,11 @@ fn test_multi_tx_mixed_outcomes() {
 fn test_deterministic_execution() {
     let state = setup_state();
     let mut prog = Program::new();
-    prog.register(transfer_def()).unwrap();
+    prog.register(transfer_def(1, 0, 1)).unwrap();
+    prog.register(transfer_def(2, 1, 2)).unwrap();
 
     let batch = Batch {
-        transactions: vec![make_tx(0, 1, 100, 0), make_tx(1, 2, 50, 1)],
+        transactions: vec![make_tx(1, 100, 0), make_tx(2, 50, 1)],
     };
 
     let st = InMemoryStaticTables::new();
@@ -219,14 +214,12 @@ fn test_deterministic_execution() {
 fn test_consistency_passes_for_valid_batch() {
     let state = setup_state();
     let mut prog = Program::new();
-    prog.register(transfer_def()).unwrap();
+    prog.register(transfer_def(1, 0, 1)).unwrap();
+    prog.register(transfer_def(2, 1, 2)).unwrap();
+    prog.register(transfer_def(3, 2, 0)).unwrap();
 
     let batch = Batch {
-        transactions: vec![
-            make_tx(0, 1, 100, 0),
-            make_tx(1, 2, 50, 1),
-            make_tx(2, 0, 25, 2),
-        ],
+        transactions: vec![make_tx(1, 100, 0), make_tx(2, 50, 1), make_tx(3, 25, 2)],
     };
 
     let st = InMemoryStaticTables::new();

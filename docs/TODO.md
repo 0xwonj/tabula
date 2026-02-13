@@ -13,7 +13,7 @@
 | Phase 1 + 1.5 | ✅ DONE | Reference interpreter, overlay, DSL compiler, CLI, trait polish |
 | M1: IR Housekeeping | ✅ DONE | SSA enforcement, CellKey order, Lookup rename, Select, Hash encoding |
 | M2: 2-Slot Migration | ✅ DONE | 2-slot Read/Write, Value::Null removal, budgets, statement alignment |
-| M3: NF Validation | Planned | NF-1~NF-4 compile-time enforcement |
+| M3: NF Validation | ✅ DONE | NF-1~NF-4 compile-time enforcement |
 | M4: Plonky3 Foundation | Planned | Poseidon2, BabyBear codec, SMT, SSMC, Hybrid VC |
 | M5: Single-Tx Proof | Planned | Witness generator, AIR, constraints, end-to-end Phase B proof |
 | M6: Batch Proof | Planned | GlobalSortedMem, LogUp, write coalescing, end-to-end Phase C proof |

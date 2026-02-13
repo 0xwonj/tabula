@@ -143,10 +143,7 @@ mod tests {
             write_event(k2, Value::U64(25), 4),
             read_event(k2, Value::U64(25), 5),
         ];
-        let read_set_old = vec![
-            (k1, Some(Value::U64(10))),
-            (k2, Some(Value::U64(20))),
-        ];
+        let read_set_old = vec![(k1, Some(Value::U64(10))), (k2, Some(Value::U64(20)))];
         assert!(check_consistency(&events, &read_set_old).is_ok());
     }
 
@@ -194,7 +191,7 @@ mod tests {
         let k = cell(1, 0, 0);
         let events = vec![
             null_write_event(k, Value::U64(0), 0), // delete
-            read_event(k, Value::U64(42), 1),       // stale: should be absent
+            read_event(k, Value::U64(42), 1),      // stale: should be absent
         ];
         let read_set_old = vec![(k, Some(Value::U64(100)))];
         assert!(check_consistency(&events, &read_set_old).is_err());
@@ -204,9 +201,9 @@ mod tests {
     fn test_initially_absent_then_write_then_read() {
         let k = cell(1, 0, 0);
         let events = vec![
-            null_read_event(k, Value::U64(0), 0),  // absent initial read
-            write_event(k, Value::U64(42), 1),      // write value
-            read_event(k, Value::U64(42), 2),       // present read
+            null_read_event(k, Value::U64(0), 0), // absent initial read
+            write_event(k, Value::U64(42), 1),    // write value
+            read_event(k, Value::U64(42), 2),     // present read
         ];
         let read_set_old = vec![(k, None)]; // initially absent
         assert!(check_consistency(&events, &read_set_old).is_ok());

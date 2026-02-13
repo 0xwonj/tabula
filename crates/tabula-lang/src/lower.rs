@@ -177,7 +177,11 @@ enum Binding {
     /// Alias — resolved to a ValueExpr without emitting instructions.
     Alias(ValueExpr, ValueType),
     /// 2-slot cell read result: (val_slot, is_null_slot, column type).
-    ReadSlot { val: Slot, is_null: Slot, ty: ValueType },
+    ReadSlot {
+        val: Slot,
+        is_null: Slot,
+        ty: ValueType,
+    },
 }
 
 impl Binding {
@@ -346,7 +350,11 @@ impl<'a> TxLower<'a> {
                 });
                 self.locals.insert(
                     name.to_string(),
-                    Binding::ReadSlot { val: dst_val, is_null: dst_is_null, ty: col_info.ty },
+                    Binding::ReadSlot {
+                        val: dst_val,
+                        is_null: dst_is_null,
+                        ty: col_info.ty,
+                    },
                 );
             }
             // Static table lookup → Lookup instruction.
@@ -881,12 +889,7 @@ impl<'a> TxLower<'a> {
 
     /// Build a null-check predicate for `expr == null` or `expr != null`.
     /// `is_eq` = true → Eq(is_null, Bool(true)), false → Eq(is_null, Bool(false))
-    fn null_check_predicate(
-        &mut self,
-        expr: &Expr,
-        is_eq: bool,
-        span: Span,
-    ) -> Option<Predicate> {
+    fn null_check_predicate(&mut self, expr: &Expr, is_eq: bool, span: Span) -> Option<Predicate> {
         // The expression must resolve to a ReadSlot binding (from a cell read).
         if let ExprKind::Ident(name) = &expr.kind
             && let Some(binding) = self.locals.get(name)
@@ -1101,7 +1104,14 @@ tx add_one(id: u64) {
         let body = &prog.tx_types[0].body;
         assert_eq!(body.len(), 3);
         // Read uses slots 0 (val) and 1 (is_null)
-        assert!(matches!(&body[0], Instruction::Read { dst_val: 0, dst_is_null: 1, .. }));
+        assert!(matches!(
+            &body[0],
+            Instruction::Read {
+                dst_val: 0,
+                dst_is_null: 1,
+                ..
+            }
+        ));
         assert!(matches!(
             &body[1],
             Instruction::Add {
@@ -1176,10 +1186,7 @@ tx check(id: u64) {
         assert!(matches!(
             &body[1],
             Instruction::Assert {
-                predicate: Predicate::Eq(
-                    ValueExpr::Slot(1),
-                    ValueExpr::Literal(Value::Bool(true)),
-                )
+                predicate: Predicate::Eq(ValueExpr::Slot(1), ValueExpr::Literal(Value::Bool(true)),)
             }
         ));
     }
@@ -1399,7 +1406,14 @@ tx inc(id: u64, amount: u64) {
         let body = &prog.tx_types[0].body;
         assert_eq!(body.len(), 3);
         // Read: slots 0 (val), 1 (is_null)
-        assert!(matches!(&body[0], Instruction::Read { dst_val: 0, dst_is_null: 1, .. }));
+        assert!(matches!(
+            &body[0],
+            Instruction::Read {
+                dst_val: 0,
+                dst_is_null: 1,
+                ..
+            }
+        ));
         assert!(matches!(&body[1], Instruction::Add { dst: 2, .. }));
         assert!(matches!(
             &body[2],
@@ -1461,21 +1475,22 @@ tx s(id: u64, flag: bool) {
 
     #[test]
     fn test_lowered_ir_passes_ssa_validation() {
-        // Verify that the lowered transfer program passes Program::register() SSA validation.
+        // Verify that the lowered transfer program passes Program::register() validation.
+        // Uses literal row keys (0, 1) so that NF-4 aliasing is provably distinct.
         use tabula_core::tx::TxTypeId;
         use tabula_executor::program::Program;
 
         let source = "\
 table balances { balance: u64 }
 
-tx transfer(from: u64, to: u64, amount: u64) {
-    let sender_bal = balances[from].balance
-    let recv_bal = balances[to].balance
+tx transfer(amount: u64) {
+    let sender_bal = balances[0].balance
+    let recv_bal = balances[1].balance
     assert sender_bal >= amount
     let new_sender = sender_bal - amount
     let new_recv = recv_bal + amount
-    balances[from].balance = new_sender
-    balances[to].balance = new_recv
+    balances[0].balance = new_sender
+    balances[1].balance = new_recv
 }";
         let compiled = compile(source);
         let mut prog = Program::new();

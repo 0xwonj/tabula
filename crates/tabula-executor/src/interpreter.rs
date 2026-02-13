@@ -10,7 +10,7 @@ use tabula_core::event::{EmittedEvent, LogicalTime};
 use tabula_core::ir::{Instruction, Slot};
 use tabula_core::schema::TableSchema;
 use tabula_core::traits::{Hasher, StateSnapshot, StaticTableProvider};
-use tabula_core::types::{zero_value, CellKey, ColId, TableId, Value, ValueType};
+use tabula_core::types::{CellKey, ColId, TableId, Value, ValueType, zero_value};
 
 use crate::overlay::Overlay;
 use crate::resolve::{evaluate_predicate, resolve_row_expr, resolve_value_expr};
@@ -290,8 +290,16 @@ mod tests {
             row: RowExpr::Literal(RowKey(0)),
             col: ColId(0),
         }];
-        let out = execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0)
-            .unwrap();
+        let out = execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
         assert!(out.emitted.is_empty());
     }
 
@@ -316,7 +324,16 @@ mod tests {
                 col: ColId(0),
             },
         ];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
         let result = ov.into_result();
         assert_eq!(
             result.write_set_final,
@@ -334,7 +351,16 @@ mod tests {
             lhs: ValueExpr::Literal(Value::U64(10)),
             rhs: ValueExpr::Literal(Value::U64(20)),
         }];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -347,8 +373,16 @@ mod tests {
             lhs: ValueExpr::Literal(Value::U64(u64::MAX)),
             rhs: ValueExpr::Literal(Value::U64(1)),
         }];
-        let err =
-            execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap_err();
+        let err = execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap_err();
         assert_eq!(err.error, TabulaError::ArithmeticOverflow);
     }
 
@@ -362,7 +396,16 @@ mod tests {
             lhs: ValueExpr::Literal(Value::U64(30)),
             rhs: ValueExpr::Literal(Value::U64(10)),
         }];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -375,7 +418,16 @@ mod tests {
             lhs: ValueExpr::Literal(Value::U64(5)),
             rhs: ValueExpr::Literal(Value::U64(7)),
         }];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -389,7 +441,16 @@ mod tests {
             lhs: ValueExpr::Literal(Value::U64(17)),
             rhs: ValueExpr::Literal(Value::U64(5)),
         }];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -403,8 +464,16 @@ mod tests {
             lhs: ValueExpr::Literal(Value::U64(10)),
             rhs: ValueExpr::Literal(Value::U64(0)),
         }];
-        let err =
-            execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap_err();
+        let err = execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap_err();
         assert_eq!(err.error, TabulaError::DivisionByZero);
     }
 
@@ -419,7 +488,16 @@ mod tests {
                 ValueExpr::Literal(Value::U64(1)),
             ),
         }];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -433,8 +511,16 @@ mod tests {
                 ValueExpr::Literal(Value::U64(2)),
             ),
         }];
-        let err =
-            execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap_err();
+        let err = execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap_err();
         assert!(matches!(err.error, TabulaError::AssertionFailed(_)));
     }
 
@@ -515,7 +601,16 @@ mod tests {
             dst: 0,
             inputs: vec![ValueExpr::Literal(Value::U64(42))],
         }];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -527,8 +622,16 @@ mod tests {
             topic: b"transfer".to_vec(),
             data: vec![ValueExpr::Literal(Value::U64(100))],
         }];
-        let out =
-            execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        let out = execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
         assert_eq!(out.emitted.len(), 1);
         assert_eq!(out.emitted[0].topic, b"transfer");
     }
@@ -544,7 +647,16 @@ mod tests {
             col: ColId(0),
             row: RowExpr::Literal(RowKey(7)),
         }];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -558,7 +670,16 @@ mod tests {
             if_true: ValueExpr::Literal(Value::U64(10)),
             if_false: ValueExpr::Literal(Value::U64(20)),
         }];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -572,7 +693,16 @@ mod tests {
             if_true: ValueExpr::Literal(Value::U64(10)),
             if_false: ValueExpr::Literal(Value::U64(20)),
         }];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -586,8 +716,16 @@ mod tests {
             if_true: ValueExpr::Literal(Value::U64(10)),
             if_false: ValueExpr::Literal(Value::U64(20)),
         }];
-        let err =
-            execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap_err();
+        let err = execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap_err();
         assert!(matches!(err.error, TabulaError::TypeMismatch { .. }));
     }
 
@@ -602,8 +740,16 @@ mod tests {
             lhs: ValueExpr::Slot(5),
             rhs: ValueExpr::Literal(Value::U64(1)),
         }];
-        let err =
-            execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap_err();
+        let err = execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap_err();
         assert!(matches!(err.error, TabulaError::SlotOutOfBounds { .. }));
     }
 
@@ -617,8 +763,16 @@ mod tests {
             lhs: ValueExpr::Param(10),
             rhs: ValueExpr::Literal(Value::U64(1)),
         }];
-        let err =
-            execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap_err();
+        let err = execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap_err();
         assert!(matches!(err.error, TabulaError::ParamOutOfBounds { .. }));
     }
 
@@ -634,7 +788,16 @@ mod tests {
             src_val: ValueExpr::Literal(Value::U64(0)),
             src_is_null: ValueExpr::Literal(Value::Bool(true)),
         }];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
         let result = ov.into_result();
         assert_eq!(result.write_set_final, vec![(cell(1, 0, 0), None)]);
     }
@@ -654,12 +817,18 @@ mod tests {
             },
             // Assert is_null == true
             Instruction::Assert {
-                predicate: Predicate::Eq(
-                    ValueExpr::Slot(1),
-                    ValueExpr::Literal(Value::Bool(true)),
-                ),
+                predicate: Predicate::Eq(ValueExpr::Slot(1), ValueExpr::Literal(Value::Bool(true))),
             },
         ];
-        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, &schemas, 0).unwrap();
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 }

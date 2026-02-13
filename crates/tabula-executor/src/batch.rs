@@ -196,69 +196,54 @@ mod tests {
         }
     }
 
-    /// A tx that reads a cell into slot 0, then asserts it >= param 1, then subtracts.
+    /// NF-compliant transfer: reads row 0 and row 1 of (table 1, col 0),
+    /// transfers `amount` (param 0) from row 0 to row 1.
     fn transfer_tx_def() -> TxTypeDef {
         TxTypeDef {
             id: TxTypeId(2),
             name: "transfer".into(),
-            param_schema: vec![
-                ParamDef {
-                    name: "sender_row".into(),
-                    value_type: ValueType::U64,
-                },
-                ParamDef {
-                    name: "receiver_row".into(),
-                    value_type: ValueType::U64,
-                },
-                ParamDef {
-                    name: "amount".into(),
-                    value_type: ValueType::U64,
-                },
-            ],
+            param_schema: vec![ParamDef {
+                name: "amount".into(),
+                value_type: ValueType::U64,
+            }],
             body: vec![
-                // Read sender balance (2 slots: val + is_null)
                 Instruction::Read {
                     dst_val: 0,
                     dst_is_null: 1,
                     table: TableId(1),
-                    row: RowExpr::Param(0),
+                    row: RowExpr::Literal(RowKey(0)),
                     col: ColId(0),
                 },
-                // Read receiver balance (2 slots: val + is_null)
                 Instruction::Read {
                     dst_val: 2,
                     dst_is_null: 3,
                     table: TableId(1),
-                    row: RowExpr::Param(1),
+                    row: RowExpr::Literal(RowKey(1)),
                     col: ColId(0),
                 },
-                // Assert sender >= amount
                 Instruction::Assert {
-                    predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(2)),
+                    predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(0)),
                 },
-                // new_sender = sender - amount
                 Instruction::Sub {
                     dst: 4,
                     lhs: ValueExpr::Slot(0),
-                    rhs: ValueExpr::Param(2),
+                    rhs: ValueExpr::Param(0),
                 },
-                // new_receiver = receiver + amount
                 Instruction::Add {
                     dst: 5,
                     lhs: ValueExpr::Slot(2),
-                    rhs: ValueExpr::Param(2),
+                    rhs: ValueExpr::Param(0),
                 },
-                // Write new balances
                 Instruction::Write {
                     table: TableId(1),
-                    row: RowExpr::Param(0),
+                    row: RowExpr::Literal(RowKey(0)),
                     col: ColId(0),
                     src_val: ValueExpr::Slot(4),
                     src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
                 Instruction::Write {
                     table: TableId(1),
-                    row: RowExpr::Param(1),
+                    row: RowExpr::Literal(RowKey(1)),
                     col: ColId(0),
                     src_val: ValueExpr::Slot(5),
                     src_is_null: ValueExpr::Literal(Value::Bool(false)),
@@ -348,28 +333,13 @@ mod tests {
         let batch = Batch {
             transactions: vec![
                 // tx1: transfer 30 from row 0 to row 1 (should succeed)
-                make_tx(
-                    2,
-                    vec![Value::U64(0), Value::U64(1), Value::U64(30)],
-                    sender,
-                    0,
-                ),
+                make_tx(2, vec![Value::U64(30)], sender, 0),
                 // tx2: transfer 100 from row 0 to row 1 (should fail — only 20 left)
                 // nonce=1 is valid, but tx fails at assertion so nonce is NOT incremented
-                make_tx(
-                    2,
-                    vec![Value::U64(0), Value::U64(1), Value::U64(100)],
-                    sender,
-                    1,
-                ),
+                make_tx(2, vec![Value::U64(100)], sender, 1),
                 // tx3: transfer 10 from row 0 to row 1 (should succeed — 20 left from tx1)
                 // nonce is still 1 because tx2 failed
-                make_tx(
-                    2,
-                    vec![Value::U64(0), Value::U64(1), Value::U64(10)],
-                    sender,
-                    1,
-                ),
+                make_tx(2, vec![Value::U64(10)], sender, 1),
             ],
         };
         let mut prog = Program::new();
@@ -533,12 +503,7 @@ mod tests {
         let batch = Batch {
             transactions: vec![
                 // Transfer 100 from row 0 to row 1 — fails at Assert (instruction 2)
-                make_tx(
-                    2,
-                    vec![Value::U64(0), Value::U64(1), Value::U64(100)],
-                    sender,
-                    0,
-                ),
+                make_tx(2, vec![Value::U64(100)], sender, 0),
             ],
         };
         let mut prog = Program::new();

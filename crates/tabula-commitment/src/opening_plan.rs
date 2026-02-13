@@ -84,7 +84,10 @@ mod tests {
 
     #[test]
     fn test_multi_column() {
-        let read_set = vec![(ck(1, 0, 0), Some(Value::U64(10))), (ck(1, 0, 1), Some(Value::U64(20)))];
+        let read_set = vec![
+            (ck(1, 0, 0), Some(Value::U64(10))),
+            (ck(1, 0, 1), Some(Value::U64(20))),
+        ];
         let plan = build_opening_plan(&read_set);
         assert_eq!(plan.len(), 2); // same table, different columns
         assert_eq!(plan[0].col, ColId(0));

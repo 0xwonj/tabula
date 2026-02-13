@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use tabula_core::error::TabulaError;
 use tabula_core::event::{ExecutionEvent, LogicalTime, OpKind};
 use tabula_core::traits::StateSnapshot;
-use tabula_core::types::{zero_value, CellKey, Value, ValueType};
+use tabula_core::types::{CellKey, Value, ValueType, zero_value};
 
 /// An undo-log entry for reverting a single mutation.
 enum UndoEntry {
