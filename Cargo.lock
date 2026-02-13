@@ -919,6 +919,9 @@ dependencies = [
 name = "tabula-proof"
 version = "0.1.0"
 dependencies = [
+ "p3-baby-bear",
+ "p3-field",
+ "tabula-commitment",
  "tabula-core",
 ]
 

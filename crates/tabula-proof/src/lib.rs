@@ -8,3 +8,13 @@ pub mod opening;
 pub mod statement;
 pub mod traits;
 pub mod update;
+
+#[cfg(feature = "stark")]
+mod trace;
+#[cfg(feature = "stark")]
+mod witness;
+
+#[cfg(feature = "stark")]
+pub use trace::{AccessRow, BatchWitness, ColumnWitness, InitRow};
+#[cfg(feature = "stark")]
+pub use witness::WitnessGenerator;

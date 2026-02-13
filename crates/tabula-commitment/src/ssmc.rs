@@ -341,15 +341,10 @@ mod tests {
     #[test]
     fn merge_old_only() {
         let h = MockFieldHasher;
-        let old = SsmcList::from_sorted(
-            TableId(1),
-            ColId(0),
-            vec![entry(0, 10), entry(1, 20)],
-        )
-        .unwrap();
+        let old =
+            SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 10), entry(1, 20)]).unwrap();
         let writes: Vec<(RowKey, Option<Vec<BabyBear>>)> = vec![];
-        let (new_list, _, trace) =
-            SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
+        let (new_list, _, trace) = SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 2);
         assert_eq!(trace.steps.len(), 2);
         assert!(trace.steps.iter().all(|s| s.source == MergeSource::OldOnly));
@@ -359,24 +354,23 @@ mod tests {
     fn merge_write_only() {
         let h = MockFieldHasher;
         let old = SsmcList::new(TableId(1), ColId(0));
-        let writes = vec![
-            (RowKey(0), Some(val(10))),
-            (RowKey(1), Some(val(20))),
-        ];
-        let (new_list, _, trace) =
-            SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
+        let writes = vec![(RowKey(0), Some(val(10))), (RowKey(1), Some(val(20)))];
+        let (new_list, _, trace) = SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 2);
-        assert!(trace.steps.iter().all(|s| s.source == MergeSource::WriteOnly));
+        assert!(
+            trace
+                .steps
+                .iter()
+                .all(|s| s.source == MergeSource::WriteOnly)
+        );
     }
 
     #[test]
     fn merge_both_overwrites() {
         let h = MockFieldHasher;
-        let old =
-            SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 10)]).unwrap();
+        let old = SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 10)]).unwrap();
         let writes = vec![(RowKey(0), Some(val(99)))];
-        let (new_list, _, trace) =
-            SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
+        let (new_list, _, trace) = SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 1);
         assert_eq!(new_list.entries()[0].value, val(99));
         assert_eq!(trace.steps[0].source, MergeSource::Both);
@@ -386,11 +380,9 @@ mod tests {
     #[test]
     fn merge_delete() {
         let h = MockFieldHasher;
-        let old =
-            SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 10)]).unwrap();
+        let old = SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 10)]).unwrap();
         let writes: Vec<(RowKey, Option<Vec<BabyBear>>)> = vec![(RowKey(0), None)];
-        let (new_list, _, trace) =
-            SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
+        let (new_list, _, trace) = SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 0);
         assert_eq!(trace.steps[0].source, MergeSource::Both);
         assert!(!trace.steps[0].in_new);
@@ -406,13 +398,12 @@ mod tests {
         )
         .unwrap();
         let writes = vec![
-            (RowKey(2), Some(val(20))),  // write_only: new key
-            (RowKey(3), Some(val(33))),  // both: overwrite
-            (RowKey(5), None),           // both: delete
-            (RowKey(7), Some(val(70))),  // write_only: new key
+            (RowKey(2), Some(val(20))), // write_only: new key
+            (RowKey(3), Some(val(33))), // both: overwrite
+            (RowKey(5), None),          // both: delete
+            (RowKey(7), Some(val(70))), // write_only: new key
         ];
-        let (new_list, _, trace) =
-            SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
+        let (new_list, _, trace) = SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
 
         // New list: [1→10, 2→20, 3→33, 7→70] (key 5 deleted)
         assert_eq!(new_list.len(), 4);
@@ -427,18 +418,10 @@ mod tests {
     #[test]
     fn merge_resulting_list_is_sorted() {
         let h = MockFieldHasher;
-        let old = SsmcList::from_sorted(
-            TableId(1),
-            ColId(0),
-            vec![entry(10, 1), entry(30, 3)],
-        )
-        .unwrap();
-        let writes = vec![
-            (RowKey(5), Some(val(5))),
-            (RowKey(20), Some(val(2))),
-        ];
-        let (new_list, _, _) =
-            SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
+        let old =
+            SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(10, 1), entry(30, 3)]).unwrap();
+        let writes = vec![(RowKey(5), Some(val(5))), (RowKey(20), Some(val(2)))];
+        let (new_list, _, _) = SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
         let keys: Vec<u64> = new_list.entries().iter().map(|e| e.key.0).collect();
         assert_eq!(keys, vec![5, 10, 20, 30]);
     }
@@ -447,27 +430,18 @@ mod tests {
     fn merge_empty_old_plus_writes() {
         let h = MockFieldHasher;
         let old = SsmcList::new(TableId(1), ColId(0));
-        let writes = vec![
-            (RowKey(0), Some(val(1))),
-            (RowKey(1), Some(val(2))),
-        ];
-        let (new_list, _, _) =
-            SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
+        let writes = vec![(RowKey(0), Some(val(1))), (RowKey(1), Some(val(2)))];
+        let (new_list, _, _) = SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 2);
     }
 
     #[test]
     fn merge_old_plus_empty_writes() {
         let h = MockFieldHasher;
-        let old = SsmcList::from_sorted(
-            TableId(1),
-            ColId(0),
-            vec![entry(0, 1), entry(1, 2)],
-        )
-        .unwrap();
+        let old =
+            SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 1), entry(1, 2)]).unwrap();
         let writes: Vec<(RowKey, Option<Vec<BabyBear>>)> = vec![];
-        let (new_list, c_new, _) =
-            SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
+        let (new_list, c_new, _) = SsmcList::merge(&old, &writes, TableId(1), ColId(0), &h);
         // New list should equal old list.
         assert_eq!(new_list.len(), old.len());
         // Commitments should match.

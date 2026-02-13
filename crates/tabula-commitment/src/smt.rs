@@ -132,7 +132,11 @@ impl<H: FieldHasher> SparseMerkleTree<H> {
 
     fn get_node(&self, level: usize, index: u64) -> H::Digest {
         if level == 0 {
-            return self.leaves.get(&index).copied().unwrap_or(self.empty_hashes[0]);
+            return self
+                .leaves
+                .get(&index)
+                .copied()
+                .unwrap_or(self.empty_hashes[0]);
         }
         self.nodes
             .get(&(level, index))

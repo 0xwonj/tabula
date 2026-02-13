@@ -5,7 +5,7 @@ use p3_field::{PrimeCharacteristicRing, PrimeField32};
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
-use tabula_core::types::{Value, ValueType};
+use tabula_core::types::{Value, ValueType, zero_value};
 
 use crate::field::{decode_u64_limbs, encode_u64_limbs};
 
@@ -18,6 +18,61 @@ use crate::field::{decode_u64_limbs, encode_u64_limbs};
 /// - Bytes32 → 8 FE (4 LE bytes per FE, rejecting non-canonical chunks)
 #[derive(Clone, Debug)]
 pub struct BabyBearCodec;
+
+/// Tier 2 (TraceEnc) width: `w(T) + 1` (value FEs + val_is_null flag).
+pub fn trace_width(codec: &BabyBearCodec, value_type: ValueType) -> usize {
+    codec.field_elements_per(value_type) + 1
+}
+
+/// Tier 2 (TraceEnc) encoding: ComEnc(value) ++ val_is_null flag.
+///
+/// - `is_null=false` → `ComEnc(value) ++ [0]`
+/// - `is_null=true`  → `[0; w(T)] ++ [1]` (canonical zero encoding)
+pub fn encode_trace(
+    value: &Value,
+    is_null: bool,
+    value_type: ValueType,
+    codec: &BabyBearCodec,
+) -> Result<Vec<BabyBear>, TabulaError> {
+    let w = codec.field_elements_per(value_type);
+    let mut fes = Vec::with_capacity(w + 1);
+    if is_null {
+        fes.resize(w, BabyBear::ZERO);
+        fes.push(BabyBear::ONE);
+    } else {
+        fes.extend(codec.encode(value)?);
+        fes.push(BabyBear::ZERO);
+    }
+    Ok(fes)
+}
+
+/// Tier 2 (TraceEnc) decoding: inverse of `encode_trace`.
+///
+/// Returns `(value, is_null)`. When null, returns the canonical zero value.
+pub fn decode_trace(
+    fes: &[BabyBear],
+    value_type: ValueType,
+    codec: &BabyBearCodec,
+) -> Result<(Value, bool), TabulaError> {
+    let expected = trace_width(codec, value_type);
+    if fes.len() != expected {
+        return Err(TabulaError::EncodingError(format!(
+            "trace decode: expected {expected} FEs for {value_type:?}, got {}",
+            fes.len()
+        )));
+    }
+    let null_flag = fes[expected - 1].as_canonical_u32();
+    match null_flag {
+        1 => Ok((zero_value(value_type), true)),
+        0 => {
+            let value = codec.decode(&fes[..expected - 1], value_type)?;
+            Ok((value, false))
+        }
+        _ => Err(TabulaError::EncodingError(format!(
+            "invalid val_is_null flag: {null_flag}"
+        ))),
+    }
+}
 
 impl ValueCodec for BabyBearCodec {
     type FieldRepr = BabyBear;
@@ -93,8 +148,7 @@ impl ValueCodec for BabyBearCodec {
             ValueType::Bytes32 => {
                 let mut bytes = [0u8; 32];
                 for (i, fe) in field_elements.iter().enumerate() {
-                    bytes[i * 4..i * 4 + 4]
-                        .copy_from_slice(&fe.as_canonical_u32().to_le_bytes());
+                    bytes[i * 4..i * 4 + 4].copy_from_slice(&fe.as_canonical_u32().to_le_bytes());
                 }
                 Ok(Value::Bytes32(bytes))
             }
@@ -215,5 +269,85 @@ mod tests {
         let codec = BabyBearCodec;
         let fes = vec![BabyBear::new(2)];
         assert!(codec.decode(&fes, ValueType::Bool).is_err());
+    }
+
+    // ── Tier 2 (TraceEnc) tests ──────────────────────────────────────────
+
+    fn trace_round_trip(value: Value, is_null: bool, ty: ValueType) {
+        let codec = BabyBearCodec;
+        let fes = super::encode_trace(&value, is_null, ty, &codec).unwrap();
+        assert_eq!(fes.len(), super::trace_width(&codec, ty));
+        let (decoded, decoded_null) = super::decode_trace(&fes, ty, &codec).unwrap();
+        assert_eq!(decoded_null, is_null);
+        if is_null {
+            assert_eq!(decoded, zero_value(ty));
+        } else {
+            assert_eq!(decoded, value);
+        }
+    }
+
+    #[test]
+    fn trace_round_trip_bool() {
+        trace_round_trip(Value::Bool(true), false, ValueType::Bool);
+        trace_round_trip(Value::Bool(false), true, ValueType::Bool);
+    }
+
+    #[test]
+    fn trace_round_trip_u64() {
+        trace_round_trip(Value::U64(42), false, ValueType::U64);
+        trace_round_trip(Value::U64(0), true, ValueType::U64);
+    }
+
+    #[test]
+    fn trace_round_trip_i64() {
+        trace_round_trip(Value::I64(-999), false, ValueType::I64);
+        trace_round_trip(Value::I64(0), true, ValueType::I64);
+    }
+
+    #[test]
+    fn trace_round_trip_bytes32() {
+        let mut bytes = [0u8; 32];
+        bytes[0..4].copy_from_slice(&100u32.to_le_bytes());
+        trace_round_trip(Value::Bytes32(bytes), false, ValueType::Bytes32);
+        trace_round_trip(Value::Bytes32([0; 32]), true, ValueType::Bytes32);
+    }
+
+    #[test]
+    fn trace_width_correct() {
+        let codec = BabyBearCodec;
+        assert_eq!(super::trace_width(&codec, ValueType::Bool), 2); // 1 + 1
+        assert_eq!(super::trace_width(&codec, ValueType::U64), 4); // 3 + 1
+        assert_eq!(super::trace_width(&codec, ValueType::I64), 4); // 3 + 1
+        assert_eq!(super::trace_width(&codec, ValueType::Bytes32), 9); // 8 + 1
+    }
+
+    #[test]
+    fn trace_null_i64_canonical_zero() {
+        // I64 null must encode as (0,0,0,1), NOT as offset-encoded I64(0) = (0,0,8,1)
+        let codec = BabyBearCodec;
+        let fes = super::encode_trace(&Value::I64(0), true, ValueType::I64, &codec).unwrap();
+        // First 3 FEs should all be zero (canonical zero), not offset-encoded
+        assert_eq!(fes[0], BabyBear::ZERO);
+        assert_eq!(fes[1], BabyBear::ZERO);
+        assert_eq!(fes[2], BabyBear::ZERO);
+        assert_eq!(fes[3], BabyBear::ONE); // null flag
+    }
+
+    #[test]
+    fn trace_non_null_i64_uses_offset_encoding() {
+        let codec = BabyBearCodec;
+        let fes = super::encode_trace(&Value::I64(0), false, ValueType::I64, &codec).unwrap();
+        // I64(0) → offset 2^63 → (0, 0, 8) via limb encoding
+        let limbs: &[BabyBear; 3] = fes[..3].try_into().unwrap();
+        let offset = decode_u64_limbs(limbs).unwrap();
+        assert_eq!(offset, 1u64 << 63);
+        assert_eq!(fes[3], BabyBear::ZERO); // not null
+    }
+
+    #[test]
+    fn trace_decode_wrong_width_rejected() {
+        let codec = BabyBearCodec;
+        let fes = vec![BabyBear::ZERO; 3]; // Wrong width for Bool (should be 2)
+        assert!(super::decode_trace(&fes, ValueType::Bool, &codec).is_err());
     }
 }

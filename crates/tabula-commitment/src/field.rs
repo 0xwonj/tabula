@@ -192,7 +192,13 @@ mod tests {
 
     #[test]
     fn domain_tags_are_distinct() {
-        let tags = [DOMAIN_SSMC, DOMAIN_SMT, DOMAIN_LEAF, DOMAIN_TABLE, DOMAIN_COL];
+        let tags = [
+            DOMAIN_SSMC,
+            DOMAIN_SMT,
+            DOMAIN_LEAF,
+            DOMAIN_TABLE,
+            DOMAIN_COL,
+        ];
         for (i, &a) in tags.iter().enumerate() {
             for (j, &b) in tags.iter().enumerate() {
                 if i != j {

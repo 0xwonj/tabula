@@ -2,7 +2,9 @@
 
 use p3_baby_bear::BabyBear;
 use p3_baby_bear::{Poseidon2BabyBear, default_babybear_poseidon2_16};
-use p3_symmetric::{CryptographicHasher, PaddingFreeSponge, PseudoCompressionFunction, TruncatedPermutation};
+use p3_symmetric::{
+    CryptographicHasher, PaddingFreeSponge, PseudoCompressionFunction, TruncatedPermutation,
+};
 
 use tabula_core::state::Digest;
 use tabula_core::traits::{Hasher, ValueCodec};

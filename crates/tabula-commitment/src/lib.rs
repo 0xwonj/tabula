@@ -11,34 +11,34 @@
 //! Without the feature, this crate compiles as an empty shell.
 
 #[cfg(feature = "stark")]
+mod codec;
+#[cfg(feature = "stark")]
 mod field;
 #[cfg(feature = "stark")]
 mod hasher;
 #[cfg(feature = "stark")]
-mod codec;
+mod hybrid;
 #[cfg(feature = "stark")]
 mod poseidon;
 #[cfg(feature = "stark")]
 mod smt;
 #[cfg(feature = "stark")]
 mod ssmc;
-#[cfg(feature = "stark")]
-mod hybrid;
 
 #[cfg(feature = "stark")]
+pub use codec::{BabyBearCodec, decode_trace, encode_trace, trace_width};
+#[cfg(feature = "stark")]
 pub use field::{
-    NativeDigest, encode_u64_limbs, decode_u64_limbs,
-    DOMAIN_SSMC, DOMAIN_SMT, DOMAIN_LEAF, DOMAIN_TABLE, DOMAIN_COL,
+    DOMAIN_COL, DOMAIN_LEAF, DOMAIN_SMT, DOMAIN_SSMC, DOMAIN_TABLE, NativeDigest, decode_u64_limbs,
+    encode_u64_limbs,
 };
 #[cfg(feature = "stark")]
 pub use hasher::{FieldHasher, MockFieldHasher};
 #[cfg(feature = "stark")]
-pub use codec::BabyBearCodec;
+pub use hybrid::{ColumnMeta, ColumnState, CommitmentStrategy, HybridVC};
 #[cfg(feature = "stark")]
 pub use poseidon::PoseidonHasher;
 #[cfg(feature = "stark")]
-pub use smt::{SparseMerkleTree, MerkleProof};
+pub use smt::{MerkleProof, SparseMerkleTree};
 #[cfg(feature = "stark")]
-pub use ssmc::{SsmcList, SsmcEntry, SsmcCommitment, MergeSource, MergeStep, MergeTrace};
-#[cfg(feature = "stark")]
-pub use hybrid::{HybridVC, ColumnState, ColumnMeta, CommitmentStrategy};
+pub use ssmc::{MergeSource, MergeStep, MergeTrace, SsmcCommitment, SsmcEntry, SsmcList};

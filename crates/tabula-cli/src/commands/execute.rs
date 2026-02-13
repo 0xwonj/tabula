@@ -1,9 +1,9 @@
 //! Handler for the `execute` subcommand.
 
+use tabula_core::event::TxOutcome;
 use tabula_core::mock::{
     InMemoryState, InMemoryStaticTables, MockHasher, MockSigVerifier, SequentialNonce,
 };
-use tabula_core::event::TxOutcome;
 use tabula_core::tx::Batch;
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency;
