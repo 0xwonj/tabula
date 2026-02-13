@@ -1,0 +1,222 @@
+//! Integration tests: multi-tx batch execution with mixed outcomes and determinism.
+
+use tabula_commitment::mock::*;
+use tabula_core::event::TxOutcome;
+use tabula_core::ir::*;
+use tabula_core::tx::*;
+use tabula_core::types::*;
+use tabula_executor::batch::{execute_batch, BatchEnv};
+use tabula_executor::consistency::check_consistency;
+use tabula_executor::program::Program;
+
+fn transfer_def() -> TxTypeDef {
+    TxTypeDef {
+        id: TxTypeId(1),
+        name: "transfer".into(),
+        param_schema: vec![
+            ParamDef {
+                name: "from".into(),
+                value_type: ValueType::U64,
+            },
+            ParamDef {
+                name: "to".into(),
+                value_type: ValueType::U64,
+            },
+            ParamDef {
+                name: "amount".into(),
+                value_type: ValueType::U64,
+            },
+        ],
+        body: vec![
+            Instruction::Read {
+                dst: 0,
+                table: TableId(1),
+                row: RowExpr::Param(0),
+                col: ColId(0),
+            },
+            Instruction::Read {
+                dst: 1,
+                table: TableId(1),
+                row: RowExpr::Param(1),
+                col: ColId(0),
+            },
+            Instruction::Assert {
+                predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(2)),
+            },
+            Instruction::Sub {
+                dst: 2,
+                lhs: ValueExpr::Slot(0),
+                rhs: ValueExpr::Param(2),
+            },
+            Instruction::Add {
+                dst: 3,
+                lhs: ValueExpr::Slot(1),
+                rhs: ValueExpr::Param(2),
+            },
+            Instruction::Write {
+                table: TableId(1),
+                row: RowExpr::Param(0),
+                col: ColId(0),
+                src: ValueExpr::Slot(2),
+            },
+            Instruction::Write {
+                table: TableId(1),
+                row: RowExpr::Param(1),
+                col: ColId(0),
+                src: ValueExpr::Slot(3),
+            },
+        ],
+    }
+}
+
+fn make_tx(from: u64, to: u64, amount: u64, nonce: u64) -> Transaction {
+    Transaction {
+        tx_type: TxTypeId(1),
+        params: vec![Value::U64(from), Value::U64(to), Value::U64(amount)],
+        sender: [1u8; 32],
+        nonce,
+        signature: vec![],
+    }
+}
+
+fn setup_state() -> InMemoryState {
+    let mut state = InMemoryState::new();
+    state.set(
+        CellKey {
+            table: TableId(1),
+            row: RowKey(0),
+            col: ColId(0),
+        },
+        Value::U64(1000),
+    );
+    state.set(
+        CellKey {
+            table: TableId(1),
+            row: RowKey(1),
+            col: ColId(0),
+        },
+        Value::U64(500),
+    );
+    state.set(
+        CellKey {
+            table: TableId(1),
+            row: RowKey(2),
+            col: ColId(0),
+        },
+        Value::U64(200),
+    );
+    state
+}
+
+#[test]
+fn test_multi_tx_mixed_outcomes() {
+    let state = setup_state();
+    let mut prog = Program::new();
+    prog.register(transfer_def()).unwrap();
+
+    let batch = Batch {
+        transactions: vec![
+            make_tx(0, 1, 300, 0), // OK: Alice 1000 -> 700, Bob 500 -> 800
+            make_tx(0, 2, 800, 1), // FAIL: Alice only has 700
+            make_tx(1, 2, 100, 1), // OK (nonce 1 since tx1 failed): Bob 800 -> 700, Charlie 200 -> 300
+        ],
+    };
+
+    let st = InMemoryStaticTables::new();
+    let env = BatchEnv {
+        hasher: &MockHasher,
+        sig_verifier: &MockSigVerifier,
+        nonce_policy: &SequentialNonce,
+        static_tables: &st,
+    };
+    let result = execute_batch(&batch, &prog, &state, &env, &std::collections::BTreeMap::new())
+        .unwrap();
+
+    assert_eq!(result.tx_outcomes[0], TxOutcome::Success);
+    assert!(matches!(result.tx_outcomes[1], TxOutcome::Failed { .. }));
+    assert_eq!(result.tx_outcomes[2], TxOutcome::Success);
+
+    // Final: Alice = 700, Bob = 700, Charlie = 300
+    let ws: std::collections::BTreeMap<_, _> = result.write_set_final.iter().cloned().collect();
+    assert_eq!(
+        ws[&CellKey {
+            table: TableId(1),
+            row: RowKey(0),
+            col: ColId(0)
+        }],
+        Value::U64(700)
+    );
+    assert_eq!(
+        ws[&CellKey {
+            table: TableId(1),
+            row: RowKey(1),
+            col: ColId(0)
+        }],
+        Value::U64(700)
+    );
+    assert_eq!(
+        ws[&CellKey {
+            table: TableId(1),
+            row: RowKey(2),
+            col: ColId(0)
+        }],
+        Value::U64(300)
+    );
+}
+
+#[test]
+fn test_deterministic_execution() {
+    let state = setup_state();
+    let mut prog = Program::new();
+    prog.register(transfer_def()).unwrap();
+
+    let batch = Batch {
+        transactions: vec![make_tx(0, 1, 100, 0), make_tx(1, 2, 50, 1)],
+    };
+
+    let st = InMemoryStaticTables::new();
+    let env = BatchEnv {
+        hasher: &MockHasher,
+        sig_verifier: &MockSigVerifier,
+        nonce_policy: &SequentialNonce,
+        static_tables: &st,
+    };
+    let r1 = execute_batch(&batch, &prog, &state, &env, &std::collections::BTreeMap::new())
+        .unwrap();
+
+    let r2 = execute_batch(&batch, &prog, &state, &env, &std::collections::BTreeMap::new())
+        .unwrap();
+
+    assert_eq!(r1.read_set_old, r2.read_set_old);
+    assert_eq!(r1.write_set_final, r2.write_set_final);
+    assert_eq!(r1.events, r2.events);
+    assert_eq!(r1.tx_outcomes, r2.tx_outcomes);
+}
+
+#[test]
+fn test_consistency_passes_for_valid_batch() {
+    let state = setup_state();
+    let mut prog = Program::new();
+    prog.register(transfer_def()).unwrap();
+
+    let batch = Batch {
+        transactions: vec![
+            make_tx(0, 1, 100, 0),
+            make_tx(1, 2, 50, 1),
+            make_tx(2, 0, 25, 2),
+        ],
+    };
+
+    let st = InMemoryStaticTables::new();
+    let env = BatchEnv {
+        hasher: &MockHasher,
+        sig_verifier: &MockSigVerifier,
+        nonce_policy: &SequentialNonce,
+        static_tables: &st,
+    };
+    let result = execute_batch(&batch, &prog, &state, &env, &std::collections::BTreeMap::new())
+        .unwrap();
+
+    assert!(result.tx_outcomes.iter().all(|o| *o == TxOutcome::Success));
+    assert!(check_consistency(&result.events, &result.read_set_old).is_ok());
+}

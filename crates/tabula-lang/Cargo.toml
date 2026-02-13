@@ -1,0 +1,12 @@
+[package]
+name = "tabula-lang"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "DSL compiler for Tabula programs"
+
+[dependencies]
+tabula-core = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]

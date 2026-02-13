@@ -1,0 +1,10 @@
+[package]
+name = "tabula-proof"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tabula-core = { workspace = true }
+tabula-executor = { workspace = true }
+tabula-commitment = { workspace = true }

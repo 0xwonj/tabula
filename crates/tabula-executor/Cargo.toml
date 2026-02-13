@@ -1,0 +1,13 @@
+[package]
+name = "tabula-executor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tabula-core = { workspace = true }
+borsh = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

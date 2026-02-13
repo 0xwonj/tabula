@@ -1,0 +1,45 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tabula-core",
+    "crates/tabula-executor",
+    "crates/tabula-commitment",
+    "crates/tabula-proof",
+    "crates/tabula-lang",
+    "crates/tabula-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Wonjae Choi <wonjae@snu.ac.kr>"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# Internal
+tabula-core = { path = "crates/tabula-core" }
+tabula-executor = { path = "crates/tabula-executor" }
+tabula-commitment = { path = "crates/tabula-commitment" }
+tabula-proof = { path = "crates/tabula-proof" }
+tabula-lang = { path = "crates/tabula-lang" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+borsh = { version = "1", features = ["derive"] }
+
+# Crypto
+blake3 = "1"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Testing
+proptest = "1"
