@@ -646,10 +646,8 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
- "tabula-commitment",
  "tabula-core",
  "tabula-executor",
- "tabula-proof",
  "tracing",
  "tracing-subscriber",
 ]
@@ -658,9 +656,6 @@ dependencies = [
 name = "tabula-commitment"
 version = "0.1.0"
 dependencies = [
- "blake3",
- "borsh",
- "proptest",
  "tabula-core",
 ]
 
@@ -668,6 +663,7 @@ dependencies = [
 name = "tabula-core"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "borsh",
  "proptest",
  "serde",
@@ -697,9 +693,7 @@ dependencies = [
 name = "tabula-proof"
 version = "0.1.0"
 dependencies = [
- "tabula-commitment",
  "tabula-core",
- "tabula-executor",
 ]
 
 [[package]]

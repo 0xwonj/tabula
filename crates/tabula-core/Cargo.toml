@@ -4,10 +4,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+mock = ["blake3"]
+
 [dependencies]
 serde = { workspace = true }
 borsh = { workspace = true }
 thiserror = { workspace = true }
+blake3 = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+blake3 = { workspace = true }

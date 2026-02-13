@@ -1,11 +1,10 @@
 #![warn(missing_docs)]
 #![deny(unused)]
 
-//! State commitment layer for the Tabula kernel.
-
-pub mod column;
-#[cfg(any(feature = "mock", test))]
-pub mod mock;
-pub mod opening_plan;
-pub mod root;
-pub mod table;
+//! Protocol-level cryptographic primitives for the Tabula kernel (out-of-circuit).
+//!
+//! This crate computes cryptographic commitments to state: Poseidon hashing,
+//! Sparse Merkle Trees (SMT), Small Sparse Map Commitments (SSMC), and
+//! hybrid state commitment dispatch.
+//!
+//! Currently empty — real implementations arrive in M4 (Plonky3 Foundation).

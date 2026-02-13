@@ -3,8 +3,6 @@
 //! All cryptographic and policy decisions are abstracted behind these traits.
 //! The executor and commitment layers are parameterized, not hardcoded.
 
-use std::fmt;
-
 use crate::error::TabulaError;
 use crate::state::Digest;
 use crate::tx::{Batch, TxTypeDef};
@@ -77,69 +75,7 @@ fn encode_value_ir(buf: &mut Vec<u8>, v: &Value) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. PCS (Polynomial / Vector Commitment Scheme)
-// ---------------------------------------------------------------------------
-
-/// A column-level commitment value.
-pub trait ColumnCommitment: Clone + Send + Sync + fmt::Debug {
-    /// Serialize this commitment to bytes.
-    fn to_bytes(&self) -> Vec<u8>;
-}
-
-/// Polynomial / Vector Commitment Scheme interface.
-pub trait PCS: Send + Sync {
-    /// The commitment type for a column.
-    type Commitment: ColumnCommitment;
-    /// Proof that a single opening is correct.
-    type OpenProof: Clone + Send + Sync;
-    /// Proof that an update was applied correctly.
-    type UpdateProof: Clone + Send + Sync;
-    /// Value codec used by this PCS.
-    type Codec: ValueCodec;
-
-    /// Access the value codec.
-    fn codec(&self) -> &Self::Codec;
-
-    /// Commit to a column vector.
-    fn commit(&self, values: &[Value]) -> Result<Self::Commitment, TabulaError>;
-
-    /// Open a single position.
-    fn open(
-        &self,
-        commitment: &Self::Commitment,
-        values: &[Value],
-        row: RowKey,
-    ) -> Result<(Value, Self::OpenProof), TabulaError>;
-
-    /// Verify a single opening.
-    fn verify_open(
-        &self,
-        commitment: &Self::Commitment,
-        row: RowKey,
-        value: &Value,
-        proof: &Self::OpenProof,
-    ) -> Result<bool, TabulaError>;
-
-    /// Batch open: multiple rows from one column.
-    fn batch_open(
-        &self,
-        commitment: &Self::Commitment,
-        values: &[Value],
-        rows: &[RowKey],
-    ) -> Result<(Vec<Value>, Self::OpenProof), TabulaError>;
-
-    /// Update a commitment after changing one cell.
-    fn update(
-        &self,
-        commitment: &Self::Commitment,
-        row: RowKey,
-        old_value: &Value,
-        new_value: &Value,
-    ) -> Result<(Self::Commitment, Self::UpdateProof), TabulaError>;
-}
-
-// ---------------------------------------------------------------------------
-// 3. StateSnapshot
+// 2. StateSnapshot
 // ---------------------------------------------------------------------------
 
 /// Read-only access to the committed state (snapshot).
@@ -153,7 +89,7 @@ pub trait StateSnapshot: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// 4. SigVerifier
+// 3. SigVerifier
 // ---------------------------------------------------------------------------
 
 /// Signature verification abstraction.
@@ -168,10 +104,10 @@ pub trait SigVerifier: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// 5. ValueCodec
+// 4. ValueCodec
 // ---------------------------------------------------------------------------
 
-/// Encodes/decodes application-level Values to/from the field elements used by the PCS.
+/// Encodes/decodes application-level Values to/from field elements.
 pub trait ValueCodec: Send + Sync {
     /// The field element representation.
     type FieldRepr: Clone + Send + Sync;
@@ -191,7 +127,7 @@ pub trait ValueCodec: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// 6. NoncePolicy
+// 5. NoncePolicy
 // ---------------------------------------------------------------------------
 
 /// Replay protection policy abstraction.
@@ -209,7 +145,7 @@ pub trait NoncePolicy: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// 7. MembershipScheme
+// 6. MembershipScheme
 // ---------------------------------------------------------------------------
 
 /// Proves that a tx type is a member of the committed program (`programRoot`).
@@ -233,7 +169,7 @@ pub trait MembershipScheme: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// 8. BatchDigester
+// 7. BatchDigester
 // ---------------------------------------------------------------------------
 
 /// Computes `batchDigest` from a `Batch`.
@@ -243,7 +179,7 @@ pub trait BatchDigester: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// 9. StaticTableProvider
+// 8. StaticTableProvider
 // ---------------------------------------------------------------------------
 
 /// Provides read-only access to static (fixed) tables.

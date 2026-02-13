@@ -1,6 +1,6 @@
 //! Handler for the `execute` subcommand.
 
-use tabula_commitment::mock::{
+use tabula_core::mock::{
     InMemoryState, InMemoryStaticTables, MockHasher, MockSigVerifier, SequentialNonce,
 };
 use tabula_core::event::TxOutcome;

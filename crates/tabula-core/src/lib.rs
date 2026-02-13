@@ -6,6 +6,8 @@
 pub mod error;
 pub mod event;
 pub mod ir;
+#[cfg(any(feature = "mock", test))]
+pub mod mock;
 pub mod schema;
 pub mod state;
 pub mod traits;

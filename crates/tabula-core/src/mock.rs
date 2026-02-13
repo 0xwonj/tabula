@@ -1,12 +1,17 @@
-//! Mock implementations of all pluggable traits for Phase 1 testing.
+//! Mock implementations of pluggable traits for Phase 1 testing.
+//!
+//! Enabled by the `mock` feature flag. These implement the traits defined
+//! in [`crate::traits`] using blake3 for hashing and in-memory collections
+//! for state.
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
-use tabula_core::error::TabulaError;
-use tabula_core::state::Digest;
-use tabula_core::traits::*;
-use tabula_core::tx::{Batch, TxTypeDef};
-use tabula_core::types::*;
+use crate::error::TabulaError;
+use crate::state::Digest;
+use crate::traits::*;
+use crate::tx::{Batch, TxTypeDef};
+use crate::types::*;
 
 // ---------------------------------------------------------------------------
 // MockHasher (blake3)
@@ -41,7 +46,7 @@ impl Hasher for MockHasher {
 // MockSigVerifier (always true)
 // ---------------------------------------------------------------------------
 
-/// Signature verifier that always returns `true`.
+/// Signature verifier that always returns `Ok(())`.
 #[derive(Debug, Clone)]
 pub struct MockSigVerifier;
 
@@ -142,7 +147,7 @@ impl StaticTableProvider for InMemoryStaticTables {
 #[derive(Debug, Clone)]
 pub struct InMemoryState {
     data: BTreeMap<CellKey, Value>,
-    tables: std::collections::BTreeSet<TableId>,
+    tables: BTreeSet<TableId>,
 }
 
 impl InMemoryState {
@@ -150,7 +155,7 @@ impl InMemoryState {
     pub fn new() -> Self {
         Self {
             data: BTreeMap::new(),
-            tables: std::collections::BTreeSet::new(),
+            tables: BTreeSet::new(),
         }
     }
 
@@ -164,61 +169,6 @@ impl InMemoryState {
 impl Default for InMemoryState {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl InMemoryState {
-    /// Compute the state root over all tables defined in `schemas`.
-    ///
-    /// Iterates schemas sorted by TableId, gathers column values sorted by
-    /// ColId and RowKey, then computes the 3-layer commitment hierarchy:
-    /// column → table → state root.
-    pub fn compute_state_root(
-        &self,
-        hasher: &dyn Hasher,
-        schemas: &[tabula_core::schema::TableSchema],
-        version_tag: &[u8],
-    ) -> Result<tabula_core::state::StateRoot, TabulaError> {
-        use crate::column::compute_column_commitment;
-        use crate::root::compute_state_root;
-        use crate::table::{compute_schema_hash, compute_table_commitment};
-
-        let mut sorted_schemas = schemas.to_vec();
-        sorted_schemas.sort_by_key(|s| s.id);
-
-        let mut table_commitments = Vec::new();
-        for schema in &sorted_schemas {
-            let schema_bytes =
-                borsh::to_vec(schema).map_err(|e| TabulaError::EncodingError(e.to_string()))?;
-            let schema_hash = compute_schema_hash(hasher, &schema_bytes);
-
-            let mut sorted_cols = schema.columns.clone();
-            sorted_cols.sort_by_key(|c| c.id);
-
-            let mut col_commitments = Vec::new();
-            for col_def in &sorted_cols {
-                // Gather all values for this (table, col) sorted by row key
-                let mut col_values: Vec<(tabula_core::types::RowKey, Value)> = self
-                    .data
-                    .iter()
-                    .filter(|(k, _)| k.table == schema.id && k.col == col_def.id)
-                    .map(|(k, v)| (k.row, v.clone()))
-                    .collect();
-                col_values.sort_by_key(|(r, _)| *r);
-
-                let values: Vec<Value> = col_values.into_iter().map(|(_, v)| v).collect();
-                col_commitments.push(compute_column_commitment(hasher, &values)?);
-            }
-
-            table_commitments.push(compute_table_commitment(
-                hasher,
-                &col_commitments,
-                schema.id,
-                &schema_hash,
-            ));
-        }
-
-        Ok(compute_state_root(hasher, &table_commitments, version_tag))
     }
 }
 
@@ -265,115 +215,6 @@ impl ValueCodec for MockValueCodec {
 }
 
 // ---------------------------------------------------------------------------
-// MockColumnCommitment + MockPCS
-// ---------------------------------------------------------------------------
-
-/// A mock column commitment: hash of borsh-serialized values.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MockCommitment(pub Digest);
-
-impl ColumnCommitment for MockCommitment {
-    fn to_bytes(&self) -> Vec<u8> {
-        self.0.to_vec()
-    }
-}
-
-/// A mock PCS: hash-based commitments, empty proofs.
-#[derive(Debug, Clone)]
-pub struct MockPCS {
-    codec: MockValueCodec,
-}
-
-impl MockPCS {
-    /// Create a new mock PCS.
-    pub fn new() -> Self {
-        Self {
-            codec: MockValueCodec,
-        }
-    }
-}
-
-impl Default for MockPCS {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl PCS for MockPCS {
-    type Commitment = MockCommitment;
-    type OpenProof = ();
-    type UpdateProof = ();
-    type Codec = MockValueCodec;
-
-    fn codec(&self) -> &Self::Codec {
-        &self.codec
-    }
-
-    fn commit(&self, values: &[Value]) -> Result<Self::Commitment, TabulaError> {
-        let bytes = borsh::to_vec(values).map_err(|e| TabulaError::EncodingError(e.to_string()))?;
-        Ok(MockCommitment(*blake3::hash(&bytes).as_bytes()))
-    }
-
-    fn open(
-        &self,
-        _commitment: &Self::Commitment,
-        values: &[Value],
-        row: RowKey,
-    ) -> Result<(Value, Self::OpenProof), TabulaError> {
-        let idx = row.0 as usize;
-        let value = values
-            .get(idx)
-            .cloned()
-            .ok_or(TabulaError::RowNotFound(TableId(0), row))?;
-        Ok((value, ()))
-    }
-
-    fn verify_open(
-        &self,
-        _commitment: &Self::Commitment,
-        _row: RowKey,
-        _value: &Value,
-        _proof: &Self::OpenProof,
-    ) -> Result<bool, TabulaError> {
-        Ok(true)
-    }
-
-    fn batch_open(
-        &self,
-        _commitment: &Self::Commitment,
-        values: &[Value],
-        rows: &[RowKey],
-    ) -> Result<(Vec<Value>, Self::OpenProof), TabulaError> {
-        let mut result = Vec::new();
-        for row in rows {
-            let idx = row.0 as usize;
-            let value = values
-                .get(idx)
-                .cloned()
-                .ok_or(TabulaError::RowNotFound(TableId(0), *row))?;
-            result.push(value);
-        }
-        Ok((result, ()))
-    }
-
-    fn update(
-        &self,
-        commitment: &Self::Commitment,
-        row: RowKey,
-        _old_value: &Value,
-        new_value: &Value,
-    ) -> Result<(Self::Commitment, Self::UpdateProof), TabulaError> {
-        let mut data = Vec::new();
-        data.extend_from_slice(&commitment.0);
-        data.extend_from_slice(&row.0.to_le_bytes());
-        data.extend_from_slice(
-            &borsh::to_vec(new_value).map_err(|e| TabulaError::EncodingError(e.to_string()))?,
-        );
-        Ok((MockCommitment(*blake3::hash(&data).as_bytes()), ()))
-    }
-}
-
-// ---------------------------------------------------------------------------
 // FlatHashMembership
 // ---------------------------------------------------------------------------
 
@@ -403,7 +244,6 @@ impl MembershipScheme for FlatHashMembership {
     }
 
     fn prove(&self, tx_types: &[TxTypeDef], _index: usize) -> Result<Self::Proof, TabulaError> {
-        // Proof is all tx type hashes
         tx_types
             .iter()
             .map(|t| {
@@ -426,12 +266,10 @@ impl MembershipScheme for FlatHashMembership {
             *blake3::hash(&bytes).as_bytes()
         };
 
-        // Check tx is in proof list
         if !proof.contains(&tx_hash) {
             return Ok(false);
         }
 
-        // Recompute root
         let mut all_bytes = Vec::new();
         for h in proof {
             all_bytes.extend_from_slice(h);
@@ -459,7 +297,7 @@ impl BatchDigester for SimpleBatchDigester {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tabula_core::tx::{ParamDef, Transaction, TxTypeId};
+    use crate::tx::{ParamDef, Transaction, TxTypeId};
 
     #[test]
     fn test_mock_hasher_deterministic() {
@@ -520,30 +358,23 @@ mod tests {
     }
 
     #[test]
+    fn test_in_memory_state_none_for_missing() {
+        let state = InMemoryState::new();
+        let k = CellKey {
+            table: TableId(1),
+            col: ColId(0),
+            row: RowKey(0),
+        };
+        assert_eq!(state.read(&k).unwrap(), None);
+    }
+
+    #[test]
     fn test_mock_value_codec_round_trip() {
         let codec = MockValueCodec;
         let v = Value::U64(42);
         let encoded = codec.encode(&v).unwrap();
         let decoded = codec.decode(&encoded, ValueType::U64).unwrap();
         assert_eq!(v, decoded);
-    }
-
-    #[test]
-    fn test_mock_pcs_commit_deterministic() {
-        let pcs = MockPCS::new();
-        let values = vec![Value::U64(1), Value::U64(2)];
-        let c1 = pcs.commit(&values).unwrap();
-        let c2 = pcs.commit(&values).unwrap();
-        assert_eq!(c1, c2);
-    }
-
-    #[test]
-    fn test_mock_pcs_open() {
-        let pcs = MockPCS::new();
-        let values = vec![Value::U64(10), Value::U64(20)];
-        let commitment = pcs.commit(&values).unwrap();
-        let (val, _proof) = pcs.open(&commitment, &values, RowKey(1)).unwrap();
-        assert_eq!(val, Value::U64(20));
     }
 
     #[test]
@@ -579,97 +410,5 @@ mod tests {
         let d1 = digester.digest(&batch).unwrap();
         let d2 = digester.digest(&batch).unwrap();
         assert_eq!(d1, d2);
-    }
-
-    #[test]
-    fn test_mock_pcs_update_changes_commitment() {
-        let pcs = MockPCS::new();
-        let values = vec![Value::U64(10), Value::U64(20)];
-        let c1 = pcs.commit(&values).unwrap();
-        let (c2, _) = pcs
-            .update(&c1, RowKey(0), &Value::U64(10), &Value::U64(99))
-            .unwrap();
-        assert_ne!(c1, c2);
-    }
-
-    #[test]
-    fn test_mock_pcs_update_deterministic() {
-        let pcs = MockPCS::new();
-        let values = vec![Value::U64(10)];
-        let c = pcs.commit(&values).unwrap();
-        let (u1, _) = pcs
-            .update(&c, RowKey(0), &Value::U64(10), &Value::U64(50))
-            .unwrap();
-        let (u2, _) = pcs
-            .update(&c, RowKey(0), &Value::U64(10), &Value::U64(50))
-            .unwrap();
-        assert_eq!(u1, u2);
-    }
-
-    #[test]
-    fn test_mock_pcs_update_differs_by_row() {
-        let pcs = MockPCS::new();
-        let values = vec![Value::U64(10), Value::U64(20)];
-        let c = pcs.commit(&values).unwrap();
-        let (u1, _) = pcs
-            .update(&c, RowKey(0), &Value::U64(10), &Value::U64(50))
-            .unwrap();
-        let (u2, _) = pcs
-            .update(&c, RowKey(1), &Value::U64(20), &Value::U64(50))
-            .unwrap();
-        assert_ne!(u1, u2);
-    }
-
-    #[test]
-    fn test_state_root_e2e() {
-        use tabula_core::schema::{ColumnDef, TableSchema};
-
-        let schemas = vec![TableSchema {
-            id: TableId(1),
-            name: "balances".into(),
-            columns: vec![ColumnDef {
-                id: ColId(0),
-                name: "balance".into(),
-                value_type: ValueType::U64,
-            }],
-        }];
-
-        let mut state = InMemoryState::new();
-        state.set(
-            CellKey {
-                table: TableId(1),
-                col: ColId(0),
-                row: RowKey(0),
-            },
-            Value::U64(100),
-        );
-
-        let hasher = MockHasher;
-        let root1 = state.compute_state_root(&hasher, &schemas, b"v1").unwrap();
-        let root2 = state.compute_state_root(&hasher, &schemas, b"v1").unwrap();
-        assert_eq!(root1, root2, "deterministic");
-
-        // Modify state → root changes
-        state.set(
-            CellKey {
-                table: TableId(1),
-                col: ColId(0),
-                row: RowKey(0),
-            },
-            Value::U64(200),
-        );
-        let root3 = state.compute_state_root(&hasher, &schemas, b"v1").unwrap();
-        assert_ne!(root1, root3, "state change should produce different root");
-    }
-
-    #[test]
-    fn test_in_memory_state_none_for_missing() {
-        let state = InMemoryState::new();
-        let k = CellKey {
-            table: TableId(1),
-            col: ColId(0),
-            row: RowKey(0),
-        };
-        assert_eq!(state.read(&k).unwrap(), None);
     }
 }

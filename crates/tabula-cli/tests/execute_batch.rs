@@ -1,6 +1,6 @@
 //! Integration tests: multi-tx batch execution with mixed outcomes and determinism.
 
-use tabula_commitment::mock::*;
+use tabula_core::mock::*;
 use tabula_core::event::TxOutcome;
 use tabula_core::ir::*;
 use tabula_core::tx::*;

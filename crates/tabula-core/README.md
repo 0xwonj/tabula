@@ -11,7 +11,8 @@ and it depends on nothing internal.
 |--------|----------|
 | `types` | `Value` (U64, I64, Bool, Bytes32), `CellKey`, `TableId`, `ColId`, `RowKey`, `ValueType` |
 | `ir` | `Instruction` enum (Read, Write, Lookup, Add, Sub, Mul, DivMod, Assert, Hash, Select, Emit), `RowExpr`, `ValueExpr`, `Predicate`, `Slot` |
-| `traits` | Pluggable abstractions: `Hasher`, `PCS`, `StateSnapshot`, `SigVerifier`, `NoncePolicy`, `ValueCodec`, `MembershipScheme`, `BatchDigester`, `StaticTableProvider` |
+| `traits` | Pluggable abstractions: `Hasher`, `StateSnapshot`, `SigVerifier`, `NoncePolicy`, `ValueCodec`, `MembershipScheme`, `BatchDigester`, `StaticTableProvider` |
+| `mock` | (feature-gated) Blake3-based mock implementations: `MockHasher`, `InMemoryState`, `MockSigVerifier`, `SequentialNonce`, `InMemoryStaticTables`, `MockValueCodec`, `FlatHashMembership`, `SimpleBatchDigester` |
 | `schema` | `TableSchema`, `ColumnDef` |
 | `tx` | `Transaction`, `TxTypeDef`, `Batch`, `ProgramBudgets` |
 | `event` | `ExecutionEvent`, `ExecutionResult`, `TxOutcome` |
