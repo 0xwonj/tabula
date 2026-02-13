@@ -36,6 +36,8 @@ pub enum Token {
     Hash,
     /// `divmod`
     Divmod,
+    /// `select`
+    Select,
 
     // --- Identifiers and literals ---
     /// User-defined identifier.
@@ -130,6 +132,7 @@ impl Token {
             "bytes32" => Some(Token::Bytes32),
             "hash" => Some(Token::Hash),
             "divmod" => Some(Token::Divmod),
+            "select" => Some(Token::Select),
             _ => None,
         }
     }

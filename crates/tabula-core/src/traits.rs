@@ -31,6 +31,52 @@ pub trait Hasher: Send + Sync {
         }
         self.hash(&buf)
     }
+    /// Hash IR values using the normative encoding (semantics-spec §1.5.5).
+    ///
+    /// Encoding: `hash(domain_tag || n_le32 || encode(v_0) || ... || encode(v_{n-1}))`
+    /// where `domain_tag` = `DOMAIN_TAG_HASH_IR` (0x02),
+    /// `encode(v)` = `type_tag:u8 || canonical_bytes(v)`.
+    ///
+    /// Type tags: U64=0, I64=1, Bool=2, Bytes32=3, Null=4.
+    fn hash_ir(&self, inputs: &[Value]) -> Digest {
+        let mut buf = Vec::new();
+        buf.push(DOMAIN_TAG_HASH_IR);
+        buf.extend_from_slice(&(inputs.len() as u32).to_le_bytes());
+        for v in inputs {
+            encode_value_ir(&mut buf, v);
+        }
+        self.hash(&buf)
+    }
+}
+
+/// Domain separation tag for the IR `Hash` instruction.
+///
+/// Distinct from SSMC (0x00), SMT (0x01), leaf (0x10), tables (0x11), cols (0x12).
+pub const DOMAIN_TAG_HASH_IR: u8 = 0x02;
+
+/// Deterministic type-tagged encoding for IR Hash instruction.
+fn encode_value_ir(buf: &mut Vec<u8>, v: &Value) {
+    match v {
+        Value::U64(n) => {
+            buf.push(0);
+            buf.extend_from_slice(&n.to_le_bytes());
+        }
+        Value::I64(n) => {
+            buf.push(1);
+            buf.extend_from_slice(&n.to_le_bytes());
+        }
+        Value::Bool(b) => {
+            buf.push(2);
+            buf.push(u8::from(*b));
+        }
+        Value::Bytes32(b) => {
+            buf.push(3);
+            buf.extend_from_slice(b);
+        }
+        Value::Null => {
+            buf.push(4);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

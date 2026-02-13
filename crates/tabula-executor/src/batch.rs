@@ -105,7 +105,10 @@ pub fn execute_batch<S: StateSnapshot>(
 
         // Verify nonce
         let current_nonce = *nonces.get(&tx.sender).unwrap_or(&0);
-        if let Err(e) = env.nonce_policy.validate(&tx.sender, tx.nonce, current_nonce) {
+        if let Err(e) = env
+            .nonce_policy
+            .validate(&tx.sender, tx.nonce, current_nonce)
+        {
             tx_outcomes.push(TxOutcome::Failed {
                 reason: e.to_string(),
                 partial_events: vec![],

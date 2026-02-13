@@ -9,8 +9,8 @@ fn test_overlay_read_your_writes_end_to_end() {
     let mut state = InMemoryState::new();
     let k = CellKey {
         table: TableId(1),
-        row: RowKey(0),
         col: ColId(0),
+        row: RowKey(0),
     };
     state.set(k, Value::U64(100));
 
@@ -38,13 +38,13 @@ fn test_overlay_checkpoint_rollback_end_to_end() {
     let mut state = InMemoryState::new();
     let k1 = CellKey {
         table: TableId(1),
-        row: RowKey(0),
         col: ColId(0),
+        row: RowKey(0),
     };
     let k2 = CellKey {
         table: TableId(1),
-        row: RowKey(1),
         col: ColId(0),
+        row: RowKey(1),
     };
     state.set(k1, Value::U64(100));
     state.set(k2, Value::U64(200));
@@ -70,8 +70,8 @@ fn test_overlay_write_coalescing_end_to_end() {
     let state = InMemoryState::new();
     let k = CellKey {
         table: TableId(1),
-        row: RowKey(0),
         col: ColId(0),
+        row: RowKey(0),
     };
 
     let mut ov = Overlay::new(&state);

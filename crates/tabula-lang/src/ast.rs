@@ -87,10 +87,7 @@ pub struct Stmt {
 #[derive(Debug, Clone)]
 pub enum StmtKind {
     /// `let name = expr`
-    Let {
-        name: String,
-        value: Expr,
-    },
+    Let { name: String, value: Expr },
     /// `let (a, b) = divmod(lhs, rhs)`
     LetDestructure {
         first: String,
@@ -106,14 +103,9 @@ pub enum StmtKind {
         value: Expr,
     },
     /// `assert expr`
-    Assert {
-        condition: Expr,
-    },
+    Assert { condition: Expr },
     /// `emit "topic" (args...)`
-    Emit {
-        topic: String,
-        args: Vec<Expr>,
-    },
+    Emit { topic: String, args: Vec<Expr> },
 }
 
 // ---------------------------------------------------------------------------
@@ -161,16 +153,16 @@ pub enum ExprKind {
         rhs: Box<Expr>,
     },
     /// Unary operation: `op operand`
-    UnaryOp {
-        op: UnaryOp,
-        operand: Box<Expr>,
-    },
+    UnaryOp { op: UnaryOp, operand: Box<Expr> },
     /// Hash call: `hash(args...)`
     Hash(Vec<Expr>),
     /// Divmod call: `divmod(lhs, rhs)` — only valid in `let (a, b) = ...`
-    Divmod {
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
+    Divmod { lhs: Box<Expr>, rhs: Box<Expr> },
+    /// Select call: `select(cond, if_true, if_false)`
+    Select {
+        cond: Box<Expr>,
+        if_true: Box<Expr>,
+        if_false: Box<Expr>,
     },
 }
 

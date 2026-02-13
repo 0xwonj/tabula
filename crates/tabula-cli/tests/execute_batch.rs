@@ -5,7 +5,7 @@ use tabula_core::event::TxOutcome;
 use tabula_core::ir::*;
 use tabula_core::tx::*;
 use tabula_core::types::*;
-use tabula_executor::batch::{execute_batch, BatchEnv};
+use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency;
 use tabula_executor::program::Program;
 
@@ -84,24 +84,24 @@ fn setup_state() -> InMemoryState {
     state.set(
         CellKey {
             table: TableId(1),
-            row: RowKey(0),
             col: ColId(0),
+            row: RowKey(0),
         },
         Value::U64(1000),
     );
     state.set(
         CellKey {
             table: TableId(1),
-            row: RowKey(1),
             col: ColId(0),
+            row: RowKey(1),
         },
         Value::U64(500),
     );
     state.set(
         CellKey {
             table: TableId(1),
-            row: RowKey(2),
             col: ColId(0),
+            row: RowKey(2),
         },
         Value::U64(200),
     );
@@ -129,8 +129,14 @@ fn test_multi_tx_mixed_outcomes() {
         nonce_policy: &SequentialNonce,
         static_tables: &st,
     };
-    let result = execute_batch(&batch, &prog, &state, &env, &std::collections::BTreeMap::new())
-        .unwrap();
+    let result = execute_batch(
+        &batch,
+        &prog,
+        &state,
+        &env,
+        &std::collections::BTreeMap::new(),
+    )
+    .unwrap();
 
     assert_eq!(result.tx_outcomes[0], TxOutcome::Success);
     assert!(matches!(result.tx_outcomes[1], TxOutcome::Failed { .. }));
@@ -141,24 +147,24 @@ fn test_multi_tx_mixed_outcomes() {
     assert_eq!(
         ws[&CellKey {
             table: TableId(1),
+            col: ColId(0),
             row: RowKey(0),
-            col: ColId(0)
         }],
         Value::U64(700)
     );
     assert_eq!(
         ws[&CellKey {
             table: TableId(1),
+            col: ColId(0),
             row: RowKey(1),
-            col: ColId(0)
         }],
         Value::U64(700)
     );
     assert_eq!(
         ws[&CellKey {
             table: TableId(1),
+            col: ColId(0),
             row: RowKey(2),
-            col: ColId(0)
         }],
         Value::U64(300)
     );
@@ -181,11 +187,23 @@ fn test_deterministic_execution() {
         nonce_policy: &SequentialNonce,
         static_tables: &st,
     };
-    let r1 = execute_batch(&batch, &prog, &state, &env, &std::collections::BTreeMap::new())
-        .unwrap();
+    let r1 = execute_batch(
+        &batch,
+        &prog,
+        &state,
+        &env,
+        &std::collections::BTreeMap::new(),
+    )
+    .unwrap();
 
-    let r2 = execute_batch(&batch, &prog, &state, &env, &std::collections::BTreeMap::new())
-        .unwrap();
+    let r2 = execute_batch(
+        &batch,
+        &prog,
+        &state,
+        &env,
+        &std::collections::BTreeMap::new(),
+    )
+    .unwrap();
 
     assert_eq!(r1.read_set_old, r2.read_set_old);
     assert_eq!(r1.write_set_final, r2.write_set_final);
@@ -214,8 +232,14 @@ fn test_consistency_passes_for_valid_batch() {
         nonce_policy: &SequentialNonce,
         static_tables: &st,
     };
-    let result = execute_batch(&batch, &prog, &state, &env, &std::collections::BTreeMap::new())
-        .unwrap();
+    let result = execute_batch(
+        &batch,
+        &prog,
+        &state,
+        &env,
+        &std::collections::BTreeMap::new(),
+    )
+    .unwrap();
 
     assert!(result.tx_outcomes.iter().all(|o| *o == TxOutcome::Success));
     assert!(check_consistency(&result.events, &result.read_set_old).is_ok());

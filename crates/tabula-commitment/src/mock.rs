@@ -124,8 +124,8 @@ impl StaticTableProvider for InMemoryStaticTables {
             .cloned()
             .ok_or(TabulaError::CellNotFound(CellKey {
                 table,
-                row: key,
                 col,
+                row: key,
             }))
     }
 
@@ -509,8 +509,8 @@ mod tests {
         let mut state = InMemoryState::new();
         let k = CellKey {
             table: TableId(1),
-            row: RowKey(0),
             col: ColId(0),
+            row: RowKey(0),
         };
         state.set(k, Value::U64(100));
 
@@ -586,7 +586,9 @@ mod tests {
         let pcs = MockPCS::new();
         let values = vec![Value::U64(10), Value::U64(20)];
         let c1 = pcs.commit(&values).unwrap();
-        let (c2, _) = pcs.update(&c1, RowKey(0), &Value::U64(10), &Value::U64(99)).unwrap();
+        let (c2, _) = pcs
+            .update(&c1, RowKey(0), &Value::U64(10), &Value::U64(99))
+            .unwrap();
         assert_ne!(c1, c2);
     }
 
@@ -595,8 +597,12 @@ mod tests {
         let pcs = MockPCS::new();
         let values = vec![Value::U64(10)];
         let c = pcs.commit(&values).unwrap();
-        let (u1, _) = pcs.update(&c, RowKey(0), &Value::U64(10), &Value::U64(50)).unwrap();
-        let (u2, _) = pcs.update(&c, RowKey(0), &Value::U64(10), &Value::U64(50)).unwrap();
+        let (u1, _) = pcs
+            .update(&c, RowKey(0), &Value::U64(10), &Value::U64(50))
+            .unwrap();
+        let (u2, _) = pcs
+            .update(&c, RowKey(0), &Value::U64(10), &Value::U64(50))
+            .unwrap();
         assert_eq!(u1, u2);
     }
 
@@ -605,8 +611,12 @@ mod tests {
         let pcs = MockPCS::new();
         let values = vec![Value::U64(10), Value::U64(20)];
         let c = pcs.commit(&values).unwrap();
-        let (u1, _) = pcs.update(&c, RowKey(0), &Value::U64(10), &Value::U64(50)).unwrap();
-        let (u2, _) = pcs.update(&c, RowKey(1), &Value::U64(20), &Value::U64(50)).unwrap();
+        let (u1, _) = pcs
+            .update(&c, RowKey(0), &Value::U64(10), &Value::U64(50))
+            .unwrap();
+        let (u2, _) = pcs
+            .update(&c, RowKey(1), &Value::U64(20), &Value::U64(50))
+            .unwrap();
         assert_ne!(u1, u2);
     }
 
@@ -628,33 +638,27 @@ mod tests {
         state.set(
             CellKey {
                 table: TableId(1),
-                row: RowKey(0),
                 col: ColId(0),
+                row: RowKey(0),
             },
             Value::U64(100),
         );
 
         let hasher = MockHasher;
-        let root1 = state
-            .compute_state_root(&hasher, &schemas, b"v1")
-            .unwrap();
-        let root2 = state
-            .compute_state_root(&hasher, &schemas, b"v1")
-            .unwrap();
+        let root1 = state.compute_state_root(&hasher, &schemas, b"v1").unwrap();
+        let root2 = state.compute_state_root(&hasher, &schemas, b"v1").unwrap();
         assert_eq!(root1, root2, "deterministic");
 
         // Modify state → root changes
         state.set(
             CellKey {
                 table: TableId(1),
-                row: RowKey(0),
                 col: ColId(0),
+                row: RowKey(0),
             },
             Value::U64(200),
         );
-        let root3 = state
-            .compute_state_root(&hasher, &schemas, b"v1")
-            .unwrap();
+        let root3 = state.compute_state_root(&hasher, &schemas, b"v1").unwrap();
         assert_ne!(root1, root3, "state change should produce different root");
     }
 
@@ -663,8 +667,8 @@ mod tests {
         let state = InMemoryState::new();
         let k = CellKey {
             table: TableId(1),
-            row: RowKey(0),
             col: ColId(0),
+            row: RowKey(0),
         };
         assert_eq!(state.read(&k).unwrap(), Value::Null);
     }

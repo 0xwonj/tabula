@@ -30,10 +30,7 @@ mod tests {
     #[test]
     fn test_deterministic() {
         let h = test_hasher();
-        let tcs = vec![
-            TableCommitmentId([1u8; 32]),
-            TableCommitmentId([2u8; 32]),
-        ];
+        let tcs = vec![TableCommitmentId([1u8; 32]), TableCommitmentId([2u8; 32])];
         let r1 = compute_state_root(&h, &tcs, b"v1");
         let r2 = compute_state_root(&h, &tcs, b"v1");
         assert_eq!(r1, r2);

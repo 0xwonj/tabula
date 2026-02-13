@@ -168,8 +168,8 @@ impl StaticTableProvider for EmptyStaticTables {
 pub(crate) fn cell(t: u32, r: u64, c: u16) -> CellKey {
     CellKey {
         table: TableId(t),
-        row: RowKey(r),
         col: ColId(c),
+        row: RowKey(r),
     }
 }
 

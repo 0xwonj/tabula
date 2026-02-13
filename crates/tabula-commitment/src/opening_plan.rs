@@ -22,7 +22,10 @@ pub struct OpeningGroup {
 pub fn build_opening_plan(read_set_old: &[(CellKey, Value)]) -> Vec<OpeningGroup> {
     let mut groups: BTreeMap<(TableId, ColId), Vec<RowKey>> = BTreeMap::new();
     for (key, _) in read_set_old {
-        groups.entry((key.table, key.col)).or_default().push(key.row);
+        groups
+            .entry((key.table, key.col))
+            .or_default()
+            .push(key.row);
     }
 
     groups
@@ -42,8 +45,8 @@ mod tests {
     fn ck(t: u32, r: u64, c: u16) -> CellKey {
         CellKey {
             table: TableId(t),
-            row: RowKey(r),
             col: ColId(c),
+            row: RowKey(r),
         }
     }
 
@@ -81,10 +84,7 @@ mod tests {
 
     #[test]
     fn test_multi_column() {
-        let read_set = vec![
-            (ck(1, 0, 0), Value::U64(10)),
-            (ck(1, 0, 1), Value::U64(20)),
-        ];
+        let read_set = vec![(ck(1, 0, 0), Value::U64(10)), (ck(1, 0, 1), Value::U64(20))];
         let plan = build_opening_plan(&read_set);
         assert_eq!(plan.len(), 2); // same table, different columns
         assert_eq!(plan[0].col, ColId(0));

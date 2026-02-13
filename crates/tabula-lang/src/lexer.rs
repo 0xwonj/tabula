@@ -84,7 +84,8 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        self.tokens.push((Token::Eof, Span::new(self.pos, self.pos)));
+        self.tokens
+            .push((Token::Eof, Span::new(self.pos, self.pos)));
     }
 
     // --- Helpers ---
@@ -137,7 +138,8 @@ impl<'a> Lexer<'a> {
         self.pos += 1;
         if self.pos < self.bytes.len() && self.bytes[self.pos] == b'=' {
             self.pos += 1;
-            self.tokens.push((Token::BangEq, Span::new(start, self.pos)));
+            self.tokens
+                .push((Token::BangEq, Span::new(start, self.pos)));
         } else {
             self.tokens.push((Token::Bang, Span::new(start, self.pos)));
         }
@@ -167,7 +169,8 @@ impl<'a> Lexer<'a> {
         self.pos += 1;
         if self.pos < self.bytes.len() && self.bytes[self.pos] == b'&' {
             self.pos += 1;
-            self.tokens.push((Token::AmpAmp, Span::new(start, self.pos)));
+            self.tokens
+                .push((Token::AmpAmp, Span::new(start, self.pos)));
         } else {
             self.errors.push(CompileError::new(
                 ErrorKind::UnexpectedChar,
@@ -181,7 +184,8 @@ impl<'a> Lexer<'a> {
         self.pos += 1;
         if self.pos < self.bytes.len() && self.bytes[self.pos] == b'|' {
             self.pos += 1;
-            self.tokens.push((Token::PipePipe, Span::new(start, self.pos)));
+            self.tokens
+                .push((Token::PipePipe, Span::new(start, self.pos)));
         } else {
             self.errors.push(CompileError::new(
                 ErrorKind::UnexpectedChar,
@@ -232,10 +236,7 @@ impl<'a> Lexer<'a> {
             self.errors.push(CompileError::new(
                 ErrorKind::InvalidHexLiteral,
                 Span::new(start, self.pos),
-                format!(
-                    "hex literal must be 1-64 hex chars, got {}",
-                    hex_str.len()
-                ),
+                format!("hex literal must be 1-64 hex chars, got {}", hex_str.len()),
             ));
             return;
         }
@@ -256,7 +257,9 @@ impl<'a> Lexer<'a> {
         }
         let text = &self.source[start..self.pos];
         match text.parse::<u64>() {
-            Ok(n) => self.tokens.push((Token::IntLit(n), Span::new(start, self.pos))),
+            Ok(n) => self
+                .tokens
+                .push((Token::IntLit(n), Span::new(start, self.pos))),
             Err(_) => self.errors.push(CompileError::new(
                 ErrorKind::IntegerOverflow,
                 Span::new(start, self.pos),
@@ -282,11 +285,7 @@ mod tests {
     use super::*;
 
     fn tok_types(source: &str) -> Vec<Token> {
-        lex(source)
-            .unwrap()
-            .into_iter()
-            .map(|(t, _)| t)
-            .collect()
+        lex(source).unwrap().into_iter().map(|(t, _)| t).collect()
     }
 
     #[test]
@@ -294,7 +293,14 @@ mod tests {
         let tokens = tok_types("table tx let assert emit");
         assert_eq!(
             tokens,
-            vec![Token::Table, Token::Tx, Token::Let, Token::Assert, Token::Emit, Token::Eof]
+            vec![
+                Token::Table,
+                Token::Tx,
+                Token::Let,
+                Token::Assert,
+                Token::Emit,
+                Token::Eof
+            ]
         );
     }
 
@@ -303,7 +309,13 @@ mod tests {
         let tokens = tok_types("u64 i64 bool bytes32");
         assert_eq!(
             tokens,
-            vec![Token::U64, Token::I64, Token::Bool, Token::Bytes32, Token::Eof]
+            vec![
+                Token::U64,
+                Token::I64,
+                Token::Bool,
+                Token::Bytes32,
+                Token::Eof
+            ]
         );
     }
 
@@ -369,10 +381,7 @@ mod tests {
     #[test]
     fn test_string_literal() {
         let tokens = tok_types(r#""hello""#);
-        assert_eq!(
-            tokens,
-            vec![Token::StringLit("hello".into()), Token::Eof]
-        );
+        assert_eq!(tokens, vec![Token::StringLit("hello".into()), Token::Eof]);
     }
 
     #[test]

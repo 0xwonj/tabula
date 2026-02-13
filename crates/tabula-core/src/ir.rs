@@ -86,10 +86,10 @@ pub enum Instruction {
         dst: Slot,
         /// Static table to lookup from.
         static_table: TableId,
-        /// Key expression.
-        key: RowExpr,
         /// Column to read.
         col: ColId,
+        /// Row expression.
+        row: RowExpr,
     },
 
     /// `dst = lhs + rhs`
@@ -146,6 +146,20 @@ pub enum Instruction {
         dst: Slot,
         /// Values to hash.
         inputs: Vec<ValueExpr>,
+    },
+
+    /// Conditional select: `dst = if cond then if_true else if_false`.
+    ///
+    /// `cond` must evaluate to `Bool`. Constraint: `dst = cond·if_true + (1-cond)·if_false`.
+    Select {
+        /// Destination slot.
+        dst: Slot,
+        /// Condition (must be Bool).
+        cond: ValueExpr,
+        /// Value when condition is true.
+        if_true: ValueExpr,
+        /// Value when condition is false.
+        if_false: ValueExpr,
     },
 
     /// Emit an application event.

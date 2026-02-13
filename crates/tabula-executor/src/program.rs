@@ -93,33 +93,60 @@ fn compile_body(
     let param_types: Vec<ValueType> = def.param_schema.iter().map(|p| p.value_type).collect();
 
     // Track which slots have been assigned and their inferred types.
+    // `assigned_at[slot]` records the instruction index that first assigned the slot (for SSA enforcement).
     let mut slot_types: Vec<Option<ValueType>> = Vec::new();
+    let mut assigned_at: Vec<Option<usize>> = Vec::new();
     let mut max_slot: Option<Slot> = None;
 
     let assign_slot = |slot: Slot,
                        ty: Option<ValueType>,
+                       instr_idx: usize,
                        slot_types: &mut Vec<Option<ValueType>>,
-                       max_slot: &mut Option<Slot>| {
+                       assigned_at: &mut Vec<Option<usize>>,
+                       max_slot: &mut Option<Slot>|
+     -> Result<(), TabulaError> {
         let idx = slot as usize;
         if idx >= slot_types.len() {
             slot_types.resize(idx + 1, None);
+            assigned_at.resize(idx + 1, None);
+        }
+        // SSA enforcement: each slot may be assigned at most once.
+        if let Some(prev) = assigned_at[idx] {
+            return Err(TabulaError::InvalidIr(format!(
+                "instruction {instr_idx}: slot {slot} already assigned at instruction {prev} (SSA violation)"
+            )));
         }
         slot_types[idx] = ty;
+        assigned_at[idx] = Some(instr_idx);
         *max_slot = Some(max_slot.map_or(slot, |m: Slot| m.max(slot)));
+        Ok(())
     };
 
     for (i, instr) in def.body.iter().enumerate() {
         match instr {
             Instruction::Read {
-                dst, table, col, row,
+                dst,
+                table,
+                col,
+                row,
             } => {
                 check_row_expr(row, param_count, &slot_types, i)?;
                 let ty = schema_col_type(schemas, table, col);
-                assign_slot(*dst, ty, &mut slot_types, &mut max_slot);
+                assign_slot(
+                    *dst,
+                    ty,
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
             }
 
             Instruction::Write {
-                table, col, row, src,
+                table,
+                col,
+                row,
+                src,
             } => {
                 check_row_expr(row, param_count, &slot_types, i)?;
                 check_value_expr(src, param_count, &slot_types, i)?;
@@ -139,32 +166,60 @@ fn compile_body(
                 dst,
                 static_table,
                 col,
-                key,
+                row,
             } => {
-                check_row_expr(key, param_count, &slot_types, i)?;
+                check_row_expr(row, param_count, &slot_types, i)?;
                 let ty = schema_col_type(schemas, static_table, col);
-                assign_slot(*dst, ty, &mut slot_types, &mut max_slot);
+                assign_slot(
+                    *dst,
+                    ty,
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
             }
 
             Instruction::Add { dst, lhs, rhs } => {
                 check_value_expr(lhs, param_count, &slot_types, i)?;
                 check_value_expr(rhs, param_count, &slot_types, i)?;
                 let ty = infer_numeric_result(lhs, rhs, &param_types, &slot_types, i)?;
-                assign_slot(*dst, ty, &mut slot_types, &mut max_slot);
+                assign_slot(
+                    *dst,
+                    ty,
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
             }
 
             Instruction::Sub { dst, lhs, rhs } => {
                 check_value_expr(lhs, param_count, &slot_types, i)?;
                 check_value_expr(rhs, param_count, &slot_types, i)?;
                 let ty = infer_numeric_result(lhs, rhs, &param_types, &slot_types, i)?;
-                assign_slot(*dst, ty, &mut slot_types, &mut max_slot);
+                assign_slot(
+                    *dst,
+                    ty,
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
             }
 
             Instruction::Mul { dst, lhs, rhs } => {
                 check_value_expr(lhs, param_count, &slot_types, i)?;
                 check_value_expr(rhs, param_count, &slot_types, i)?;
                 let ty = infer_numeric_result(lhs, rhs, &param_types, &slot_types, i)?;
-                assign_slot(*dst, ty, &mut slot_types, &mut max_slot);
+                assign_slot(
+                    *dst,
+                    ty,
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
             }
 
             Instruction::DivMod {
@@ -176,8 +231,22 @@ fn compile_body(
                 check_value_expr(lhs, param_count, &slot_types, i)?;
                 check_value_expr(rhs, param_count, &slot_types, i)?;
                 let ty = infer_numeric_result(lhs, rhs, &param_types, &slot_types, i)?;
-                assign_slot(*dst_q, ty, &mut slot_types, &mut max_slot);
-                assign_slot(*dst_r, ty, &mut slot_types, &mut max_slot);
+                assign_slot(
+                    *dst_q,
+                    ty,
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
+                assign_slot(
+                    *dst_r,
+                    ty,
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
             }
 
             Instruction::Assert { predicate } => {
@@ -191,9 +260,51 @@ fn compile_body(
                 assign_slot(
                     *dst,
                     Some(ValueType::Bytes32),
+                    i,
                     &mut slot_types,
+                    &mut assigned_at,
                     &mut max_slot,
-                );
+                )?;
+            }
+
+            Instruction::Select {
+                dst,
+                cond,
+                if_true,
+                if_false,
+            } => {
+                check_value_expr(cond, param_count, &slot_types, i)?;
+                check_value_expr(if_true, param_count, &slot_types, i)?;
+                check_value_expr(if_false, param_count, &slot_types, i)?;
+                // cond must be Bool
+                if let Some(ct) = expr_type(cond, &param_types, &slot_types)
+                    && ct != ValueType::Bool
+                {
+                    return Err(TabulaError::InvalidIr(format!(
+                        "instruction {i}: select condition must be Bool, got {ct:?}"
+                    )));
+                }
+                // if_true and if_false must match types (if both known)
+                let tt = expr_type(if_true, &param_types, &slot_types);
+                let ft = expr_type(if_false, &param_types, &slot_types);
+                let ty = match (tt, ft) {
+                    (Some(t), Some(f)) if t != f => {
+                        return Err(TabulaError::InvalidIr(format!(
+                            "instruction {i}: select branches type mismatch: {t:?} vs {f:?}"
+                        )));
+                    }
+                    (Some(t), _) => Some(t),
+                    (_, Some(f)) => Some(f),
+                    (None, None) => None,
+                };
+                assign_slot(
+                    *dst,
+                    ty,
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
             }
 
             Instruction::Emit { data, .. } => {
@@ -667,8 +778,8 @@ mod tests {
             body: vec![Instruction::Lookup {
                 dst: 0,
                 static_table: TableId(99),
-                key: RowExpr::Param(0),
                 col: ColId(0),
+                row: RowExpr::Param(0),
             }],
         };
         let mut prog = Program::new();
@@ -676,5 +787,207 @@ mod tests {
         prog.register(def).unwrap();
         let info = prog.type_info(TxTypeId(12)).unwrap();
         assert_eq!(info.slot_types[0], Some(ValueType::Bool));
+    }
+
+    #[test]
+    fn test_select_type_inference() {
+        let def = TxTypeDef {
+            id: TxTypeId(16),
+            name: "select_test".into(),
+            param_schema: vec![
+                ParamDef {
+                    name: "flag".into(),
+                    value_type: ValueType::Bool,
+                },
+                ParamDef {
+                    name: "a".into(),
+                    value_type: ValueType::U64,
+                },
+                ParamDef {
+                    name: "b".into(),
+                    value_type: ValueType::U64,
+                },
+            ],
+            body: vec![Instruction::Select {
+                dst: 0,
+                cond: ValueExpr::Param(0),
+                if_true: ValueExpr::Param(1),
+                if_false: ValueExpr::Param(2),
+            }],
+        };
+        let mut prog = Program::new();
+        prog.register(def).unwrap();
+        let info = prog.type_info(TxTypeId(16)).unwrap();
+        assert_eq!(info.slot_types[0], Some(ValueType::U64));
+    }
+
+    #[test]
+    fn test_select_branch_type_mismatch_rejected() {
+        let def = TxTypeDef {
+            id: TxTypeId(17),
+            name: "select_mismatch".into(),
+            param_schema: vec![
+                ParamDef {
+                    name: "flag".into(),
+                    value_type: ValueType::Bool,
+                },
+                ParamDef {
+                    name: "a".into(),
+                    value_type: ValueType::U64,
+                },
+                ParamDef {
+                    name: "b".into(),
+                    value_type: ValueType::I64,
+                },
+            ],
+            body: vec![Instruction::Select {
+                dst: 0,
+                cond: ValueExpr::Param(0),
+                if_true: ValueExpr::Param(1),
+                if_false: ValueExpr::Param(2),
+            }],
+        };
+        let mut prog = Program::new();
+        let err = prog.register(def).unwrap_err();
+        assert!(matches!(err, TabulaError::InvalidIr(ref msg) if msg.contains("type mismatch")));
+    }
+
+    #[test]
+    fn test_select_non_bool_cond_rejected() {
+        let def = TxTypeDef {
+            id: TxTypeId(18),
+            name: "select_bad_cond".into(),
+            param_schema: vec![ParamDef {
+                name: "x".into(),
+                value_type: ValueType::U64,
+            }],
+            body: vec![Instruction::Select {
+                dst: 0,
+                cond: ValueExpr::Param(0), // U64, not Bool
+                if_true: ValueExpr::Literal(Value::U64(1)),
+                if_false: ValueExpr::Literal(Value::U64(2)),
+            }],
+        };
+        let mut prog = Program::new();
+        let err = prog.register(def).unwrap_err();
+        assert!(matches!(err, TabulaError::InvalidIr(ref msg) if msg.contains("Bool")));
+    }
+
+    #[test]
+    fn test_ssa_violation_rejected() {
+        // Assign slot 0 twice → SSA violation
+        let def = TxTypeDef {
+            id: TxTypeId(13),
+            name: "ssa_violate".into(),
+            param_schema: vec![
+                ParamDef {
+                    name: "a".into(),
+                    value_type: ValueType::U64,
+                },
+                ParamDef {
+                    name: "b".into(),
+                    value_type: ValueType::U64,
+                },
+            ],
+            body: vec![
+                Instruction::Add {
+                    dst: 0,
+                    lhs: ValueExpr::Param(0),
+                    rhs: ValueExpr::Literal(Value::U64(1)),
+                },
+                Instruction::Add {
+                    dst: 0, // SSA violation: slot 0 already assigned
+                    lhs: ValueExpr::Param(1),
+                    rhs: ValueExpr::Literal(Value::U64(2)),
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        let err = prog.register(def).unwrap_err();
+        assert!(matches!(err, TabulaError::InvalidIr(ref msg) if msg.contains("SSA violation")));
+    }
+
+    #[test]
+    fn test_ssa_distinct_slots_accepted() {
+        // Each slot assigned exactly once → valid SSA
+        let def = TxTypeDef {
+            id: TxTypeId(14),
+            name: "ssa_valid".into(),
+            param_schema: vec![ParamDef {
+                name: "x".into(),
+                value_type: ValueType::U64,
+            }],
+            body: vec![
+                Instruction::Add {
+                    dst: 0,
+                    lhs: ValueExpr::Param(0),
+                    rhs: ValueExpr::Literal(Value::U64(1)),
+                },
+                Instruction::Add {
+                    dst: 1,
+                    lhs: ValueExpr::Slot(0),
+                    rhs: ValueExpr::Literal(Value::U64(2)),
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        prog.register(def).unwrap();
+    }
+
+    #[test]
+    fn test_ssa_divmod_both_slots_unique() {
+        // DivMod assigns dst_q and dst_r — both must be unique
+        let def = TxTypeDef {
+            id: TxTypeId(15),
+            name: "divmod_ssa".into(),
+            param_schema: vec![ParamDef {
+                name: "x".into(),
+                value_type: ValueType::U64,
+            }],
+            body: vec![
+                Instruction::Add {
+                    dst: 0,
+                    lhs: ValueExpr::Param(0),
+                    rhs: ValueExpr::Literal(Value::U64(1)),
+                },
+                Instruction::DivMod {
+                    dst_q: 1,
+                    dst_r: 0, // SSA violation: slot 0 already assigned by prior Add
+                    lhs: ValueExpr::Slot(0),
+                    rhs: ValueExpr::Literal(Value::U64(3)),
+                },
+            ],
+        };
+        let mut prog = Program::new();
+        let err = prog.register(def).unwrap_err();
+        assert!(matches!(err, TabulaError::InvalidIr(ref msg) if msg.contains("SSA violation")));
+    }
+
+    #[test]
+    fn test_ssa_divmod_same_dst_rejected() {
+        // DivMod { dst_q: 0, dst_r: 0 } — multi-result distinctness violation
+        let def = TxTypeDef {
+            id: TxTypeId(19),
+            name: "divmod_same_dst".into(),
+            param_schema: vec![
+                ParamDef {
+                    name: "a".into(),
+                    value_type: ValueType::U64,
+                },
+                ParamDef {
+                    name: "b".into(),
+                    value_type: ValueType::U64,
+                },
+            ],
+            body: vec![Instruction::DivMod {
+                dst_q: 0,
+                dst_r: 0, // SSA violation: same slot for both results
+                lhs: ValueExpr::Param(0),
+                rhs: ValueExpr::Param(1),
+            }],
+        };
+        let mut prog = Program::new();
+        let err = prog.register(def).unwrap_err();
+        assert!(matches!(err, TabulaError::InvalidIr(ref msg) if msg.contains("SSA violation")));
     }
 }

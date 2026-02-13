@@ -54,8 +54,8 @@ impl StateCell {
         (
             CellKey {
                 table: TableId(self.table),
-                row: RowKey(self.row),
                 col: ColId(self.col),
+                row: RowKey(self.row),
             },
             self.value.clone(),
         )

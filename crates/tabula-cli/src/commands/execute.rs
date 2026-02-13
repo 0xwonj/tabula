@@ -5,7 +5,7 @@ use tabula_commitment::mock::{
 };
 use tabula_core::event::TxOutcome;
 use tabula_core::tx::Batch;
-use tabula_executor::batch::{execute_batch, BatchEnv};
+use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency;
 use tabula_executor::program::Program;
 
@@ -58,7 +58,13 @@ pub fn cmd_execute(
         nonce_policy: &SequentialNonce,
         static_tables: &st,
     };
-    let result = execute_batch(&batch, &program, &state, &env, &std::collections::BTreeMap::new())?;
+    let result = execute_batch(
+        &batch,
+        &program,
+        &state,
+        &env,
+        &std::collections::BTreeMap::new(),
+    )?;
 
     // Consistency check
     let consistency = match check_consistency(&result.events, &result.read_set_old) {

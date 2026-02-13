@@ -61,8 +61,8 @@ pub fn execute<S: StateSnapshot>(
                     let row_key = resolve_row_expr(row, &slots, params)?;
                     let key = CellKey {
                         table: *table,
-                        row: row_key,
                         col: *col,
+                        row: row_key,
                     };
                     let value = overlay.read(&key)?;
                     set_slot(&mut slots, *dst, value)?;
@@ -78,8 +78,8 @@ pub fn execute<S: StateSnapshot>(
                     let value = resolve_value_expr(src, &slots, params)?;
                     let key = CellKey {
                         table: *table,
-                        row: row_key,
                         col: *col,
+                        row: row_key,
                     };
                     overlay.write(&key, value);
                 }
@@ -87,10 +87,10 @@ pub fn execute<S: StateSnapshot>(
                 Instruction::Lookup {
                     dst,
                     static_table,
-                    key,
                     col,
+                    row,
                 } => {
-                    let row_key = resolve_row_expr(key, &slots, params)?;
+                    let row_key = resolve_row_expr(row, &slots, params)?;
                     let value = static_tables.lookup(*static_table, row_key, *col)?;
                     set_slot(&mut slots, *dst, value)?;
                 }
@@ -134,14 +134,34 @@ pub fn execute<S: StateSnapshot>(
                 }
 
                 Instruction::Hash { dst, inputs } => {
-                    let mut data = Vec::new();
-                    for input in inputs {
-                        let v = resolve_value_expr(input, &slots, params)?;
-                        let bytes = borsh_encode_value(&v)?;
-                        data.extend_from_slice(&bytes);
-                    }
-                    let digest = hasher.hash(&data);
+                    let values: Vec<Value> = inputs
+                        .iter()
+                        .map(|input| resolve_value_expr(input, &slots, params))
+                        .collect::<Result<_, _>>()?;
+                    let digest = hasher.hash_ir(&values);
                     set_slot(&mut slots, *dst, Value::Bytes32(digest))?;
+                }
+
+                Instruction::Select {
+                    dst,
+                    cond,
+                    if_true,
+                    if_false,
+                } => {
+                    let c = resolve_value_expr(cond, &slots, params)?;
+                    let t = resolve_value_expr(if_true, &slots, params)?;
+                    let f = resolve_value_expr(if_false, &slots, params)?;
+                    let selected = match c {
+                        Value::Bool(true) => t,
+                        Value::Bool(false) => f,
+                        _ => {
+                            return Err(TabulaError::TypeMismatch {
+                                expected: "Bool",
+                                actual: c.type_name(),
+                            });
+                        }
+                    };
+                    set_slot(&mut slots, *dst, selected)?;
                 }
 
                 Instruction::Emit { topic, data } => {
@@ -182,10 +202,6 @@ fn set_slot(slots: &mut Vec<Value>, idx: Slot, value: Value) -> Result<(), Tabul
         slots.push(value);
     }
     Ok(())
-}
-
-fn borsh_encode_value(v: &Value) -> Result<Vec<u8>, TabulaError> {
-    borsh::to_vec(v).map_err(|e| TabulaError::EncodingError(e.to_string()))
 }
 
 #[cfg(test)]
@@ -464,10 +480,50 @@ mod tests {
         let instrs = vec![Instruction::Lookup {
             dst: 0,
             static_table: TableId(99),
-            key: RowExpr::Literal(RowKey(7)),
             col: ColId(0),
+            row: RowExpr::Literal(RowKey(7)),
         }];
         execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, 0).unwrap();
+    }
+
+    #[test]
+    fn test_select_true_branch() {
+        let snap = make_snapshot(vec![]);
+        let mut ov = Overlay::new(&snap);
+        let instrs = vec![Instruction::Select {
+            dst: 0,
+            cond: ValueExpr::Literal(Value::Bool(true)),
+            if_true: ValueExpr::Literal(Value::U64(10)),
+            if_false: ValueExpr::Literal(Value::U64(20)),
+        }];
+        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, 0).unwrap();
+    }
+
+    #[test]
+    fn test_select_false_branch() {
+        let snap = make_snapshot(vec![]);
+        let mut ov = Overlay::new(&snap);
+        let instrs = vec![Instruction::Select {
+            dst: 0,
+            cond: ValueExpr::Literal(Value::Bool(false)),
+            if_true: ValueExpr::Literal(Value::U64(10)),
+            if_false: ValueExpr::Literal(Value::U64(20)),
+        }];
+        execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, 0).unwrap();
+    }
+
+    #[test]
+    fn test_select_non_bool_cond_fails() {
+        let snap = make_snapshot(vec![]);
+        let mut ov = Overlay::new(&snap);
+        let instrs = vec![Instruction::Select {
+            dst: 0,
+            cond: ValueExpr::Literal(Value::U64(1)),
+            if_true: ValueExpr::Literal(Value::U64(10)),
+            if_false: ValueExpr::Literal(Value::U64(20)),
+        }];
+        let err = execute(&instrs, &[], &mut ov, &XorHasher, &TestStaticTables, 0).unwrap_err();
+        assert!(matches!(err.error, TabulaError::TypeMismatch { .. }));
     }
 
     #[test]

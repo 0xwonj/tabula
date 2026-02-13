@@ -76,10 +76,10 @@ pub struct RowKey(pub u64);
 pub struct CellKey {
     /// The table containing this cell.
     pub table: TableId,
-    /// The row within the table.
-    pub row: RowKey,
     /// The column within the table.
     pub col: ColId,
+    /// The row within the table.
+    pub row: RowKey,
 }
 
 /// A typed value stored in a table cell.
@@ -291,38 +291,44 @@ mod tests {
 
     #[test]
     fn test_cellkey_ordering() {
+        // Canonical sort order: (table, col, row)
         let a = CellKey {
             table: TableId(1),
-            row: RowKey(0),
             col: ColId(0),
+            row: RowKey(0),
         };
         let b = CellKey {
             table: TableId(1),
-            row: RowKey(0),
             col: ColId(1),
+            row: RowKey(0),
         };
         let c = CellKey {
             table: TableId(1),
-            row: RowKey(1),
             col: ColId(0),
+            row: RowKey(1),
         };
         let d = CellKey {
             table: TableId(2),
-            row: RowKey(0),
             col: ColId(0),
+            row: RowKey(0),
         };
 
-        assert!(a < b, "same table+row, col 0 < col 1");
-        assert!(a < c, "same table, row 0 < row 1");
+        assert!(a < b, "same table, col 0 < col 1");
+        assert!(a < c, "same table+col, row 0 < row 1");
         assert!(c < d, "table 1 < table 2");
+        // Verify col sorts before row (canonical (t,c,r) order)
+        assert!(
+            c < b,
+            "col 0 row 1 < col 1 row 0: col takes priority over row"
+        );
     }
 
     #[test]
     fn test_borsh_round_trip_cellkey() {
         let ck = CellKey {
             table: TableId(5),
-            row: RowKey(100),
             col: ColId(3),
+            row: RowKey(100),
         };
         let bytes = borsh::to_vec(&ck).unwrap();
         let decoded: CellKey = borsh::from_slice(&bytes).unwrap();

@@ -196,7 +196,10 @@ impl Parser {
                 self.errors.push(CompileError::new(
                     ErrorKind::ExpectedToken,
                     span,
-                    format!("expected type (u64, i64, bool, bytes32), found {:?}", self.peek()),
+                    format!(
+                        "expected type (u64, i64, bool, bytes32), found {:?}",
+                        self.peek()
+                    ),
                 ));
                 return None;
             }
@@ -547,6 +550,8 @@ impl Parser {
             Token::Hash => self.parse_hash_call(),
             // Built-in: divmod(...)
             Token::Divmod => self.parse_divmod_expr(),
+            // Built-in: select(cond, if_true, if_false)
+            Token::Select => self.parse_select_call(),
             // Identifier — could be a simple variable or cell read.
             Token::Ident(_) => self.parse_ident_or_cell_read(),
             _ => {
@@ -595,6 +600,28 @@ impl Parser {
             kind: ExprKind::Divmod {
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
+            },
+            span: start.merge(end),
+        })
+    }
+
+    /// Parse `select(cond, if_true, if_false)`
+    fn parse_select_call(&mut self) -> Option<Expr> {
+        let start = self.peek_span();
+        self.advance(); // consume 'select'
+        self.expect(&Token::LParen).ok()?;
+        let cond = self.parse_expr()?;
+        self.expect(&Token::Comma).ok()?;
+        let if_true = self.parse_expr()?;
+        self.expect(&Token::Comma).ok()?;
+        let if_false = self.parse_expr()?;
+        let end = self.peek_span();
+        self.expect(&Token::RParen).ok()?;
+        Some(Expr {
+            kind: ExprKind::Select {
+                cond: Box::new(cond),
+                if_true: Box::new(if_true),
+                if_false: Box::new(if_false),
             },
             span: start.merge(end),
         })
@@ -763,7 +790,10 @@ mod tests {
         let body = &prog.transactions[0].body;
         // Should parse as a + (b * 2) due to precedence.
         if let StmtKind::Let { value, .. } = &body[0].kind {
-            assert!(matches!(&value.kind, ExprKind::BinOp { op: BinOp::Add, .. }));
+            assert!(matches!(
+                &value.kind,
+                ExprKind::BinOp { op: BinOp::Add, .. }
+            ));
         } else {
             panic!("expected let statement");
         }
@@ -818,8 +848,7 @@ mod tests {
 
     #[test]
     fn test_parse_emit() {
-        let prog =
-            parse_source("tx t(a: u64, b: u64) { emit \"transfer\" (a, b) }");
+        let prog = parse_source("tx t(a: u64, b: u64) { emit \"transfer\" (a, b) }");
         let body = &prog.transactions[0].body;
         if let StmtKind::Emit { topic, args, .. } = &body[0].kind {
             assert_eq!(topic, "transfer");
@@ -902,7 +931,10 @@ tx transfer(from: u64, to: u64, amount: u64) {
         if let StmtKind::Let { value, .. } = &body[0].kind {
             assert!(matches!(
                 &value.kind,
-                ExprKind::UnaryOp { op: UnaryOp::Neg, .. }
+                ExprKind::UnaryOp {
+                    op: UnaryOp::Neg,
+                    ..
+                }
             ));
         } else {
             panic!("expected let with negation");
@@ -916,10 +948,28 @@ tx transfer(from: u64, to: u64, amount: u64) {
         if let StmtKind::Assert { condition } = &body[0].kind {
             assert!(matches!(
                 &condition.kind,
-                ExprKind::UnaryOp { op: UnaryOp::Not, .. }
+                ExprKind::UnaryOp {
+                    op: UnaryOp::Not,
+                    ..
+                }
             ));
         } else {
             panic!("expected assert with not");
+        }
+    }
+
+    // --- Error cases ---
+
+    // --- Select ---
+
+    #[test]
+    fn test_parse_select_call() {
+        let prog = parse_source("tx t(c: bool, a: u64, b: u64) { let x = select(c, a, b) }");
+        let body = &prog.transactions[0].body;
+        if let StmtKind::Let { value, .. } = &body[0].kind {
+            assert!(matches!(&value.kind, ExprKind::Select { .. }));
+        } else {
+            panic!("expected let with select");
         }
     }
 

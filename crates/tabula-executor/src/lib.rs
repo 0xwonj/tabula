@@ -11,6 +11,6 @@ pub mod program;
 pub mod resolve;
 
 #[cfg(test)]
-pub(crate) mod test_fixtures;
-#[cfg(test)]
 mod proptest_tests;
+#[cfg(test)]
+pub(crate) mod test_fixtures;

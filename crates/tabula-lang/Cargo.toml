@@ -10,3 +10,4 @@ tabula-core = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+tabula-executor = { workspace = true }

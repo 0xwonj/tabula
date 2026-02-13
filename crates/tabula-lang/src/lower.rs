@@ -115,10 +115,7 @@ impl LowerCtx {
 
                 let col_id = ColId(j as u16);
                 let vt = ast_type_to_value_type(col.ty);
-                columns.insert(
-                    col.name.clone(),
-                    ColumnInfo { id: col_id, ty: vt },
-                );
+                columns.insert(col.name.clone(), ColumnInfo { id: col_id, ty: vt });
                 col_defs.push(ColumnDef {
                     id: col_id,
                     name: col.name.clone(),
@@ -351,16 +348,18 @@ impl<'a> TxLower<'a> {
                 self.instructions.push(Instruction::Lookup {
                     dst,
                     static_table: table_id,
-                    key: key_expr,
                     col: col_info.id,
+                    row: key_expr,
                 });
                 self.locals
                     .insert(name.to_string(), Binding::Slot(dst, col_info.ty));
             }
             // Hash call → Hash instruction.
             ExprKind::Hash(args) => {
-                let inputs: Vec<_> =
-                    args.iter().filter_map(|a| self.lower_value_expr(a)).collect();
+                let inputs: Vec<_> = args
+                    .iter()
+                    .filter_map(|a| self.lower_value_expr(a))
+                    .collect();
                 if inputs.len() != args.len() {
                     return;
                 }
@@ -369,6 +368,34 @@ impl<'a> TxLower<'a> {
                 self.locals
                     .insert(name.to_string(), Binding::Slot(dst, ValueType::Bytes32));
             }
+            // Select call → Select instruction.
+            ExprKind::Select {
+                cond,
+                if_true,
+                if_false,
+            } => {
+                let Some(cond_ve) = self.lower_value_expr(cond) else {
+                    return;
+                };
+                let Some(true_ve) = self.lower_value_expr(if_true) else {
+                    return;
+                };
+                let Some(false_ve) = self.lower_value_expr(if_false) else {
+                    return;
+                };
+                let ty = self
+                    .expr_type(if_true)
+                    .or_else(|| self.expr_type(if_false))
+                    .unwrap_or(ValueType::U64);
+                let dst = self.alloc_slot();
+                self.instructions.push(Instruction::Select {
+                    dst,
+                    cond: cond_ve,
+                    if_true: true_ve,
+                    if_false: false_ve,
+                });
+                self.locals.insert(name.to_string(), Binding::Slot(dst, ty));
+            }
             // General expression (arithmetic, ident, literal).
             _ => {
                 let Some((lowered, ty)) = self.lower_expr_to_slot(value) else {
@@ -376,13 +403,11 @@ impl<'a> TxLower<'a> {
                 };
                 match lowered {
                     LoweredExpr::Slot(s) => {
-                        self.locals
-                            .insert(name.to_string(), Binding::Slot(s, ty));
+                        self.locals.insert(name.to_string(), Binding::Slot(s, ty));
                     }
                     LoweredExpr::ValueExpr(ve, ty) => {
                         // No instruction needed — store as an alias.
-                        self.locals
-                            .insert(name.to_string(), Binding::Alias(ve, ty));
+                        self.locals.insert(name.to_string(), Binding::Alias(ve, ty));
                     }
                 }
             }
@@ -425,9 +450,7 @@ impl<'a> TxLower<'a> {
 
         let lhs_ty = self.expr_type(lhs);
         let rhs_ty = self.expr_type(rhs);
-        let ty = lhs_ty
-            .or(rhs_ty)
-            .unwrap_or(ValueType::U64);
+        let ty = lhs_ty.or(rhs_ty).unwrap_or(ValueType::U64);
 
         let dst_q = self.alloc_slot();
         let dst_r = self.alloc_slot();
@@ -443,14 +466,7 @@ impl<'a> TxLower<'a> {
             .insert(second.to_string(), Binding::Slot(dst_r, ty));
     }
 
-    fn lower_assign(
-        &mut self,
-        table: &str,
-        row: &Expr,
-        col: &str,
-        value: &Expr,
-        span: Span,
-    ) {
+    fn lower_assign(&mut self, table: &str, row: &Expr, col: &str, value: &Expr, span: Span) {
         let Some((table_id, col_info)) = self.resolve_table_col(table, col, span) else {
             return;
         };
@@ -616,18 +632,38 @@ impl<'a> TxLower<'a> {
                 self.instructions.push(Instruction::Lookup {
                     dst,
                     static_table: table_id,
-                    key: key_expr,
                     col: col_info.id,
+                    row: key_expr,
                 });
                 Some(ValueExpr::Slot(dst))
             }
             ExprKind::Hash(args) => {
-                let inputs: Vec<_> = args.iter().filter_map(|a| self.lower_value_expr(a)).collect();
+                let inputs: Vec<_> = args
+                    .iter()
+                    .filter_map(|a| self.lower_value_expr(a))
+                    .collect();
                 if inputs.len() != args.len() {
                     return None;
                 }
                 let dst = self.alloc_slot();
                 self.instructions.push(Instruction::Hash { dst, inputs });
+                Some(ValueExpr::Slot(dst))
+            }
+            ExprKind::Select {
+                cond,
+                if_true,
+                if_false,
+            } => {
+                let cond_ve = self.lower_value_expr(cond)?;
+                let true_ve = self.lower_value_expr(if_true)?;
+                let false_ve = self.lower_value_expr(if_false)?;
+                let dst = self.alloc_slot();
+                self.instructions.push(Instruction::Select {
+                    dst,
+                    cond: cond_ve,
+                    if_true: true_ve,
+                    if_false: false_ve,
+                });
                 Some(ValueExpr::Slot(dst))
             }
             _ => {
@@ -644,9 +680,7 @@ impl<'a> TxLower<'a> {
     /// Lower an expression to a RowExpr.
     fn lower_row_expr(&mut self, expr: &Expr) -> Option<RowExpr> {
         match &expr.kind {
-            ExprKind::IntLit(n) => {
-                Some(RowExpr::Literal(tabula_core::types::RowKey(*n)))
-            }
+            ExprKind::IntLit(n) => Some(RowExpr::Literal(tabula_core::types::RowKey(*n))),
             ExprKind::Ident(name) => {
                 if let Some(binding) = self.locals.get(name) {
                     Some(binding.to_row_expr())
@@ -824,10 +858,7 @@ impl<'a> TxLower<'a> {
             self.errors.push(CompileError::new(
                 ErrorKind::UndefinedColumn,
                 span,
-                format!(
-                    "undefined column '{}' in table '{}'",
-                    col_name, table_name
-                ),
+                format!("undefined column '{}' in table '{}'", col_name, table_name),
             ));
             return None;
         };
@@ -850,18 +881,16 @@ impl<'a> TxLower<'a> {
                     None
                 }
             }
-            ExprKind::CellRead { table, col, .. } => {
-                self.tables
-                    .get(table)
-                    .and_then(|t| t.columns.get(col))
-                    .map(|c| c.ty)
-            }
-            ExprKind::StaticRead { table, col, .. } => {
-                self.tables
-                    .get(table)
-                    .and_then(|t| t.columns.get(col))
-                    .map(|c| c.ty)
-            }
+            ExprKind::CellRead { table, col, .. } => self
+                .tables
+                .get(table)
+                .and_then(|t| t.columns.get(col))
+                .map(|c| c.ty),
+            ExprKind::StaticRead { table, col, .. } => self
+                .tables
+                .get(table)
+                .and_then(|t| t.columns.get(col))
+                .map(|c| c.ty),
             ExprKind::Hash(_) => Some(ValueType::Bytes32),
             ExprKind::BinOp { op, lhs, rhs, .. } if is_arithmetic(*op) => {
                 self.expr_type(lhs).or_else(|| self.expr_type(rhs))
@@ -873,9 +902,10 @@ impl<'a> TxLower<'a> {
             ExprKind::UnaryOp {
                 op: UnaryOp::Not, ..
             } => Some(ValueType::Bool),
-            ExprKind::Divmod { lhs, rhs } => {
-                self.expr_type(lhs).or_else(|| self.expr_type(rhs))
-            }
+            ExprKind::Divmod { lhs, rhs } => self.expr_type(lhs).or_else(|| self.expr_type(rhs)),
+            ExprKind::Select {
+                if_true, if_false, ..
+            } => self.expr_type(if_true).or_else(|| self.expr_type(if_false)),
             _ => None,
         }
     }
@@ -1252,7 +1282,10 @@ tx t(flag: bool) {
         assert!(matches!(
             &body[0],
             Instruction::Assert {
-                predicate: Predicate::Eq(ValueExpr::Param(0), ValueExpr::Literal(Value::Bool(true)))
+                predicate: Predicate::Eq(
+                    ValueExpr::Param(0),
+                    ValueExpr::Literal(Value::Bool(true))
+                )
             }
         ));
     }
@@ -1274,8 +1307,111 @@ tx inc(id: u64, amount: u64) {
         assert!(matches!(&body[1], Instruction::Add { dst: 1, .. }));
         assert!(matches!(
             &body[2],
-            Instruction::Write { src: ValueExpr::Slot(1), .. }
+            Instruction::Write {
+                src: ValueExpr::Slot(1),
+                ..
+            }
         ));
+    }
+
+    // --- Select ---
+
+    #[test]
+    fn test_lower_select() {
+        let source = "\
+table t { a: u64, b: u64 }
+tx s(id: u64, flag: bool) {
+    let x = t[id].a
+    let y = t[id].b
+    let result = select(flag, x, y)
+    t[id].a = result
+}";
+        let prog = compile(source);
+        let body = &prog.tx_types[0].body;
+        assert_eq!(body.len(), 4);
+        assert!(matches!(
+            &body[2],
+            Instruction::Select {
+                dst: 2,
+                cond: ValueExpr::Param(1),
+                if_true: ValueExpr::Slot(0),
+                if_false: ValueExpr::Slot(1),
+            }
+        ));
+    }
+
+    #[test]
+    fn test_lower_select_literal_branches() {
+        let source = "tx s(flag: bool) { let x = select(flag, 42, 0) }";
+        let prog = compile(source);
+        let body = &prog.tx_types[0].body;
+        assert_eq!(body.len(), 1);
+        assert!(matches!(
+            &body[0],
+            Instruction::Select {
+                dst: 0,
+                cond: ValueExpr::Param(0),
+                if_true: ValueExpr::Literal(Value::U64(42)),
+                if_false: ValueExpr::Literal(Value::U64(0)),
+            }
+        ));
+    }
+
+    // --- SSA validation of lowered IR ---
+
+    #[test]
+    fn test_lowered_ir_passes_ssa_validation() {
+        // Verify that the lowered transfer program passes Program::register() SSA validation.
+        use tabula_core::tx::TxTypeId;
+        use tabula_executor::program::Program;
+
+        let source = "\
+table balances { balance: u64 }
+
+tx transfer(from: u64, to: u64, amount: u64) {
+    let sender_bal = balances[from].balance
+    let recv_bal = balances[to].balance
+    assert sender_bal >= amount
+    let new_sender = sender_bal - amount
+    let new_recv = recv_bal + amount
+    balances[from].balance = new_sender
+    balances[to].balance = new_recv
+}";
+        let compiled = compile(source);
+        let mut prog = Program::new();
+        for schema in &compiled.schemas {
+            prog.add_schema(schema.clone());
+        }
+        for tx_type in &compiled.tx_types {
+            prog.register(tx_type.clone())
+                .unwrap_or_else(|e| panic!("lowered IR failed SSA validation: {e}"));
+        }
+        // Verify type info was inferred
+        let info = prog.type_info(TxTypeId(0)).unwrap();
+        assert_eq!(info.slot_types[0], Some(ValueType::U64));
+    }
+
+    #[test]
+    fn test_lowered_select_passes_ssa_validation() {
+        use tabula_executor::program::Program;
+
+        let source = "\
+table t { a: u64, b: u64 }
+tx s(id: u64, flag: bool) {
+    let x = t[id].a
+    let y = t[id].b
+    let result = select(flag, x, y)
+    t[id].a = result
+}";
+        let compiled = compile(source);
+        let mut prog = Program::new();
+        for schema in &compiled.schemas {
+            prog.add_schema(schema.clone());
+        }
+        for tx_type in &compiled.tx_types {
+            prog.register(tx_type.clone())
+                .unwrap_or_else(|e| panic!("lowered Select IR failed SSA validation: {e}"));
+        }
     }
 
     // --- Logical AND in assert ---

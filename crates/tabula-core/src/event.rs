@@ -89,8 +89,8 @@ mod tests {
         let event = ExecutionEvent {
             key: CellKey {
                 table: TableId(1),
-                row: RowKey(0),
                 col: ColId(0),
+                row: RowKey(0),
             },
             op: OpKind::Read,
             value: Value::U64(100),
