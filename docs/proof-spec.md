@@ -417,30 +417,32 @@ These multiplicities are enforced as columns in the AIR. The LogUp running sum o
 
 #### 4.2.R Integer Encoding and Comparison Gadgets (BabyBear)
 
-**Motivation.** BabyBear is a 31-bit prime field (`p = 2^31 - 1`). Therefore, 64-bit integers (row keys, timestamps) and other bounded identifiers MUST be represented using a multi-limb encoding and manipulated via integer-emulation constraints. The proof MUST NOT rely on interpreting a `u64` as a single field element — a single BabyBear element can only hold values in `[0, p-1]`, and field arithmetic wraps modulo `p`, which does not correspond to integer semantics for values ≥ `p`.
+**Motivation.** BabyBear is a 31-bit prime field (`p = 2^31 - 2^27 + 1 = 2013265921`). Therefore, 64-bit integers (row keys, timestamps) and other bounded identifiers MUST be represented using a multi-limb encoding and manipulated via integer-emulation constraints. The proof MUST NOT rely on interpreting a `u64` as a single field element — a single BabyBear element can only hold values in `[0, p-1]`, and field arithmetic wraps modulo `p`, which does not correspond to integer semantics for values ≥ `p`.
 
 **Notation convention.** Throughout this spec, any `u64`-typed field in an AIR table (e.g., `r`, `key`, `next_key`, `τ`) is represented as **3 BabyBear limbs** `(x0, x1, x2)` as defined below. Table schemas use the shorthand `key` to mean the 3-limb representation; implementations expand this to three AIR columns (e.g., `key_0, key_1, key_2`).
 
 **u64 limb encoding.** Represent any `u64` quantity `x` as three limbs `(x0, x1, x2)`:
 
-* `x = x0 + x1 · 2^31 + x2 · 2^62` (in the integers)
-* `x0 ∈ [0, 2^31)` — standard 31-bit range-check
-* `x1 ∈ [0, 2^31)` — standard 31-bit range-check
-* `x2 ∈ {0, 1, 2, 3}` — 2-bit range-check via vanishing polynomial: `x2·(x2-1)·(x2-2)·(x2-3) = 0`
+* `x = x0 + x1 · 2^30 + x2 · 2^60` (in the integers)
+* `x0 ∈ [0, 2^30)` — 30-bit range-check
+* `x1 ∈ [0, 2^30)` — 30-bit range-check
+* `x2 ∈ [0, 16)` — 4-bit range-check (e.g., decompose into 4 boolean bits, or lookup)
 
-This covers the full `u64` range: `3 · 2^62 + (2^31-1) · 2^31 + (2^31-1) = 2^64 - 1`. Constraint cost: 2 range-checks (31-bit each, implementation-dependent) + 1 degree-4 polynomial.
+This covers the full `u64` range: `15 · 2^60 + (2^30-1) · 2^30 + (2^30-1) = 2^64 - 1`. Constraint cost: 2 range-checks (30-bit each, implementation-dependent) + 1 range-check (4-bit).
 
-**Reconstruction constraint.** The prover provides `(x0, x1, x2)` as witness columns. The verifier checks `x0 + x1 · 2^31 + x2 · 2^62 = x_combined` where `x_combined` is a multi-limb representation (NOT a single field element). In practice, this means **all comparisons and arithmetic on u64 values are performed limb-wise** with explicit carry/borrow propagation.
+**Why 30+30+4 (not 31+31+2).** BabyBear's modulus `p = 2013265921 < 2^31 - 1 = 2147483647`. A 31-bit limb value can exceed `p`, causing lossy reduction when stored as a field element. 30-bit limbs (max `2^30 - 1 = 1073741823 < p`) are always canonical, ensuring lossless round-trip both in-circuit and out-of-circuit (commitment hashing).
+
+**Reconstruction constraint.** The prover provides `(x0, x1, x2)` as witness columns. The verifier checks `x0 + x1 · 2^30 + x2 · 2^60 = x_combined` where `x_combined` is a multi-limb representation (NOT a single field element). In practice, this means **all comparisons and arithmetic on u64 values are performed limb-wise** with explicit carry/borrow propagation.
 
 **Equality gadget (u64).** To enforce `x = y` for two u64-encoded values, enforce limb-wise equality: `x0 = y0 ∧ x1 = y1 ∧ x2 = y2`.
 
 **Non-negativity of difference (x ≥ y).** To enforce integer `x ≥ y`, introduce borrow bits `(b0, b1) ∈ {0,1}` and difference limbs `(d0, d1, d2)`:
 
-* `d0 = x0 - y0 + b0 · 2^31`, with `d0 ∈ [0, 2^31)` and `b0 ∈ {0,1}`
-* `d1 = x1 - y1 - b0 + b1 · 2^31`, with `d1 ∈ [0, 2^31)` and `b1 ∈ {0,1}`
-* `d2 = x2 - y2 - b1`, with `d2 ∈ {0, 1, 2, 3}`
+* `d0 = x0 - y0 + b0 · 2^30`, with `d0 ∈ [0, 2^30)` and `b0 ∈ {0,1}`
+* `d1 = x1 - y1 - b0 + b1 · 2^30`, with `d1 ∈ [0, 2^30)` and `b1 ∈ {0,1}`
+* `d2 = x2 - y2 - b1`, with `d2 ∈ [0, 16)`
 
-The final result `d2` must be non-negative (no underflow), which is guaranteed by the range constraint `d2 ∈ {0,1,2,3}`. This enforces integer `x - y = d0 + d1 · 2^31 + d2 · 2^62 ≥ 0`.
+The final result `d2` must be non-negative (no underflow), which is guaranteed by the range constraint `d2 ∈ [0, 16)`. This enforces integer `x - y = d0 + d1 · 2^30 + d2 · 2^60 ≥ 0`.
 
 **Strict inequality (x > y).** Enforce `x ≥ y + 1` using the non-negativity gadget. Since `y + 1` may carry, compute `(y0+1, y1, y2)` with carry propagation, then apply the non-negativity check.
 
@@ -467,7 +469,7 @@ Inter-tx memory read/write consistency is verified using **LogUp (logarithmic de
 **Decision: Plonky3 with BabyBear field.**
 
 * **Plonky3**: Production-ready STARK framework, audited, used by SP1 (Succinct). Modular AIR, native LogUp support.
-* **BabyBear** (p = 2^31 - 1): 31-bit prime field. Fast native arithmetic, well-suited for Tabula's small-value workloads (u64 = 3 limbs, i64 = 3 limbs, bool = 1 limb).
+* **BabyBear** (p = 2^31 - 2^27 + 1 = 2013265921): 31-bit prime field. Fast native arithmetic, well-suited for Tabula's small-value workloads (u64 = 3 limbs, i64 = 3 limbs, bool = 1 limb).
 * FRI is the polynomial commitment backend for the STARK itself (proving polynomial evaluations). This is distinct from the state VC (§4.2) — FRI proves the AIR, SSMC/SMT commits state.
 
 **Why not Stwo**: Faster (100x over Stone) but API is experimental and requires Rust nightly. Can migrate later if it stabilizes.
@@ -1033,7 +1035,7 @@ decode(y: u64) = (y.wrapping_sub(2^63)) as i64
 
 Mapping: `i64::MIN (-2^63) → 0`, `0 → 2^63`, `i64::MAX (2^63-1) → 2^64-1`.
 
-The offset constant `K = 2^63` has limb representation `(0, 0, 2)` (since `2^63 = 2 · 2^62`).
+The offset constant `K = 2^63` has limb representation `(0, 0, 8)` (since `2^63 = 8 · 2^60`).
 
 **Properties:**
 * **Order-preserving**: `a >_signed b ⟺ encode(a) >_unsigned encode(b)`. All comparison gadgets from §4.2.R apply directly.

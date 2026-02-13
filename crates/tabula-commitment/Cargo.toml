@@ -4,5 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+stark = ["p3-field", "p3-baby-bear", "p3-poseidon2", "p3-symmetric"]
+
 [dependencies]
 tabula-core = { workspace = true }
+p3-field     = { workspace = true, optional = true }
+p3-baby-bear = { workspace = true, optional = true }
+p3-poseidon2 = { workspace = true, optional = true }
+p3-symmetric = { workspace = true, optional = true }

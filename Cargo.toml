@@ -30,6 +30,12 @@ borsh = { version = "1", features = ["derive"] }
 # Crypto
 blake3 = "1"
 
+# Plonky3 (BabyBear + Poseidon2)
+p3-field     = "0.4"
+p3-baby-bear = "0.4"
+p3-poseidon2 = "0.4"
+p3-symmetric = "0.4"
+
 # Error handling
 thiserror = "2"
 anyhow = "1"

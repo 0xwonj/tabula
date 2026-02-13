@@ -447,7 +447,7 @@ pub struct ApplyBatchStatement {
 
 **Encoding** — per-type variable width, no type tag:
 - `Bool` → `w=1`: single boolean FE `{0,1}`
-- `U64` → `w=3`: 3 BabyBear limbs `(x0, x1 ∈ [0, 2^31), x2 ∈ {0,1,2,3})`
+- `U64` → `w=3`: 3 BabyBear limbs `(x0, x1 ∈ [0, 2^30), x2 ∈ [0, 16))`
 - `I64` → `w=3`: offset encoding `x + 2^63` → same 3 limbs as U64
 - `Digest` → `w=8`: 8 native BabyBear FE (Poseidon2 squeeze, NOT byte-decomposed)
 
