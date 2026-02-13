@@ -43,8 +43,6 @@ pub enum Predicate {
     Gt(ValueExpr, ValueExpr),
     /// Left is greater than or equal to right.
     Gte(ValueExpr, ValueExpr),
-    /// Value is not null.
-    NotNull(ValueExpr),
     /// Logical AND of two predicates.
     And(Box<Predicate>, Box<Predicate>),
     /// Logical OR of two predicates.
@@ -56,28 +54,32 @@ pub enum Predicate {
 /// A single DB-IR instruction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub enum Instruction {
-    /// Read a cell from state, store result in `dst`.
+    /// Read a cell from state, store value in `dst_val` and null flag in `dst_is_null`.
     Read {
-        /// Destination slot.
-        dst: Slot,
+        /// Destination slot for the value (canonical zero if absent).
+        dst_val: Slot,
+        /// Destination slot for the null flag (Bool: true = absent).
+        dst_is_null: Slot,
         /// Table to read from.
         table: TableId,
-        /// Row expression.
-        row: RowExpr,
         /// Column to read.
         col: ColId,
+        /// Row expression.
+        row: RowExpr,
     },
 
     /// Write a value to a cell in state.
     Write {
         /// Table to write to.
         table: TableId,
-        /// Row expression.
-        row: RowExpr,
         /// Column to write.
         col: ColId,
+        /// Row expression.
+        row: RowExpr,
         /// Source value expression.
-        src: ValueExpr,
+        src_val: ValueExpr,
+        /// Source null flag expression (Bool: true = delete).
+        src_is_null: ValueExpr,
     },
 
     /// Lookup in a static (fixed) table, store result in `dst`.
@@ -178,10 +180,11 @@ mod tests {
     #[test]
     fn test_instruction_borsh_round_trip() {
         let instr = Instruction::Read {
-            dst: 0,
+            dst_val: 0,
+            dst_is_null: 1,
             table: TableId(1),
-            row: RowExpr::Param(0),
             col: ColId(0),
+            row: RowExpr::Param(0),
         };
         let bytes = borsh::to_vec(&instr).unwrap();
         let decoded: Instruction = borsh::from_slice(&bytes).unwrap();
@@ -192,7 +195,10 @@ mod tests {
     fn test_predicate_borsh_round_trip() {
         let pred = Predicate::And(
             Box::new(Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(2))),
-            Box::new(Predicate::NotNull(ValueExpr::Slot(1))),
+            Box::new(Predicate::Eq(
+                ValueExpr::Slot(1),
+                ValueExpr::Literal(Value::Bool(false)),
+            )),
         );
         let bytes = borsh::to_vec(&pred).unwrap();
         let decoded: Predicate = borsh::from_slice(&bytes).unwrap();

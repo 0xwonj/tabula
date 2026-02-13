@@ -129,6 +129,7 @@ pub fn execute_batch<S: StateSnapshot>(
             &mut overlay,
             env.hasher,
             env.static_tables,
+            program.schemas(),
             time,
         ) {
             Ok(output) => {
@@ -189,7 +190,8 @@ mod tests {
                 table: TableId(1),
                 row: RowExpr::Param(0),
                 col: ColId(0),
-                src: ValueExpr::Param(1),
+                src_val: ValueExpr::Param(1),
+                src_is_null: ValueExpr::Literal(Value::Bool(false)),
             }],
         }
     }
@@ -214,16 +216,18 @@ mod tests {
                 },
             ],
             body: vec![
-                // Read sender balance
+                // Read sender balance (2 slots: val + is_null)
                 Instruction::Read {
-                    dst: 0,
+                    dst_val: 0,
+                    dst_is_null: 1,
                     table: TableId(1),
                     row: RowExpr::Param(0),
                     col: ColId(0),
                 },
-                // Read receiver balance
+                // Read receiver balance (2 slots: val + is_null)
                 Instruction::Read {
-                    dst: 1,
+                    dst_val: 2,
+                    dst_is_null: 3,
                     table: TableId(1),
                     row: RowExpr::Param(1),
                     col: ColId(0),
@@ -234,14 +238,14 @@ mod tests {
                 },
                 // new_sender = sender - amount
                 Instruction::Sub {
-                    dst: 2,
+                    dst: 4,
                     lhs: ValueExpr::Slot(0),
                     rhs: ValueExpr::Param(2),
                 },
                 // new_receiver = receiver + amount
                 Instruction::Add {
-                    dst: 3,
-                    lhs: ValueExpr::Slot(1),
+                    dst: 5,
+                    lhs: ValueExpr::Slot(2),
                     rhs: ValueExpr::Param(2),
                 },
                 // Write new balances
@@ -249,13 +253,15 @@ mod tests {
                     table: TableId(1),
                     row: RowExpr::Param(0),
                     col: ColId(0),
-                    src: ValueExpr::Slot(2),
+                    src_val: ValueExpr::Slot(4),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
                 Instruction::Write {
                     table: TableId(1),
                     row: RowExpr::Param(1),
                     col: ColId(0),
-                    src: ValueExpr::Slot(3),
+                    src_val: ValueExpr::Slot(5),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
             ],
         }
@@ -276,7 +282,7 @@ mod tests {
         assert_eq!(result.tx_outcomes[0], TxOutcome::Success);
         assert_eq!(
             result.write_set_final,
-            vec![(cell(1, 0, 0), Value::U64(42))]
+            vec![(cell(1, 0, 0), Some(Value::U64(42)))]
         );
     }
 
@@ -300,7 +306,8 @@ mod tests {
             param_schema: vec![],
             body: vec![
                 Instruction::Read {
-                    dst: 0,
+                    dst_val: 0,
+                    dst_is_null: 1,
                     table: TableId(1),
                     row: RowExpr::Literal(RowKey(0)),
                     col: ColId(0),
@@ -309,7 +316,8 @@ mod tests {
                     table: TableId(1),
                     row: RowExpr::Literal(RowKey(1)),
                     col: ColId(0),
-                    src: ValueExpr::Slot(0),
+                    src_val: ValueExpr::Slot(0),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
             ],
         })
@@ -324,7 +332,7 @@ mod tests {
         assert!(
             result
                 .write_set_final
-                .contains(&(cell(1, 1, 0), Value::U64(100)))
+                .contains(&(cell(1, 1, 0), Some(Value::U64(100))))
         );
     }
 
@@ -376,12 +384,12 @@ mod tests {
         assert!(
             result
                 .write_set_final
-                .contains(&(cell(1, 0, 0), Value::U64(10)))
+                .contains(&(cell(1, 0, 0), Some(Value::U64(10))))
         );
         assert!(
             result
                 .write_set_final
-                .contains(&(cell(1, 1, 0), Value::U64(90)))
+                .contains(&(cell(1, 1, 0), Some(Value::U64(90))))
         );
     }
 

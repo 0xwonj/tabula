@@ -19,15 +19,24 @@ use tabula_core::types::{CellKey, Value};
 /// read returns a value inconsistent with the most recent write.
 pub fn check_consistency(
     events: &[ExecutionEvent],
-    read_set_old: &[(CellKey, Value)],
+    read_set_old: &[(CellKey, Option<Value>)],
 ) -> Result<(), TabulaError> {
     // Build initial value map from read_set_old
-    let initial: BTreeMap<CellKey, Value> = read_set_old.iter().cloned().collect();
+    let initial: BTreeMap<CellKey, Option<Value>> = read_set_old.iter().cloned().collect();
 
     // Group events by cell key, preserving time order
     let mut by_key: BTreeMap<CellKey, Vec<&ExecutionEvent>> = BTreeMap::new();
     for event in events {
         by_key.entry(event.key).or_default().push(event);
+    }
+
+    // Convert an event's (value, val_is_null) pair to Option<Value>.
+    fn event_to_opt(event: &ExecutionEvent) -> Option<Value> {
+        if event.val_is_null {
+            None
+        } else {
+            Some(event.value.clone())
+        }
     }
 
     // For each key, walk events in time order and verify consistency
@@ -38,18 +47,19 @@ pub fn check_consistency(
         sorted.sort_by_key(|e| e.time);
 
         // Current value for this key: starts at the initial/snapshot value
-        let mut current_value = initial.get(key).cloned().unwrap_or(Value::Null);
+        let mut current_opt = initial.get(key).cloned().unwrap_or(None);
 
         for event in sorted {
             match event.op {
                 OpKind::Write => {
-                    current_value = event.value.clone();
+                    current_opt = event_to_opt(event);
                 }
                 OpKind::Read => {
-                    if event.value != current_value {
+                    let read_opt = event_to_opt(event);
+                    if read_opt != current_opt {
                         return Err(TabulaError::ConsistencyError(format!(
                             "stale read at key {:?} time {}: expected {:?}, got {:?}",
-                            event.key, event.time, current_value, event.value,
+                            event.key, event.time, current_opt, read_opt,
                         )));
                     }
                 }
@@ -71,6 +81,7 @@ mod tests {
             key,
             op: OpKind::Read,
             value,
+            val_is_null: false,
             time,
             tx_index: 0,
         }
@@ -81,6 +92,7 @@ mod tests {
             key,
             op: OpKind::Write,
             value,
+            val_is_null: false,
             time,
             tx_index: 0,
         }
@@ -94,7 +106,7 @@ mod tests {
             write_event(k, Value::U64(80), 1),
             read_event(k, Value::U64(80), 2),
         ];
-        let read_set_old = vec![(k, Value::U64(100))];
+        let read_set_old = vec![(k, Some(Value::U64(100)))];
         assert!(check_consistency(&events, &read_set_old).is_ok());
     }
 
@@ -105,7 +117,7 @@ mod tests {
             write_event(k, Value::U64(50), 0),
             read_event(k, Value::U64(100), 1), // stale: should be 50
         ];
-        let read_set_old = vec![(k, Value::U64(100))];
+        let read_set_old = vec![(k, Some(Value::U64(100)))];
         assert!(check_consistency(&events, &read_set_old).is_err());
     }
 
@@ -131,12 +143,72 @@ mod tests {
             write_event(k2, Value::U64(25), 4),
             read_event(k2, Value::U64(25), 5),
         ];
-        let read_set_old = vec![(k1, Value::U64(10)), (k2, Value::U64(20))];
+        let read_set_old = vec![
+            (k1, Some(Value::U64(10))),
+            (k2, Some(Value::U64(20))),
+        ];
         assert!(check_consistency(&events, &read_set_old).is_ok());
     }
 
     #[test]
     fn test_empty_events() {
         assert!(check_consistency(&[], &[]).is_ok());
+    }
+
+    fn null_write_event(key: CellKey, zero: Value, time: u64) -> ExecutionEvent {
+        ExecutionEvent {
+            key,
+            op: OpKind::Write,
+            value: zero,
+            val_is_null: true,
+            time,
+            tx_index: 0,
+        }
+    }
+
+    fn null_read_event(key: CellKey, zero: Value, time: u64) -> ExecutionEvent {
+        ExecutionEvent {
+            key,
+            op: OpKind::Read,
+            value: zero,
+            val_is_null: true,
+            time,
+            tx_index: 0,
+        }
+    }
+
+    #[test]
+    fn test_null_write_then_null_read() {
+        let k = cell(1, 0, 0);
+        let events = vec![
+            read_event(k, Value::U64(100), 0),
+            null_write_event(k, Value::U64(0), 1), // delete
+            null_read_event(k, Value::U64(0), 2),  // absent read
+        ];
+        let read_set_old = vec![(k, Some(Value::U64(100)))];
+        assert!(check_consistency(&events, &read_set_old).is_ok());
+    }
+
+    #[test]
+    fn test_null_write_then_present_read_fails() {
+        let k = cell(1, 0, 0);
+        let events = vec![
+            null_write_event(k, Value::U64(0), 0), // delete
+            read_event(k, Value::U64(42), 1),       // stale: should be absent
+        ];
+        let read_set_old = vec![(k, Some(Value::U64(100)))];
+        assert!(check_consistency(&events, &read_set_old).is_err());
+    }
+
+    #[test]
+    fn test_initially_absent_then_write_then_read() {
+        let k = cell(1, 0, 0);
+        let events = vec![
+            null_read_event(k, Value::U64(0), 0),  // absent initial read
+            write_event(k, Value::U64(42), 1),      // write value
+            read_event(k, Value::U64(42), 2),       // present read
+        ];
+        let read_set_old = vec![(k, None)]; // initially absent
+        assert!(check_consistency(&events, &read_set_old).is_ok());
     }
 }

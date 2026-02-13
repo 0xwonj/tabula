@@ -657,7 +657,7 @@ pub trait StaticTableProvider: Send + Sync {
 
 Tabula uses a **slot-based flat IR** with **True SSA** semantics — not an AST, not a bytecode VM. Each destination slot is assigned at most once (validated at registration time), and each instruction maps to a single operation, making it trivially interpretable and directly traceable for proving (1 instruction = 1 constraint group). The SSA property eliminates the need for intra-tx memory arguments.
 
-> **Implementation note**: The current Rust IR uses single-slot `Read { dst }` and `Write { src }` with `Value::Null` for null representation. The normative semantics-spec uses two-slot `Read(dst_val, dst_is_null)` and `Write(src_val, src_is_null)` where null is a separate boolean flag. This divergence is tracked for migration — see [TODO.md](./TODO.md).
+> **Note**: The Rust IR uses two-slot `Read { dst_val, dst_is_null }` and `Write { src_val, src_is_null }`, matching the normative semantics-spec. `Value::Null` has been removed; absence is a separate `Bool` flag. See [semantics-spec.md](./semantics-spec.md) §1.5.
 
 ### 7.1 Slot Environment
 

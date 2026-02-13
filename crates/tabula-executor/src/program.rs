@@ -72,6 +72,11 @@ impl Program {
     pub fn all_types(&self) -> Vec<&TxTypeDef> {
         self.types.values().collect()
     }
+
+    /// Return the table schemas.
+    pub fn schemas(&self) -> &BTreeMap<TableId, TableSchema> {
+        &self.schemas
+    }
 }
 
 impl Default for Program {
@@ -125,7 +130,8 @@ fn compile_body(
     for (i, instr) in def.body.iter().enumerate() {
         match instr {
             Instruction::Read {
-                dst,
+                dst_val,
+                dst_is_null,
                 table,
                 col,
                 row,
@@ -133,8 +139,16 @@ fn compile_body(
                 check_row_expr(row, param_count, &slot_types, i)?;
                 let ty = schema_col_type(schemas, table, col);
                 assign_slot(
-                    *dst,
+                    *dst_val,
                     ty,
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
+                assign_slot(
+                    *dst_is_null,
+                    Some(ValueType::Bool),
                     i,
                     &mut slot_types,
                     &mut assigned_at,
@@ -146,18 +160,28 @@ fn compile_body(
                 table,
                 col,
                 row,
-                src,
+                src_val,
+                src_is_null,
             } => {
                 check_row_expr(row, param_count, &slot_types, i)?;
-                check_value_expr(src, param_count, &slot_types, i)?;
-                // Type-check: if schema provides expected type and src type is known, they must match.
+                check_value_expr(src_val, param_count, &slot_types, i)?;
+                check_value_expr(src_is_null, param_count, &slot_types, i)?;
+                // Type-check: if schema provides expected type and src_val type is known, they must match.
                 if let Some(expected) = schema_col_type(schemas, table, col)
-                    && let Some(actual) = expr_type(src, &param_types, &slot_types)
+                    && let Some(actual) = expr_type(src_val, &param_types, &slot_types)
                     && actual != expected
                 {
                     return Err(TabulaError::InvalidIr(format!(
                         "instruction {i}: write to table {} col {} expects {expected:?} but got {actual:?}",
                         table.0, col.0
+                    )));
+                }
+                // Type-check: src_is_null must be Bool if known.
+                if let Some(is_null_ty) = expr_type(src_is_null, &param_types, &slot_types)
+                    && is_null_ty != ValueType::Bool
+                {
+                    return Err(TabulaError::InvalidIr(format!(
+                        "instruction {i}: write src_is_null must be Bool, got {is_null_ty:?}"
                     )));
                 }
             }
@@ -368,7 +392,6 @@ fn check_predicate(
             check_value_expr(r, param_count, slot_types, instr_idx)?;
             Ok(())
         }
-        Predicate::NotNull(v) => check_value_expr(v, param_count, slot_types, instr_idx),
         Predicate::And(a, b) | Predicate::Or(a, b) => {
             check_predicate(a, param_count, slot_types, instr_idx)?;
             check_predicate(b, param_count, slot_types, instr_idx)?;
@@ -459,7 +482,6 @@ fn value_to_type(v: &Value) -> Option<ValueType> {
         Value::I64(_) => Some(ValueType::I64),
         Value::Bool(_) => Some(ValueType::Bool),
         Value::Bytes32(_) => Some(ValueType::Bytes32),
-        Value::Null => None,
     }
 }
 
@@ -490,13 +512,15 @@ mod tests {
             ],
             body: vec![
                 Instruction::Read {
-                    dst: 0,
+                    dst_val: 0,
+                    dst_is_null: 1,
                     table: TableId(1),
                     row: RowExpr::Param(0),
                     col: ColId(0),
                 },
                 Instruction::Read {
-                    dst: 1,
+                    dst_val: 2,
+                    dst_is_null: 3,
                     table: TableId(1),
                     row: RowExpr::Param(1),
                     col: ColId(0),
@@ -505,26 +529,28 @@ mod tests {
                     predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(2)),
                 },
                 Instruction::Sub {
-                    dst: 2,
+                    dst: 4,
                     lhs: ValueExpr::Slot(0),
                     rhs: ValueExpr::Param(2),
                 },
                 Instruction::Add {
-                    dst: 3,
-                    lhs: ValueExpr::Slot(1),
+                    dst: 5,
+                    lhs: ValueExpr::Slot(2),
                     rhs: ValueExpr::Param(2),
                 },
                 Instruction::Write {
                     table: TableId(1),
                     row: RowExpr::Param(0),
                     col: ColId(0),
-                    src: ValueExpr::Slot(2),
+                    src_val: ValueExpr::Slot(4),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
                 Instruction::Write {
                     table: TableId(1),
                     row: RowExpr::Param(1),
                     col: ColId(0),
-                    src: ValueExpr::Slot(3),
+                    src_val: ValueExpr::Slot(5),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
             ],
         }
@@ -543,14 +569,17 @@ mod tests {
         prog.register(transfer_def()).unwrap();
         let info = prog.type_info(TxTypeId(1)).unwrap();
 
-        // Slots 0, 1 = Read results → None (unknown without table schema)
+        // Slots 0, 2 = Read dst_val → None (unknown without table schema)
+        // Slots 1, 3 = Read dst_is_null → Bool
         assert_eq!(info.slot_types[0], None);
-        assert_eq!(info.slot_types[1], None);
-        // Slot 2 = Sub(Slot(0), Param(2)) → Param(2) is U64 → U64
-        assert_eq!(info.slot_types[2], Some(ValueType::U64));
-        // Slot 3 = Add(Slot(1), Param(2)) → Param(2) is U64 → U64
-        assert_eq!(info.slot_types[3], Some(ValueType::U64));
-        assert_eq!(info.max_slot, Some(3));
+        assert_eq!(info.slot_types[1], Some(ValueType::Bool));
+        assert_eq!(info.slot_types[2], None);
+        assert_eq!(info.slot_types[3], Some(ValueType::Bool));
+        // Slot 4 = Sub(Slot(0), Param(2)) → Param(2) is U64 → U64
+        assert_eq!(info.slot_types[4], Some(ValueType::U64));
+        // Slot 5 = Add(Slot(2), Param(2)) → Param(2) is U64 → U64
+        assert_eq!(info.slot_types[5], Some(ValueType::U64));
+        assert_eq!(info.max_slot, Some(5));
         assert_eq!(
             info.param_types,
             vec![ValueType::U64, ValueType::U64, ValueType::U64]
@@ -587,7 +616,8 @@ mod tests {
                 table: TableId(1),
                 row: RowExpr::Param(0), // param 0 doesn't exist
                 col: ColId(0),
-                src: ValueExpr::Literal(Value::U64(1)),
+                src_val: ValueExpr::Literal(Value::U64(1)),
+                src_is_null: ValueExpr::Literal(Value::Bool(false)),
             }],
         };
         let mut prog = Program::new();
@@ -696,9 +726,11 @@ mod tests {
         prog.add_schema(balances_schema());
         prog.register(transfer_def()).unwrap();
         let info = prog.type_info(TxTypeId(1)).unwrap();
-        // With schema, Read slots now have inferred types.
+        // With schema, Read dst_val slots now have inferred types.
         assert_eq!(info.slot_types[0], Some(ValueType::U64));
-        assert_eq!(info.slot_types[1], Some(ValueType::U64));
+        assert_eq!(info.slot_types[1], Some(ValueType::Bool)); // dst_is_null
+        assert_eq!(info.slot_types[2], Some(ValueType::U64));
+        assert_eq!(info.slot_types[3], Some(ValueType::Bool)); // dst_is_null
     }
 
     #[test]
@@ -711,7 +743,8 @@ mod tests {
                 table: TableId(1),
                 row: RowExpr::Literal(tabula_core::types::RowKey(0)),
                 col: ColId(0),
-                src: ValueExpr::Literal(Value::Bool(true)), // schema expects U64
+                src_val: ValueExpr::Literal(Value::Bool(true)), // schema expects U64
+                src_is_null: ValueExpr::Literal(Value::Bool(false)),
             }],
         };
         let mut prog = Program::new();
@@ -729,7 +762,8 @@ mod tests {
             param_schema: vec![],
             body: vec![
                 Instruction::Read {
-                    dst: 0,
+                    dst_val: 0,
+                    dst_is_null: 1,
                     table: TableId(1),
                     row: RowExpr::Literal(tabula_core::types::RowKey(0)),
                     col: ColId(0),
@@ -738,7 +772,8 @@ mod tests {
                     table: TableId(1),
                     row: RowExpr::Literal(tabula_core::types::RowKey(0)),
                     col: ColId(0),
-                    src: ValueExpr::Slot(0),
+                    src_val: ValueExpr::Slot(0),
+                    src_is_null: ValueExpr::Slot(1),
                 },
             ],
         };
@@ -749,12 +784,12 @@ mod tests {
 
     #[test]
     fn test_no_schema_backward_compatible() {
-        // Without schema, Read slots should still be None (backward compat).
+        // Without schema, Read val slots have no type, but is_null slots are always Bool.
         let mut prog = Program::new();
         prog.register(transfer_def()).unwrap();
         let info = prog.type_info(TxTypeId(1)).unwrap();
-        assert_eq!(info.slot_types[0], None);
-        assert_eq!(info.slot_types[1], None);
+        assert_eq!(info.slot_types[0], None); // dst_val — no schema
+        assert_eq!(info.slot_types[1], Some(ValueType::Bool)); // dst_is_null — always Bool
     }
 
     #[test]

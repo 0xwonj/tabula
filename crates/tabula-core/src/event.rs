@@ -26,8 +26,11 @@ pub struct ExecutionEvent {
     pub key: CellKey,
     /// Whether this is a read or write.
     pub op: OpKind,
-    /// The value read or written.
+    /// The value read or written (canonical zero when absent).
     pub value: Value,
+    /// Whether the cell is absent (null).
+    #[serde(default)]
+    pub val_is_null: bool,
     /// Logical time of the operation.
     pub time: LogicalTime,
     /// Index of the transaction within the batch (0-based).
@@ -68,9 +71,11 @@ pub struct EmittedEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionResult {
     /// Cells read from committed state (not from overlay). Deduplicated.
-    pub read_set_old: Vec<(CellKey, Value)>,
+    /// `None` = cell was absent.
+    pub read_set_old: Vec<(CellKey, Option<Value>)>,
     /// Final writes to apply to committed state. Coalesced (last-write-wins).
-    pub write_set_final: Vec<(CellKey, Value)>,
+    /// `None` = delete (write null).
+    pub write_set_final: Vec<(CellKey, Option<Value>)>,
     /// Full execution trace for consistency proving.
     pub events: Vec<ExecutionEvent>,
     /// Emitted application events / receipts.
@@ -94,6 +99,7 @@ mod tests {
             },
             op: OpKind::Read,
             value: Value::U64(100),
+            val_is_null: false,
             time: 1,
             tx_index: 0,
         };

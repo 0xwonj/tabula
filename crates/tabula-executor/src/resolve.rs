@@ -73,10 +73,6 @@ pub fn evaluate_predicate(
             let rv = resolve_value_expr(r, slots, params)?;
             lv.compare(&rv).map(|ord| ord != Ordering::Less)
         }
-        Predicate::NotNull(v) => {
-            let val = resolve_value_expr(v, slots, params)?;
-            Ok(!matches!(val, Value::Null))
-        }
         Predicate::And(a, b) => {
             let ra = evaluate_predicate(a, slots, params)?;
             let rb = evaluate_predicate(b, slots, params)?;
@@ -121,7 +117,6 @@ fn get_param(params: &[Value], idx: u16) -> Result<Value, TabulaError> {
 fn value_to_row_key(v: &Value) -> Result<RowKey, TabulaError> {
     match v {
         Value::U64(n) => Ok(RowKey(*n)),
-        Value::Null => Err(TabulaError::NullValue),
         _ => Err(TabulaError::TypeMismatch {
             expected: "U64",
             actual: v.type_name(),

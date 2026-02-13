@@ -223,8 +223,8 @@ impl InMemoryState {
 }
 
 impl StateSnapshot for InMemoryState {
-    fn read(&self, key: &CellKey) -> Result<Value, TabulaError> {
-        Ok(self.data.get(key).cloned().unwrap_or(Value::Null))
+    fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
+        Ok(self.data.get(key).cloned())
     }
 
     fn table_exists(&self, table: TableId) -> bool {
@@ -514,7 +514,7 @@ mod tests {
         };
         state.set(k, Value::U64(100));
 
-        assert_eq!(state.read(&k).unwrap(), Value::U64(100));
+        assert_eq!(state.read(&k).unwrap(), Some(Value::U64(100)));
         assert!(state.table_exists(TableId(1)));
         assert!(!state.table_exists(TableId(99)));
     }
@@ -663,13 +663,13 @@ mod tests {
     }
 
     #[test]
-    fn test_in_memory_state_null_for_missing() {
+    fn test_in_memory_state_none_for_missing() {
         let state = InMemoryState::new();
         let k = CellKey {
             table: TableId(1),
             col: ColId(0),
             row: RowKey(0),
         };
-        assert_eq!(state.read(&k).unwrap(), Value::Null);
+        assert_eq!(state.read(&k).unwrap(), None);
     }
 }

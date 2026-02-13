@@ -37,7 +37,7 @@ pub trait Hasher: Send + Sync {
     /// where `domain_tag` = `DOMAIN_TAG_HASH_IR` (0x02),
     /// `encode(v)` = `type_tag:u8 || canonical_bytes(v)`.
     ///
-    /// Type tags: U64=0, I64=1, Bool=2, Bytes32=3, Null=4.
+    /// Type tags: U64=0, I64=1, Bool=2, Bytes32=3.
     fn hash_ir(&self, inputs: &[Value]) -> Digest {
         let mut buf = Vec::new();
         buf.push(DOMAIN_TAG_HASH_IR);
@@ -72,9 +72,6 @@ fn encode_value_ir(buf: &mut Vec<u8>, v: &Value) {
         Value::Bytes32(b) => {
             buf.push(3);
             buf.extend_from_slice(b);
-        }
-        Value::Null => {
-            buf.push(4);
         }
     }
 }
@@ -149,8 +146,8 @@ pub trait PCS: Send + Sync {
 ///
 /// The executor uses this to resolve reads that miss the overlay.
 pub trait StateSnapshot: Send + Sync {
-    /// Read a cell from committed state. Returns `Value::Null` if absent.
-    fn read(&self, key: &CellKey) -> Result<Value, TabulaError>;
+    /// Read a cell from committed state. Returns `None` if absent.
+    fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError>;
     /// Check whether a table exists.
     fn table_exists(&self, table: TableId) -> bool;
 }

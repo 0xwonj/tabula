@@ -75,10 +75,6 @@ pub enum TabulaError {
     #[error("tx type not found: {0:?}")]
     TxTypeNotFound(crate::tx::TxTypeId),
 
-    /// Operation on a null value where non-null was required.
-    #[error("null value in operation")]
-    NullValue,
-
     /// Encoding/decoding error.
     #[error("encoding error: {0}")]
     EncodingError(String),

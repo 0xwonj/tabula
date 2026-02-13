@@ -169,19 +169,21 @@ impl LowerCtx {
 // Per-transaction lowering
 // ---------------------------------------------------------------------------
 
-/// A local binding: either a real slot or an alias for a ValueExpr.
+/// A local binding: either a real slot, an alias, or a 2-slot read result.
 #[derive(Debug, Clone)]
 enum Binding {
     /// Occupies a physical IR slot.
     Slot(Slot, ValueType),
     /// Alias — resolved to a ValueExpr without emitting instructions.
     Alias(ValueExpr, ValueType),
+    /// 2-slot cell read result: (val_slot, is_null_slot, column type).
+    ReadSlot { val: Slot, is_null: Slot, ty: ValueType },
 }
 
 impl Binding {
     fn ty(&self) -> ValueType {
         match self {
-            Binding::Slot(_, ty) | Binding::Alias(_, ty) => *ty,
+            Binding::Slot(_, ty) | Binding::Alias(_, ty) | Binding::ReadSlot { ty, .. } => *ty,
         }
     }
 
@@ -189,12 +191,13 @@ impl Binding {
         match self {
             Binding::Slot(s, _) => ValueExpr::Slot(*s),
             Binding::Alias(ve, _) => ve.clone(),
+            Binding::ReadSlot { val, .. } => ValueExpr::Slot(*val),
         }
     }
 
     fn to_row_expr(&self) -> RowExpr {
         match self {
-            Binding::Slot(s, _) => RowExpr::Slot(*s),
+            Binding::Slot(s, _) | Binding::ReadSlot { val: s, .. } => RowExpr::Slot(*s),
             Binding::Alias(ve, _) => match ve {
                 ValueExpr::Literal(Value::U64(n)) => {
                     RowExpr::Literal(tabula_core::types::RowKey(*n))
@@ -203,6 +206,13 @@ impl Binding {
                 ValueExpr::Param(p) => RowExpr::Param(*p),
                 _ => RowExpr::Slot(0), // fallback — type checker should prevent this
             },
+        }
+    }
+
+    fn is_null_slot(&self) -> Option<Slot> {
+        match self {
+            Binding::ReadSlot { is_null, .. } => Some(*is_null),
+            _ => None,
         }
     }
 }
@@ -316,7 +326,7 @@ impl<'a> TxLower<'a> {
         }
 
         match &value.kind {
-            // Cell read → Read instruction.
+            // Cell read → Read instruction (2-slot: val + is_null).
             ExprKind::CellRead { table, row, col } => {
                 let Some((table_id, col_info)) = self.resolve_table_col(table, col, value.span)
                 else {
@@ -325,15 +335,19 @@ impl<'a> TxLower<'a> {
                 let Some(row_expr) = self.lower_row_expr(row) else {
                     return;
                 };
-                let dst = self.alloc_slot();
+                let dst_val = self.alloc_slot();
+                let dst_is_null = self.alloc_slot();
                 self.instructions.push(Instruction::Read {
-                    dst,
+                    dst_val,
+                    dst_is_null,
                     table: table_id,
                     row: row_expr,
                     col: col_info.id,
                 });
-                self.locals
-                    .insert(name.to_string(), Binding::Slot(dst, col_info.ty));
+                self.locals.insert(
+                    name.to_string(),
+                    Binding::ReadSlot { val: dst_val, is_null: dst_is_null, ty: col_info.ty },
+                );
             }
             // Static table lookup → Lookup instruction.
             ExprKind::StaticRead { table, key, col } => {
@@ -473,6 +487,17 @@ impl<'a> TxLower<'a> {
         let Some(row_expr) = self.lower_row_expr(row) else {
             return;
         };
+        // Special case: `table[row].col = null` → write with is_null=true
+        if matches!(&value.kind, ExprKind::Null) {
+            self.instructions.push(Instruction::Write {
+                table: table_id,
+                row: row_expr,
+                col: col_info.id,
+                src_val: ValueExpr::Literal(tabula_core::types::zero_value(col_info.ty)),
+                src_is_null: ValueExpr::Literal(Value::Bool(true)),
+            });
+            return;
+        }
         let Some(src) = self.lower_value_expr(value) else {
             return;
         };
@@ -480,7 +505,8 @@ impl<'a> TxLower<'a> {
             table: table_id,
             row: row_expr,
             col: col_info.id,
-            src,
+            src_val: src,
+            src_is_null: ValueExpr::Literal(Value::Bool(false)),
         });
     }
 
@@ -572,7 +598,7 @@ impl<'a> TxLower<'a> {
                 let dst = self.alloc_slot();
                 self.instructions.push(Instruction::Sub {
                     dst,
-                    lhs: ValueExpr::Literal(zero_value(ty)),
+                    lhs: ValueExpr::Literal(tabula_core::types::zero_value(ty)),
                     rhs: operand_ve,
                 });
                 Some((LoweredExpr::Slot(dst), ty))
@@ -592,7 +618,14 @@ impl<'a> TxLower<'a> {
             ExprKind::IntLit(n) => Some(ValueExpr::Literal(Value::U64(*n))),
             ExprKind::BoolLit(b) => Some(ValueExpr::Literal(Value::Bool(*b))),
             ExprKind::HexLit(b) => Some(ValueExpr::Literal(Value::Bytes32(*b))),
-            ExprKind::Null => Some(ValueExpr::Literal(Value::Null)),
+            ExprKind::Null => {
+                self.errors.push(CompileError::new(
+                    ErrorKind::TypeMismatch,
+                    expr.span,
+                    "null cannot be used as a value; use in assignments or comparisons",
+                ));
+                None
+            }
             ExprKind::Ident(name) => self.resolve_ident(name, expr.span),
             // Arithmetic ops need a slot.
             ExprKind::BinOp { op, .. } if is_arithmetic(*op) => {
@@ -611,19 +644,21 @@ impl<'a> TxLower<'a> {
                     LoweredExpr::ValueExpr(ve, _) => Some(ve),
                 }
             }
-            // Cell read as part of an expression (not a let binding) — needs a temp slot.
+            // Cell read as part of an expression (not a let binding) — needs temp slots.
             ExprKind::CellRead { table, row, col } => {
                 let (table_id, col_info) = self.resolve_table_col(table, col, expr.span)?;
                 let row_expr = self.lower_row_expr(row)?;
-                let dst = self.alloc_slot();
+                let dst_val = self.alloc_slot();
+                let dst_is_null = self.alloc_slot(); // unnamed temp for is_null
                 self.instructions.push(Instruction::Read {
-                    dst,
+                    dst_val,
+                    dst_is_null,
                     table: table_id,
                     row: row_expr,
                     col: col_info.id,
                 });
                 // No local binding — this is a temporary.
-                Some(ValueExpr::Slot(dst))
+                Some(ValueExpr::Slot(dst_val))
             }
             ExprKind::StaticRead { table, key, col } => {
                 let (table_id, col_info) = self.resolve_table_col(table, col, expr.span)?;
@@ -722,20 +757,24 @@ impl<'a> TxLower<'a> {
         match &expr.kind {
             ExprKind::BinOp { op, lhs, rhs } => match op {
                 BinOp::Eq => {
-                    // Special case: x != null → NotNull
+                    // Special case: x == null → check is_null slot is true
+                    if matches!(&rhs.kind, ExprKind::Null) {
+                        return self.null_check_predicate(lhs, true, expr.span);
+                    }
+                    if matches!(&lhs.kind, ExprKind::Null) {
+                        return self.null_check_predicate(rhs, true, expr.span);
+                    }
                     let l = self.lower_value_expr(lhs)?;
                     let r = self.lower_value_expr(rhs)?;
                     Some(Predicate::Eq(l, r))
                 }
                 BinOp::Neq => {
-                    // Special case: x != null → NotNull(x)
+                    // Special case: x != null → check is_null slot is false (not null)
                     if matches!(&rhs.kind, ExprKind::Null) {
-                        let v = self.lower_value_expr(lhs)?;
-                        return Some(Predicate::NotNull(v));
+                        return self.null_check_predicate(lhs, false, expr.span);
                     }
                     if matches!(&lhs.kind, ExprKind::Null) {
-                        let v = self.lower_value_expr(rhs)?;
-                        return Some(Predicate::NotNull(v));
+                        return self.null_check_predicate(rhs, false, expr.span);
                     }
                     // General != → Not(Eq(...))
                     let l = self.lower_value_expr(lhs)?;
@@ -840,6 +879,32 @@ impl<'a> TxLower<'a> {
         }
     }
 
+    /// Build a null-check predicate for `expr == null` or `expr != null`.
+    /// `is_eq` = true → Eq(is_null, Bool(true)), false → Eq(is_null, Bool(false))
+    fn null_check_predicate(
+        &mut self,
+        expr: &Expr,
+        is_eq: bool,
+        span: Span,
+    ) -> Option<Predicate> {
+        // The expression must resolve to a ReadSlot binding (from a cell read).
+        if let ExprKind::Ident(name) = &expr.kind
+            && let Some(binding) = self.locals.get(name)
+            && let Some(is_null_slot) = binding.is_null_slot()
+        {
+            return Some(Predicate::Eq(
+                ValueExpr::Slot(is_null_slot),
+                ValueExpr::Literal(Value::Bool(is_eq)),
+            ));
+        }
+        self.errors.push(CompileError::new(
+            ErrorKind::TypeMismatch,
+            span,
+            "null comparison requires a cell-read binding (let x = table[row].col)",
+        ));
+        None
+    }
+
     fn resolve_table_col(
         &mut self,
         table_name: &str,
@@ -936,15 +1001,6 @@ fn is_arithmetic(op: BinOp) -> bool {
     )
 }
 
-fn zero_value(ty: ValueType) -> Value {
-    match ty {
-        ValueType::U64 => Value::U64(0),
-        ValueType::I64 => Value::I64(0),
-        ValueType::Bool => Value::Bool(false),
-        ValueType::Bytes32 => Value::Bytes32([0; 32]),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1011,7 +1067,8 @@ tx rw(id: u64, val: u64) {
         assert!(matches!(
             &body[0],
             Instruction::Read {
-                dst: 0,
+                dst_val: 0,
+                dst_is_null: 1,
                 table,
                 row: RowExpr::Param(0),
                 col,
@@ -1023,7 +1080,8 @@ tx rw(id: u64, val: u64) {
                 table,
                 row: RowExpr::Param(0),
                 col,
-                src: ValueExpr::Param(1),
+                src_val: ValueExpr::Param(1),
+                src_is_null: ValueExpr::Literal(Value::Bool(false)),
             } if *table == TableId(0) && *col == ColId(0)
         ));
     }
@@ -1042,11 +1100,12 @@ tx add_one(id: u64) {
         let prog = compile(source);
         let body = &prog.tx_types[0].body;
         assert_eq!(body.len(), 3);
-        assert!(matches!(&body[0], Instruction::Read { dst: 0, .. }));
+        // Read uses slots 0 (val) and 1 (is_null)
+        assert!(matches!(&body[0], Instruction::Read { dst_val: 0, dst_is_null: 1, .. }));
         assert!(matches!(
             &body[1],
             Instruction::Add {
-                dst: 1,
+                dst: 2,
                 lhs: ValueExpr::Slot(0),
                 rhs: ValueExpr::Literal(Value::U64(1)),
             }
@@ -1054,7 +1113,8 @@ tx add_one(id: u64) {
         assert!(matches!(
             &body[2],
             Instruction::Write {
-                src: ValueExpr::Slot(1),
+                src_val: ValueExpr::Slot(2),
+                src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 ..
             }
         ));
@@ -1089,10 +1149,37 @@ tx check(id: u64) {
 }";
         let prog = compile(source);
         let body = &prog.tx_types[0].body;
+        // x != null → Eq(is_null_slot, Bool(false))
+        // Read uses slots 0 (val) and 1 (is_null)
         assert!(matches!(
             &body[1],
             Instruction::Assert {
-                predicate: Predicate::NotNull(ValueExpr::Slot(0))
+                predicate: Predicate::Eq(
+                    ValueExpr::Slot(1),
+                    ValueExpr::Literal(Value::Bool(false)),
+                )
+            }
+        ));
+    }
+
+    #[test]
+    fn test_lower_assert_eq_null() {
+        let source = "\
+table t { v: u64 }
+tx check(id: u64) {
+    let x = t[id].v
+    assert x == null
+}";
+        let prog = compile(source);
+        let body = &prog.tx_types[0].body;
+        // x == null → Eq(is_null_slot, Bool(true))
+        assert!(matches!(
+            &body[1],
+            Instruction::Assert {
+                predicate: Predicate::Eq(
+                    ValueExpr::Slot(1),
+                    ValueExpr::Literal(Value::Bool(true)),
+                )
             }
         ));
     }
@@ -1202,17 +1289,23 @@ tx transfer(from: u64, to: u64, amount: u64) {
         assert_eq!(tx.body.len(), 7);
 
         // Verify exact IR output matches hand-written transfer.
+        // Read sender_bal: slots 0 (val), 1 (is_null)
+        // Read recv_bal:   slots 2 (val), 3 (is_null)
+        // Sub new_sender:  slot 4
+        // Add new_recv:    slot 5
         assert_eq!(
             tx.body,
             vec![
                 Instruction::Read {
-                    dst: 0,
+                    dst_val: 0,
+                    dst_is_null: 1,
                     table: TableId(0),
                     row: RowExpr::Param(0),
                     col: ColId(0),
                 },
                 Instruction::Read {
-                    dst: 1,
+                    dst_val: 2,
+                    dst_is_null: 3,
                     table: TableId(0),
                     row: RowExpr::Param(1),
                     col: ColId(0),
@@ -1221,26 +1314,28 @@ tx transfer(from: u64, to: u64, amount: u64) {
                     predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(2)),
                 },
                 Instruction::Sub {
-                    dst: 2,
+                    dst: 4,
                     lhs: ValueExpr::Slot(0),
                     rhs: ValueExpr::Param(2),
                 },
                 Instruction::Add {
-                    dst: 3,
-                    lhs: ValueExpr::Slot(1),
+                    dst: 5,
+                    lhs: ValueExpr::Slot(2),
                     rhs: ValueExpr::Param(2),
                 },
                 Instruction::Write {
                     table: TableId(0),
                     row: RowExpr::Param(0),
                     col: ColId(0),
-                    src: ValueExpr::Slot(2),
+                    src_val: ValueExpr::Slot(4),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
                 Instruction::Write {
                     table: TableId(0),
                     row: RowExpr::Param(1),
                     col: ColId(0),
-                    src: ValueExpr::Slot(3),
+                    src_val: ValueExpr::Slot(5),
+                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
             ]
         );
@@ -1303,12 +1398,14 @@ tx inc(id: u64, amount: u64) {
         let prog = compile(source);
         let body = &prog.tx_types[0].body;
         assert_eq!(body.len(), 3);
-        assert!(matches!(&body[0], Instruction::Read { dst: 0, .. }));
-        assert!(matches!(&body[1], Instruction::Add { dst: 1, .. }));
+        // Read: slots 0 (val), 1 (is_null)
+        assert!(matches!(&body[0], Instruction::Read { dst_val: 0, dst_is_null: 1, .. }));
+        assert!(matches!(&body[1], Instruction::Add { dst: 2, .. }));
         assert!(matches!(
             &body[2],
             Instruction::Write {
-                src: ValueExpr::Slot(1),
+                src_val: ValueExpr::Slot(2),
+                src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 ..
             }
         ));
@@ -1329,13 +1426,16 @@ tx s(id: u64, flag: bool) {
         let prog = compile(source);
         let body = &prog.tx_types[0].body;
         assert_eq!(body.len(), 4);
+        // Read x: slots 0 (val), 1 (is_null)
+        // Read y: slots 2 (val), 3 (is_null)
+        // Select: slot 4
         assert!(matches!(
             &body[2],
             Instruction::Select {
-                dst: 2,
+                dst: 4,
                 cond: ValueExpr::Param(1),
                 if_true: ValueExpr::Slot(0),
-                if_false: ValueExpr::Slot(1),
+                if_false: ValueExpr::Slot(2),
             }
         ));
     }
@@ -1386,9 +1486,10 @@ tx transfer(from: u64, to: u64, amount: u64) {
             prog.register(tx_type.clone())
                 .unwrap_or_else(|e| panic!("lowered IR failed SSA validation: {e}"));
         }
-        // Verify type info was inferred
+        // Verify type info was inferred (slot 0 = val U64, slot 1 = is_null Bool)
         let info = prog.type_info(TxTypeId(0)).unwrap();
         assert_eq!(info.slot_types[0], Some(ValueType::U64));
+        assert_eq!(info.slot_types[1], Some(ValueType::Bool));
     }
 
     #[test]

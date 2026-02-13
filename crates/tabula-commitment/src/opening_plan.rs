@@ -19,7 +19,7 @@ pub struct OpeningGroup {
 ///
 /// Groups entries by (tableId, colId), deduplicates and sorts rows within
 /// each group, and returns groups sorted by (tableId, colId).
-pub fn build_opening_plan(read_set_old: &[(CellKey, Value)]) -> Vec<OpeningGroup> {
+pub fn build_opening_plan(read_set_old: &[(CellKey, Option<Value>)]) -> Vec<OpeningGroup> {
     let mut groups: BTreeMap<(TableId, ColId), Vec<RowKey>> = BTreeMap::new();
     for (key, _) in read_set_old {
         groups
@@ -53,9 +53,9 @@ mod tests {
     #[test]
     fn test_grouping() {
         let read_set = vec![
-            (ck(1, 0, 0), Value::U64(10)),
-            (ck(1, 1, 0), Value::U64(20)),
-            (ck(2, 0, 0), Value::U64(30)),
+            (ck(1, 0, 0), Some(Value::U64(10))),
+            (ck(1, 1, 0), Some(Value::U64(20))),
+            (ck(2, 0, 0), Some(Value::U64(30))),
         ];
         let plan = build_opening_plan(&read_set);
         assert_eq!(plan.len(), 2); // table 1 col 0, table 2 col 0
@@ -68,8 +68,8 @@ mod tests {
     #[test]
     fn test_dedup() {
         let read_set = vec![
-            (ck(1, 0, 0), Value::U64(10)),
-            (ck(1, 0, 0), Value::U64(10)), // duplicate
+            (ck(1, 0, 0), Some(Value::U64(10))),
+            (ck(1, 0, 0), Some(Value::U64(10))), // duplicate
         ];
         let plan = build_opening_plan(&read_set);
         assert_eq!(plan.len(), 1);
@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn test_multi_column() {
-        let read_set = vec![(ck(1, 0, 0), Value::U64(10)), (ck(1, 0, 1), Value::U64(20))];
+        let read_set = vec![(ck(1, 0, 0), Some(Value::U64(10))), (ck(1, 0, 1), Some(Value::U64(20)))];
         let plan = build_opening_plan(&read_set);
         assert_eq!(plan.len(), 2); // same table, different columns
         assert_eq!(plan[0].col, ColId(0));

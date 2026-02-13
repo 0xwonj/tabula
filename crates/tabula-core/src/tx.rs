@@ -72,6 +72,22 @@ impl Transaction {
     }
 }
 
+/// Program-level resource budgets for DoS prevention.
+///
+/// Verified by prover and verifier to ensure programs do not exceed
+/// allocated resources.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
+pub struct ProgramBudgets {
+    /// Maximum number of IR instructions per transaction.
+    pub max_ops: u32,
+    /// Maximum number of SSA slots per transaction.
+    pub max_slots: u16,
+    /// Maximum number of state accesses (reads + writes) per transaction.
+    pub max_accesses: u32,
+}
+
 /// An ordered batch of transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct Batch {

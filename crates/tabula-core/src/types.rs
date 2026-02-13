@@ -85,6 +85,7 @@ pub struct CellKey {
 /// A typed value stored in a table cell.
 ///
 /// Application-level only — field element encoding is handled by `ValueCodec`.
+/// Null/absence is represented by `Option<Value>`, not a variant.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub enum Value {
     /// Unsigned 64-bit integer.
@@ -95,14 +96,10 @@ pub enum Value {
     Bool(bool),
     /// 32-byte blob (e.g. hash digest, public key).
     Bytes32([u8; 32]),
-    /// Null / absent value.
-    Null,
 }
 
 impl Value {
     /// Check whether this value matches the given type descriptor.
-    ///
-    /// `Null` does not match any `ValueType`.
     pub fn matches_type(&self, ty: ValueType) -> bool {
         matches!(
             (self, ty),
@@ -120,7 +117,6 @@ impl Value {
             Value::I64(_) => "I64",
             Value::Bool(_) => "Bool",
             Value::Bytes32(_) => "Bytes32",
-            Value::Null => "Null",
         }
     }
 
@@ -135,7 +131,6 @@ impl Value {
                 .checked_add(*b)
                 .map(Value::I64)
                 .ok_or(TabulaError::ArithmeticOverflow),
-            (Value::Null, _) | (_, Value::Null) => Err(TabulaError::NullValue),
             _ => Err(TabulaError::TypeMismatch {
                 expected: self.type_name(),
                 actual: rhs.type_name(),
@@ -154,7 +149,6 @@ impl Value {
                 .checked_sub(*b)
                 .map(Value::I64)
                 .ok_or(TabulaError::ArithmeticOverflow),
-            (Value::Null, _) | (_, Value::Null) => Err(TabulaError::NullValue),
             _ => Err(TabulaError::TypeMismatch {
                 expected: self.type_name(),
                 actual: rhs.type_name(),
@@ -173,7 +167,6 @@ impl Value {
                 .checked_mul(*b)
                 .map(Value::I64)
                 .ok_or(TabulaError::ArithmeticOverflow),
-            (Value::Null, _) | (_, Value::Null) => Err(TabulaError::NullValue),
             _ => Err(TabulaError::TypeMismatch {
                 expected: self.type_name(),
                 actual: rhs.type_name(),
@@ -198,7 +191,6 @@ impl Value {
                 let r = a.checked_rem(*b).ok_or(TabulaError::ArithmeticOverflow)?;
                 Ok((Value::I64(q), Value::I64(r)))
             }
-            (Value::Null, _) | (_, Value::Null) => Err(TabulaError::NullValue),
             _ => Err(TabulaError::TypeMismatch {
                 expected: self.type_name(),
                 actual: rhs.type_name(),
@@ -207,26 +199,28 @@ impl Value {
     }
 
     /// Compare two values of the same ordered type.
-    ///
-    /// # Null semantics
-    ///
-    /// Comparing against `Null` returns `TabulaError::NullValue` rather than
-    /// implementing three-valued logic (3VL).  This is intentional: 3VL would
-    /// require an `Unknown` truth value that propagates through `And`/`Or`/`Not`,
-    /// which significantly complicates ZK constraint generation.  Programs
-    /// should guard with `Assert(NotNull(slot))` before any comparison that
-    /// might encounter `Null`.
     pub fn compare(&self, rhs: &Value) -> Result<Ordering, TabulaError> {
         match (self, rhs) {
             (Value::U64(a), Value::U64(b)) => Ok(a.cmp(b)),
             (Value::I64(a), Value::I64(b)) => Ok(a.cmp(b)),
             (Value::Bool(a), Value::Bool(b)) => Ok(a.cmp(b)),
-            (Value::Null, _) | (_, Value::Null) => Err(TabulaError::NullValue),
             _ => Err(TabulaError::TypeMismatch {
                 expected: self.type_name(),
                 actual: rhs.type_name(),
             }),
         }
+    }
+}
+
+/// Return the canonical zero value for a given type.
+///
+/// Used when a cell is absent (null) — the trace records `(zero_value(T), val_is_null=true)`.
+pub fn zero_value(ty: ValueType) -> Value {
+    match ty {
+        ValueType::U64 => Value::U64(0),
+        ValueType::I64 => Value::I64(0),
+        ValueType::Bool => Value::Bool(false),
+        ValueType::Bytes32 => Value::Bytes32([0; 32]),
     }
 }
 
@@ -282,14 +276,6 @@ mod tests {
     }
 
     #[test]
-    fn test_borsh_round_trip_value_null() {
-        let v = Value::Null;
-        let bytes = borsh::to_vec(&v).unwrap();
-        let decoded: Value = borsh::from_slice(&bytes).unwrap();
-        assert_eq!(v, decoded);
-    }
-
-    #[test]
     fn test_cellkey_ordering() {
         // Canonical sort order: (table, col, row)
         let a = CellKey {
@@ -337,13 +323,12 @@ mod tests {
 
     #[test]
     fn test_value_variant_coverage() {
-        // Ensure all five variants are distinct under PartialEq.
+        // Ensure all four variants are distinct under PartialEq.
         let variants = [
             Value::U64(0),
             Value::I64(0),
             Value::Bool(false),
             Value::Bytes32([0; 32]),
-            Value::Null,
         ];
         for (i, a) in variants.iter().enumerate() {
             for (j, b) in variants.iter().enumerate() {
@@ -364,7 +349,6 @@ mod tests {
         assert_eq!(Value::I64(0).type_name(), "I64");
         assert_eq!(Value::Bool(true).type_name(), "Bool");
         assert_eq!(Value::Bytes32([0; 32]).type_name(), "Bytes32");
-        assert_eq!(Value::Null.type_name(), "Null");
     }
 
     #[test]
@@ -390,14 +374,6 @@ mod tests {
                 .checked_add(&Value::U64(1))
                 .unwrap_err(),
             TabulaError::ArithmeticOverflow
-        );
-    }
-
-    #[test]
-    fn test_checked_add_null() {
-        assert_eq!(
-            Value::Null.checked_add(&Value::U64(1)).unwrap_err(),
-            TabulaError::NullValue
         );
     }
 
@@ -496,14 +472,6 @@ mod tests {
     }
 
     #[test]
-    fn test_compare_null() {
-        assert_eq!(
-            Value::Null.compare(&Value::U64(1)).unwrap_err(),
-            TabulaError::NullValue
-        );
-    }
-
-    #[test]
     fn test_compare_type_mismatch() {
         assert!(matches!(
             Value::U64(1).compare(&Value::I64(1)).unwrap_err(),
@@ -521,6 +489,14 @@ mod tests {
         assert!(!Value::U64(0).matches_type(ValueType::I64));
         assert!(!Value::I64(0).matches_type(ValueType::U64));
         assert!(!Value::Bool(true).matches_type(ValueType::U64));
-        assert!(!Value::Null.matches_type(ValueType::U64));
+        assert!(!Value::Bool(true).matches_type(ValueType::Bytes32));
+    }
+
+    #[test]
+    fn test_zero_value_per_type() {
+        assert_eq!(zero_value(ValueType::U64), Value::U64(0));
+        assert_eq!(zero_value(ValueType::I64), Value::I64(0));
+        assert_eq!(zero_value(ValueType::Bool), Value::Bool(false));
+        assert_eq!(zero_value(ValueType::Bytes32), Value::Bytes32([0; 32]));
     }
 }

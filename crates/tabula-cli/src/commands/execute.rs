@@ -78,13 +78,17 @@ pub fn cmd_execute(
         // Apply write set
         for (key, value) in &result.write_set_final {
             let cell = StateCell::from_cell_pair(key, value);
-            // Update existing or append
-            if let Some(existing) = new_state
-                .iter_mut()
-                .find(|c| c.table == cell.table && c.row == cell.row && c.col == cell.col)
+            if let Some(pos) = new_state
+                .iter()
+                .position(|c| c.table == cell.table && c.row == cell.row && c.col == cell.col)
             {
-                existing.value = cell.value;
-            } else {
+                if value.is_none() {
+                    // Deleted cell — remove from state
+                    new_state.remove(pos);
+                } else {
+                    new_state[pos].value = cell.value;
+                }
+            } else if value.is_some() {
                 new_state.push(cell);
             }
         }

@@ -29,13 +29,15 @@ fn transfer_def() -> TxTypeDef {
         ],
         body: vec![
             Instruction::Read {
-                dst: 0,
+                dst_val: 0,
+                dst_is_null: 1,
                 table: TableId(1),
                 row: RowExpr::Param(0),
                 col: ColId(0),
             },
             Instruction::Read {
-                dst: 1,
+                dst_val: 2,
+                dst_is_null: 3,
                 table: TableId(1),
                 row: RowExpr::Param(1),
                 col: ColId(0),
@@ -44,26 +46,28 @@ fn transfer_def() -> TxTypeDef {
                 predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(2)),
             },
             Instruction::Sub {
-                dst: 2,
+                dst: 4,
                 lhs: ValueExpr::Slot(0),
                 rhs: ValueExpr::Param(2),
             },
             Instruction::Add {
-                dst: 3,
-                lhs: ValueExpr::Slot(1),
+                dst: 5,
+                lhs: ValueExpr::Slot(2),
                 rhs: ValueExpr::Param(2),
             },
             Instruction::Write {
                 table: TableId(1),
                 row: RowExpr::Param(0),
                 col: ColId(0),
-                src: ValueExpr::Slot(2),
+                src_val: ValueExpr::Slot(4),
+                src_is_null: ValueExpr::Literal(Value::Bool(false)),
             },
             Instruction::Write {
                 table: TableId(1),
                 row: RowExpr::Param(1),
                 col: ColId(0),
-                src: ValueExpr::Slot(3),
+                src_val: ValueExpr::Slot(5),
+                src_is_null: ValueExpr::Literal(Value::Bool(false)),
             },
         ],
     }
@@ -150,7 +154,7 @@ fn test_multi_tx_mixed_outcomes() {
             col: ColId(0),
             row: RowKey(0),
         }],
-        Value::U64(700)
+        Some(Value::U64(700))
     );
     assert_eq!(
         ws[&CellKey {
@@ -158,7 +162,7 @@ fn test_multi_tx_mixed_outcomes() {
             col: ColId(0),
             row: RowKey(1),
         }],
-        Value::U64(700)
+        Some(Value::U64(700))
     );
     assert_eq!(
         ws[&CellKey {
@@ -166,7 +170,7 @@ fn test_multi_tx_mixed_outcomes() {
             col: ColId(0),
             row: RowKey(2),
         }],
-        Value::U64(300)
+        Some(Value::U64(300))
     );
 }
 

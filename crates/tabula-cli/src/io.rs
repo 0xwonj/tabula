@@ -36,6 +36,8 @@ pub struct StateFile {
 }
 
 /// A single cell entry in the state file.
+///
+/// `value` is `None` when the cell is absent (deleted).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateCell {
     /// Table ID.
@@ -44,12 +46,15 @@ pub struct StateCell {
     pub row: u64,
     /// Column ID.
     pub col: u16,
-    /// Cell value.
-    pub value: Value,
+    /// Cell value (`null` in JSON = absent).
+    pub value: Option<Value>,
 }
 
 impl StateCell {
     /// Convert to a `(CellKey, Value)` pair.
+    ///
+    /// Panics if value is `None` — only use for state file input where cells
+    /// are always present.
     pub fn to_cell_pair(&self) -> (CellKey, Value) {
         (
             CellKey {
@@ -57,12 +62,12 @@ impl StateCell {
                 col: ColId(self.col),
                 row: RowKey(self.row),
             },
-            self.value.clone(),
+            self.value.clone().expect("state cell value must be present"),
         )
     }
 
-    /// Create from a `(CellKey, Value)` pair.
-    pub fn from_cell_pair(key: &CellKey, value: &Value) -> Self {
+    /// Create from a `(CellKey, Option<Value>)` pair.
+    pub fn from_cell_pair(key: &CellKey, value: &Option<Value>) -> Self {
         Self {
             table: key.table.0,
             row: key.row.0,

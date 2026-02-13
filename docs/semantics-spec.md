@@ -68,7 +68,7 @@ Key absence is expressed as a **separate boolean flag** (`val_is_null`), not as 
 
 **Canonical zero.** When `val_is_null = true`, the value slot MUST contain the canonical zero of the column's schema type. This is a protocol-level MUST (not merely a convention) — it ensures deterministic trace encoding and prevents the prover from smuggling information in "don't-care" slots.
 
-> **Current Rust IR.** The `Value::Null` enum variant encodes absence in a single slot. This is an implementation convenience; it will be reconciled with the two-slot normative form. The proof trace decomposes `Value` into Tier 2 encoding: `val[w(T)]` field elements + `val_is_null` boolean.
+> **Rust IR.** The implementation matches this normative form: `Read { dst_val, dst_is_null, table, col, row }`. `Value::Null` has been removed; the state layer uses `Option<Value>` and the overlay produces events with `val_is_null: bool`.
 
 #### 1.3.2 Digest Representation
 
@@ -134,7 +134,7 @@ where `T` is the schema type of column `(t, c)`. In the proof trace, `dst_val` i
 
 Semantically, each `Read` queries the committed base state. In the proof system, base-state openings are amortized: one opening per unique `(t,c,r)` per **batch** via init rows (proof-spec §8). NF-1 (Unique-Read) guarantees at most one `Read` per `(t,c,r)` per tx, so within a single tx the correspondence is 1:1.
 
-> **Current Rust IR.** `Read` has a single `dst: Slot` and loads a `Value` (which may be `Value::Null`). The two-slot normative form is a planned IR change; currently the codec splits `Value` into `(val[w(T)], val_is_null)` at the proof boundary.
+> **Rust IR.** `Read { dst_val, dst_is_null, table, col, row }` — matches the normative two-slot form.
 
 #### 1.5.2 Write Semantics
 
@@ -145,7 +145,7 @@ Semantically, each `Read` queries the committed base state. In the proof system,
 
 Each non-predicated `Write` corresponds to exactly one entry in `WriteSet` (zero if predicated with `pred = 0` — see ok-gating below).
 
-> **Current Rust IR.** `Write` takes a single `ValueExpr` source where `Value::Null` encodes delete. The two-source normative form is a planned IR change.
+> **Rust IR.** `Write { table, col, row, src_val, src_is_null }` — matches the normative two-source form.
 
 **Predicated writes (ok-gating, future):**
 
@@ -213,7 +213,7 @@ Select(dst: Slot, cond: ValueExpr(Bool), if_true: ValueExpr(T), if_false: ValueE
 
 Without `Select`, the IR cannot express runtime-conditional values while maintaining the canonical normal form.
 
-> **Current Rust IR.** `Select` is not yet implemented. It will be added as an `Instruction::Select` variant.
+> **Rust IR.** `Instruction::Select { dst, cond, if_true, if_false }` is implemented.
 
 ### 1.6 Failure Semantics
 

@@ -20,8 +20,8 @@ use tabula_core::types::*;
 pub(crate) struct TestSnapshot(pub BTreeMap<CellKey, Value>);
 
 impl StateSnapshot for TestSnapshot {
-    fn read(&self, key: &CellKey) -> Result<Value, TabulaError> {
-        Ok(self.0.get(key).cloned().unwrap_or(Value::Null))
+    fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
+        Ok(self.0.get(key).cloned())
     }
 
     fn table_exists(&self, _: TableId) -> bool {
@@ -49,9 +49,9 @@ impl CountingSnapshot {
 }
 
 impl StateSnapshot for CountingSnapshot {
-    fn read(&self, key: &CellKey) -> Result<Value, TabulaError> {
+    fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
         self.call_count.fetch_add(1, Ordering::Relaxed);
-        Ok(self.data.get(key).cloned().unwrap_or(Value::Null))
+        Ok(self.data.get(key).cloned())
     }
 
     fn table_exists(&self, _: TableId) -> bool {

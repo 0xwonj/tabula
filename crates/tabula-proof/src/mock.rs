@@ -39,7 +39,13 @@ mod tests {
             old_state_root: [0u8; 32],
             new_state_root: [1u8; 32],
             program_root: [2u8; 32],
-            batch_digest: [3u8; 32],
+            applied_tx_digest: [3u8; 32],
+            static_table_root: [4u8; 32],
+            budgets: tabula_core::tx::ProgramBudgets {
+                max_ops: 1000,
+                max_slots: 256,
+                max_accesses: 500,
+            },
         };
 
         let prover = MockProver;

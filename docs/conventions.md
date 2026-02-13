@@ -44,28 +44,21 @@
 - **Immutable snapshot** — `StateSnapshot` is read-only, overlay handles mutations
 - **Stage 1 / Stage 2 boundary** — `ExecutionResult` is the handoff, no leaking
 
-## Null Value Semantics
+## Null / Absence Semantics
 
-`Value::Null` represents the absence of a value (e.g. an uninitialized cell).
+Null is **not** a value type. The `Value` enum has four variants: `U64`, `I64`, `Bool`, `Bytes32`. Absence is represented separately:
 
-**Comparison on Null → `NullValue` error.** `Value::compare()` returns
-`Err(TabulaError::NullValue)` when either operand is `Null`. There is no
-SQL-style three-valued logic (3VL) — no `Unknown` truth value.
-
-**Arithmetic on Null → `NullValue` error.** `checked_add`, `checked_sub`,
-`checked_mul`, and `checked_divmod` all fail immediately on `Null` operands.
+- **State layer:** `Option<Value>` — `None` = absent cell.
+- **IR Read:** `Read { dst_val, dst_is_null, table, col, row }` — produces two SSA slots. `dst_is_null: Bool` indicates absence.
+- **IR Write:** `Write { table, col, row, src_val, src_is_null }` — `src_is_null = true` is a **delete**.
+- **Canonical zero:** When `val_is_null = true`, the value slot MUST contain `zero_value(T)` (U64→0, I64→0, Bool→false, Bytes32→[0;32]).
 
 **Guard pattern:**
 ```
-Assert(NotNull(Slot(s)))   // ensure the slot is non-Null before comparison
-Assert(Gte(Slot(s), ...))  // safe — we know s is not Null
+Assert(Eq(Slot(is_null_slot), Literal(Bool(false))))  // ensure key exists before use
 ```
 
-**Rationale:** 3VL introduces an `Unknown` truth value that must propagate
-through `And`/`Or`/`Not`. In a ZK constraint system every boolean must
-resolve to 0 or 1; modelling `Unknown` as a third state doubles the
-constraint cost of every predicate. Failing fast on `Null` keeps the
-constraint system simple and moves responsibility to the program author.
+**Rationale:** No SQL-style three-valued logic. In a ZK constraint system every boolean must resolve to 0 or 1; a separate `is_null` flag is cheaper than a tagged union or `Unknown` truth value.
 
 ## Commit Style
 

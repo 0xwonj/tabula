@@ -22,8 +22,8 @@ mod tests {
 
     // --- Proptest strategies ---
 
-    fn arb_value() -> impl Strategy<Value = Value> {
-        prop_oneof![any::<u64>().prop_map(Value::U64), Just(Value::Null),]
+    fn arb_value() -> impl Strategy<Value = Option<Value>> {
+        prop_oneof![any::<u64>().prop_map(|n| Some(Value::U64(n))), Just(None),]
     }
 
     fn arb_row() -> impl Strategy<Value = u64> {
@@ -41,16 +41,16 @@ mod tests {
             let mut ov = Overlay::new(&snap);
 
             for (r, v) in &writes {
-                ov.write(&pcell(*r), v.clone());
+                ov.write(&pcell(*r), v.clone(), ValueType::U64);
             }
 
-            let result = ov.read(&pcell(read_row)).unwrap();
+            let result = ov.read(&pcell(read_row), ValueType::U64).unwrap();
 
-            let expected = writes.iter()
+            let expected: Option<Value> = writes.iter()
                 .rev()
                 .find(|(r, _)| *r == read_row)
                 .map(|(_, v)| v.clone())
-                .unwrap_or(Value::Null);
+                .unwrap_or(None);
 
             prop_assert_eq!(result, expected);
         }
@@ -66,7 +66,7 @@ mod tests {
             let mut ov = Overlay::new(&snap);
 
             for (r, v) in &writes {
-                ov.write(&pcell(*r), v.clone());
+                ov.write(&pcell(*r), v.clone(), ValueType::U64);
             }
 
             let result = ov.into_result();
@@ -90,7 +90,7 @@ mod tests {
             let mut ov = Overlay::new(&snap);
 
             for r in &reads {
-                let _ = ov.read(&pcell(*r)).unwrap();
+                let _ = ov.read(&pcell(*r), ValueType::U64).unwrap();
             }
 
             let result = ov.into_result();
@@ -112,20 +112,20 @@ mod tests {
             let mut ov = Overlay::new(&snap);
 
             for (r, v) in &pre_writes {
-                ov.write(&pcell(*r), v.clone());
+                ov.write(&pcell(*r), v.clone(), ValueType::U64);
             }
 
-            let expected = ov.read(&pcell(read_row)).unwrap();
+            let expected = ov.read(&pcell(read_row), ValueType::U64).unwrap();
 
             ov.checkpoint();
 
             for (r, v) in &post_writes {
-                ov.write(&pcell(*r), v.clone());
+                ov.write(&pcell(*r), v.clone(), ValueType::U64);
             }
 
             ov.rollback();
 
-            let actual = ov.read(&pcell(read_row)).unwrap();
+            let actual = ov.read(&pcell(read_row), ValueType::U64).unwrap();
             prop_assert_eq!(actual, expected);
         }
     }
@@ -145,10 +145,10 @@ mod tests {
             let mut ov = Overlay::new(&snap);
 
             for r in &write_rows {
-                ov.write(&pcell(*r), Value::U64(999));
+                ov.write(&pcell(*r), Some(Value::U64(999)), ValueType::U64);
             }
             for r in &read_rows {
-                let _ = ov.read(&pcell(*r)).unwrap();
+                let _ = ov.read(&pcell(*r), ValueType::U64).unwrap();
             }
 
             let result = ov.into_result();
@@ -185,13 +185,14 @@ mod tests {
                 param_schema: vec![ParamDef { name: "amount".into(), value_type: ValueType::U64 }],
                 body: vec![
                     Instruction::Read {
-                        dst: 0,
+                        dst_val: 0,
+                        dst_is_null: 1,
                         table: TableId(1),
                         row: RowExpr::Literal(RowKey(0)),
                         col: ColId(0),
                     },
                     Instruction::Sub {
-                        dst: 1,
+                        dst: 2,
                         lhs: ValueExpr::Slot(0),
                         rhs: ValueExpr::Param(0),
                     },
@@ -199,7 +200,8 @@ mod tests {
                         table: TableId(1),
                         row: RowExpr::Literal(RowKey(0)),
                         col: ColId(0),
-                        src: ValueExpr::Slot(1),
+                        src_val: ValueExpr::Slot(2),
+                        src_is_null: ValueExpr::Literal(Value::Bool(false)),
                     },
                 ],
             }).unwrap();
@@ -242,13 +244,13 @@ mod tests {
         ) {
             let k = pcell(0);
             let mut events = vec![
-                ExecutionEvent { key: k, op: OpKind::Read, value: Value::U64(100), time: 0, tx_index: 0 },
-                ExecutionEvent { key: k, op: OpKind::Write, value: Value::U64(80), time: 1, tx_index: 0 },
-                ExecutionEvent { key: k, op: OpKind::Read, value: Value::U64(80), time: 2, tx_index: 0 },
-                ExecutionEvent { key: k, op: OpKind::Write, value: Value::U64(60), time: 3, tx_index: 0 },
-                ExecutionEvent { key: k, op: OpKind::Read, value: Value::U64(60), time: 4, tx_index: 0 },
+                ExecutionEvent { key: k, op: OpKind::Read, value: Value::U64(100), val_is_null: false, time: 0, tx_index: 0 },
+                ExecutionEvent { key: k, op: OpKind::Write, value: Value::U64(80), val_is_null: false, time: 1, tx_index: 0 },
+                ExecutionEvent { key: k, op: OpKind::Read, value: Value::U64(80), val_is_null: false, time: 2, tx_index: 0 },
+                ExecutionEvent { key: k, op: OpKind::Write, value: Value::U64(60), val_is_null: false, time: 3, tx_index: 0 },
+                ExecutionEvent { key: k, op: OpKind::Read, value: Value::U64(60), val_is_null: false, time: 4, tx_index: 0 },
             ];
-            let read_set_old = vec![(k, Value::U64(100))];
+            let read_set_old = vec![(k, Some(Value::U64(100)))];
 
             let idx = tamper_idx % events.len();
             match events[idx].op {
