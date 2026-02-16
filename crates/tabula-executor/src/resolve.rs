@@ -1,13 +1,11 @@
 //! Expression resolution helpers for the interpreter.
 //!
-//! Resolves `RowExpr`, `ValueExpr`, and `Predicate` nodes to concrete values
+//! Resolves `RowExpr` and `ValueExpr` nodes to concrete values
 //! using the slot environment and parameter list.
 
-use std::cmp::Ordering;
-
 use tabula_core::error::TabulaError;
-use tabula_core::ir::{Predicate, RowExpr, Slot, ValueExpr};
-use tabula_core::types::{RowKey, Value};
+use tabula_core::{RowKey, Value};
+use tabula_ir::{RowExpr, Slot, ValueExpr};
 
 /// Resolve a `RowExpr` to a concrete `RowKey`.
 pub fn resolve_row_expr(
@@ -38,55 +36,6 @@ pub fn resolve_value_expr(
         ValueExpr::Literal(v) => Ok(v.clone()),
         ValueExpr::Slot(s) => get_slot(slots, *s),
         ValueExpr::Param(p) => get_param(params, *p),
-    }
-}
-
-/// Evaluate a predicate to a boolean.
-pub fn evaluate_predicate(
-    pred: &Predicate,
-    slots: &[Value],
-    params: &[Value],
-) -> Result<bool, TabulaError> {
-    match pred {
-        Predicate::Eq(l, r) => {
-            let lv = resolve_value_expr(l, slots, params)?;
-            let rv = resolve_value_expr(r, slots, params)?;
-            Ok(lv == rv)
-        }
-        Predicate::Lt(l, r) => {
-            let lv = resolve_value_expr(l, slots, params)?;
-            let rv = resolve_value_expr(r, slots, params)?;
-            lv.compare(&rv).map(|ord| ord == Ordering::Less)
-        }
-        Predicate::Lte(l, r) => {
-            let lv = resolve_value_expr(l, slots, params)?;
-            let rv = resolve_value_expr(r, slots, params)?;
-            lv.compare(&rv).map(|ord| ord != Ordering::Greater)
-        }
-        Predicate::Gt(l, r) => {
-            let lv = resolve_value_expr(l, slots, params)?;
-            let rv = resolve_value_expr(r, slots, params)?;
-            lv.compare(&rv).map(|ord| ord == Ordering::Greater)
-        }
-        Predicate::Gte(l, r) => {
-            let lv = resolve_value_expr(l, slots, params)?;
-            let rv = resolve_value_expr(r, slots, params)?;
-            lv.compare(&rv).map(|ord| ord != Ordering::Less)
-        }
-        Predicate::And(a, b) => {
-            let ra = evaluate_predicate(a, slots, params)?;
-            let rb = evaluate_predicate(b, slots, params)?;
-            Ok(ra && rb)
-        }
-        Predicate::Or(a, b) => {
-            let ra = evaluate_predicate(a, slots, params)?;
-            let rb = evaluate_predicate(b, slots, params)?;
-            Ok(ra || rb)
-        }
-        Predicate::Not(p) => {
-            let r = evaluate_predicate(p, slots, params)?;
-            Ok(!r)
-        }
     }
 }
 

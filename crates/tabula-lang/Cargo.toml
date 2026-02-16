@@ -7,7 +7,8 @@ description = "DSL compiler for Tabula programs"
 
 [dependencies]
 tabula-core = { workspace = true }
+tabula-ir = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-tabula-executor = { workspace = true }
+tabula-ir = { workspace = true }

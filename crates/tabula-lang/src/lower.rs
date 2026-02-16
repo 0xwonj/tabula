@@ -5,10 +5,8 @@
 
 use std::collections::HashMap;
 
-use tabula_core::ir::{Instruction, Predicate, RowExpr, Slot, ValueExpr};
-use tabula_core::schema::{ColumnDef, TableSchema};
-use tabula_core::tx::{ParamDef, TxTypeDef, TxTypeId};
-use tabula_core::types::{ColId, TableId, Value, ValueType};
+use tabula_core::{ColId, ColumnDef, TableId, TableSchema, TxTypeId, Value, ValueType};
+use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, RowExpr, Slot, TxTypeDef, ValueExpr};
 
 use crate::ast::{self, BinOp, Expr, ExprKind, Program, StmtKind, TypeName, UnaryOp};
 use crate::error::{CompileError, ErrorKind};
@@ -203,9 +201,7 @@ impl Binding {
         match self {
             Binding::Slot(s, _) | Binding::ReadSlot { val: s, .. } => RowExpr::Slot(*s),
             Binding::Alias(ve, _) => match ve {
-                ValueExpr::Literal(Value::U64(n)) => {
-                    RowExpr::Literal(tabula_core::types::RowKey(*n))
-                }
+                ValueExpr::Literal(Value::U64(n)) => RowExpr::Literal(tabula_core::RowKey(*n)),
                 ValueExpr::Slot(s) => RowExpr::Slot(*s),
                 ValueExpr::Param(p) => RowExpr::Param(*p),
                 _ => RowExpr::Slot(0), // fallback — type checker should prevent this
@@ -501,7 +497,7 @@ impl<'a> TxLower<'a> {
                 table: table_id,
                 row: row_expr,
                 col: col_info.id,
-                src_val: ValueExpr::Literal(tabula_core::types::zero_value(col_info.ty)),
+                src_val: ValueExpr::Literal(tabula_core::zero_value(col_info.ty)),
                 src_is_null: ValueExpr::Literal(Value::Bool(true)),
             });
             return;
@@ -519,10 +515,10 @@ impl<'a> TxLower<'a> {
     }
 
     fn lower_assert(&mut self, condition: &Expr) {
-        let Some(predicate) = self.lower_predicate(condition) else {
+        let Some(cond) = self.lower_bool_expr(condition) else {
             return;
         };
-        self.instructions.push(Instruction::Assert { predicate });
+        self.instructions.push(Instruction::Assert { cond });
     }
 
     fn lower_emit(&mut self, topic: &str, args: &[Expr]) {
@@ -554,18 +550,21 @@ impl<'a> TxLower<'a> {
                     .unwrap_or(ValueType::U64);
                 let dst = self.alloc_slot();
                 let instr = match op {
-                    BinOp::Add => Instruction::Add {
+                    BinOp::Add => Instruction::Arith {
                         dst,
+                        op: ArithOp::Add,
                         lhs: lhs_ve,
                         rhs: rhs_ve,
                     },
-                    BinOp::Sub => Instruction::Sub {
+                    BinOp::Sub => Instruction::Arith {
                         dst,
+                        op: ArithOp::Sub,
                         lhs: lhs_ve,
                         rhs: rhs_ve,
                     },
-                    BinOp::Mul => Instruction::Mul {
+                    BinOp::Mul => Instruction::Arith {
                         dst,
+                        op: ArithOp::Mul,
                         lhs: lhs_ve,
                         rhs: rhs_ve,
                     },
@@ -604,9 +603,10 @@ impl<'a> TxLower<'a> {
                 let operand_ve = self.lower_value_expr(operand)?;
                 let ty = self.expr_type(operand).unwrap_or(ValueType::I64);
                 let dst = self.alloc_slot();
-                self.instructions.push(Instruction::Sub {
+                self.instructions.push(Instruction::Arith {
                     dst,
-                    lhs: ValueExpr::Literal(tabula_core::types::zero_value(ty)),
+                    op: ArithOp::Sub,
+                    lhs: ValueExpr::Literal(tabula_core::zero_value(ty)),
                     rhs: operand_ve,
                 });
                 Some((LoweredExpr::Slot(dst), ty))
@@ -723,7 +723,7 @@ impl<'a> TxLower<'a> {
     /// Lower an expression to a RowExpr.
     fn lower_row_expr(&mut self, expr: &Expr) -> Option<RowExpr> {
         match &expr.kind {
-            ExprKind::IntLit(n) => Some(RowExpr::Literal(tabula_core::types::RowKey(*n))),
+            ExprKind::IntLit(n) => Some(RowExpr::Literal(tabula_core::RowKey(*n))),
             ExprKind::Ident(name) => {
                 if let Some(binding) = self.locals.get(name) {
                     Some(binding.to_row_expr())
@@ -743,7 +743,7 @@ impl<'a> TxLower<'a> {
                 let ve = self.lower_value_expr(expr)?;
                 match ve {
                     ValueExpr::Literal(Value::U64(n)) => {
-                        Some(RowExpr::Literal(tabula_core::types::RowKey(n)))
+                        Some(RowExpr::Literal(tabula_core::RowKey(n)))
                     }
                     ValueExpr::Slot(s) => Some(RowExpr::Slot(s)),
                     ValueExpr::Param(p) => Some(RowExpr::Param(p)),
@@ -760,64 +760,58 @@ impl<'a> TxLower<'a> {
         }
     }
 
-    /// Lower a comparison/logical expression to a Predicate.
-    fn lower_predicate(&mut self, expr: &Expr) -> Option<Predicate> {
+    /// Lower a comparison/logical expression to a Bool-typed `ValueExpr`.
+    ///
+    /// Emits flat `Cmp`, `Not`, `And`, `Or` instructions as needed, returning
+    /// a `ValueExpr` that references the Bool result.
+    fn lower_bool_expr(&mut self, expr: &Expr) -> Option<ValueExpr> {
         match &expr.kind {
             ExprKind::BinOp { op, lhs, rhs } => match op {
                 BinOp::Eq => {
-                    // Special case: x == null → check is_null slot is true
+                    // Special case: x == null → check is_null slot
                     if matches!(&rhs.kind, ExprKind::Null) {
-                        return self.null_check_predicate(lhs, true, expr.span);
+                        return self.null_check_expr(lhs, true, expr.span);
                     }
                     if matches!(&lhs.kind, ExprKind::Null) {
-                        return self.null_check_predicate(rhs, true, expr.span);
+                        return self.null_check_expr(rhs, true, expr.span);
                     }
-                    let l = self.lower_value_expr(lhs)?;
-                    let r = self.lower_value_expr(rhs)?;
-                    Some(Predicate::Eq(l, r))
+                    self.emit_cmp(CmpOp::Eq, lhs, rhs)
                 }
                 BinOp::Neq => {
-                    // Special case: x != null → check is_null slot is false (not null)
+                    // Special case: x != null → check is_null slot is false
                     if matches!(&rhs.kind, ExprKind::Null) {
-                        return self.null_check_predicate(lhs, false, expr.span);
+                        return self.null_check_expr(lhs, false, expr.span);
                     }
                     if matches!(&lhs.kind, ExprKind::Null) {
-                        return self.null_check_predicate(rhs, false, expr.span);
+                        return self.null_check_expr(rhs, false, expr.span);
                     }
-                    // General != → Not(Eq(...))
-                    let l = self.lower_value_expr(lhs)?;
-                    let r = self.lower_value_expr(rhs)?;
-                    Some(Predicate::Not(Box::new(Predicate::Eq(l, r))))
+                    self.emit_cmp(CmpOp::Ne, lhs, rhs)
                 }
-                BinOp::Lt => {
-                    let l = self.lower_value_expr(lhs)?;
-                    let r = self.lower_value_expr(rhs)?;
-                    Some(Predicate::Lt(l, r))
-                }
-                BinOp::Lte => {
-                    let l = self.lower_value_expr(lhs)?;
-                    let r = self.lower_value_expr(rhs)?;
-                    Some(Predicate::Lte(l, r))
-                }
-                BinOp::Gt => {
-                    let l = self.lower_value_expr(lhs)?;
-                    let r = self.lower_value_expr(rhs)?;
-                    Some(Predicate::Gt(l, r))
-                }
-                BinOp::Gte => {
-                    let l = self.lower_value_expr(lhs)?;
-                    let r = self.lower_value_expr(rhs)?;
-                    Some(Predicate::Gte(l, r))
-                }
+                BinOp::Lt => self.emit_cmp(CmpOp::Lt, lhs, rhs),
+                BinOp::Lte => self.emit_cmp(CmpOp::Lte, lhs, rhs),
+                BinOp::Gt => self.emit_cmp(CmpOp::Gt, lhs, rhs),
+                BinOp::Gte => self.emit_cmp(CmpOp::Gte, lhs, rhs),
                 BinOp::And => {
-                    let l = self.lower_predicate(lhs)?;
-                    let r = self.lower_predicate(rhs)?;
-                    Some(Predicate::And(Box::new(l), Box::new(r)))
+                    let l = self.lower_bool_expr(lhs)?;
+                    let r = self.lower_bool_expr(rhs)?;
+                    let dst = self.alloc_slot();
+                    self.instructions.push(Instruction::And {
+                        dst,
+                        lhs: l,
+                        rhs: r,
+                    });
+                    Some(ValueExpr::Slot(dst))
                 }
                 BinOp::Or => {
-                    let l = self.lower_predicate(lhs)?;
-                    let r = self.lower_predicate(rhs)?;
-                    Some(Predicate::Or(Box::new(l), Box::new(r)))
+                    let l = self.lower_bool_expr(lhs)?;
+                    let r = self.lower_bool_expr(rhs)?;
+                    let dst = self.alloc_slot();
+                    self.instructions.push(Instruction::Or {
+                        dst,
+                        lhs: l,
+                        rhs: r,
+                    });
+                    Some(ValueExpr::Slot(dst))
                 }
                 // Arithmetic ops inside assert — need to evaluate first.
                 BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
@@ -833,31 +827,13 @@ impl<'a> TxLower<'a> {
                 op: UnaryOp::Not,
                 operand,
             } => {
-                let inner = self.lower_predicate(operand)?;
-                Some(Predicate::Not(Box::new(inner)))
+                let inner = self.lower_bool_expr(operand)?;
+                let dst = self.alloc_slot();
+                self.instructions.push(Instruction::Not { dst, src: inner });
+                Some(ValueExpr::Slot(dst))
             }
-            ExprKind::BoolLit(true) => {
-                // assert true → assert 1 == 1 (always passes)
-                Some(Predicate::Eq(
-                    ValueExpr::Literal(Value::U64(1)),
-                    ValueExpr::Literal(Value::U64(1)),
-                ))
-            }
-            ExprKind::BoolLit(false) => {
-                // assert false → assert 0 == 1 (always fails)
-                Some(Predicate::Eq(
-                    ValueExpr::Literal(Value::U64(0)),
-                    ValueExpr::Literal(Value::U64(1)),
-                ))
-            }
-            ExprKind::Ident(name) => {
-                // assert some_bool_var → NotNull(var) as a proxy
-                // Actually, asserting a boolean variable should check it's true.
-                // But the IR doesn't have a "truthiness" predicate.
-                // Use: Eq(var, Literal(true))
-                let ve = self.resolve_ident(name, expr.span)?;
-                Some(Predicate::Eq(ve, ValueExpr::Literal(Value::Bool(true))))
-            }
+            ExprKind::BoolLit(b) => Some(ValueExpr::Literal(Value::Bool(*b))),
+            ExprKind::Ident(name) => self.resolve_ident(name, expr.span),
             _ => {
                 self.errors.push(CompileError::new(
                     ErrorKind::TypeMismatch,
@@ -867,6 +843,20 @@ impl<'a> TxLower<'a> {
                 None
             }
         }
+    }
+
+    /// Emit a `Cmp` instruction and return a `ValueExpr::Slot` referencing the Bool result.
+    fn emit_cmp(&mut self, op: CmpOp, lhs: &Expr, rhs: &Expr) -> Option<ValueExpr> {
+        let l = self.lower_value_expr(lhs)?;
+        let r = self.lower_value_expr(rhs)?;
+        let dst = self.alloc_slot();
+        self.instructions.push(Instruction::Cmp {
+            dst,
+            op,
+            lhs: l,
+            rhs: r,
+        });
+        Some(ValueExpr::Slot(dst))
     }
 
     // --- Helpers ---
@@ -887,18 +877,22 @@ impl<'a> TxLower<'a> {
         }
     }
 
-    /// Build a null-check predicate for `expr == null` or `expr != null`.
-    /// `is_eq` = true → Eq(is_null, Bool(true)), false → Eq(is_null, Bool(false))
-    fn null_check_predicate(&mut self, expr: &Expr, is_eq: bool, span: Span) -> Option<Predicate> {
+    /// Build a null-check Bool expression for `expr == null` or `expr != null`.
+    /// Emits `Cmp { Eq, is_null_slot, Bool(is_eq) }` and returns the result slot.
+    fn null_check_expr(&mut self, expr: &Expr, is_eq: bool, span: Span) -> Option<ValueExpr> {
         // The expression must resolve to a ReadSlot binding (from a cell read).
         if let ExprKind::Ident(name) = &expr.kind
             && let Some(binding) = self.locals.get(name)
             && let Some(is_null_slot) = binding.is_null_slot()
         {
-            return Some(Predicate::Eq(
-                ValueExpr::Slot(is_null_slot),
-                ValueExpr::Literal(Value::Bool(is_eq)),
-            ));
+            let dst = self.alloc_slot();
+            self.instructions.push(Instruction::Cmp {
+                dst,
+                op: CmpOp::Eq,
+                lhs: ValueExpr::Slot(is_null_slot),
+                rhs: ValueExpr::Literal(Value::Bool(is_eq)),
+            });
+            return Some(ValueExpr::Slot(dst));
         }
         self.errors.push(CompileError::new(
             ErrorKind::TypeMismatch,
@@ -1114,8 +1108,9 @@ tx add_one(id: u64) {
         ));
         assert!(matches!(
             &body[1],
-            Instruction::Add {
+            Instruction::Arith {
                 dst: 2,
+                op: ArithOp::Add,
                 lhs: ValueExpr::Slot(0),
                 rhs: ValueExpr::Literal(Value::U64(1)),
             }
@@ -1140,11 +1135,20 @@ tx check(x: u64, y: u64) {
 }";
         let prog = compile(source);
         let body = &prog.tx_types[0].body;
-        assert_eq!(body.len(), 1);
+        assert_eq!(body.len(), 2);
         assert!(matches!(
             &body[0],
+            Instruction::Cmp {
+                dst: 0,
+                op: CmpOp::Gte,
+                lhs: ValueExpr::Param(0),
+                rhs: ValueExpr::Param(1),
+            }
+        ));
+        assert!(matches!(
+            &body[1],
             Instruction::Assert {
-                predicate: Predicate::Gte(ValueExpr::Param(0), ValueExpr::Param(1))
+                cond: ValueExpr::Slot(0),
             }
         ));
     }
@@ -1159,15 +1163,22 @@ tx check(id: u64) {
 }";
         let prog = compile(source);
         let body = &prog.tx_types[0].body;
-        // x != null → Eq(is_null_slot, Bool(false))
-        // Read uses slots 0 (val) and 1 (is_null)
+        // x != null → Cmp(Eq, is_null_slot, Bool(false)) + Assert
+        // Read uses slots 0 (val) and 1 (is_null), Cmp uses slot 2
+        assert_eq!(body.len(), 3);
         assert!(matches!(
             &body[1],
+            Instruction::Cmp {
+                dst: 2,
+                op: CmpOp::Eq,
+                lhs: ValueExpr::Slot(1),
+                rhs: ValueExpr::Literal(Value::Bool(false)),
+            }
+        ));
+        assert!(matches!(
+            &body[2],
             Instruction::Assert {
-                predicate: Predicate::Eq(
-                    ValueExpr::Slot(1),
-                    ValueExpr::Literal(Value::Bool(false)),
-                )
+                cond: ValueExpr::Slot(2),
             }
         ));
     }
@@ -1182,11 +1193,22 @@ tx check(id: u64) {
 }";
         let prog = compile(source);
         let body = &prog.tx_types[0].body;
-        // x == null → Eq(is_null_slot, Bool(true))
+        // x == null → Cmp(Eq, is_null_slot, Bool(true)) + Assert
+        // Read uses slots 0 (val) and 1 (is_null), Cmp uses slot 2
+        assert_eq!(body.len(), 3);
         assert!(matches!(
             &body[1],
+            Instruction::Cmp {
+                dst: 2,
+                op: CmpOp::Eq,
+                lhs: ValueExpr::Slot(1),
+                rhs: ValueExpr::Literal(Value::Bool(true)),
+            }
+        ));
+        assert!(matches!(
+            &body[2],
             Instruction::Assert {
-                predicate: Predicate::Eq(ValueExpr::Slot(1), ValueExpr::Literal(Value::Bool(true)),)
+                cond: ValueExpr::Slot(2),
             }
         ));
     }
@@ -1293,13 +1315,14 @@ tx transfer(from: u64, to: u64, amount: u64) {
         let tx = &prog.tx_types[0];
         assert_eq!(tx.name, "transfer");
         assert_eq!(tx.param_schema.len(), 3);
-        assert_eq!(tx.body.len(), 7);
+        assert_eq!(tx.body.len(), 8);
 
         // Verify exact IR output matches hand-written transfer.
         // Read sender_bal: slots 0 (val), 1 (is_null)
         // Read recv_bal:   slots 2 (val), 3 (is_null)
-        // Sub new_sender:  slot 4
-        // Add new_recv:    slot 5
+        // Cmp gte:         slot 4
+        // Arith Sub:       slot 5
+        // Arith Add:       slot 6
         assert_eq!(
             tx.body,
             vec![
@@ -1317,16 +1340,24 @@ tx transfer(from: u64, to: u64, amount: u64) {
                     row: RowExpr::Param(1),
                     col: ColId(0),
                 },
-                Instruction::Assert {
-                    predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(2)),
-                },
-                Instruction::Sub {
+                Instruction::Cmp {
                     dst: 4,
+                    op: CmpOp::Gte,
                     lhs: ValueExpr::Slot(0),
                     rhs: ValueExpr::Param(2),
                 },
-                Instruction::Add {
+                Instruction::Assert {
+                    cond: ValueExpr::Slot(4),
+                },
+                Instruction::Arith {
                     dst: 5,
+                    op: ArithOp::Sub,
+                    lhs: ValueExpr::Slot(0),
+                    rhs: ValueExpr::Param(2),
+                },
+                Instruction::Arith {
+                    dst: 6,
+                    op: ArithOp::Add,
                     lhs: ValueExpr::Slot(2),
                     rhs: ValueExpr::Param(2),
                 },
@@ -1334,14 +1365,14 @@ tx transfer(from: u64, to: u64, amount: u64) {
                     table: TableId(0),
                     row: RowExpr::Param(0),
                     col: ColId(0),
-                    src_val: ValueExpr::Slot(4),
+                    src_val: ValueExpr::Slot(5),
                     src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
                 Instruction::Write {
                     table: TableId(0),
                     row: RowExpr::Param(1),
                     col: ColId(0),
-                    src_val: ValueExpr::Slot(5),
+                    src_val: ValueExpr::Slot(6),
                     src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
             ]
@@ -1361,12 +1392,21 @@ tx t(x: u64, y: u64) {
         let prog = compile(source);
         let body = &prog.tx_types[0].body;
         // `let a = x` and `let b = y` should NOT emit instructions.
-        // Only the assert should be emitted.
-        assert_eq!(body.len(), 1);
+        // Cmp + Assert = 2 instructions.
+        assert_eq!(body.len(), 2);
         assert!(matches!(
             &body[0],
+            Instruction::Cmp {
+                dst: 0,
+                op: CmpOp::Gte,
+                lhs: ValueExpr::Param(0),
+                rhs: ValueExpr::Param(1),
+            }
+        ));
+        assert!(matches!(
+            &body[1],
             Instruction::Assert {
-                predicate: Predicate::Gte(ValueExpr::Param(0), ValueExpr::Param(1))
+                cond: ValueExpr::Slot(0),
             }
         ));
     }
@@ -1380,14 +1420,12 @@ tx t(flag: bool) {
 }";
         let prog = compile(source);
         let body = &prog.tx_types[0].body;
+        // assert x → Assert { cond: Param(0) } (alias resolves directly)
         assert_eq!(body.len(), 1);
         assert!(matches!(
             &body[0],
             Instruction::Assert {
-                predicate: Predicate::Eq(
-                    ValueExpr::Param(0),
-                    ValueExpr::Literal(Value::Bool(true))
-                )
+                cond: ValueExpr::Param(0),
             }
         ));
     }
@@ -1414,7 +1452,14 @@ tx inc(id: u64, amount: u64) {
                 ..
             }
         ));
-        assert!(matches!(&body[1], Instruction::Add { dst: 2, .. }));
+        assert!(matches!(
+            &body[1],
+            Instruction::Arith {
+                dst: 2,
+                op: ArithOp::Add,
+                ..
+            }
+        ));
         assert!(matches!(
             &body[2],
             Instruction::Write {
@@ -1477,8 +1522,8 @@ tx s(id: u64, flag: bool) {
     fn test_lowered_ir_passes_ssa_validation() {
         // Verify that the lowered transfer program passes Program::register() validation.
         // Uses literal row keys (0, 1) so that NF-4 aliasing is provably distinct.
-        use tabula_core::tx::TxTypeId;
-        use tabula_executor::program::Program;
+        use tabula_core::TxTypeId;
+        use tabula_ir::Program;
 
         let source = "\
 table balances { balance: u64 }
@@ -1509,7 +1554,7 @@ tx transfer(amount: u64) {
 
     #[test]
     fn test_lowered_select_passes_ssa_validation() {
-        use tabula_executor::program::Program;
+        use tabula_ir::Program;
 
         let source = "\
 table t { a: u64, b: u64 }
@@ -1540,11 +1585,37 @@ tx t(x: u64, y: u64) {
 }";
         let prog = compile(source);
         let body = &prog.tx_types[0].body;
-        assert_eq!(body.len(), 1);
-        if let Instruction::Assert { predicate } = &body[0] {
-            assert!(matches!(predicate, Predicate::And(_, _)));
-        } else {
-            panic!("expected assert");
-        }
+        // Cmp(x>0) → slot 0, Cmp(y>0) → slot 1, And → slot 2, Assert
+        assert_eq!(body.len(), 4);
+        assert!(matches!(
+            &body[0],
+            Instruction::Cmp {
+                dst: 0,
+                op: CmpOp::Gt,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &body[1],
+            Instruction::Cmp {
+                dst: 1,
+                op: CmpOp::Gt,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &body[2],
+            Instruction::And {
+                dst: 2,
+                lhs: ValueExpr::Slot(0),
+                rhs: ValueExpr::Slot(1),
+            }
+        ));
+        assert!(matches!(
+            &body[3],
+            Instruction::Assert {
+                cond: ValueExpr::Slot(2),
+            }
+        ));
     }
 }

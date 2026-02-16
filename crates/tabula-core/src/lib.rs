@@ -4,12 +4,23 @@
 //! Core types, traits, and error definitions for the Tabula kernel.
 
 pub mod error;
-pub mod event;
-pub mod ir;
+mod event;
 #[cfg(any(feature = "mock", test))]
 pub mod mock;
-pub mod schema;
-pub mod state;
+mod state;
 pub mod traits;
-pub mod tx;
-pub mod types;
+mod tx;
+
+// ── State model ──
+pub use state::id::{
+    CellKey, ColId, ColumnCommitmentId, Digest, RowKey, StateRoot, TableCommitmentId, TableId,
+    TxTypeId,
+};
+pub use state::schema::{ColumnDef, TableSchema};
+pub use state::value::{Value, ValueType, zero_value};
+
+// ── Transaction model ──
+pub use tx::{Batch, ProgramBudgets, Transaction};
+
+// ── Execution output ──
+pub use event::{EmittedEvent, ExecutionEvent, ExecutionResult, LogicalTime, OpKind, TxOutcome};

@@ -1,7 +1,7 @@
 //! Integration tests: overlay semantics end-to-end.
 
 use tabula_core::mock::InMemoryState;
-use tabula_core::types::*;
+use tabula_core::{CellKey, ColId, RowKey, TableId, Value, ValueType};
 use tabula_executor::overlay::Overlay;
 
 #[test]

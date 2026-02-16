@@ -5,10 +5,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use tabula_core::event::{EmittedEvent, ExecutionEvent, TxOutcome};
-use tabula_core::schema::TableSchema;
-use tabula_core::tx::{Transaction, TxTypeDef, TxTypeId};
-use tabula_core::types::{CellKey, ColId, RowKey, TableId, Value};
+use tabula_core::{
+    CellKey, ColId, EmittedEvent, ExecutionEvent, RowKey, TableId, TableSchema, Transaction,
+    TxOutcome, TxTypeId, Value,
+};
+use tabula_ir::TxTypeDef;
 
 // ---------------------------------------------------------------------------
 // Program input

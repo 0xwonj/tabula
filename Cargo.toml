@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/tabula-core",
+    "crates/tabula-ir",
     "crates/tabula-executor",
     "crates/tabula-commitment",
     "crates/tabula-proof",
@@ -18,6 +19,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 # Internal
 tabula-core = { path = "crates/tabula-core" }
+tabula-ir = { path = "crates/tabula-ir" }
 tabula-executor = { path = "crates/tabula-executor" }
 tabula-commitment = { path = "crates/tabula-commitment" }
 tabula-proof = { path = "crates/tabula-proof" }
@@ -30,11 +32,13 @@ borsh = { version = "1", features = ["derive"] }
 # Crypto
 blake3 = "1"
 
-# Plonky3 (BabyBear + Poseidon2)
-p3-field     = "0.4"
+# Plonky3 (BabyBear + Poseidon2 + AIR)
+p3-field = "0.4"
 p3-baby-bear = "0.4"
 p3-poseidon2 = "0.4"
 p3-symmetric = "0.4"
+p3-air = "0.4"
+p3-matrix = "0.4"
 
 # Error handling
 thiserror = "2"

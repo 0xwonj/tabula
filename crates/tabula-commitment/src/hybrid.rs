@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use p3_baby_bear::BabyBear;
 
-use tabula_core::types::{ColId, RowKey, TableId};
+use tabula_core::{ColId, RowKey, TableId};
 
 use crate::field::{DOMAIN_COL, DOMAIN_LEAF, DOMAIN_SMT, DOMAIN_TABLE, NativeDigest};
 use crate::hasher::FieldHasher;

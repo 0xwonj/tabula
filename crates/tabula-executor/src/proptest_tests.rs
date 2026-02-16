@@ -6,10 +6,11 @@ mod tests {
 
     use proptest::prelude::*;
 
-    use tabula_core::event::{ExecutionEvent, OpKind};
-    use tabula_core::ir::{Instruction, RowExpr, ValueExpr};
-    use tabula_core::tx::{Batch, ParamDef, Transaction, TxTypeDef, TxTypeId};
-    use tabula_core::types::*;
+    use tabula_core::{
+        Batch, CellKey, ColId, ExecutionEvent, OpKind, RowKey, TableId, Transaction, TxTypeId,
+        Value, ValueType,
+    };
+    use tabula_ir::{ArithOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
 
     use crate::consistency::check_consistency;
     use crate::overlay::Overlay;
@@ -178,7 +179,16 @@ mod tests {
             data.insert(pcell(0), Value::U64(initial_balance));
             let snap = TestSnapshot(data);
 
-            let mut prog = crate::program::Program::new();
+            let mut prog = tabula_ir::Program::new();
+            prog.add_schema(tabula_core::TableSchema {
+                id: TableId(1),
+                name: "test".into(),
+                columns: vec![tabula_core::ColumnDef {
+                    id: ColId(0),
+                    name: "val".into(),
+                    value_type: ValueType::U64,
+                }],
+            });
             prog.register(TxTypeDef {
                 id: TxTypeId(1),
                 name: "withdraw".into(),
@@ -191,8 +201,9 @@ mod tests {
                         row: RowExpr::Literal(RowKey(0)),
                         col: ColId(0),
                     },
-                    Instruction::Sub {
+                    Instruction::Arith {
                         dst: 2,
+                        op: ArithOp::Sub,
                         lhs: ValueExpr::Slot(0),
                         rhs: ValueExpr::Param(0),
                     },

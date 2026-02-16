@@ -1,6 +1,6 @@
 //! Error types for the Tabula kernel.
 
-use crate::types::{CellKey, ColId, RowKey, TableId};
+use crate::{CellKey, ColId, RowKey, TableId};
 
 /// Unified error type for all Tabula crate boundaries.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -73,7 +73,7 @@ pub enum TabulaError {
 
     /// Transaction type not found in program.
     #[error("tx type not found: {0:?}")]
-    TxTypeNotFound(crate::tx::TxTypeId),
+    TxTypeNotFound(crate::TxTypeId),
 
     /// Encoding/decoding error.
     #[error("encoding error: {0}")]

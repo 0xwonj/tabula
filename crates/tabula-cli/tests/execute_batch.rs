@@ -1,13 +1,13 @@
 //! Integration tests: multi-tx batch execution with mixed outcomes and determinism.
 
-use tabula_core::event::TxOutcome;
-use tabula_core::ir::*;
 use tabula_core::mock::*;
-use tabula_core::tx::*;
-use tabula_core::types::*;
+use tabula_core::{
+    Batch, CellKey, ColId, ColumnDef, RowKey, TableId, TableSchema, Transaction, TxOutcome,
+    TxTypeId, Value, ValueType,
+};
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency;
-use tabula_executor::program::Program;
+use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, Program, RowExpr, TxTypeDef, ValueExpr};
 
 /// NF-compliant transfer: reads `from_row` and `to_row` of (table 1, col 0),
 /// transfers `amount` (param 0) from `from_row` to `to_row`.
@@ -34,16 +34,24 @@ fn transfer_def(id: u32, from_row: u64, to_row: u64) -> TxTypeDef {
                 row: RowExpr::Literal(RowKey(to_row)),
                 col: ColId(0),
             },
-            Instruction::Assert {
-                predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(0)),
-            },
-            Instruction::Sub {
+            Instruction::Cmp {
                 dst: 4,
+                op: CmpOp::Gte,
                 lhs: ValueExpr::Slot(0),
                 rhs: ValueExpr::Param(0),
             },
-            Instruction::Add {
+            Instruction::Assert {
+                cond: ValueExpr::Slot(4),
+            },
+            Instruction::Arith {
                 dst: 5,
+                op: ArithOp::Sub,
+                lhs: ValueExpr::Slot(0),
+                rhs: ValueExpr::Param(0),
+            },
+            Instruction::Arith {
+                dst: 6,
+                op: ArithOp::Add,
                 lhs: ValueExpr::Slot(2),
                 rhs: ValueExpr::Param(0),
             },
@@ -51,14 +59,14 @@ fn transfer_def(id: u32, from_row: u64, to_row: u64) -> TxTypeDef {
                 table: TableId(1),
                 row: RowExpr::Literal(RowKey(from_row)),
                 col: ColId(0),
-                src_val: ValueExpr::Slot(4),
+                src_val: ValueExpr::Slot(5),
                 src_is_null: ValueExpr::Literal(Value::Bool(false)),
             },
             Instruction::Write {
                 table: TableId(1),
                 row: RowExpr::Literal(RowKey(to_row)),
                 col: ColId(0),
-                src_val: ValueExpr::Slot(5),
+                src_val: ValueExpr::Slot(6),
                 src_is_null: ValueExpr::Literal(Value::Bool(false)),
             },
         ],
@@ -108,6 +116,15 @@ fn setup_state() -> InMemoryState {
 fn test_multi_tx_mixed_outcomes() {
     let state = setup_state();
     let mut prog = Program::new();
+    prog.add_schema(TableSchema {
+        id: TableId(1),
+        name: "test".into(),
+        columns: vec![ColumnDef {
+            id: ColId(0),
+            name: "val".into(),
+            value_type: ValueType::U64,
+        }],
+    });
     prog.register(transfer_def(1, 0, 1)).unwrap(); // 0→1
     prog.register(transfer_def(2, 0, 2)).unwrap(); // 0→2
     prog.register(transfer_def(3, 1, 2)).unwrap(); // 1→2
@@ -172,6 +189,15 @@ fn test_multi_tx_mixed_outcomes() {
 fn test_deterministic_execution() {
     let state = setup_state();
     let mut prog = Program::new();
+    prog.add_schema(TableSchema {
+        id: TableId(1),
+        name: "test".into(),
+        columns: vec![ColumnDef {
+            id: ColId(0),
+            name: "val".into(),
+            value_type: ValueType::U64,
+        }],
+    });
     prog.register(transfer_def(1, 0, 1)).unwrap();
     prog.register(transfer_def(2, 1, 2)).unwrap();
 
@@ -214,6 +240,15 @@ fn test_deterministic_execution() {
 fn test_consistency_passes_for_valid_batch() {
     let state = setup_state();
     let mut prog = Program::new();
+    prog.add_schema(TableSchema {
+        id: TableId(1),
+        name: "test".into(),
+        columns: vec![ColumnDef {
+            id: ColId(0),
+            name: "val".into(),
+            value_type: ValueType::U64,
+        }],
+    });
     prog.register(transfer_def(1, 0, 1)).unwrap();
     prog.register(transfer_def(2, 1, 2)).unwrap();
     prog.register(transfer_def(3, 2, 0)).unwrap();

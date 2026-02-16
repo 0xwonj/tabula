@@ -93,9 +93,9 @@ checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bitflags"
-version = "2.10.0"
+version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
 
 [[package]]
 name = "blake3"
@@ -441,6 +441,16 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "p3-air"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0141a56ed9924ce0265e7e91cd29bbcd230262744b7a7f0c448bfbf212f73182"
+dependencies = [
+ "p3-field",
+ "p3-matrix",
+]
 
 [[package]]
 name = "p3-baby-bear"
@@ -851,9 +861,9 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "syn"
-version = "2.0.115"
+version = "2.0.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e614ed320ac28113fa64972c4262d5dbc89deacdfd00c34a3e4cea073243c12"
+checksum = "3df424c70518695237746f84cede799c9c58fcb37450d7b23716568cc8bc69cb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -870,6 +880,7 @@ dependencies = [
  "serde_json",
  "tabula-core",
  "tabula-executor",
+ "tabula-ir",
  "tracing",
  "tracing-subscriber",
 ]
@@ -903,7 +914,17 @@ dependencies = [
  "borsh",
  "proptest",
  "tabula-core",
+ "tabula-ir",
  "tracing",
+]
+
+[[package]]
+name = "tabula-ir"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "serde",
+ "tabula-core",
 ]
 
 [[package]]
@@ -911,7 +932,7 @@ name = "tabula-lang"
 version = "0.1.0"
 dependencies = [
  "tabula-core",
- "tabula-executor",
+ "tabula-ir",
  "thiserror",
 ]
 
@@ -919,8 +940,12 @@ dependencies = [
 name = "tabula-proof"
 version = "0.1.0"
 dependencies = [
+ "p3-air",
  "p3-baby-bear",
  "p3-field",
+ "p3-matrix",
+ "p3-poseidon2",
+ "p3-symmetric",
  "tabula-commitment",
  "tabula-core",
 ]
@@ -1072,9 +1097,9 @@ checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.23"
+version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "537dd038a89878be9b64dd4bd1b260315c1bb94f4d784956b81e27a088d9a09e"
+checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "unicode-xid"

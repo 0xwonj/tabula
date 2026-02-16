@@ -8,10 +8,8 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use crate::error::TabulaError;
-use crate::state::Digest;
 use crate::traits::*;
-use crate::tx::{Batch, TxTypeDef};
-use crate::types::*;
+use crate::{Batch, CellKey, ColId, Digest, RowKey, TableId, Value, ValueType};
 
 // ---------------------------------------------------------------------------
 // MockHasher (blake3)
@@ -218,7 +216,7 @@ impl ValueCodec for MockValueCodec {
 // FlatHashMembership
 // ---------------------------------------------------------------------------
 
-/// Membership scheme: hash all tx types, concatenate, hash result.
+/// Membership scheme: hash all items, concatenate, hash result.
 /// Proof is the full list (brute-force verification).
 #[derive(Debug, Clone)]
 pub struct FlatHashMembership;
@@ -226,15 +224,11 @@ pub struct FlatHashMembership;
 impl MembershipScheme for FlatHashMembership {
     type Proof = Vec<Digest>;
 
-    fn compute_root(&self, tx_types: &[TxTypeDef]) -> Result<Digest, TabulaError> {
-        let hashes: Vec<Digest> = tx_types
+    fn compute_root(&self, items: &[&[u8]]) -> Result<Digest, TabulaError> {
+        let hashes: Vec<Digest> = items
             .iter()
-            .map(|t| {
-                let bytes =
-                    borsh::to_vec(t).map_err(|e| TabulaError::EncodingError(e.to_string()))?;
-                Ok(*blake3::hash(&bytes).as_bytes())
-            })
-            .collect::<Result<Vec<_>, TabulaError>>()?;
+            .map(|item| *blake3::hash(item).as_bytes())
+            .collect();
 
         let mut all_bytes = Vec::new();
         for h in &hashes {
@@ -243,30 +237,17 @@ impl MembershipScheme for FlatHashMembership {
         Ok(*blake3::hash(&all_bytes).as_bytes())
     }
 
-    fn prove(&self, tx_types: &[TxTypeDef], _index: usize) -> Result<Self::Proof, TabulaError> {
-        tx_types
+    fn prove(&self, items: &[&[u8]], _index: usize) -> Result<Self::Proof, TabulaError> {
+        Ok(items
             .iter()
-            .map(|t| {
-                let bytes =
-                    borsh::to_vec(t).map_err(|e| TabulaError::EncodingError(e.to_string()))?;
-                Ok(*blake3::hash(&bytes).as_bytes())
-            })
-            .collect()
+            .map(|item| *blake3::hash(item).as_bytes())
+            .collect())
     }
 
-    fn verify(
-        &self,
-        root: &Digest,
-        tx_type: &TxTypeDef,
-        proof: &Self::Proof,
-    ) -> Result<bool, TabulaError> {
-        let tx_hash = {
-            let bytes =
-                borsh::to_vec(tx_type).map_err(|e| TabulaError::EncodingError(e.to_string()))?;
-            *blake3::hash(&bytes).as_bytes()
-        };
+    fn verify(&self, root: &Digest, item: &[u8], proof: &Self::Proof) -> Result<bool, TabulaError> {
+        let item_hash = *blake3::hash(item).as_bytes();
 
-        if !proof.contains(&tx_hash) {
+        if !proof.contains(&item_hash) {
             return Ok(false);
         }
 
@@ -297,7 +278,7 @@ impl BatchDigester for SimpleBatchDigester {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tx::{ParamDef, Transaction, TxTypeId};
+    use crate::{Transaction, TxTypeId};
 
     #[test]
     fn test_mock_hasher_deterministic() {
@@ -380,19 +361,12 @@ mod tests {
     #[test]
     fn test_flat_hash_membership() {
         let scheme = FlatHashMembership;
-        let types = vec![TxTypeDef {
-            id: TxTypeId(1),
-            name: "transfer".into(),
-            param_schema: vec![ParamDef {
-                name: "amount".into(),
-                value_type: ValueType::U64,
-            }],
-            body: vec![],
-        }];
+        let item = b"tx_type_1_serialized";
+        let items: Vec<&[u8]> = vec![item.as_slice()];
 
-        let root = scheme.compute_root(&types).unwrap();
-        let proof = scheme.prove(&types, 0).unwrap();
-        assert!(scheme.verify(&root, &types[0], &proof).unwrap());
+        let root = scheme.compute_root(&items).unwrap();
+        let proof = scheme.prove(&items, 0).unwrap();
+        assert!(scheme.verify(&root, item, &proof).unwrap());
     }
 
     #[test]

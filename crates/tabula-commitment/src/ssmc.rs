@@ -3,7 +3,7 @@
 use p3_baby_bear::BabyBear;
 
 use tabula_core::error::TabulaError;
-use tabula_core::types::{ColId, RowKey, TableId};
+use tabula_core::{ColId, RowKey, TableId};
 
 use crate::field::encode_u64_limbs;
 use crate::hasher::FieldHasher;

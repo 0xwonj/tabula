@@ -9,8 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateSnapshot, StaticTableProvider};
-use tabula_core::tx::Transaction;
-use tabula_core::types::*;
+use tabula_core::{CellKey, ColId, RowKey, TableId, Transaction, Value};
 
 // ---------------------------------------------------------------------------
 // StateSnapshot impls
@@ -181,7 +180,7 @@ pub(crate) fn make_tx(
     nonce: u64,
 ) -> Transaction {
     Transaction {
-        tx_type: tabula_core::tx::TxTypeId(tx_type),
+        tx_type: tabula_core::TxTypeId(tx_type),
         params,
         sender,
         nonce,

@@ -1,7 +1,6 @@
 //! The ApplyBatch public inputs statement.
 
-use tabula_core::state::Digest;
-use tabula_core::tx::ProgramBudgets;
+use tabula_core::{Digest, ProgramBudgets};
 
 /// Public inputs for the ApplyBatch proof.
 #[derive(Debug, Clone, PartialEq, Eq)]

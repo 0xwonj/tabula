@@ -3,7 +3,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::types::{CellKey, Value};
+use crate::{CellKey, Value};
 
 /// Monotonically increasing logical timestamp within a batch execution.
 pub type LogicalTime = u64;
@@ -87,7 +87,7 @@ pub struct ExecutionResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ColId, RowKey, TableId};
+    use crate::{ColId, RowKey, TableId};
 
     #[test]
     fn test_execution_event_borsh_round_trip() {

@@ -1,49 +1,9 @@
-//! Transaction model: type definitions, concrete transactions, and batches.
+//! Runtime transaction types: concrete transactions and batches.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::ir::Instruction;
-use crate::types::{Value, ValueType};
-
-/// Unique identifier for a transaction type.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-)]
-pub struct TxTypeId(pub u32);
-
-/// A transaction type definition (part of the program).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct TxTypeDef {
-    /// Transaction type identifier.
-    pub id: TxTypeId,
-    /// Human-readable name.
-    pub name: String,
-    /// Parameter schema.
-    pub param_schema: Vec<ParamDef>,
-    /// DB-IR body.
-    pub body: Vec<Instruction>,
-}
-
-/// Describes a parameter of a transaction type.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct ParamDef {
-    /// Parameter name.
-    pub name: String,
-    /// Expected value type.
-    pub value_type: ValueType,
-}
+use crate::{TxTypeId, Value};
 
 /// A concrete transaction in a batch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]

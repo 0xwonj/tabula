@@ -6,9 +6,8 @@ use p3_symmetric::{
     CryptographicHasher, PaddingFreeSponge, PseudoCompressionFunction, TruncatedPermutation,
 };
 
-use tabula_core::state::Digest;
 use tabula_core::traits::{Hasher, ValueCodec};
-use tabula_core::types::Value;
+use tabula_core::{Digest, Value};
 
 use crate::codec::BabyBearCodec;
 use crate::field::NativeDigest;
@@ -92,7 +91,7 @@ impl Hasher for PoseidonHasher {
     fn hash_ir(&self, inputs: &[Value]) -> Digest {
         let codec = BabyBearCodec;
         let mut fes = Vec::new();
-        fes.push(BabyBear::new(0x02)); // DOMAIN_TAG_HASH_IR
+        fes.push(BabyBear::new(crate::field::DOMAIN_HASH_IR));
         fes.push(BabyBear::new(inputs.len() as u32));
         for v in inputs {
             let encoded = codec.encode(v).expect("hash_ir: encoding failed");

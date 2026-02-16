@@ -4,13 +4,13 @@
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::event::{EmittedEvent, ExecutionResult, TxOutcome};
 use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateSnapshot, StaticTableProvider};
-use tabula_core::tx::Batch;
+use tabula_core::{Batch, EmittedEvent, ExecutionResult, TxOutcome};
+
+use tabula_ir::Program;
 
 use crate::interpreter;
 use crate::overlay::Overlay;
-use crate::program::Program;
 
 /// Pluggable trait implementations needed by the batch executor.
 pub struct BatchEnv<'a> {
@@ -165,11 +165,23 @@ pub fn execute_batch<S: StateSnapshot>(
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-    use tabula_core::ir::{Instruction, Predicate, RowExpr, ValueExpr};
-    use tabula_core::tx::{ParamDef, TxTypeDef, TxTypeId};
-    use tabula_core::types::*;
+    use tabula_core::{ColId, ColumnDef, RowKey, TableId, TableSchema, TxTypeId, Value, ValueType};
+    use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
 
     use crate::test_fixtures::*;
+
+    /// Table schema used by all batch test tx types: TableId(1) with one U64 column.
+    fn test_schema() -> TableSchema {
+        TableSchema {
+            id: TableId(1),
+            name: "test".into(),
+            columns: vec![ColumnDef {
+                id: ColId(0),
+                name: "val".into(),
+                value_type: ValueType::U64,
+            }],
+        }
+    }
 
     /// A simple "write value to cell" tx type.
     fn write_tx_def() -> TxTypeDef {
@@ -221,16 +233,24 @@ mod tests {
                     row: RowExpr::Literal(RowKey(1)),
                     col: ColId(0),
                 },
-                Instruction::Assert {
-                    predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(0)),
-                },
-                Instruction::Sub {
+                Instruction::Cmp {
                     dst: 4,
+                    op: CmpOp::Gte,
                     lhs: ValueExpr::Slot(0),
                     rhs: ValueExpr::Param(0),
                 },
-                Instruction::Add {
+                Instruction::Assert {
+                    cond: ValueExpr::Slot(4),
+                },
+                Instruction::Arith {
                     dst: 5,
+                    op: ArithOp::Sub,
+                    lhs: ValueExpr::Slot(0),
+                    rhs: ValueExpr::Param(0),
+                },
+                Instruction::Arith {
+                    dst: 6,
+                    op: ArithOp::Add,
                     lhs: ValueExpr::Slot(2),
                     rhs: ValueExpr::Param(0),
                 },
@@ -238,14 +258,14 @@ mod tests {
                     table: TableId(1),
                     row: RowExpr::Literal(RowKey(0)),
                     col: ColId(0),
-                    src_val: ValueExpr::Slot(4),
+                    src_val: ValueExpr::Slot(5),
                     src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
                 Instruction::Write {
                     table: TableId(1),
                     row: RowExpr::Literal(RowKey(1)),
                     col: ColId(0),
-                    src_val: ValueExpr::Slot(5),
+                    src_val: ValueExpr::Slot(6),
                     src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
             ],
@@ -260,6 +280,7 @@ mod tests {
             transactions: vec![make_tx(1, vec![Value::U64(0), Value::U64(42)], sender, 0)],
         };
         let mut prog = Program::new();
+        prog.add_schema(test_schema());
         prog.register(write_tx_def()).unwrap();
 
         let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -284,6 +305,7 @@ mod tests {
             ],
         };
         let mut prog = Program::new();
+        prog.add_schema(test_schema());
         prog.register(write_tx_def()).unwrap();
         prog.register(TxTypeDef {
             id: TxTypeId(3),
@@ -343,6 +365,7 @@ mod tests {
             ],
         };
         let mut prog = Program::new();
+        prog.add_schema(test_schema());
         prog.register(transfer_tx_def()).unwrap();
 
         let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -370,6 +393,7 @@ mod tests {
             transactions: vec![make_tx(1, vec![Value::U64(0), Value::U64(1)], [1u8; 32], 0)],
         };
         let mut prog = Program::new();
+        prog.add_schema(test_schema());
         prog.register(write_tx_def()).unwrap();
 
         let env = BatchEnv {
@@ -392,6 +416,7 @@ mod tests {
             )],
         };
         let mut prog = Program::new();
+        prog.add_schema(test_schema());
         prog.register(write_tx_def()).unwrap();
 
         let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -424,6 +449,7 @@ mod tests {
             ],
         };
         let mut prog = Program::new();
+        prog.add_schema(test_schema());
         prog.register(write_tx_def()).unwrap();
 
         let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -439,6 +465,7 @@ mod tests {
             transactions: vec![make_tx(1, vec![Value::U64(0)], sender, 0)],
         };
         let mut prog = Program::new();
+        prog.add_schema(test_schema());
         prog.register(write_tx_def()).unwrap();
 
         let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -461,6 +488,7 @@ mod tests {
             )],
         };
         let mut prog = Program::new();
+        prog.add_schema(test_schema());
         prog.register(write_tx_def()).unwrap();
 
         let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -481,6 +509,7 @@ mod tests {
             ],
         };
         let mut prog = Program::new();
+        prog.add_schema(test_schema());
         prog.register(write_tx_def()).unwrap();
 
         let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -492,8 +521,8 @@ mod tests {
 
     #[test]
     fn test_failed_tx_partial_events() {
-        // Transfer tx: reads 2 cells, asserts balance >= amount, then writes 2 cells.
-        // If assert fails (instruction 2), we should get 2 partial read events.
+        // Transfer tx: reads 2 cells, Cmp, asserts balance >= amount, then writes 2 cells.
+        // If assert fails (instruction 3), we should get 2 partial read events.
         let mut data = BTreeMap::new();
         data.insert(cell(1, 0, 0), Value::U64(10)); // balance = 10
         data.insert(cell(1, 1, 0), Value::U64(50));
@@ -502,11 +531,12 @@ mod tests {
 
         let batch = Batch {
             transactions: vec![
-                // Transfer 100 from row 0 to row 1 — fails at Assert (instruction 2)
+                // Transfer 100 from row 0 to row 1 — fails at Assert (instruction 3)
                 make_tx(2, vec![Value::U64(100)], sender, 0),
             ],
         };
         let mut prog = Program::new();
+        prog.add_schema(test_schema());
         prog.register(transfer_tx_def()).unwrap();
 
         let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -517,9 +547,9 @@ mod tests {
                 failed_instruction,
                 ..
             } => {
-                // 2 reads before the assert
+                // 2 reads before the Cmp + assert
                 assert_eq!(partial_events.len(), 2);
-                assert_eq!(*failed_instruction, Some(2));
+                assert_eq!(*failed_instruction, Some(3));
             }
             TxOutcome::Success => panic!("expected failure"),
         }
@@ -534,6 +564,7 @@ mod tests {
             transactions: vec![make_tx(1, vec![Value::U64(0)], sender, 0)],
         };
         let mut prog = Program::new();
+        prog.add_schema(test_schema());
         prog.register(write_tx_def()).unwrap();
 
         let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();

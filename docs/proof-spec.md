@@ -1236,7 +1236,7 @@ In Layer C, the per-(t,c) memory argument (§8) handles **inter-tx** read-after-
 
 | Decision | Choice |
 |----------|--------|
-| STARK framework | **Plonky3** over **BabyBear** field (p = 2^31 - 1) |
+| STARK framework | **Plonky3** over **BabyBear** field (p = 2^31 − 2^27 + 1 = 2013265921) |
 | State VC | **Hybrid**: SSMC (≤ threshold) + SMT (> threshold), auto-selected per-column. Threshold TBD (estimated 100-300 rows, calibrated via B7) |
 | SSMC design | Sorted AIR trace sub-table + Poseidon hash chain + LogUp membership/non-membership + 3-way merge update proof |
 | Hash function | **Poseidon** for all in-circuit hashing (canonical `hash_id`); Blake3 = non-canonical debug mode only |

@@ -1,8 +1,8 @@
 # Tabula Kernel — Architecture
 
-> **Status**: Draft v0.4.4
+> **Status**: Draft v0.4.5
 > **Scope**: Crate structure, core abstractions, tech stack, data flow, and implementation phasing for the Tabula Kernel.
-> **Prerequisites**: [summary.md](./summary.md), [rw-strategy.md](./rw-strategy.md)
+> **Prerequisites**: [summary.md](./summary.md)
 
 ---
 
@@ -47,10 +47,12 @@ tabula/
 ├── Cargo.toml                       # workspace root
 ├── docs/
 │   ├── summary.md                   # design spec
-│   ├── rw-strategy.md               # read/write strategy
 │   ├── architecture.md              # this document
 │   ├── proof-spec.md                # STARK proof system constraints (AIR, LogUp, trace layout)
-│   └── semantics-spec.md            # Core IR contract, canonical state normal form, execution semantics
+│   ├── semantics-spec.md            # Core IR contract, canonical state normal form, execution semantics
+│   ├── dsl-philosophy.md            # DSL design philosophy
+│   ├── m4-design.md                 # M4 commitment layer design
+│   └── m6-air-foundation.md         # M6 AIR foundation plan
 │
 ├── crates/
 │   ├── tabula-core/                 # fundamental types, traits, errors
@@ -63,7 +65,8 @@ tabula/
 │   │       ├── state.rs
 │   │       ├── event.rs
 │   │       ├── error.rs
-│   │       └── traits.rs
+│   │       ├── traits.rs
+│   │       └── mock.rs             # MockHasher, etc. (feature = "mock")
 │   │
 │   ├── tabula-executor/             # deterministic execution engine
 │   │   └── src/
@@ -84,23 +87,32 @@ tabula/
 │   │       ├── parser.rs
 │   │       └── lower.rs
 │   │
-│   ├── tabula-commitment/           # state commitment layer
+│   ├── tabula-commitment/           # cryptographic state commitment (Plonky3 / BabyBear)
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── column.rs            # column commitment: H(borsh(values))
-│   │       ├── table.rs             # table commitment: H(colComs || tableId || schemaHash)
-│   │       ├── root.rs              # state root: H(tableComs || versionTag)
-│   │       ├── opening_plan.rs      # groups ReadSet_old by (tableId, colId)
-│   │       └── mock.rs             # MockPCS, MockHasher, InMemoryState, etc.
+│   │       ├── field.rs             # NativeDigest, domain tags, u64 limb encoding
+│   │       ├── codec.rs             # BabyBearCodec: value ↔ field element encoding
+│   │       ├── poseidon.rs          # PoseidonHasher (Poseidon2 width-16)
+│   │       ├── hasher.rs            # FieldHasher trait + MockFieldHasher
+│   │       ├── smt.rs              # SparseMerkleTree
+│   │       ├── ssmc.rs             # SsmcList, SsmcCommitment, MergeTrace
+│   │       └── hybrid.rs           # HybridVC, ColumnMeta, CommitmentStrategy
 │   │
 │   ├── tabula-proof/                # proof generation & verification
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── traits.rs
-│   │       ├── statement.rs
-│   │       ├── opening.rs
-│   │       ├── update.rs
-│   │       └── mock.rs
+│   │       ├── statement.rs         # ApplyBatchStatement (no feature gate)
+│   │       ├── trace.rs             # BatchWitness, ColumnWitness, AccessRow, InitRow (stark)
+│   │       ├── witness.rs           # WitnessGenerator (stark)
+│   │       └── air/                 # AIR constraint infrastructure (stark)
+│   │           ├── mod.rs
+│   │           ├── columns.rs       # zero-copy borrow (AlignedBorrow pattern)
+│   │           ├── bus.rs           # LogUp bus IDs
+│   │           ├── gadgets.rs       # is_real prefix gadget
+│   │           ├── debug.rs         # constraint checker
+│   │           └── chips/
+│   │               ├── mod.rs
+│   │               └── column_meta.rs  # ColumnMetaChip AIR + trace generator
 │   │
 │   └── tabula-cli/                  # binary entry point
 │       └── src/
@@ -111,11 +123,6 @@ tabula/
 │               ├── execute.rs       # execute command handler
 │               ├── inspect.rs       # inspect command handler
 │               └── example.rs       # example command handler
-│
-└── tests/                           # workspace-level integration tests
-    ├── execute_batch.rs
-    ├── overlay_semantics.rs
-    └── state_commitment.rs
 ```
 
 ---
@@ -126,7 +133,7 @@ tabula/
               tabula-core
            /   |    |     \
   tabula-executor  |  tabula-commitment
-           \   |   |     /
+               |   |     /
            tabula-proof
                 |
   tabula-lang   |
@@ -140,7 +147,7 @@ tabula/
 | `tabula-executor` | `tabula-core` |
 | `tabula-commitment` | `tabula-core` |
 | `tabula-lang` | `tabula-core` |
-| `tabula-proof` | `tabula-core`, `tabula-executor`, `tabula-commitment` |
+| `tabula-proof` | `tabula-core`, `tabula-commitment` |
 | `tabula-cli` | all of the above |
 
 **Why this matters:**
@@ -195,13 +202,15 @@ tabula/
 
 | Module | Responsibility |
 |--------|---------------|
-| `column.rs` | `compute_column_commitment(hasher, values) → ColumnCommitmentId`: hash of borsh-serialized column values. |
-| `table.rs` | `compute_table_commitment(hasher, colComs, tableId, schemaHash) → TableCommitmentId` and `compute_schema_hash`. |
-| `root.rs` | `compute_state_root(hasher, tableComs, versionTag) → StateRoot`: global 3-layer hash. |
-| `opening_plan.rs` | `build_opening_plan(ReadSet_old) → Vec<OpeningGroup>`: groups by `(tableId, colId)`, deduplicates and sorts rows. |
-| `mock.rs` | `MockPCS`, `MockValueCodec`, `MockHasher`, `MockMembershipScheme`, `MockBatchDigester`, `InMemoryState` (with `compute_state_root` method). Hash-based, no real proofs. |
+| `field.rs` | `NativeDigest([BabyBear; 8])`, domain tags (`DOMAIN_SSMC`, `DOMAIN_SMT`, `DOMAIN_LEAF`, `DOMAIN_TABLE`, `DOMAIN_COL`), u64 limb encoding (30+30+4 split). |
+| `codec.rs` | `BabyBearCodec`: schema-typed value ↔ field element encoding. Per-type width: `w(Bool)=1, w(U64)=w(I64)=3, w(Digest)=8`. |
+| `poseidon.rs` | `PoseidonHasher`: Poseidon2 width-16 over BabyBear. Implements `FieldHasher` (FE-level) and core `Hasher` (byte-level). |
+| `hasher.rs` | `FieldHasher` trait: `hash(&[F])→Digest`, `compress(D,D)→D`, `hash_domain(tag,&[F])→D`. `MockFieldHasher` for fast unit tests. |
+| `smt.rs` | `SparseMerkleTree`: depth-parameterized SMT over `FieldHasher`. Insert, prove, verify. |
+| `ssmc.rs` | `SsmcList`, `SsmcCommitment`, `MergeTrace`: sorted key-value list commitment via Poseidon chain + 3-way merge proof. |
+| `hybrid.rs` | `HybridVC`, `ColumnMeta`, `ColumnState`, `CommitmentStrategy`: per-column SSMC/SMT dispatch with threshold-based auto-selection. |
 
-**Dependencies**: `tabula-core`, `blake3` (for mock implementations)
+**Dependencies**: `tabula-core` (+ Plonky3 crates behind `stark` feature flag)
 
 ### 4.4 tabula-proof
 
@@ -209,13 +218,13 @@ tabula/
 
 | Module | Responsibility |
 |--------|---------------|
-| `traits.rs` | `Prover` and `Verifier` trait definitions. |
 | `statement.rs` | `ApplyBatchStatement`: public inputs struct (`oldStateRoot`, `newStateRoot`, `programRoot`, `AppliedTxDigest`, `StaticTableRoot`, `budgets`). See proof-spec §5.1 for the full definition. |
-| `opening.rs` | Batched opening proof generation. |
-| `update.rs` | Batched update proof generation. |
-| `mock.rs` | `MockProver`: accept-all prover for pipeline testing. |
+| `trace.rs` | Witness data types: `BatchWitness`, `ColumnWitness`, `AccessRow`, `InitRow`. Bridges `ExecutionResult` to proof-friendly structures. (`stark` feature) |
+| `witness.rs` | `WitnessGenerator`: transforms `ExecutionResult` + `ColumnMeta` into `BatchWitness`. (`stark` feature) |
+| `air/` | AIR constraint infrastructure: `columns.rs` (zero-copy borrow), `bus.rs` (LogUp bus IDs), `gadgets.rs` (`is_real` prefix), `debug.rs` (constraint checker), `chips/` (per-chip `BaseAir` + `Air` impls). (`stark` feature) |
+| `air/chips/column_meta.rs` | `ColumnMetaChip`: boolean, `is_real` prefix, strict `(t,c)` ordering, untouched binding constraints. Trace generator. |
 
-**Dependencies**: `tabula-core`, `tabula-executor`, `tabula-commitment` (+ proof backend behind feature flags)
+**Dependencies**: `tabula-core`, `tabula-commitment` (+ Plonky3 crates behind `stark` feature flag)
 
 ### 4.5 tabula-lang
 
@@ -275,7 +284,6 @@ pub enum Value {
     I64(i64),
     Bool(bool),
     Bytes32([u8; 32]),
-    Null,
 }
 
 /// Describes the type of a column or parameter.
@@ -287,7 +295,7 @@ pub enum ValueType {
 }
 ```
 
-`Value` is a concrete enum representing **application-level** types only. It deliberately excludes field elements — field encoding is a PCS-layer concern handled by the `ValueCodec` trait (see Section 6.5). This keeps the executor free from any assumptions about the underlying field size (254-bit for BN254, 64-bit for Goldilocks, 31-bit for BabyBear).
+`Value` is a concrete enum representing **application-level** types only. There is no `Null` variant — absence is modeled as a separate `val_is_null: bool` flag in `ExecutionEvent` and as `Option<Value>` in `ExecutionResult` collections (see §5.4). This matches the normative two-slot `Read/Write` design in [semantics-spec.md](./semantics-spec.md) §1.5. Field element encoding is a PCS-layer concern handled by the `ValueCodec` trait (see Section 6.5).
 
 ### 5.3 Transaction Model
 
@@ -335,7 +343,8 @@ pub enum OpKind { Read, Write }
 pub struct ExecutionEvent {
     pub key: CellKey,
     pub op: OpKind,
-    pub value: Value,
+    pub value: Value,            // canonical zero when absent
+    pub val_is_null: bool,       // true = cell is absent
     pub time: LogicalTime,
     pub tx_index: u32,           // index of the transaction within the batch
 }
@@ -356,15 +365,17 @@ pub enum TxOutcome {
 /// This is the handoff point between Stage 1 (execution) and Stage 2 (commitment).
 pub struct ExecutionResult {
     /// Cells read from oldStateRoot (not from overlay). Deduplicated.
-    pub read_set_old: Vec<(CellKey, Value)>,
+    /// `None` = cell was absent.
+    pub read_set_old: Vec<(CellKey, Option<Value>)>,
     /// Final writes to apply to committed state. Coalesced across the entire batch (last-write-wins).
+    /// `None` = delete (write null).
     /// This is `WriteSet_batch_final` in proof-spec terminology (§8.6).
     /// Within a single tx, NF-2 guarantees at most one Write per key, so no intra-tx coalescing occurs.
-    pub write_set_final: Vec<(CellKey, Value)>,
+    pub write_set_final: Vec<(CellKey, Option<Value>)>,
     /// Full execution trace for consistency proving.
     pub events: Vec<ExecutionEvent>,
-    /// Emitted events / receipts.
-    pub emitted: Vec<Event>,
+    /// Emitted application events / receipts.
+    pub emitted: Vec<EmittedEvent>,
     /// Per-transaction outcomes (success/failure).
     pub tx_outcomes: Vec<TxOutcome>,
 }
@@ -692,20 +703,22 @@ pub enum ValueExpr {
 pub enum Instruction {
     // ── State Operations ──────────────────────────────────
 
-    /// Read a cell from state, store result in `dst`.
+    /// Read a cell from state, store value in `dst_val` and null flag in `dst_is_null`.
     Read {
-        dst: Slot,
+        dst_val: Slot,
+        dst_is_null: Slot,
         table: TableId,
-        row: RowExpr,
         col: ColId,
+        row: RowExpr,
     },
 
     /// Write a value to a cell in state.
     Write {
         table: TableId,
-        row: RowExpr,
         col: ColId,
-        src: ValueExpr,
+        row: RowExpr,
+        src_val: ValueExpr,
+        src_is_null: ValueExpr,
     },
 
     /// Lookup in a static (fixed) table, store result in `dst`.
@@ -777,7 +790,6 @@ pub enum Predicate {
     Lte(ValueExpr, ValueExpr),
     Gt(ValueExpr, ValueExpr),
     Gte(ValueExpr, ValueExpr),
-    NotNull(ValueExpr),
     And(Box<Predicate>, Box<Predicate>),
     Or(Box<Predicate>, Box<Predicate>),
     Not(Box<Predicate>),
@@ -1010,7 +1022,7 @@ OpeningPlan:
 | Concern | Crate | Rationale |
 |---------|-------|-----------|
 | STARK proof system | `p3-uni-stark`, `p3-fri` | **Confirmed**: Plonky3 — production-ready, audited, SP1-validated. |
-| Field arithmetic | `p3-field`, `p3-baby-bear` | **Confirmed**: BabyBear (p = 2^31 - 1). Fast native arithmetic. |
+| Field arithmetic | `p3-field`, `p3-baby-bear` | **Confirmed**: BabyBear (p = 2^31 − 2^27 + 1 = 2013265921). Fast native arithmetic. |
 | Hash (in-circuit) | `p3-poseidon2` | Poseidon2 over BabyBear for SSMC sponge commitment, SMT internal nodes, and IR Hash instruction. |
 | LogUp | `p3-air` (built-in) | Native LogUp support for memory consistency arguments. |
 | SNARK wrapping | TBD (SP1 wrapper or custom Groth16) | Optional: STARK→SNARK for on-chain verification (~200 bytes). |
@@ -1031,13 +1043,12 @@ tabula-lang:
   (zero parser dependencies — hand-rolled lexer + recursive descent)
 
 tabula-commitment:
-  tabula-core, blake3
-  (blake3 used only by mock implementations)
+  tabula-core
+  [feature = "stark"] p3-field, p3-baby-bear, p3-poseidon2, p3-symmetric
 
 tabula-proof:
-  tabula-core, tabula-executor, tabula-commitment
-  [feature = "stark"] plonky3, p3-field, p3-fri, ...
-  [feature = "snark"] ark-ff, ark-ec, ark-poly, ark-poly-commit
+  tabula-core, tabula-commitment
+  [feature = "stark"] p3-field, p3-baby-bear, p3-air, p3-matrix
 
 tabula-cli:
   all of the above, clap, anyhow, tracing-subscriber
@@ -1188,7 +1199,7 @@ The system has clear enough boundaries that the overhead is justified.
 
 ### D9: STARK (FRI) as proof backend — CONFIRMED
 
-**Choice**: **Plonky3 over BabyBear** (p = 2^31 - 1).
+**Choice**: **Plonky3 over BabyBear** (p = 2^31 − 2^27 + 1 = 2013265921).
 
 - **Pro**: Transparent setup (no trusted ceremony).
 - **Pro**: Post-quantum secure.

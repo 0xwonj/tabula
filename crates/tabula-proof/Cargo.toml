@@ -6,10 +6,23 @@ license.workspace = true
 
 [features]
 default = []
-stark = ["tabula-commitment/stark", "p3-field", "p3-baby-bear"]
+stark = [
+    "tabula-commitment/stark",
+    "dep:tabula-commitment",
+    "p3-field",
+    "p3-baby-bear",
+    "p3-air",
+    "p3-matrix",
+    "p3-poseidon2",
+    "p3-symmetric",
+]
 
 [dependencies]
 tabula-core = { workspace = true }
-tabula-commitment = { workspace = true }
-p3-field     = { workspace = true, optional = true }
+tabula-commitment = { workspace = true, optional = true }
+p3-field = { workspace = true, optional = true }
 p3-baby-bear = { workspace = true, optional = true }
+p3-air = { workspace = true, optional = true }
+p3-matrix = { workspace = true, optional = true }
+p3-poseidon2 = { workspace = true, optional = true }
+p3-symmetric = { workspace = true, optional = true }

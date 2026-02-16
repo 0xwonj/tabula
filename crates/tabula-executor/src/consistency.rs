@@ -7,8 +7,7 @@
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::event::{ExecutionEvent, OpKind};
-use tabula_core::types::{CellKey, Value};
+use tabula_core::{CellKey, ExecutionEvent, OpKind, Value};
 
 /// Check that the execution trace is consistent with last-write semantics.
 ///

@@ -3,8 +3,8 @@
 use p3_baby_bear::BabyBear;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 
+use tabula_core::Digest;
 use tabula_core::error::TabulaError;
-use tabula_core::state::Digest;
 
 // ── Domain separation tags ──────────────────────────────────────────────────
 
@@ -18,6 +18,8 @@ pub const DOMAIN_LEAF: u32 = 0x10;
 pub const DOMAIN_TABLE: u32 = 0x11;
 /// SMT_cols node domain tag.
 pub const DOMAIN_COL: u32 = 0x12;
+/// Hash-IR (in-program hash instruction) domain tag.
+pub const DOMAIN_HASH_IR: u32 = 0x02;
 
 // ── NativeDigest ────────────────────────────────────────────────────────────
 
@@ -195,6 +197,7 @@ mod tests {
         let tags = [
             DOMAIN_SSMC,
             DOMAIN_SMT,
+            DOMAIN_HASH_IR,
             DOMAIN_LEAF,
             DOMAIN_TABLE,
             DOMAIN_COL,

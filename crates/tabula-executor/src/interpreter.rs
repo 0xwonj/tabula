@@ -6,14 +6,14 @@
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::event::{EmittedEvent, LogicalTime};
-use tabula_core::ir::{Instruction, Slot};
-use tabula_core::schema::TableSchema;
 use tabula_core::traits::{Hasher, StateSnapshot, StaticTableProvider};
-use tabula_core::types::{CellKey, ColId, TableId, Value, ValueType, zero_value};
+use tabula_core::{
+    CellKey, ColId, EmittedEvent, LogicalTime, TableId, TableSchema, Value, ValueType, zero_value,
+};
+use tabula_ir::{Instruction, Slot};
 
 use crate::overlay::Overlay;
-use crate::resolve::{evaluate_predicate, resolve_row_expr, resolve_value_expr};
+use crate::resolve::{resolve_row_expr, resolve_value_expr};
 
 /// Output of executing a single transaction's instruction body.
 #[derive(Debug, Clone)]
@@ -70,7 +70,7 @@ pub fn execute<S: StateSnapshot>(
                         col: *col,
                         row: row_key,
                     };
-                    let col_type = lookup_col_type(schemas, *table, *col);
+                    let col_type = lookup_col_type(schemas, *table, *col)?;
                     let opt = overlay.read(&key, col_type)?;
                     match opt {
                         Some(v) => {
@@ -99,7 +99,7 @@ pub fn execute<S: StateSnapshot>(
                         col: *col,
                         row: row_key,
                     };
-                    let col_type = lookup_col_type(schemas, *table, *col);
+                    let col_type = lookup_col_type(schemas, *table, *col)?;
                     let opt = match is_null {
                         Value::Bool(true) => None,
                         Value::Bool(false) => Some(value),
@@ -124,22 +124,10 @@ pub fn execute<S: StateSnapshot>(
                     set_slot(&mut slots, *dst, value)?;
                 }
 
-                Instruction::Add { dst, lhs, rhs } => {
+                Instruction::Arith { dst, op, lhs, rhs } => {
                     let l = resolve_value_expr(lhs, &slots, params)?;
                     let r = resolve_value_expr(rhs, &slots, params)?;
-                    set_slot(&mut slots, *dst, l.checked_add(&r)?)?;
-                }
-
-                Instruction::Sub { dst, lhs, rhs } => {
-                    let l = resolve_value_expr(lhs, &slots, params)?;
-                    let r = resolve_value_expr(rhs, &slots, params)?;
-                    set_slot(&mut slots, *dst, l.checked_sub(&r)?)?;
-                }
-
-                Instruction::Mul { dst, lhs, rhs } => {
-                    let l = resolve_value_expr(lhs, &slots, params)?;
-                    let r = resolve_value_expr(rhs, &slots, params)?;
-                    set_slot(&mut slots, *dst, l.checked_mul(&r)?)?;
+                    set_slot(&mut slots, *dst, op.apply(&l, &r)?)?;
                 }
 
                 Instruction::DivMod {
@@ -155,10 +143,82 @@ pub fn execute<S: StateSnapshot>(
                     set_slot(&mut slots, *dst_r, rem)?;
                 }
 
-                Instruction::Assert { predicate } => {
-                    let result = evaluate_predicate(predicate, &slots, params)?;
-                    if !result {
-                        return Err(TabulaError::AssertionFailed(format!("{predicate:?}")));
+                Instruction::Cmp { dst, op, lhs, rhs } => {
+                    let l = resolve_value_expr(lhs, &slots, params)?;
+                    let r = resolve_value_expr(rhs, &slots, params)?;
+                    set_slot(&mut slots, *dst, op.apply(&l, &r)?)?;
+                }
+
+                Instruction::Not { dst, src } => {
+                    let v = resolve_value_expr(src, &slots, params)?;
+                    match v {
+                        Value::Bool(b) => set_slot(&mut slots, *dst, Value::Bool(!b))?,
+                        _ => {
+                            return Err(TabulaError::TypeMismatch {
+                                expected: "Bool",
+                                actual: v.type_name(),
+                            });
+                        }
+                    }
+                }
+
+                Instruction::And { dst, lhs, rhs } => {
+                    let l = resolve_value_expr(lhs, &slots, params)?;
+                    let r = resolve_value_expr(rhs, &slots, params)?;
+                    match (&l, &r) {
+                        (Value::Bool(a), Value::Bool(b)) => {
+                            set_slot(&mut slots, *dst, Value::Bool(*a && *b))?
+                        }
+                        (Value::Bool(_), _) => {
+                            return Err(TabulaError::TypeMismatch {
+                                expected: "Bool",
+                                actual: r.type_name(),
+                            });
+                        }
+                        _ => {
+                            return Err(TabulaError::TypeMismatch {
+                                expected: "Bool",
+                                actual: l.type_name(),
+                            });
+                        }
+                    }
+                }
+
+                Instruction::Or { dst, lhs, rhs } => {
+                    let l = resolve_value_expr(lhs, &slots, params)?;
+                    let r = resolve_value_expr(rhs, &slots, params)?;
+                    match (&l, &r) {
+                        (Value::Bool(a), Value::Bool(b)) => {
+                            set_slot(&mut slots, *dst, Value::Bool(*a || *b))?
+                        }
+                        (Value::Bool(_), _) => {
+                            return Err(TabulaError::TypeMismatch {
+                                expected: "Bool",
+                                actual: r.type_name(),
+                            });
+                        }
+                        _ => {
+                            return Err(TabulaError::TypeMismatch {
+                                expected: "Bool",
+                                actual: l.type_name(),
+                            });
+                        }
+                    }
+                }
+
+                Instruction::Assert { cond } => {
+                    let v = resolve_value_expr(cond, &slots, params)?;
+                    match v {
+                        Value::Bool(true) => {}
+                        Value::Bool(false) => {
+                            return Err(TabulaError::AssertionFailed(format!("{cond:?}")));
+                        }
+                        _ => {
+                            return Err(TabulaError::TypeMismatch {
+                                expected: "Bool",
+                                actual: v.type_name(),
+                            });
+                        }
                     }
                 }
 
@@ -238,20 +298,28 @@ fn lookup_col_type(
     schemas: &BTreeMap<TableId, TableSchema>,
     table: TableId,
     col: ColId,
-) -> ValueType {
-    schemas
+) -> Result<ValueType, TabulaError> {
+    let schema = schemas
         .get(&table)
-        .and_then(|s| s.columns.iter().find(|c| c.id == col))
+        .ok_or(TabulaError::TableNotFound(table))?;
+    schema
+        .columns
+        .iter()
+        .find(|c| c.id == col)
         .map(|c| c.value_type)
-        .unwrap_or(ValueType::U64)
+        .ok_or_else(|| {
+            TabulaError::InvalidIr(format!(
+                "column {:?} not found in schema for table {:?}",
+                col, table
+            ))
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tabula_core::ir::{Predicate, RowExpr, ValueExpr};
-    use tabula_core::schema::{ColumnDef, TableSchema};
-    use tabula_core::types::{ColId, RowKey, TableId};
+    use tabula_core::{ColumnDef, RowKey};
+    use tabula_ir::{ArithOp, CmpOp, RowExpr, ValueExpr};
 
     use crate::test_fixtures::*;
 
@@ -346,8 +414,9 @@ mod tests {
         let snap = make_snapshot(vec![]);
         let mut ov = Overlay::new(&snap);
         let schemas = test_schemas();
-        let instrs = vec![Instruction::Add {
+        let instrs = vec![Instruction::Arith {
             dst: 0,
+            op: ArithOp::Add,
             lhs: ValueExpr::Literal(Value::U64(10)),
             rhs: ValueExpr::Literal(Value::U64(20)),
         }];
@@ -368,8 +437,9 @@ mod tests {
         let snap = make_snapshot(vec![]);
         let mut ov = Overlay::new(&snap);
         let schemas = test_schemas();
-        let instrs = vec![Instruction::Add {
+        let instrs = vec![Instruction::Arith {
             dst: 0,
+            op: ArithOp::Add,
             lhs: ValueExpr::Literal(Value::U64(u64::MAX)),
             rhs: ValueExpr::Literal(Value::U64(1)),
         }];
@@ -391,8 +461,9 @@ mod tests {
         let snap = make_snapshot(vec![]);
         let mut ov = Overlay::new(&snap);
         let schemas = test_schemas();
-        let instrs = vec![Instruction::Sub {
+        let instrs = vec![Instruction::Arith {
             dst: 0,
+            op: ArithOp::Sub,
             lhs: ValueExpr::Literal(Value::U64(30)),
             rhs: ValueExpr::Literal(Value::U64(10)),
         }];
@@ -413,8 +484,9 @@ mod tests {
         let snap = make_snapshot(vec![]);
         let mut ov = Overlay::new(&snap);
         let schemas = test_schemas();
-        let instrs = vec![Instruction::Mul {
+        let instrs = vec![Instruction::Arith {
             dst: 0,
+            op: ArithOp::Mul,
             lhs: ValueExpr::Literal(Value::U64(5)),
             rhs: ValueExpr::Literal(Value::U64(7)),
         }];
@@ -478,15 +550,40 @@ mod tests {
     }
 
     #[test]
+    fn test_cmp_eq() {
+        let snap = make_snapshot(vec![]);
+        let mut ov = Overlay::new(&snap);
+        let schemas = test_schemas();
+        let instrs = vec![
+            Instruction::Cmp {
+                dst: 0,
+                op: CmpOp::Eq,
+                lhs: ValueExpr::Literal(Value::U64(1)),
+                rhs: ValueExpr::Literal(Value::U64(1)),
+            },
+            Instruction::Assert {
+                cond: ValueExpr::Slot(0),
+            },
+        ];
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn test_assert_passing() {
         let snap = make_snapshot(vec![]);
         let mut ov = Overlay::new(&snap);
         let schemas = test_schemas();
         let instrs = vec![Instruction::Assert {
-            predicate: Predicate::Eq(
-                ValueExpr::Literal(Value::U64(1)),
-                ValueExpr::Literal(Value::U64(1)),
-            ),
+            cond: ValueExpr::Literal(Value::Bool(true)),
         }];
         execute(
             &instrs,
@@ -506,10 +603,7 @@ mod tests {
         let mut ov = Overlay::new(&snap);
         let schemas = test_schemas();
         let instrs = vec![Instruction::Assert {
-            predicate: Predicate::Eq(
-                ValueExpr::Literal(Value::U64(1)),
-                ValueExpr::Literal(Value::U64(2)),
-            ),
+            cond: ValueExpr::Literal(Value::Bool(false)),
         }];
         let err = execute(
             &instrs,
@@ -525,71 +619,140 @@ mod tests {
     }
 
     #[test]
-    fn test_predicate_lt() {
-        assert!(
-            evaluate_predicate(
-                &Predicate::Lt(
-                    ValueExpr::Literal(Value::U64(1)),
-                    ValueExpr::Literal(Value::U64(2))
-                ),
-                &[],
-                &[],
-            )
-            .unwrap()
-        );
+    fn test_cmp_lt() {
+        let snap = make_snapshot(vec![]);
+        let mut ov = Overlay::new(&snap);
+        let schemas = test_schemas();
+        let instrs = vec![
+            Instruction::Cmp {
+                dst: 0,
+                op: CmpOp::Lt,
+                lhs: ValueExpr::Literal(Value::U64(1)),
+                rhs: ValueExpr::Literal(Value::U64(2)),
+            },
+            Instruction::Assert {
+                cond: ValueExpr::Slot(0),
+            },
+        ];
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
-    fn test_predicate_gte() {
-        assert!(
-            evaluate_predicate(
-                &Predicate::Gte(
-                    ValueExpr::Literal(Value::U64(5)),
-                    ValueExpr::Literal(Value::U64(5))
-                ),
-                &[],
-                &[],
-            )
-            .unwrap()
-        );
+    fn test_cmp_gte() {
+        let snap = make_snapshot(vec![]);
+        let mut ov = Overlay::new(&snap);
+        let schemas = test_schemas();
+        let instrs = vec![
+            Instruction::Cmp {
+                dst: 0,
+                op: CmpOp::Gte,
+                lhs: ValueExpr::Literal(Value::U64(5)),
+                rhs: ValueExpr::Literal(Value::U64(5)),
+            },
+            Instruction::Assert {
+                cond: ValueExpr::Slot(0),
+            },
+        ];
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
-    fn test_predicate_and_or_not() {
-        let t = Predicate::Eq(
-            ValueExpr::Literal(Value::U64(1)),
-            ValueExpr::Literal(Value::U64(1)),
-        );
-        let f = Predicate::Eq(
-            ValueExpr::Literal(Value::U64(1)),
-            ValueExpr::Literal(Value::U64(2)),
-        );
+    fn test_and_or_not() {
+        let snap = make_snapshot(vec![]);
+        let mut ov = Overlay::new(&snap);
+        let schemas = test_schemas();
 
-        assert!(
-            evaluate_predicate(
-                &Predicate::And(Box::new(t.clone()), Box::new(t.clone())),
-                &[],
-                &[]
-            )
-            .unwrap()
-        );
-        assert!(
-            !evaluate_predicate(
-                &Predicate::And(Box::new(t.clone()), Box::new(f.clone())),
-                &[],
-                &[]
-            )
-            .unwrap()
-        );
-        assert!(
-            evaluate_predicate(
-                &Predicate::Or(Box::new(t.clone()), Box::new(f.clone())),
-                &[],
-                &[]
-            )
-            .unwrap()
-        );
-        assert!(evaluate_predicate(&Predicate::Not(Box::new(f.clone())), &[], &[]).unwrap());
+        // true AND true → true
+        let instrs = vec![
+            Instruction::And {
+                dst: 0,
+                lhs: ValueExpr::Literal(Value::Bool(true)),
+                rhs: ValueExpr::Literal(Value::Bool(true)),
+            },
+            Instruction::Assert {
+                cond: ValueExpr::Slot(0),
+            },
+        ];
+        execute(
+            &instrs,
+            &[],
+            &mut ov,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
+
+        // true AND false → false; NOT false → true
+        let snap2 = make_snapshot(vec![]);
+        let mut ov2 = Overlay::new(&snap2);
+        let instrs2 = vec![
+            Instruction::And {
+                dst: 0,
+                lhs: ValueExpr::Literal(Value::Bool(true)),
+                rhs: ValueExpr::Literal(Value::Bool(false)),
+            },
+            Instruction::Not {
+                dst: 1,
+                src: ValueExpr::Slot(0),
+            },
+            Instruction::Assert {
+                cond: ValueExpr::Slot(1),
+            },
+        ];
+        execute(
+            &instrs2,
+            &[],
+            &mut ov2,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
+
+        // true OR false → true
+        let snap3 = make_snapshot(vec![]);
+        let mut ov3 = Overlay::new(&snap3);
+        let instrs3 = vec![
+            Instruction::Or {
+                dst: 0,
+                lhs: ValueExpr::Literal(Value::Bool(true)),
+                rhs: ValueExpr::Literal(Value::Bool(false)),
+            },
+            Instruction::Assert {
+                cond: ValueExpr::Slot(0),
+            },
+        ];
+        execute(
+            &instrs3,
+            &[],
+            &mut ov3,
+            &XorHasher,
+            &TestStaticTables,
+            &schemas,
+            0,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -735,8 +898,9 @@ mod tests {
         let mut ov = Overlay::new(&snap);
         let schemas = test_schemas();
         // Try to use slot 5 as input without ever setting it
-        let instrs = vec![Instruction::Add {
+        let instrs = vec![Instruction::Arith {
             dst: 0,
+            op: ArithOp::Add,
             lhs: ValueExpr::Slot(5),
             rhs: ValueExpr::Literal(Value::U64(1)),
         }];
@@ -758,8 +922,9 @@ mod tests {
         let snap = make_snapshot(vec![]);
         let mut ov = Overlay::new(&snap);
         let schemas = test_schemas();
-        let instrs = vec![Instruction::Add {
+        let instrs = vec![Instruction::Arith {
             dst: 0,
+            op: ArithOp::Add,
             lhs: ValueExpr::Param(10),
             rhs: ValueExpr::Literal(Value::U64(1)),
         }];
@@ -816,8 +981,14 @@ mod tests {
                 col: ColId(0),
             },
             // Assert is_null == true
+            Instruction::Cmp {
+                dst: 2,
+                op: CmpOp::Eq,
+                lhs: ValueExpr::Slot(1),
+                rhs: ValueExpr::Literal(Value::Bool(true)),
+            },
             Instruction::Assert {
-                predicate: Predicate::Eq(ValueExpr::Slot(1), ValueExpr::Literal(Value::Bool(true))),
+                cond: ValueExpr::Slot(2),
             },
         ];
         execute(

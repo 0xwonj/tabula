@@ -1,9 +1,7 @@
 //! Handler for the `example` subcommand.
 
-use tabula_core::ir::*;
-use tabula_core::schema::{ColumnDef, TableSchema};
-use tabula_core::tx::{ParamDef, TxTypeDef, TxTypeId};
-use tabula_core::types::*;
+use tabula_core::{ColId, ColumnDef, TableId, TableSchema, TxTypeId, Value, ValueType};
+use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
 
 use crate::io::{BatchFile, ProgramFile, StateCell, StateFile, TxInput, write_json};
 
@@ -53,16 +51,24 @@ pub fn cmd_example(dir: &std::path::Path) -> anyhow::Result<()> {
                     row: RowExpr::Param(1),
                     col: ColId(0),
                 },
-                Instruction::Assert {
-                    predicate: Predicate::Gte(ValueExpr::Slot(0), ValueExpr::Param(2)),
-                },
-                Instruction::Sub {
+                Instruction::Cmp {
                     dst: 4,
+                    op: CmpOp::Gte,
                     lhs: ValueExpr::Slot(0),
                     rhs: ValueExpr::Param(2),
                 },
-                Instruction::Add {
+                Instruction::Assert {
+                    cond: ValueExpr::Slot(4),
+                },
+                Instruction::Arith {
                     dst: 5,
+                    op: ArithOp::Sub,
+                    lhs: ValueExpr::Slot(0),
+                    rhs: ValueExpr::Param(2),
+                },
+                Instruction::Arith {
+                    dst: 6,
+                    op: ArithOp::Add,
                     lhs: ValueExpr::Slot(2),
                     rhs: ValueExpr::Param(2),
                 },
@@ -70,14 +76,14 @@ pub fn cmd_example(dir: &std::path::Path) -> anyhow::Result<()> {
                     table: TableId(1),
                     row: RowExpr::Param(0),
                     col: ColId(0),
-                    src_val: ValueExpr::Slot(4),
+                    src_val: ValueExpr::Slot(5),
                     src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
                 Instruction::Write {
                     table: TableId(1),
                     row: RowExpr::Param(1),
                     col: ColId(0),
-                    src_val: ValueExpr::Slot(5),
+                    src_val: ValueExpr::Slot(6),
                     src_is_null: ValueExpr::Literal(Value::Bool(false)),
                 },
                 Instruction::Emit {

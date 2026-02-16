@@ -5,7 +5,7 @@ use p3_field::{PrimeCharacteristicRing, PrimeField32};
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
-use tabula_core::types::{Value, ValueType, zero_value};
+use tabula_core::{Value, ValueType, zero_value};
 
 use crate::field::{decode_u64_limbs, encode_u64_limbs};
 
@@ -13,7 +13,7 @@ use crate::field::{decode_u64_limbs, encode_u64_limbs};
 ///
 /// Width table:
 /// - Bool   → 1 FE (`{0, 1}`)
-/// - U64    → 3 FE (31+31+2 bit limbs)
+/// - U64    → 3 FE (30+30+4 bit limbs)
 /// - I64    → 3 FE (offset encoding: `val + 2^63` → 3-limb U64)
 /// - Bytes32 → 8 FE (4 LE bytes per FE, rejecting non-canonical chunks)
 #[derive(Clone, Debug)]
