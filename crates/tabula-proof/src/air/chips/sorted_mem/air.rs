@@ -23,11 +23,14 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
+use crate::air::builder::InteractionAirBuilder;
 use crate::air::columns::borrow_cols;
 use crate::air::gadgets::integer::{SHIFT_30_U32, expr_from_u32};
 use crate::air::gadgets::{
-    U64Limbs, constrain_is_real_prefix, constrain_is_zero, constrain_null_canon,
+    U64Limbs, constrain_is_real_prefix, constrain_is_zero, constrain_limb_halves,
+    constrain_null_canon,
 };
+use crate::air::interaction::{AirInteraction, InteractionKind};
 
 use super::columns::{GlobalSortedMemCols, sorted_mem_width};
 
@@ -41,7 +44,7 @@ impl<F, const W: usize> BaseAir<F> for GlobalSortedMemChip<W> {
     }
 }
 
-impl<AB: AirBuilder, const W: usize> Air<AB> for GlobalSortedMemChip<W> {
+impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for GlobalSortedMemChip<W> {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local_row = main.row_slice(0).expect("trace must have at least one row");
@@ -59,11 +62,21 @@ impl<AB: AirBuilder, const W: usize> Air<AB> for GlobalSortedMemChip<W> {
         constrain_init_format(builder, local);
         constrain_same_key_detection(builder, local, next, both_real.clone());
         constrain_segment_first_init(builder, local, next, both_real.clone());
+        constrain_first_of_segment(builder, local, next, both_real.clone());
         constrain_ordering(builder, local, next, both_real.clone());
         constrain_memory_transitions(builder, local, next, both_real.clone());
         // 9. Init-row uniqueness: implied by tau ordering (init has tau=0,
         //    next same-key row must have tau > 0 via StrictIneq). No extra constraint.
         constrain_write_set_extraction(builder, local, next, both_real);
+
+        constrain_range_check_halves(builder, local);
+
+        // ── LogUp buses ──
+        receive_memory(builder, local);
+        send_sorted_mem_meta(builder, local);
+        send_ssmc_membership(builder, local);
+        send_merge_write_set(builder, local);
+        send_range_checks(builder, local);
     }
 }
 
@@ -78,7 +91,7 @@ fn reconstruct_u64<AB: AirBuilder>(limbs: &U64Limbs<AB::Var>) -> AB::Expr {
         + limbs.limb2.clone().into() * shift_60
 }
 
-/// 1. Boolean constraints on 8 flag columns (is_real handled by is_real_prefix).
+/// 1. Boolean constraints on 10 flag columns (is_real handled by is_real_prefix).
 fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &GlobalSortedMemCols<AB::Var, W>,
@@ -91,6 +104,8 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder.assert_bool(local.has_written.clone());
     builder.assert_bool(local.tc_changed.clone());
     builder.assert_bool(local.r_changed.clone());
+    builder.assert_bool(local.is_first_of_segment.clone());
+    builder.assert_bool(local.meta_is_empty_old.clone());
 }
 
 /// 2. `is_real` prefix: monotonic 1→0 transition.
@@ -201,6 +216,171 @@ fn constrain_segment_first_init<AB: AirBuilder, const W: usize>(
         .when_first_row()
         .when(local.is_real.clone())
         .assert_zero(AB::Expr::ONE - local.is_init.clone().into());
+}
+
+/// First-of-segment derivation: `is_first_of_segment` marks the first row of each `(t,c)` group.
+///
+/// - First real row: always first-of-segment.
+/// - Transition: `next.is_first_of_segment = local.tc_changed` (when both real).
+fn constrain_first_of_segment<AB: AirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &GlobalSortedMemCols<AB::Var, W>,
+    next: &GlobalSortedMemCols<AB::Var, W>,
+    both_real: AB::Expr,
+) {
+    // First real row must be first-of-segment.
+    builder
+        .when_first_row()
+        .when(local.is_real.clone())
+        .assert_zero(AB::Expr::ONE - local.is_first_of_segment.clone().into());
+
+    // For real transitions: next.is_first_of_segment = local.tc_changed.
+    builder.when_transition().assert_zero(
+        both_real * (next.is_first_of_segment.clone().into() - local.tc_changed.clone().into()),
+    );
+}
+
+/// Range-check half-decomposition constraints.
+///
+/// Each 30-bit limb of `r` and `tau` is decomposed into two 15-bit halves.
+/// Constrains: `limb = lo + hi * 2^15` for all 4 decomposed limbs.
+///
+/// No `is_real` gating needed — on padding rows all values are zero,
+/// so `0 = 0 + 0 * 2^15` is trivially satisfied.
+fn constrain_range_check_halves<AB: AirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &GlobalSortedMemCols<AB::Var, W>,
+) {
+    constrain_limb_halves(builder, local.r.limb0.clone().into(), &local.r_l0_halves);
+    constrain_limb_halves(builder, local.r.limb1.clone().into(), &local.r_l1_halves);
+    constrain_limb_halves(
+        builder,
+        local.tau.limb0.clone().into(),
+        &local.tau_l0_halves,
+    );
+    constrain_limb_halves(
+        builder,
+        local.tau.limb1.clone().into(),
+        &local.tau_l1_halves,
+    );
+}
+
+/// C1 Memory bus receive: non-init rows receive from ExecutionChip.
+///
+/// Tuple: `(table_id, col_id, r[3], tau[3], is_write, val[W], val_is_null)`.
+/// Multiplicity: `is_real · (1 − is_init)`.
+fn receive_memory<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &GlobalSortedMemCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr =
+        local.is_real.clone().into() * (AB::Expr::ONE - local.is_init.clone().into());
+
+    let mut values: Vec<AB::Expr> = vec![
+        local.table_id.clone().into(),
+        local.col_id.clone().into(),
+        local.r.limb0.clone().into(),
+        local.r.limb1.clone().into(),
+        local.r.limb2.clone().into(),
+        local.tau.limb0.clone().into(),
+        local.tau.limb1.clone().into(),
+        local.tau.limb2.clone().into(),
+        local.is_write.clone().into(),
+    ];
+    for i in 0..W {
+        values.push(local.val[i].clone().into());
+    }
+    values.push(local.val_is_null.clone().into());
+
+    builder.receive(AirInteraction {
+        values,
+        multiplicity,
+        kind: InteractionKind::Memory,
+    });
+}
+
+/// SortedMemMeta bus send: one interaction per `(t,c)` segment.
+///
+/// Tuple: `(table_id, col_id, meta_is_empty_old)`.
+/// Multiplicity: `is_real · is_first_of_segment`.
+fn send_sorted_mem_meta<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &GlobalSortedMemCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr =
+        local.is_real.clone().into() * local.is_first_of_segment.clone().into();
+
+    builder.send(AirInteraction {
+        values: vec![
+            local.table_id.clone().into(),
+            local.col_id.clone().into(),
+            local.meta_is_empty_old.clone().into(),
+        ],
+        multiplicity,
+        kind: InteractionKind::SortedMemMeta,
+    });
+}
+
+/// C2 SsmcMembership bus send: init rows for non-empty columns with non-null values.
+///
+/// Tuple: `(table_id, col_id, r_l0, r_l1, r_l2, val[0..W])`.
+/// Multiplicity: `is_real · is_init · (1 − val_is_null) · (1 − meta_is_empty_old)`.
+fn send_ssmc_membership<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &GlobalSortedMemCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr = local.is_real.clone().into()
+        * local.is_init.clone().into()
+        * (AB::Expr::ONE - local.val_is_null.clone().into())
+        * (AB::Expr::ONE - local.meta_is_empty_old.clone().into());
+
+    let mut values: Vec<AB::Expr> = vec![
+        local.table_id.clone().into(),
+        local.col_id.clone().into(),
+        local.r.limb0.clone().into(),
+        local.r.limb1.clone().into(),
+        local.r.limb2.clone().into(),
+    ];
+    for i in 0..W {
+        values.push(local.val[i].clone().into());
+    }
+
+    builder.send(AirInteraction {
+        values,
+        multiplicity,
+        kind: InteractionKind::SsmcMembership,
+    });
+}
+
+/// C4 MergeWriteSet bus send: write-set extraction rows.
+///
+/// Tuple: `(table_id, col_id, r_l0, r_l1, r_l2, mem[0..W], mem_is_null)`.
+/// Multiplicity: `is_real · is_last_for_key · has_written`.
+fn send_merge_write_set<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &GlobalSortedMemCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr = local.is_real.clone().into()
+        * local.is_last_for_key.clone().into()
+        * local.has_written.clone().into();
+
+    let mut values: Vec<AB::Expr> = vec![
+        local.table_id.clone().into(),
+        local.col_id.clone().into(),
+        local.r.limb0.clone().into(),
+        local.r.limb1.clone().into(),
+        local.r.limb2.clone().into(),
+    ];
+    for i in 0..W {
+        values.push(local.mem[i].clone().into());
+    }
+    values.push(local.mem_is_null.clone().into());
+
+    builder.send(AirInteraction {
+        values,
+        multiplicity,
+        kind: InteractionKind::MergeWriteSet,
+    });
 }
 
 /// 7. Ordering: shared StrictIneq for r (key change) or tau (same key).
@@ -325,4 +505,45 @@ fn constrain_write_set_extraction<AB: AirBuilder, const W: usize>(
     builder.when_transition().assert_zero(
         both_real * same_key * next_not_init * (next.has_written.clone().into() - expected_next_hw),
     );
+}
+
+/// C8 RangeCheck bus sends: half-decomposed limbs of `r` and `tau`.
+///
+/// Sends 10 values per real row:
+/// - `r.limb0`: lo, hi (2 sends)
+/// - `r.limb1`: lo, hi (2 sends)
+/// - `r.limb2`: direct (1 send, 4-bit value fits in [0, 2^16))
+/// - `tau.limb0`: lo, hi (2 sends)
+/// - `tau.limb1`: lo, hi (2 sends)
+/// - `tau.limb2`: direct (1 send)
+///
+/// All with multiplicity `is_real`.
+fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &GlobalSortedMemCols<AB::Var, W>,
+) {
+    let mult: AB::Expr = local.is_real.clone().into();
+
+    // Helper: send a single value on the RangeCheck bus.
+    let mut send_rc = |val: AB::Expr| {
+        builder.send(AirInteraction {
+            values: vec![val],
+            multiplicity: mult.clone(),
+            kind: InteractionKind::RangeCheck,
+        });
+    };
+
+    // r limbs
+    send_rc(local.r_l0_halves.lo.clone().into());
+    send_rc(local.r_l0_halves.hi.clone().into());
+    send_rc(local.r_l1_halves.lo.clone().into());
+    send_rc(local.r_l1_halves.hi.clone().into());
+    send_rc(local.r.limb2.clone().into());
+
+    // tau limbs
+    send_rc(local.tau_l0_halves.lo.clone().into());
+    send_rc(local.tau_l0_halves.hi.clone().into());
+    send_rc(local.tau_l1_halves.lo.clone().into());
+    send_rc(local.tau_l1_halves.hi.clone().into());
+    send_rc(local.tau.limb2.clone().into());
 }

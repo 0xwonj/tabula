@@ -8,7 +8,7 @@
 //! followed by access rows in timestamp order.
 
 use crate::air::columns::num_cols;
-use crate::air::gadgets::{IsZero, StrictIneq, U64Limbs};
+use crate::air::gadgets::{IsZero, LimbHalves, StrictIneq, U64Limbs};
 
 /// Column layout for the GlobalSortedMem AIR.
 ///
@@ -55,6 +55,22 @@ pub struct GlobalSortedMemCols<T, const W: usize> {
     pub is_last_for_key: T,
     /// 1 if any write has occurred for the current `(t, c, r)` key.
     pub has_written: T,
+
+    // ── Segment metadata (for SortedMemMeta bus) ──
+    /// 1 if this is the first row of a `(t,c)` segment.
+    pub is_first_of_segment: T,
+    /// For first-of-segment rows: 1 if the column was empty in the old state.
+    pub meta_is_empty_old: T,
+
+    // ── Range-check half-decomposition (for RangeCheck bus) ──
+    /// Half-decomposition of r.limb0 (15+15 bits).
+    pub r_l0_halves: LimbHalves<T>,
+    /// Half-decomposition of r.limb1 (15+15 bits).
+    pub r_l1_halves: LimbHalves<T>,
+    /// Half-decomposition of tau.limb0 (15+15 bits).
+    pub tau_l0_halves: LimbHalves<T>,
+    /// Half-decomposition of tau.limb1 (15+15 bits).
+    pub tau_l1_halves: LimbHalves<T>,
 
     // ── Ordering helpers ──
     /// 1 if `(table_id, col_id)` changes from this row to the next.

@@ -5,9 +5,8 @@
 //! - Clock/timestamp (access counter)
 //! - Access log (table, column, row key, value, null flag)
 //! - Operand witness values (source values for opcode semantics)
+//! - Operand-to-slot selectors (one-hot, constrained in M9-A1)
 //! - SSA slots (Layout A: full carry)
-//!
-//! Operand-to-slot linkage is NOT constrained in M8 (deferred to M9).
 
 use crate::air::columns::num_cols;
 use crate::air::gadgets::U64Limbs;
@@ -73,6 +72,9 @@ pub struct ExecutionCols<T, const W: usize> {
     pub clk: T,
     /// Timestamp for memory bus: tau = clk + 1 when is_access=1.
     pub tau: T,
+    /// Timestamp as u64 limbs for Memory bus fingerprint (3 limbs: 30+30+4).
+    /// Constrained: `is_access ⟹ tau = reconstruct(tau_limbs)`.
+    pub tau_limbs: U64Limbs<T>,
 
     // ── Access log (populated when is_access=1, zeros otherwise) ──
     /// Table identifier for the access.
@@ -97,6 +99,16 @@ pub struct ExecutionCols<T, const W: usize> {
     pub src2_val: [T; W],
     /// Condition value for Select (single boolean field element).
     pub cond_val: T,
+
+    // ── Operand-to-slot selectors (M9 A1) ──
+    /// One-hot: which slot src1 reads from.
+    pub src1_sel: [T; MAX_SLOTS],
+    /// One-hot: which slot src2 reads from.
+    pub src2_sel: [T; MAX_SLOTS],
+    /// One-hot: which slot cond reads from.
+    pub cond_sel: [T; MAX_SLOTS],
+    /// Null flag for src1 operand (must match slot_is_null of selected slot).
+    pub src1_is_null: T,
 
     // ── Arithmetic carry columns ──
     /// Carry from limb0 to limb1 in integer Add/Sub.

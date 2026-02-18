@@ -74,6 +74,51 @@ pub fn constrain_u64_decomposition<AB: AirBuilder>(
     builder.assert_eq(expected, reconstructed);
 }
 
+// ── LimbHalves ───────────────────────────────────────────────────────────────
+
+/// 15-bit mask for half-limb extraction.
+pub(crate) const MASK_15: u64 = (1 << 15) - 1;
+
+/// 2^15 as u32 (fits in BabyBear).
+pub(crate) const SHIFT_15_U32: u32 = 1 << 15;
+
+/// Half-decomposition of a 30-bit limb into two 15-bit halves.
+///
+/// - `lo`: bits [0..15), range [0, 2^15)
+/// - `hi`: bits [15..30), range [0, 2^15)
+///
+/// Reconstruction: `limb = lo + hi * 2^15`.
+///
+/// Each half fits in [0, 2^16) and is sent to the RangeCheck bus.
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct LimbHalves<T> {
+    /// Lower 15 bits of the limb.
+    pub lo: T,
+    /// Upper 15 bits of the limb.
+    pub hi: T,
+}
+
+impl LimbHalves<BabyBear> {
+    /// Fill half columns from a 30-bit limb value.
+    pub fn populate(&mut self, limb_val: u32) {
+        debug_assert!(limb_val < (1 << 30), "limb value must be < 2^30");
+        self.lo = BabyBear::new(limb_val & MASK_15 as u32);
+        self.hi = BabyBear::new(limb_val >> 15);
+    }
+}
+
+/// Constrain that `limb = halves.lo + halves.hi * 2^15`.
+pub fn constrain_limb_halves<AB: AirBuilder>(
+    builder: &mut AB,
+    limb: AB::Expr,
+    halves: &LimbHalves<AB::Var>,
+) {
+    let shift_15: AB::Expr = expr_from_u32::<AB>(SHIFT_15_U32);
+    let reconstructed: AB::Expr = halves.lo.clone().into() + halves.hi.clone().into() * shift_15;
+    builder.assert_eq(limb, reconstructed);
+}
+
 // ── IsZero ────────────────────────────────────────────────────────────────────
 
 /// Is-zero gadget: determines whether a field element is zero.

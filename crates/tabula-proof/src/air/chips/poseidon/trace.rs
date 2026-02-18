@@ -10,8 +10,12 @@ use p3_matrix::dense::RowMajorMatrix;
 use crate::air::columns::borrow_cols_mut;
 use crate::air::gadgets::bool_fe;
 
-use super::columns::{PoseidonCols, poseidon_width};
-use super::constants::{TOTAL_ROUNDS, WIDTH, is_full_round, poseidon2_permutation};
+use super::columns::{
+    POSEIDON_PREPROCESSED_WIDTH, PoseidonCols, PoseidonPreprocessedCols, poseidon_width,
+};
+use super::constants::{
+    TOTAL_ROUNDS, WIDTH, is_full_round, poseidon2_permutation, round_constants,
+};
 
 /// Generate a Poseidon2 trace from a list of permutation inputs.
 ///
@@ -24,8 +28,11 @@ pub fn generate_poseidon_trace(inputs: &[[BabyBear; WIDTH]]) -> RowMajorMatrix<B
     let mut values = vec![BabyBear::ZERO; num_rows * width];
 
     for (perm_idx, input) in inputs.iter().enumerate() {
-        let (rounds, _output) = poseidon2_permutation(*input);
+        let (rounds, output) = poseidon2_permutation(*input);
         debug_assert_eq!(rounds.len(), TOTAL_ROUNDS);
+
+        // perm_output = first 8 elements of the permutation output (digest).
+        let perm_output: [BabyBear; 8] = core::array::from_fn(|j| output[j]);
 
         for (r, round_data) in rounds.iter().enumerate() {
             let row_idx = perm_idx * TOTAL_ROUNDS + r;
@@ -42,8 +49,36 @@ pub fn generate_poseidon_trace(inputs: &[[BabyBear; WIDTH]]) -> RowMajorMatrix<B
             cols.is_full_round = bool_fe(is_full_round(r));
             cols.is_first_round = bool_fe(r == 0);
             cols.is_last_round = bool_fe(r == TOTAL_ROUNDS - 1);
+            cols.perm_input = *input;
+            cols.perm_output = perm_output;
         }
     }
 
     RowMajorMatrix::new(values, width)
+}
+
+/// Generate the preprocessed trace for PoseidonChip.
+///
+/// Contains the expected round constants and `is_full_round` flag for each row.
+/// Cycles through the 21-round pattern for each permutation, with zero padding.
+/// Must be the same height as the main trace.
+pub fn generate_poseidon_preprocessed(num_perms: usize) -> RowMajorMatrix<BabyBear> {
+    let num_real = num_perms * TOTAL_ROUNDS;
+    let num_rows = (num_real + 1).next_power_of_two().max(2);
+    let mut values = vec![BabyBear::ZERO; num_rows * POSEIDON_PREPROCESSED_WIDTH];
+
+    for perm_idx in 0..num_perms {
+        for r in 0..TOTAL_ROUNDS {
+            let row_idx = perm_idx * TOTAL_ROUNDS + r;
+            let offset = row_idx * POSEIDON_PREPROCESSED_WIDTH;
+            let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+                borrow_cols_mut(&mut values[offset..offset + POSEIDON_PREPROCESSED_WIDTH]);
+
+            cols.rc = round_constants(r);
+            cols.is_full_round = bool_fe(is_full_round(r));
+        }
+    }
+    // Padding rows remain zero (rc=0, is_full_round=0).
+
+    RowMajorMatrix::new(values, POSEIDON_PREPROCESSED_WIDTH)
 }

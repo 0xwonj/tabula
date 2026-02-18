@@ -9,6 +9,7 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::air::columns::borrow_cols_mut;
 use crate::air::gadgets::bool_fe;
+use crate::air::gadgets::integer::MASK_30;
 
 use super::columns::{GlobalMergeCols, merge_width};
 
@@ -61,6 +62,45 @@ pub struct MergeRow {
     pub hash_acc: [BabyBear; 8],
 }
 
+/// Compose the 16-element Poseidon input for a Merge hash chain step.
+///
+/// - First-in-new: `[0x00, table_id, col_id, key[3], new_val[W], 0..]`
+/// - Continuation: `[prev_hash_acc[8], key[3], new_val[W], 0..]`
+fn compose_merge_perm_input(
+    row: &MergeRow,
+    is_first_in_new: bool,
+    prev_hash_acc: Option<&[BabyBear; 8]>,
+) -> [BabyBear; 16] {
+    let key_limbs = [
+        BabyBear::new((row.key & MASK_30) as u32),
+        BabyBear::new(((row.key >> 30) & MASK_30) as u32),
+        BabyBear::new((row.key >> 60) as u32),
+    ];
+
+    let mut input = [BabyBear::ZERO; 16];
+    if is_first_in_new {
+        input[0] = BabyBear::ZERO; // domain tag 0x00
+        input[1] = BabyBear::new(row.table_id);
+        input[2] = BabyBear::new(row.col_id as u32);
+        input[3] = key_limbs[0];
+        input[4] = key_limbs[1];
+        input[5] = key_limbs[2];
+        for (i, v) in row.new_val.iter().enumerate() {
+            input[6 + i] = *v;
+        }
+    } else {
+        let prev = prev_hash_acc.expect("continuation row must have prev_hash_acc");
+        input[..8].copy_from_slice(prev);
+        input[8] = key_limbs[0];
+        input[9] = key_limbs[1];
+        input[10] = key_limbs[2];
+        for (i, v) in row.new_val.iter().enumerate() {
+            input[11 + i] = *v;
+        }
+    }
+    input
+}
+
 /// Generate a GlobalMerge trace from pre-sorted merge rows.
 ///
 /// `rows` must be sorted by `(table_id, col_id, key)`.
@@ -77,6 +117,11 @@ pub fn generate_merge_trace<const W: usize>(rows: &[MergeRow]) -> RowMajorMatrix
     let num_real = rows.len();
     let num_rows = (num_real + 1).next_power_of_two().max(2);
     let mut values = vec![BabyBear::ZERO; num_rows * width];
+
+    // Track whether we've seen an in_new=1 row in the current segment.
+    let mut seen_in_new_in_segment = false;
+    // Track the previous hash_acc for continuation rows.
+    let mut prev_hash_acc: Option<[BabyBear; 8]> = None;
 
     for (i, row) in rows.iter().enumerate() {
         assert_eq!(row.old_val.len(), W, "old_val length mismatch");
@@ -108,14 +153,42 @@ pub fn generate_merge_trace<const W: usize>(rows: &[MergeRow]) -> RowMajorMatrix
         cols.in_new = bool_fe(row.in_new);
         cols.hash_acc = row.hash_acc;
 
-        // tc_changed: compare with next row.
-        if i + 1 < num_real {
+        // Detect segment boundary.
+        let is_new_segment = if i == 0 {
+            true
+        } else {
+            let prev = &rows[i - 1];
+            row.table_id != prev.table_id || row.col_id != prev.col_id
+        };
+        if is_new_segment {
+            seen_in_new_in_segment = false;
+            prev_hash_acc = None;
+        }
+
+        // is_first_in_new: first in_new=1 row in segment.
+        let is_first_in_new = row.in_new && !seen_in_new_in_segment;
+        cols.is_first_in_new = bool_fe(is_first_in_new);
+
+        // Compose perm_input for rows that participate in hashing (in_new=1).
+        if row.in_new {
+            cols.perm_input =
+                compose_merge_perm_input(row, is_first_in_new, prev_hash_acc.as_ref());
+            prev_hash_acc = Some(row.hash_acc);
+            seen_in_new_in_segment = true;
+        }
+        // Rows with in_new=0: perm_input stays zero (unconstrained, mult=0).
+
+        // tc_changed and is_last_segment: compare with next row.
+        let is_last_segment = if i + 1 < num_real {
             let nxt = &rows[i + 1];
             let tc_changed = row.table_id != nxt.table_id || row.col_id != nxt.col_id;
             cols.tc_changed = bool_fe(tc_changed);
+            tc_changed
         } else {
             cols.tc_changed = BabyBear::ONE;
-        }
+            true // last real row is always last of segment
+        };
+        cols.is_last_segment = bool_fe(is_last_segment);
     }
 
     populate_ordering_witnesses::<W>(rows, num_real, num_rows, width, &mut values);

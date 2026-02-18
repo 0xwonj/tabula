@@ -2,46 +2,30 @@
 
 DSL compiler for the Tabula kernel.
 
-Compiles `.tab` source files into Tabula IR (`Vec<TableSchema>` + `Vec<TxTypeDef>`).
+## Role
 
-## Pipeline
+Compiles `.tab` source files into Tabula IR (`Vec<TableSchema>` +
+`Vec<TxTypeDef>`) via a hand-rolled lexer, recursive-descent parser,
+and single-pass lowerer with type checking and slot allocation.
 
-```
-Source (.tab)
-    ↓
-  Lexer     → Vec<Token>
-    ↓
-  Parser    → AST (Vec<Item>)
-    ↓
-  Lowerer   → CompiledProgram { schemas, tx_types }
-```
+Zero parser-generator dependencies. Depends on `tabula-core` and `tabula-ir`.
 
-**Entry point**: `tabula_lang::compile(source) -> Result<CompiledProgram, Vec<CompileError>>`
+## Language Philosophy
 
-## Modules
+**The language IS the constraint.** No loops, no recursion, no branches.
+These are not missing features — they are design properties that enable
+ZK proving. If a construct cannot be proven, it is not expressible.
 
-| Module | Role |
-|--------|------|
-| `lexer` | Hand-rolled tokenizer, zero external dependencies |
-| `parser` | Recursive descent + Pratt expression parsing |
-| `lower` | AST → IR lowering with type checking and slot allocation |
-| `ast` | AST node types |
-| `token` | Token types and keywords |
-| `span` | Source location tracking |
-| `error` | `CompileError` with span information |
+**One binding, one slot.** Every `let` creates an immutable variable that
+maps 1:1 to an IR SSA slot. No reassignment, no shadowing. The
+developer's mental model of variable liveness matches the machine's.
 
-## Language Design
+**Cell addressing is first-class.** `table[row].col` — the developer
+always knows which table, which row, which column. No query planner,
+no implicit scan. One expression = one cell.
 
-- No loops, no recursion, no branches (flat instruction sequence)
-- Immutable bindings (`let x = ...`) map 1:1 to SSA slots
-- Cell addressing: `table[row].col`
-- Explicit Read/Write separation
-- `assert` as the only control mechanism
-- Types inferred from schema boundaries
-- `select(cond, a, b)` for conditional values
+**Explicit state mutation.** Reads are `let` bindings; writes are
+assignments (`table[row].col = expr`). You can always tell by looking
+at a line whether it reads or writes state.
 
-See [`docs/dsl-philosophy.md`](../../docs/dsl-philosophy.md) for design rationale.
-
-## Dependencies
-
-Only `tabula-core` + `thiserror`. Zero parser generator dependencies.
+See [`docs/research/dsl-philosophy.md`](../../docs/research/dsl-philosophy.md) for full design rationale.

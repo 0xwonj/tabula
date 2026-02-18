@@ -34,6 +34,9 @@ pub struct SortedMemRow {
     pub val: Vec<BabyBear>,
     /// Value null flag.
     pub val_is_null: bool,
+    /// Whether the column was empty in the old state (for SortedMemMeta bus).
+    /// Only meaningful for first-of-segment rows; ignored otherwise.
+    pub meta_is_empty_old: bool,
 }
 
 /// Generate a GlobalSortedMem trace from pre-sorted witness rows.
@@ -79,12 +82,34 @@ pub fn generate_sorted_mem_trace<const W: usize>(
         cols.col_id = BabyBear::new(row.col_id as u32);
         cols.r.populate(row.row_key);
         cols.tau.populate(row.timestamp);
+
+        // Half-decomposition for range checks
+        let r_l0 = (row.row_key & MASK_30) as u32;
+        let r_l1 = ((row.row_key >> 30) & MASK_30) as u32;
+        cols.r_l0_halves.populate(r_l0);
+        cols.r_l1_halves.populate(r_l1);
+        let tau_l0 = (row.timestamp & MASK_30) as u32;
+        let tau_l1 = ((row.timestamp >> 30) & MASK_30) as u32;
+        cols.tau_l0_halves.populate(tau_l0);
+        cols.tau_l1_halves.populate(tau_l1);
         cols.is_init = bool_fe(row.is_init);
         cols.is_write = bool_fe(row.is_write);
         for (j, v) in row.val.iter().enumerate() {
             cols.val[j] = *v;
         }
         cols.val_is_null = bool_fe(row.val_is_null);
+
+        // Determine if this is the start of a new (t,c) segment.
+        let is_first_of_segment = if i == 0 {
+            true
+        } else {
+            let prev = &rows[i - 1];
+            row.table_id != prev.table_id || row.col_id != prev.col_id
+        };
+        cols.is_first_of_segment = bool_fe(is_first_of_segment);
+        if is_first_of_segment {
+            cols.meta_is_empty_old = bool_fe(row.meta_is_empty_old);
+        }
 
         // Determine if this is the start of a new key.
         let is_new_key = if i == 0 {

@@ -48,9 +48,23 @@ pub struct GlobalMergeCols<T, const W: usize> {
     /// 1 if this entry is in NewList, 0 if deleted.
     pub in_new: T,
 
-    // ── Hash accumulator (NOT constrained in M8) ──
+    // ── Hash accumulator ──
     /// Running hash of NewList entries (8 field elements).
     pub hash_acc: [T; 8],
+
+    // ── Hash chain Poseidon input (C5 PoseidonPermutation bus) ──
+    /// Composed 16-element Poseidon input for the NewList hash chain.
+    /// First-in-new entry: `[0x00, t, c, key[3], new_val[W], 0..]`.
+    /// Continuation: `[prev_hash_acc[8], key[3], new_val[W], 0..]`.
+    /// Rows with `in_new=0` are unconstrained (multiplicity = 0).
+    pub perm_input: [T; 16],
+    /// 1 if this is the first `in_new=1` row of the segment.
+    /// Prover witness; soundness from LogUp (wrong composition → Poseidon mismatch).
+    pub is_first_in_new: T,
+
+    // ── Segment boundary ──
+    /// 1 if this is the last row of a `(t,c)` segment (for CommitmentVerification bus).
+    pub is_last_segment: T,
 
     // ── Ordering gadgets ──
     /// Proves `key < next_key` within same segment.

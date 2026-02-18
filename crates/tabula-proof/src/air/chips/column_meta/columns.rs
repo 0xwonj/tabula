@@ -33,6 +33,9 @@ pub struct ColumnMetaCols<T> {
     pub is_empty_new: T,
     /// Column was modified in this batch.
     pub is_touched: T,
+    /// Whether this column has a GlobalSortedMem segment (prover witness).
+    /// LogUp enforces consistency: must be 1 iff SortedMem has a matching `(t,c)` segment.
+    pub has_sorted_mem: T,
     // ── Helper witness columns for strict lex ordering (M7 upgrade) ──
     /// IsZero gadget for `(table_id_next - table_id)`.
     pub table_diff_iz: IsZero<T>,

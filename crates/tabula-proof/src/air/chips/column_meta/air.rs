@@ -22,8 +22,10 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
+use crate::air::builder::InteractionAirBuilder;
 use crate::air::columns::borrow_cols;
 use crate::air::gadgets::{constrain_is_real_prefix, constrain_is_zero};
+use crate::air::interaction::{AirInteraction, InteractionKind};
 
 use super::columns::{COLUMN_META_WIDTH, ColumnMetaCols, DIGEST_WIDTH};
 
@@ -37,7 +39,7 @@ impl<F> BaseAir<F> for ColumnMetaChip {
     }
 }
 
-impl<AB: AirBuilder> Air<AB> for ColumnMetaChip {
+impl<AB: InteractionAirBuilder> Air<AB> for ColumnMetaChip {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local_row = main.row_slice(0).expect("trace must have at least one row");
@@ -120,5 +122,96 @@ impl<AB: AirBuilder> Air<AB> for ColumnMetaChip {
                 * local.is_touched.clone().into()
                 * local.is_empty_new.clone().into(),
         );
+
+        // ── 7. has_sorted_mem boolean ──
+        builder.assert_bool(local.has_sorted_mem.clone());
+
+        // ── LogUp buses ──
+        receive_sorted_mem_meta(builder, local);
+        receive_commitment_verification_old(builder, local);
+        receive_commitment_verification_new(builder, local);
     }
+}
+
+/// SortedMemMeta bus receive for ColumnMeta.
+///
+/// Tuple: `(table_id, col_id, is_empty_old)`.
+/// Multiplicity: `is_real · has_sorted_mem`.
+fn receive_sorted_mem_meta<AB: InteractionAirBuilder>(
+    builder: &mut AB,
+    local: &ColumnMetaCols<AB::Var>,
+) {
+    let multiplicity: AB::Expr = local.is_real.clone().into() * local.has_sorted_mem.clone().into();
+
+    builder.receive(AirInteraction {
+        values: vec![
+            local.table_id.clone().into(),
+            local.col_id.clone().into(),
+            local.is_empty_old.clone().into(),
+        ],
+        multiplicity,
+        kind: InteractionKind::SortedMemMeta,
+    });
+}
+
+/// C6 CommitmentVerification bus receive for Com_old.
+///
+/// Tuple: `(table_id, col_id, 0, is_touched, com_old[0..8])`.
+/// Multiplicity: `is_real · (1 − tag) · (1 − is_empty_old)`.
+///
+/// Only SSMC-tagged (tag=0), non-empty-old columns have SSMC data to verify.
+fn receive_commitment_verification_old<AB: InteractionAirBuilder>(
+    builder: &mut AB,
+    local: &ColumnMetaCols<AB::Var>,
+) {
+    let not_tag: AB::Expr = AB::Expr::ONE - local.tag.clone().into();
+    let not_empty_old: AB::Expr = AB::Expr::ONE - local.is_empty_old.clone().into();
+    let multiplicity: AB::Expr = local.is_real.clone().into() * not_tag * not_empty_old;
+
+    let mut values: Vec<AB::Expr> = vec![
+        local.table_id.clone().into(),
+        local.col_id.clone().into(),
+        AB::Expr::ZERO, // comm_type = 0 (Com_old)
+        local.is_touched.clone().into(),
+    ];
+    for j in 0..DIGEST_WIDTH {
+        values.push(local.com_old[j].clone().into());
+    }
+
+    builder.receive(AirInteraction {
+        values,
+        multiplicity,
+        kind: InteractionKind::CommitmentVerification,
+    });
+}
+
+/// C6 CommitmentVerification bus receive for Com_new.
+///
+/// Tuple: `(table_id, col_id, 1, is_touched, com_new[0..8])`.
+/// Multiplicity: `is_real · (1 − tag) · is_touched`.
+///
+/// Only SSMC-tagged, touched columns have Merge data producing Com_new.
+fn receive_commitment_verification_new<AB: InteractionAirBuilder>(
+    builder: &mut AB,
+    local: &ColumnMetaCols<AB::Var>,
+) {
+    let not_tag: AB::Expr = AB::Expr::ONE - local.tag.clone().into();
+    let multiplicity: AB::Expr =
+        local.is_real.clone().into() * not_tag * local.is_touched.clone().into();
+
+    let mut values: Vec<AB::Expr> = vec![
+        local.table_id.clone().into(),
+        local.col_id.clone().into(),
+        AB::Expr::ONE, // comm_type = 1 (Com_new)
+        local.is_touched.clone().into(),
+    ];
+    for j in 0..DIGEST_WIDTH {
+        values.push(local.com_new[j].clone().into());
+    }
+
+    builder.receive(AirInteraction {
+        values,
+        multiplicity,
+        kind: InteractionKind::CommitmentVerification,
+    });
 }

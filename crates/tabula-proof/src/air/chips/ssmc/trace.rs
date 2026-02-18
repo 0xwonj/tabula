@@ -10,6 +10,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use super::columns::{GlobalSsmcCols, ssmc_width};
 use crate::air::columns::borrow_cols_mut;
 use crate::air::gadgets::bool_fe;
+use crate::air::gadgets::integer::MASK_30;
 
 /// A flat row for building the SSMC trace.
 ///
@@ -26,6 +27,51 @@ pub struct SsmcEntry {
     pub value: Vec<BabyBear>,
     /// Running Poseidon hash chain accumulator (precomputed).
     pub hash_acc: [BabyBear; 8],
+    /// 1 if this entry is looked up by a SortedMem init row (C2 receive).
+    pub mult_witness: bool,
+    /// 1 if this segment's column is touched in the batch (C3 send).
+    pub segment_is_touched: bool,
+}
+
+/// Compose the 16-element Poseidon input for an SSMC hash chain step.
+///
+/// - First entry: `[0x00, table_id, col_id, key[3], value[W], 0..]`
+/// - Continuation: `[prev_hash_acc[8], key[3], value[W], 0..]`
+fn compose_ssmc_perm_input(
+    entry: &SsmcEntry,
+    is_first: bool,
+    prev_hash_acc: Option<&[BabyBear; 8]>,
+) -> [BabyBear; 16] {
+    let key_limbs = [
+        BabyBear::new((entry.key & MASK_30) as u32),
+        BabyBear::new(((entry.key >> 30) & MASK_30) as u32),
+        BabyBear::new((entry.key >> 60) as u32),
+    ];
+
+    let mut input = [BabyBear::ZERO; 16];
+    if is_first {
+        // [0x00, table_id, col_id, key[3], value[W], 0..]
+        input[0] = BabyBear::ZERO; // domain tag 0x00
+        input[1] = BabyBear::new(entry.table_id);
+        input[2] = BabyBear::new(entry.col_id as u32);
+        input[3] = key_limbs[0];
+        input[4] = key_limbs[1];
+        input[5] = key_limbs[2];
+        for (i, v) in entry.value.iter().enumerate() {
+            input[6 + i] = *v;
+        }
+    } else {
+        // [prev_hash_acc[8], key[3], value[W], 0..]
+        let prev = prev_hash_acc.expect("continuation row must have prev_hash_acc");
+        input[..8].copy_from_slice(prev);
+        input[8] = key_limbs[0];
+        input[9] = key_limbs[1];
+        input[10] = key_limbs[2];
+        for (i, v) in entry.value.iter().enumerate() {
+            input[11 + i] = *v;
+        }
+    }
+    input
 }
 
 /// Generate a GlobalSSMC trace from pre-sorted SSMC entries.
@@ -67,6 +113,20 @@ pub fn generate_ssmc_trace<const W: usize>(entries: &[SsmcEntry]) -> RowMajorMat
         }
         cols.hash_acc = entry.hash_acc;
 
+        // Compose perm_input for hash chain.
+        let is_first_entry = if i == 0 {
+            true
+        } else {
+            let prev = &entries[i - 1];
+            entry.table_id != prev.table_id || entry.col_id != prev.col_id
+        };
+        let prev_hash = if is_first_entry {
+            None
+        } else {
+            Some(&entries[i - 1].hash_acc)
+        };
+        cols.perm_input = compose_ssmc_perm_input(entry, is_first_entry, prev_hash);
+
         // Determine segment boundaries.
         let is_first = if i == 0 {
             true
@@ -94,6 +154,10 @@ pub fn generate_ssmc_trace<const W: usize>(entries: &[SsmcEntry]) -> RowMajorMat
             // Last real row: next is padding.
             cols.tc_changed = BabyBear::ONE;
         }
+
+        // LogUp witness columns.
+        cols.mult_witness = bool_fe(entry.mult_witness);
+        cols.segment_is_touched = bool_fe(entry.segment_is_touched);
     }
 
     populate_ordering_witnesses::<W>(entries, num_real, num_rows, width, &mut values);

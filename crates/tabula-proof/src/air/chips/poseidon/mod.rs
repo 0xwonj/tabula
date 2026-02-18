@@ -12,6 +12,9 @@ pub mod constants;
 pub mod trace;
 
 pub use air::PoseidonChip;
-pub use columns::{POSEIDON_WIDTH, PoseidonCols, poseidon_width};
+pub use columns::{
+    POSEIDON_PREPROCESSED_WIDTH, POSEIDON_WIDTH, PoseidonCols, PoseidonPreprocessedCols,
+    poseidon_width,
+};
 pub use constants::WIDTH as POSEIDON_PERM_WIDTH;
-pub use trace::generate_poseidon_trace;
+pub use trace::{generate_poseidon_preprocessed, generate_poseidon_trace};

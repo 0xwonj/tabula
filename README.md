@@ -8,7 +8,9 @@ avoiding the ISA overhead of general-purpose zkVMs like RISC-V.
 ## Architecture
 
 ```
-tabula-core           Types, traits, IR, errors
+tabula-core           Types, traits, errors
+    ↑
+tabula-ir             IR definitions, SSA validation, normal form
     ↑
 tabula-executor       Deterministic execution engine
     ↑
@@ -29,20 +31,21 @@ injected at the call site.
 
 | Crate | Role |
 |-------|------|
-| [`tabula-core`](crates/tabula-core/) | Interfaces — types, traits, IR, errors |
-| [`tabula-executor`](crates/tabula-executor/) | Execution — interpreter, overlay, batch, NF validation |
+| [`tabula-core`](crates/tabula-core/) | Interfaces — types, traits, errors |
+| [`tabula-ir`](crates/tabula-ir/) | IR — instructions, tx type defs, SSA/NF validation |
+| [`tabula-executor`](crates/tabula-executor/) | Execution — interpreter, overlay, batch |
 | [`tabula-lang`](crates/tabula-lang/) | Compiler — `.tab` DSL to IR |
-| [`tabula-commitment`](crates/tabula-commitment/) | Crypto — protocol-level cryptographic primitives |
-| [`tabula-proof`](crates/tabula-proof/) | Proving — STARK proof generation and verification |
+| [`tabula-commitment`](crates/tabula-commitment/) | Crypto — Poseidon, SMT, SSMC (out-of-circuit) |
+| [`tabula-proof`](crates/tabula-proof/) | Proving — STARK proof generation via Plonky3 |
 | [`tabula-cli`](crates/tabula-cli/) | CLI — JSON-based batch execution and inspection |
 
 ## Key Specs
 
 | Document | Version | Scope |
 |----------|---------|-------|
-| [`semantics-spec.md`](docs/semantics-spec.md) | v0.2.1 | Core IR contract, execution model, normal form |
-| [`proof-spec.md`](docs/proof-spec.md) | v0.9 | AIR constraints, LogUp, trace layout, STARK |
-| [`architecture.md`](docs/architecture.md) | v0.4.4 | Crate structure, data flow, phasing |
+| [`semantics-spec.md`](docs/spec/semantics-spec.md) | v0.2.1 | Core IR contract, execution model, normal form |
+| [`proof-spec.md`](docs/spec/proof-spec.md) | v0.9 | AIR constraints, LogUp, trace layout, STARK |
+| [`architecture.md`](docs/design/architecture.md) | v0.4.4 | Crate structure, data flow, phasing |
 
 ## Building
 

@@ -63,6 +63,12 @@ pub struct InstructionRecord {
     pub src2_val: Vec<BabyBear>,
     /// Condition value for Select (boolean).
     pub cond_val: bool,
+    /// Which slot src1 reads from (for operand-to-slot linkage).
+    pub src1_slot_idx: Option<usize>,
+    /// Which slot src2 reads from (for operand-to-slot linkage).
+    pub src2_slot_idx: Option<usize>,
+    /// Which slot cond reads from (for operand-to-slot linkage).
+    pub cond_slot_idx: Option<usize>,
     /// For access instructions: table id.
     pub access_t: Option<u32>,
     /// For access instructions: column id.
@@ -116,7 +122,9 @@ pub fn generate_execution_trace<const W: usize>(
         cols.clk = BabyBear::new(clk);
 
         if is_access {
+            let tau_val = clk as u64 + 1;
             cols.tau = BabyBear::new(clk + 1);
+            cols.tau_limbs.populate(tau_val);
             clk += 1;
 
             // Access log
@@ -155,6 +163,21 @@ pub fn generate_execution_trace<const W: usize>(
         }
         if rec.opcode == Opcode::Mul {
             cols.arith_is_mul = BabyBear::ONE;
+        }
+
+        // Operand-to-slot selectors
+        if let Some(s) = rec.src1_slot_idx {
+            assert!(s < MAX_SLOTS, "src1_slot_idx {s} >= MAX_SLOTS");
+            cols.src1_sel[s] = BabyBear::ONE;
+            cols.src1_is_null = slot_nulls[s];
+        }
+        if let Some(s) = rec.src2_slot_idx {
+            assert!(s < MAX_SLOTS, "src2_slot_idx {s} >= MAX_SLOTS");
+            cols.src2_sel[s] = BabyBear::ONE;
+        }
+        if let Some(s) = rec.cond_slot_idx {
+            assert!(s < MAX_SLOTS, "cond_slot_idx {s} >= MAX_SLOTS");
+            cols.cond_sel[s] = BabyBear::ONE;
         }
 
         // Arithmetic carry (for Add/Sub)

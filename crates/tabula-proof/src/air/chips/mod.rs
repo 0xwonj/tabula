@@ -12,7 +12,9 @@ pub mod range_check;
 pub mod sorted_mem;
 pub mod ssmc;
 
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, BaseAir};
+
+use super::builder::InteractionAirBuilder;
 
 use column_meta::ColumnMetaChip;
 use execution::ExecutionChip;
@@ -22,29 +24,21 @@ use range_check::RangeCheckChip;
 use sorted_mem::GlobalSortedMemChip;
 use ssmc::GlobalSsmcChip;
 
-use super::bus::InteractionDecl;
-
 /// Metadata interface for AIR chips.
 ///
-/// Object-safe trait for introspection: chip name and declared interactions.
-/// Used by future dynamic chip dispatch and debugging infrastructure.
+/// Object-safe trait for introspection. Chip name is used by debug
+/// checking and error messages.
+///
+/// LogUp interactions are declared via [`super::builder::InteractionAirBuilder`]
+/// during `eval()`, not via this trait.
 pub trait ChipMeta {
     /// Human-readable chip name (e.g. `"ColumnMeta"`).
     fn chip_name(&self) -> &'static str;
-
-    /// LogUp interaction declarations for this chip.
-    ///
-    /// Empty until interactions are wired in M9.
-    fn interactions(&self) -> Vec<InteractionDecl>;
 }
 
 impl ChipMeta for ColumnMetaChip {
     fn chip_name(&self) -> &'static str {
         "ColumnMeta"
-    }
-
-    fn interactions(&self) -> Vec<InteractionDecl> {
-        vec![]
     }
 }
 
@@ -52,22 +46,11 @@ impl ChipMeta for RangeCheckChip {
     fn chip_name(&self) -> &'static str {
         "RangeCheck"
     }
-
-    fn interactions(&self) -> Vec<InteractionDecl> {
-        // Wired in M9: RangeCheck receive.
-        vec![]
-    }
 }
 
 impl<const W: usize> ChipMeta for GlobalSortedMemChip<W> {
     fn chip_name(&self) -> &'static str {
         "GlobalSortedMem"
-    }
-
-    fn interactions(&self) -> Vec<InteractionDecl> {
-        // Wired in M9: Memory receive, SsmcMembership send (init rows),
-        // MergeCompleteness send (write-set), ColumnMetaJoin send.
-        vec![]
     }
 }
 
@@ -75,23 +58,11 @@ impl<const W: usize> ChipMeta for GlobalSsmcChip<W> {
     fn chip_name(&self) -> &'static str {
         "GlobalSSMC"
     }
-
-    fn interactions(&self) -> Vec<InteractionDecl> {
-        // Wired in M9: SsmcMembership receive, MergeCompleteness OldList send,
-        // ColumnMetaJoin send, hash chain via PoseidonPermutation.
-        vec![]
-    }
 }
 
 impl<const W: usize> ChipMeta for GlobalMergeChip<W> {
     fn chip_name(&self) -> &'static str {
         "GlobalMerge"
-    }
-
-    fn interactions(&self) -> Vec<InteractionDecl> {
-        // Wired in M9: MergeCompleteness receive (OldList + WriteSet sub-buses),
-        // ColumnMetaJoin send, hash chain via PoseidonPermutation.
-        vec![]
     }
 }
 
@@ -99,22 +70,11 @@ impl ChipMeta for PoseidonChip {
     fn chip_name(&self) -> &'static str {
         "Poseidon"
     }
-
-    fn interactions(&self) -> Vec<InteractionDecl> {
-        // Wired in M9: PoseidonPermutation bus, receive from SSMC/Merge/Hash.
-        vec![]
-    }
 }
 
 impl<const W: usize> ChipMeta for ExecutionChip<W> {
     fn chip_name(&self) -> &'static str {
         "Execution"
-    }
-
-    fn interactions(&self) -> Vec<InteractionDecl> {
-        // Wired in M9: Memory bus send (is_access rows),
-        // RangeCheck send (limb ranges), operand-slot linkage.
-        vec![]
     }
 }
 
@@ -158,10 +118,6 @@ impl ChipMeta for TabulaAir {
     fn chip_name(&self) -> &'static str {
         dispatch_tabula_air!(self, chip_name)
     }
-
-    fn interactions(&self) -> Vec<InteractionDecl> {
-        dispatch_tabula_air!(self, interactions)
-    }
 }
 
 impl<F> BaseAir<F> for TabulaAir {
@@ -178,7 +134,7 @@ impl<F> BaseAir<F> for TabulaAir {
     }
 }
 
-impl<AB: AirBuilder> Air<AB> for TabulaAir {
+impl<AB: InteractionAirBuilder> Air<AB> for TabulaAir {
     fn eval(&self, builder: &mut AB) {
         dispatch_tabula_air!(self, eval, builder)
     }

@@ -669,7 +669,7 @@ fn assert_column_meta_air_valid(
 ) {
     let wg = make_wg();
     let witness = wg.generate(result, schema, states).unwrap();
-    let trace = generate_column_meta_trace(&witness.column_metas);
+    let trace = generate_column_meta_trace(&witness.column_metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace)
         .expect("ColumnMeta AIR constraints should pass for witness-generated trace");
 }
@@ -843,6 +843,7 @@ fn flatten_to_sorted_mem_rows(witness: &BatchWitness<MockFieldHasher>) -> Vec<So
     let mut rows = Vec::new();
 
     for cw in &witness.columns {
+        let is_empty_old = cw.meta.is_empty_old;
         for init in &cw.init_rows {
             rows.push(SortedMemRow {
                 table_id: init.key.table.0,
@@ -853,6 +854,7 @@ fn flatten_to_sorted_mem_rows(witness: &BatchWitness<MockFieldHasher>) -> Vec<So
                 is_write: false,
                 val: init.value_fes.clone(),
                 val_is_null: init.val_is_null,
+                meta_is_empty_old: is_empty_old,
             });
         }
         for access in &cw.access_rows {
@@ -865,6 +867,7 @@ fn flatten_to_sorted_mem_rows(witness: &BatchWitness<MockFieldHasher>) -> Vec<So
                 is_write: access.is_write,
                 val: access.value_fes.clone(),
                 val_is_null: access.val_is_null,
+                meta_is_empty_old: false,
             });
         }
     }

@@ -51,6 +51,20 @@ pub struct GlobalSsmcCols<T, const W: usize> {
     pub col_diff_iz: IsZero<T>,
     /// 1 if `(table_id, col_id)` changes from this row to the next.
     pub tc_changed: T,
+
+    // ── Hash chain Poseidon input (C5 PoseidonPermutation bus) ──
+    /// Composed 16-element Poseidon input for the hash chain.
+    /// First entry: `[0x00, t, c, key[3], value[W], 0..]`.
+    /// Continuation: `[prev_hash_acc[8], key[3], value[W], 0..]`.
+    pub perm_input: [T; 16],
+
+    // ── LogUp witness columns ──
+    /// Multiplicity witness for SsmcMembership bus (C2 receive).
+    /// 1 if this entry is looked up by a SortedMem init row, 0 otherwise.
+    pub mult_witness: T,
+    /// Per-segment flag: 1 if this segment's column is touched in the batch.
+    /// Must be constant within a segment. Used by MergeOldList bus (C3 send).
+    pub segment_is_touched: T,
 }
 
 /// Compute the width of GlobalSsmcCols for a given value width.

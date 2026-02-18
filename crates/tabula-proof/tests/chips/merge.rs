@@ -139,6 +139,7 @@ fn invalid_delete_in_new_one() {
 
 #[test]
 fn invalid_hash_acc_changed_through_delete() {
+    // Two consecutive in_new=0 rows (deletes) — hash_acc must carry between them.
     let hash1 = [BabyBear::new(42); 8];
     let hash2 = [BabyBear::new(99); 8];
     let rows = vec![
@@ -152,7 +153,7 @@ fn invalid_hash_acc_changed_through_delete() {
         },
         MergeRow {
             hash_acc: hash2,
-            ..old_only_row(0, 0, 30, [3, 0, 0])
+            ..delete_row(0, 0, 30, [3, 0, 0])
         },
     ];
     let trace = generate_merge_trace::<3>(&rows);
@@ -249,5 +250,5 @@ fn soundness_tc_changed_forged() {
 
 #[test]
 fn standard_width() {
-    assert_eq!(MERGE_STANDARD_WIDTH, 34);
+    assert_eq!(MERGE_STANDARD_WIDTH, 52);
 }

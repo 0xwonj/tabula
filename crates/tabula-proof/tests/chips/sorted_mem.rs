@@ -135,6 +135,7 @@ fn invalid_read_wrong_value() {
             is_write: false,
             val: vec![BabyBear::new(999), BabyBear::new(2), BabyBear::new(3)],
             val_is_null: false,
+            meta_is_empty_old: false,
         },
     ];
     let trace = generate_sorted_mem_trace::<3>(&rows);
@@ -300,5 +301,5 @@ fn soundness_is_last_for_key_forged() {
 
 #[test]
 fn standard_width() {
-    assert_eq!(SORTED_MEM_STANDARD_WIDTH, 32);
+    assert_eq!(SORTED_MEM_STANDARD_WIDTH, 42);
 }

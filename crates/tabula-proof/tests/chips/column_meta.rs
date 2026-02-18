@@ -27,7 +27,7 @@ fn valid_three_real_rows_plus_padding() {
         meta_entry(0, 1, true, d3, d4),
         meta_entry(1, 0, true, d5, d6),
     ];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect("valid trace should pass");
 }
 
@@ -36,14 +36,14 @@ fn valid_single_real_row() {
     let d1 = distinct_digest(1);
     let d2 = distinct_digest(2);
     let metas = vec![meta_entry(0, 0, true, d1, d2)];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect("single row should pass");
 }
 
 #[test]
 fn valid_all_padding() {
     let metas: Vec<ColumnMeta> = vec![];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect("all-padding should pass");
 }
 
@@ -52,7 +52,7 @@ fn valid_untouched_com_equal() {
     let d1 = distinct_digest(1);
     // Untouched: com_new = com_old.
     let metas = vec![meta_entry(0, 0, false, d1, d1)];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect("untouched with equal coms should pass");
 }
 
@@ -70,7 +70,7 @@ fn valid_smt_tag() {
         is_empty_new: false,
         is_touched: true,
     }];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect("SMT tag=1 is valid boolean");
 }
 
@@ -87,7 +87,7 @@ fn valid_many_rows_different_tables() {
             )
         })
         .collect();
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect("many different tables should pass");
 }
 
@@ -104,7 +104,7 @@ fn valid_many_cols_same_table() {
             )
         })
         .collect();
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect("many cols same table should pass");
 }
 
@@ -115,7 +115,7 @@ fn invalid_boolean_tag_equals_2() {
     let d1 = distinct_digest(1);
     let d2 = distinct_digest(2);
     let metas = vec![meta_entry(0, 0, true, d1, d2)];
-    let mut trace = generate_column_meta_trace(&metas);
+    let mut trace = generate_column_meta_trace(&metas, &Default::default());
     // Set tag = 2 (invalid boolean).
     let tag_offset = 3; // is_real(0), table_id(1), col_id(2), tag(3)
     trace.values[tag_offset] = BabyBear::TWO;
@@ -132,7 +132,7 @@ fn invalid_is_real_prefix_zero_then_one() {
         meta_entry(0, 0, true, d1, d2),
         meta_entry(0, 1, true, d3, d4),
     ];
-    let mut trace = generate_column_meta_trace(&metas);
+    let mut trace = generate_column_meta_trace(&metas, &Default::default());
     // Set row 0 is_real = 0, row 1 is_real = 1 -> violates prefix.
     trace.values[0] = BabyBear::ZERO; // row 0, is_real
     debug_check(&ColumnMetaChip, &trace).expect_err("0->1 should fail is_real prefix");
@@ -148,7 +148,7 @@ fn invalid_duplicate_table_col() {
         meta_entry(0, 0, true, d1, d2),
         meta_entry(0, 0, true, d3, d4),
     ];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect_err("duplicate (t,c) should fail ordering");
 }
 
@@ -158,7 +158,7 @@ fn invalid_untouched_com_mismatch() {
     let d2 = distinct_digest(2);
     // Untouched but com_new != com_old.
     let metas = vec![meta_entry(0, 0, false, d1, d2)];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect_err("untouched with different coms should fail");
 }
 
@@ -177,7 +177,7 @@ fn valid_untouched_empty_preserved() {
         is_empty_new: true,
         is_touched: false,
     }];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect("untouched empty preserved");
 }
 
@@ -195,7 +195,7 @@ fn valid_empty_to_nonempty_transition() {
         is_empty_new: false,
         is_touched: true,
     }];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect("empty→non-empty transition");
 }
 
@@ -213,7 +213,7 @@ fn valid_nonempty_stays_nonempty() {
         is_empty_new: false,
         is_touched: true,
     }];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect("non-empty stays non-empty");
 }
 
@@ -230,7 +230,7 @@ fn invalid_untouched_empty_changed() {
         is_empty_new: false, // changed despite untouched!
         is_touched: false,
     }];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace).expect_err("untouched but empty flag changed");
 }
 
@@ -248,7 +248,7 @@ fn invalid_empty_stays_empty_when_touched() {
         is_empty_new: true, // should be 0 since touched + was empty
         is_touched: true,
     }];
-    let trace = generate_column_meta_trace(&metas);
+    let trace = generate_column_meta_trace(&metas, &Default::default());
     debug_check(&ColumnMetaChip, &trace)
         .expect_err("empty_old=1 ∧ touched=1 ⟹ empty_new must be 0");
 }
@@ -263,14 +263,14 @@ fn invalid_is_zero_soundness_forged_table_diff() {
         meta_entry(0, 0, true, d1, d2),
         meta_entry(1, 0, true, d3, d4),
     ];
-    let mut trace = generate_column_meta_trace(&metas);
+    let mut trace = generate_column_meta_trace(&metas, &Default::default());
 
     // Column layout: is_real(0), table_id(1), col_id(2), tag(3),
     //   com_old[8](4-11), com_new[8](12-19),
-    //   is_empty_old(20), is_empty_new(21), is_touched(22),
-    //   table_diff_iz.inv(23), table_diff_iz.is_zero(24),
-    //   col_diff_iz.inv(25), col_diff_iz.is_zero(26)
-    let table_diff_iz_is_zero_offset = 24;
+    //   is_empty_old(20), is_empty_new(21), is_touched(22), has_sorted_mem(23),
+    //   table_diff_iz.inv(24), table_diff_iz.is_zero(25),
+    //   col_diff_iz.inv(26), col_diff_iz.is_zero(27)
+    let table_diff_iz_is_zero_offset = 25;
     trace.values[table_diff_iz_is_zero_offset] = BabyBear::ONE;
     debug_check(&ColumnMetaChip, &trace)
         .expect_err("forged is_zero should fail IsZero constraint (val*is_zero!=0)");
@@ -280,5 +280,5 @@ fn invalid_is_zero_soundness_forged_table_diff() {
 
 #[test]
 fn column_meta_width() {
-    assert_eq!(COLUMN_META_WIDTH, 27);
+    assert_eq!(COLUMN_META_WIDTH, 28);
 }

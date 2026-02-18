@@ -200,5 +200,5 @@ fn soundness_tc_changed_forged() {
 
 #[test]
 fn standard_width() {
-    assert_eq!(SSMC_STANDARD_WIDTH, 27);
+    assert_eq!(SSMC_STANDARD_WIDTH, 45);
 }

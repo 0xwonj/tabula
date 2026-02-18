@@ -16,10 +16,12 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
+use crate::air::builder::InteractionAirBuilder;
 use crate::air::columns::borrow_cols;
 use crate::air::gadgets::constrain_is_real_prefix;
+use crate::air::interaction::{AirInteraction, InteractionKind};
 
-use super::columns::{PoseidonCols, poseidon_width};
+use super::columns::{PoseidonCols, PoseidonPreprocessedCols, poseidon_width};
 use super::constants::WIDTH;
 
 /// The Poseidon2 AIR chip.
@@ -32,7 +34,7 @@ impl<F> BaseAir<F> for PoseidonChip {
     }
 }
 
-impl<AB: AirBuilder> Air<AB> for PoseidonChip {
+impl<AB: InteractionAirBuilder> Air<AB> for PoseidonChip {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local_row = main.row_slice(0).expect("trace must have at least one row");
@@ -58,7 +60,12 @@ impl<AB: AirBuilder> Air<AB> for PoseidonChip {
         let layer_gate_partial: AB::Expr = is_real.clone() * not_full * not_last;
         constrain_linear_layer_full(builder, local, next, layer_gate_full);
         constrain_linear_layer_partial(builder, local, next, layer_gate_partial);
-        constrain_round_control(builder, local, next, both_real);
+        constrain_round_control(builder, local, next, both_real.clone());
+        constrain_perm_output(builder, local, next, is_real.clone(), both_real);
+        constrain_round_constants(builder, local, is_real.clone());
+
+        // ── LogUp bus ──
+        receive_poseidon_permutation(builder, local);
     }
 }
 
@@ -315,4 +322,129 @@ fn internal_linear_exprs<AB: AirBuilder>(
 ) -> [AB::Expr; WIDTH] {
     let sum: AB::Expr = input.iter().cloned().sum();
     core::array::from_fn(|i| input[i].clone() * diag[i].clone() + sum.clone())
+}
+
+// ── perm_output constraints ─────────────────────────────────────────────────
+
+/// Constrain `perm_input` and `perm_output` — carry + verification.
+///
+/// **perm_input** (raw pre-MDS input):
+/// 1. Carry: constant within a permutation (not last round → next equals local).
+/// 2. First-round verification: `state = external_linear_layer(perm_input)`.
+///
+/// **perm_output** (first 8 elements of permutation output):
+/// 3. Carry: constant within a permutation.
+/// 4. Last-round verification: `perm_output = external_linear_layer(sbox_out)[0..8]`.
+fn constrain_perm_output<AB: AirBuilder>(
+    builder: &mut AB,
+    local: &PoseidonCols<AB::Var>,
+    next: &PoseidonCols<AB::Var>,
+    is_real: AB::Expr,
+    both_real: AB::Expr,
+) {
+    let not_last: AB::Expr = AB::Expr::ONE - local.is_last_round.clone().into();
+
+    // 1-3. Carry: perm_input and perm_output constant within a permutation.
+    let carry_gate: AB::Expr = both_real * not_last;
+    for i in 0..WIDTH {
+        let diff: AB::Expr = next.perm_input[i].clone().into() - local.perm_input[i].clone().into();
+        builder
+            .when_transition()
+            .assert_zero(carry_gate.clone() * diff);
+    }
+    for j in 0..8 {
+        let diff: AB::Expr =
+            next.perm_output[j].clone().into() - local.perm_output[j].clone().into();
+        builder
+            .when_transition()
+            .assert_zero(carry_gate.clone() * diff);
+    }
+
+    // 2. First-round verification: state = external_linear_layer(perm_input).
+    let first_gate: AB::Expr = is_real.clone() * local.is_first_round.clone().into();
+    let perm_input_exprs: [AB::Expr; WIDTH] =
+        core::array::from_fn(|i| local.perm_input[i].clone().into());
+    let expected_state = external_linear_exprs::<AB>(perm_input_exprs);
+    for (i, exp) in expected_state.iter().enumerate() {
+        builder.assert_zero(first_gate.clone() * (local.state[i].clone().into() - exp.clone()));
+    }
+
+    // 4. Last-round verification: perm_output = external_linear_layer(sbox_out)[0..8].
+    let sbox_out: [AB::Expr; WIDTH] = core::array::from_fn(|i| {
+        let y2: AB::Expr = local.sbox_y2[i].clone().into();
+        let y3: AB::Expr = local.sbox_y3[i].clone().into();
+        y3 * y2.clone() * y2
+    });
+    let expected_output = external_linear_exprs::<AB>(sbox_out);
+
+    let verify_gate: AB::Expr = is_real * local.is_last_round.clone().into();
+    for (j, exp) in expected_output.iter().enumerate().take(8) {
+        builder
+            .assert_zero(verify_gate.clone() * (local.perm_output[j].clone().into() - exp.clone()));
+    }
+}
+
+// ── Preprocessed round constant verification ─────────────────────────────────
+
+/// 6. Round constant verification via preprocessed columns.
+///
+/// Constrains `rc[i]` and `is_full_round` in the main trace to match
+/// the preprocessed values. This prevents the prover from forging
+/// round constants to produce arbitrary hash outputs.
+///
+/// For each i: `is_real * (main.rc[i] - prep.rc[i]) = 0`
+/// And: `is_real * (main.is_full_round - prep.is_full_round) = 0`
+///
+/// When no preprocessed trace is provided (zero-width), constraints are
+/// silently skipped for backward compatibility with non-preprocessed tests.
+fn constrain_round_constants<AB: InteractionAirBuilder>(
+    builder: &mut AB,
+    local: &PoseidonCols<AB::Var>,
+    is_real: AB::Expr,
+) {
+    let prep = builder.preprocessed();
+
+    // Zero-width preprocessed → height=0 → row_slice returns None → skip.
+    if let Some(prep_row) = prep.row_slice(0) {
+        let prep: &PoseidonPreprocessedCols<AB::Var> = borrow_cols(&prep_row);
+
+        for i in 0..WIDTH {
+            builder.assert_zero(
+                is_real.clone() * (local.rc[i].clone().into() - prep.rc[i].clone().into()),
+            );
+        }
+        builder.assert_zero(
+            is_real * (local.is_full_round.clone().into() - prep.is_full_round.clone().into()),
+        );
+    }
+}
+
+// ── LogUp bus interaction ───────────────────────────────────────────────────
+
+/// C5 PoseidonPermutation bus receive.
+///
+/// Tuple: `(perm_input[0..16], perm_output[0..8])` — 24 elements.
+/// Multiplicity: `is_real · is_first_round`.
+///
+/// Receives at the first row of each permutation. `perm_input` is the raw
+/// (pre-MDS) permutation input, `perm_output` is the verified digest.
+fn receive_poseidon_permutation<AB: InteractionAirBuilder>(
+    builder: &mut AB,
+    local: &PoseidonCols<AB::Var>,
+) {
+    let multiplicity: AB::Expr = local.is_real.clone().into() * local.is_first_round.clone().into();
+
+    let mut values: Vec<AB::Expr> = Vec::with_capacity(24);
+    for i in 0..WIDTH {
+        values.push(local.perm_input[i].clone().into());
+    }
+    for j in 0..8 {
+        values.push(local.perm_output[j].clone().into());
+    }
+
+    builder.receive(AirInteraction {
+        values,
+        multiplicity,
+        kind: InteractionKind::PoseidonPermutation,
+    });
 }

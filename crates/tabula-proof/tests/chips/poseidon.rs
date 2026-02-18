@@ -3,17 +3,22 @@ use p3_field::PrimeCharacteristicRing;
 use p3_symmetric::Permutation;
 
 use tabula_proof::air::chips::poseidon::air::PoseidonChip;
-use tabula_proof::air::chips::poseidon::columns::{POSEIDON_WIDTH, PoseidonCols, poseidon_width};
+use tabula_proof::air::chips::poseidon::columns::{
+    POSEIDON_PREPROCESSED_WIDTH, POSEIDON_WIDTH, PoseidonCols, PoseidonPreprocessedCols,
+    poseidon_width,
+};
 use tabula_proof::air::chips::poseidon::constants::{
     TOTAL_ROUNDS, WIDTH, internal_diag_minus_1, is_full_round, poseidon2_permutation,
     round_constants, sbox_with_intermediates,
 };
-use tabula_proof::air::chips::poseidon::trace::generate_poseidon_trace;
-use tabula_proof::air::{borrow_cols_mut, debug_check};
+use tabula_proof::air::chips::poseidon::trace::{
+    generate_poseidon_preprocessed, generate_poseidon_trace,
+};
+use tabula_proof::air::{borrow_cols_mut, debug_check, debug_check_with_preprocessed};
 
 use crate::common::builders::poseidon_test_input;
 
-// ── Valid traces ──
+// ── Valid traces (backward-compatible, no preprocessed) ──
 
 #[test]
 fn valid_single_permutation() {
@@ -55,7 +60,74 @@ fn trace_output_matches_p3() {
     assert_eq!(rounds.len(), TOTAL_ROUNDS);
 }
 
-// ── Invalid traces ──
+// ── Valid traces WITH preprocessed ──
+
+#[test]
+fn valid_with_preprocessed() {
+    let inputs = vec![poseidon_test_input(1)];
+    let trace = generate_poseidon_trace(&inputs);
+    let prep = generate_poseidon_preprocessed(inputs.len());
+    debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep))
+        .expect("valid trace with preprocessed should pass");
+}
+
+#[test]
+fn valid_two_permutations_with_preprocessed() {
+    let inputs = vec![poseidon_test_input(1), poseidon_test_input(100)];
+    let trace = generate_poseidon_trace(&inputs);
+    let prep = generate_poseidon_preprocessed(inputs.len());
+    debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep))
+        .expect("two permutations with preprocessed should pass");
+}
+
+// ── Invalid traces (preprocessed RC verification) ──
+
+#[test]
+fn invalid_corrupted_main_rc_vs_preprocessed() {
+    let inputs = vec![poseidon_test_input(1)];
+    let mut trace = generate_poseidon_trace(&inputs);
+    let prep = generate_poseidon_preprocessed(inputs.len());
+
+    // Corrupt rc[0] on main trace row 0 → mismatch with preprocessed
+    let width = poseidon_width();
+    let cols: &mut PoseidonCols<BabyBear> = borrow_cols_mut(&mut trace.values[0..width]);
+    cols.rc[0] += BabyBear::ONE;
+
+    debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep))
+        .expect_err("main trace rc mismatch with preprocessed should fail");
+}
+
+#[test]
+fn invalid_corrupted_preprocessed_rc() {
+    let inputs = vec![poseidon_test_input(1)];
+    let trace = generate_poseidon_trace(&inputs);
+    let mut prep = generate_poseidon_preprocessed(inputs.len());
+
+    // Corrupt preprocessed rc[0] on row 0
+    let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+        borrow_cols_mut(&mut prep.values[0..POSEIDON_PREPROCESSED_WIDTH]);
+    cols.rc[0] += BabyBear::ONE;
+
+    debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep))
+        .expect_err("corrupted preprocessed rc should fail");
+}
+
+#[test]
+fn invalid_wrong_is_full_round_preprocessed() {
+    let inputs = vec![poseidon_test_input(1)];
+    let trace = generate_poseidon_trace(&inputs);
+    let mut prep = generate_poseidon_preprocessed(inputs.len());
+
+    // Flip is_full_round on preprocessed row 0 (which IS a full round)
+    let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+        borrow_cols_mut(&mut prep.values[0..POSEIDON_PREPROCESSED_WIDTH]);
+    cols.is_full_round = BabyBear::ZERO; // should be 1
+
+    debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep))
+        .expect_err("wrong is_full_round in preprocessed should fail");
+}
+
+// ── Invalid traces (existing, no preprocessed) ──
 
 #[test]
 fn invalid_corrupted_sbox_y2() {
@@ -170,9 +242,14 @@ fn sbox_correct() {
     assert_eq!(si.out, expected);
 }
 
-// ── Column width test ──
+// ── Column width tests ──
 
 #[test]
 fn width() {
-    assert_eq!(POSEIDON_WIDTH, 69);
+    assert_eq!(POSEIDON_WIDTH, 93);
+}
+
+#[test]
+fn preprocessed_width() {
+    assert_eq!(POSEIDON_PREPROCESSED_WIDTH, 17);
 }

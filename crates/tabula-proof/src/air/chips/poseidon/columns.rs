@@ -40,6 +40,15 @@ pub struct PoseidonCols<T> {
     pub is_last_round: T,
     /// 1 for real rows, 0 for padding.
     pub is_real: T,
+
+    // ── C5 PoseidonPermutation bus columns ──
+    /// Raw (pre-MDS) permutation input. Constant within a permutation (21 rows).
+    /// At first round: `state = external_linear_layer(perm_input)`.
+    pub perm_input: [T; WIDTH],
+    /// First 8 elements of the permutation output (Poseidon digest).
+    /// Constant within a permutation (21 rows). Verified at last round:
+    /// `perm_output = external_linear_layer(sbox_out)[0..8]`.
+    pub perm_output: [T; 8],
 }
 
 /// Compute the width of PoseidonCols.
@@ -49,3 +58,20 @@ pub const fn poseidon_width() -> usize {
 
 /// Width constant for PoseidonCols.
 pub const POSEIDON_WIDTH: usize = poseidon_width();
+
+/// Preprocessed column layout for the Poseidon2 AIR.
+///
+/// Contains the expected round constants and is_full_round flag for each row.
+/// The prover cannot forge these values — they are fixed at setup time.
+///
+/// 17 columns: rc(16) + is_full_round(1).
+#[repr(C)]
+pub struct PoseidonPreprocessedCols<T> {
+    /// Expected round constants for this row.
+    pub rc: [T; WIDTH],
+    /// Expected is_full_round flag for this row.
+    pub is_full_round: T,
+}
+
+/// Width of the Poseidon preprocessed trace.
+pub const POSEIDON_PREPROCESSED_WIDTH: usize = num_cols::<PoseidonPreprocessedCols<u8>, u8>();

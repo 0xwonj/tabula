@@ -2,6 +2,8 @@
 //!
 //! Converts `ColumnMeta` witness data into a `RowMajorMatrix<BabyBear>` trace.
 
+use std::collections::BTreeSet;
+
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
@@ -15,9 +17,15 @@ use super::columns::{COLUMN_META_WIDTH, ColumnMetaCols};
 
 /// Generate a ColumnMeta trace from witness data.
 ///
+/// `sorted_mem_columns` indicates which `(table, col)` pairs have
+/// GlobalSortedMem segments. This gates the SortedMemMeta bus receive.
+///
 /// Rows are padded to the next power of two (Plonky3 requirement).
 /// Padding rows have `is_real = 0`.
-pub fn generate_column_meta_trace(metas: &[ColumnMeta]) -> RowMajorMatrix<BabyBear> {
+pub fn generate_column_meta_trace(
+    metas: &[ColumnMeta],
+    sorted_mem_columns: &BTreeSet<(u32, u16)>,
+) -> RowMajorMatrix<BabyBear> {
     let width = COLUMN_META_WIDTH;
     let num_real = metas.len();
     let num_rows = (num_real + 1).next_power_of_two().max(2); // min 2 rows for transition
@@ -40,6 +48,7 @@ pub fn generate_column_meta_trace(metas: &[ColumnMeta]) -> RowMajorMatrix<BabyBe
         cols.is_empty_old = bool_fe(meta.is_empty_old);
         cols.is_empty_new = bool_fe(meta.is_empty_new);
         cols.is_touched = bool_fe(meta.is_touched);
+        cols.has_sorted_mem = bool_fe(sorted_mem_columns.contains(&(meta.table.0, meta.col.0)));
 
         // Compute IsZero witness columns for lex ordering.
         if i + 1 < num_real {
