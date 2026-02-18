@@ -6,8 +6,8 @@
 //! - **Write coalescing**: only the last write per key survives
 //!
 //! Internally composed of two sub-components:
-//! - [`ExecutionState`]: state management (write buffer, read cache, undo log)
-//! - [`TraceRecorder`]: event recording (execution trace, logical time)
+//! - **ExecutionState** (private): state management (write buffer, read cache, undo log)
+//! - **TraceRecorder** (`pub(crate)`): event recording (execution trace, logical time)
 //!
 //! This separation prepares for Phase 4 (ok-gating), where failed-tx
 //! rollback will roll back state only while preserving the event trace.
@@ -76,7 +76,7 @@ impl<'a, S: StateSnapshot> ExecutionState<'a, S> {
     /// Read from the snapshot, filling the read cache and undo log.
     fn read_from_snapshot(&mut self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
         let opt = self.snapshot.read(key)?;
-        self.read_cache.insert(*key, opt.clone());
+        self.read_cache.insert(*key, opt);
         if !self.checkpoints.is_empty() {
             self.undo_log.push(UndoEntry::ReadCacheFill { key: *key });
         }
@@ -173,7 +173,7 @@ impl TraceRecorder {
         col_type: ValueType,
     ) {
         let (value, val_is_null) = match opt_value {
-            Some(v) => (v.clone(), false),
+            Some(v) => (*v, false),
             None => (zero_value(col_type), true),
         };
         self.events.push(ExecutionEvent {
@@ -251,8 +251,8 @@ pub struct OverlayResult {
 /// Uses an undo-log for O(1) checkpoint and O(k) rollback (where k
 /// is the number of mutations since the checkpoint).
 ///
-/// Internally composed of [`ExecutionState`] (state management) and
-/// [`TraceRecorder`] (event recording). The public API is unchanged.
+/// Internally composed of **ExecutionState** (state management) and
+/// **TraceRecorder** (event recording). The public API is unchanged.
 pub struct Overlay<'a, S: StateSnapshot> {
     state: ExecutionState<'a, S>,
     recorder: TraceRecorder,
@@ -283,7 +283,7 @@ impl<'a, S: StateSnapshot> Overlay<'a, S> {
     ) -> Result<Option<Value>, TabulaError> {
         // Rule A: read-your-writes
         if let Some(opt) = self.state.read_from_buffer(key) {
-            let opt = opt.clone();
+            let opt = *opt;
             self.recorder
                 .record_event(key, OpKind::Read, &opt, col_type);
             return Ok(opt);
@@ -291,7 +291,7 @@ impl<'a, S: StateSnapshot> Overlay<'a, S> {
 
         // Rule B: read deduplication
         if let Some(opt) = self.state.read_from_cache(key) {
-            let opt = opt.clone();
+            let opt = *opt;
             self.recorder
                 .record_event(key, OpKind::Read, &opt, col_type);
             return Ok(opt);
@@ -365,223 +365,47 @@ impl<'a, S: StateSnapshot> Overlay<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::test_fixtures::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use tabula_core::traits::StateSnapshot;
+    use tabula_core::{ColId, RowKey, TableId};
 
     const TY: ValueType = ValueType::U64;
 
-    // ── Existing Overlay tests (unchanged public API) ───────────────────
-
-    #[test]
-    fn test_read_your_writes() {
-        let snap = CountingSnapshot::new(BTreeMap::new());
-        let mut ov = Overlay::new(&snap);
-        let k = cell(1, 0, 0);
-
-        ov.write(&k, Some(Value::U64(42)), TY);
-        let v = ov.read(&k, TY).unwrap();
-        assert_eq!(v, Some(Value::U64(42)));
-        // Should NOT have called snapshot
-        assert_eq!(snap.call_count(), 0);
+    fn cell(t: u32, r: u64, c: u16) -> CellKey {
+        CellKey {
+            table: TableId(t),
+            col: ColId(c),
+            row: RowKey(r),
+        }
     }
 
-    #[test]
-    fn test_read_dedup() {
-        let mut data = BTreeMap::new();
-        let k = cell(1, 0, 0);
-        data.insert(k, Value::U64(100));
-        let snap = CountingSnapshot::new(data);
-        let mut ov = Overlay::new(&snap);
-
-        let v1 = ov.read(&k, TY).unwrap();
-        let v2 = ov.read(&k, TY).unwrap();
-        assert_eq!(v1, Some(Value::U64(100)));
-        assert_eq!(v2, Some(Value::U64(100)));
-        // Snapshot should only have been called once
-        assert_eq!(snap.call_count(), 1);
+    struct CountingSnapshot {
+        data: BTreeMap<CellKey, Value>,
+        call_count: AtomicU32,
     }
 
-    #[test]
-    fn test_write_coalescing() {
-        let snap = CountingSnapshot::new(BTreeMap::new());
-        let mut ov = Overlay::new(&snap);
-        let k = cell(1, 0, 0);
+    impl CountingSnapshot {
+        fn new(data: BTreeMap<CellKey, Value>) -> Self {
+            Self {
+                data,
+                call_count: AtomicU32::new(0),
+            }
+        }
 
-        ov.write(&k, Some(Value::U64(1)), TY);
-        ov.write(&k, Some(Value::U64(2)), TY);
-
-        let result = ov.into_result();
-        // Only one entry in write_set_final, with the last value
-        assert_eq!(result.write_set_final.len(), 1);
-        assert_eq!(result.write_set_final[0], (k, Some(Value::U64(2))));
+        fn call_count(&self) -> u32 {
+            self.call_count.load(Ordering::Relaxed)
+        }
     }
 
-    #[test]
-    fn test_checkpoint_rollback() {
-        let snap = CountingSnapshot::new(BTreeMap::new());
-        let mut ov = Overlay::new(&snap);
-        let k = cell(1, 0, 0);
+    impl StateSnapshot for CountingSnapshot {
+        fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
+            self.call_count.fetch_add(1, Ordering::Relaxed);
+            Ok(self.data.get(key).cloned())
+        }
 
-        ov.write(&k, Some(Value::U64(10)), TY);
-        ov.checkpoint();
-        ov.write(&k, Some(Value::U64(20)), TY);
-
-        // After rollback, should see the first write
-        ov.rollback();
-        let v = ov.read(&k, TY).unwrap();
-        assert_eq!(v, Some(Value::U64(10)));
-    }
-
-    #[test]
-    fn test_read_set_old_excludes_written_before_read() {
-        let mut data = BTreeMap::new();
-        let k1 = cell(1, 0, 0);
-        let k2 = cell(1, 1, 0);
-        data.insert(k1, Value::U64(100));
-        data.insert(k2, Value::U64(200));
-        let snap = CountingSnapshot::new(data);
-        let mut ov = Overlay::new(&snap);
-
-        // Write k1 before reading it — should NOT appear in read_set_old
-        ov.write(&k1, Some(Value::U64(999)), TY);
-        let _ = ov.read(&k1, TY).unwrap();
-        // Read k2 from snapshot — should appear in read_set_old
-        let _ = ov.read(&k2, TY).unwrap();
-
-        let result = ov.into_result();
-        // read_set_old should only contain k2
-        assert_eq!(result.read_set_old.len(), 1);
-        assert_eq!(result.read_set_old[0], (k2, Some(Value::U64(200))));
-    }
-
-    #[test]
-    fn test_empty_overlay() {
-        let snap = CountingSnapshot::new(BTreeMap::new());
-        let ov = Overlay::new(&snap);
-        let result = ov.into_result();
-        assert!(result.read_set_old.is_empty());
-        assert!(result.write_set_final.is_empty());
-        assert!(result.events.is_empty());
-    }
-
-    #[test]
-    fn test_undo_write_restore() {
-        let snap = CountingSnapshot::new(BTreeMap::new());
-        let mut ov = Overlay::new(&snap);
-        let k = cell(1, 0, 0);
-
-        ov.write(&k, Some(Value::U64(10)), TY);
-        ov.checkpoint();
-        ov.write(&k, Some(Value::U64(20)), TY);
-        ov.write(&k, Some(Value::U64(30)), TY);
-        ov.rollback();
-
-        // Should see original value
-        let v = ov.read(&k, TY).unwrap();
-        assert_eq!(v, Some(Value::U64(10)));
-    }
-
-    #[test]
-    fn test_undo_new_key_removal() {
-        let snap = CountingSnapshot::new(BTreeMap::new());
-        let mut ov = Overlay::new(&snap);
-        let k = cell(1, 0, 0);
-
-        ov.checkpoint();
-        ov.write(&k, Some(Value::U64(42)), TY);
-        ov.rollback();
-
-        // Key should be absent (read from snapshot = None)
-        let v = ov.read(&k, TY).unwrap();
-        assert_eq!(v, None);
-        let result = ov.into_result();
-        assert!(result.write_set_final.is_empty());
-    }
-
-    #[test]
-    fn test_undo_read_cache_removal() {
-        let mut data = BTreeMap::new();
-        let k = cell(1, 0, 0);
-        data.insert(k, Value::U64(100));
-        let snap = CountingSnapshot::new(data);
-        let mut ov = Overlay::new(&snap);
-
-        ov.checkpoint();
-        let _ = ov.read(&k, TY).unwrap(); // fills read cache
-        assert_eq!(snap.call_count(), 1);
-        ov.rollback();
-
-        // After rollback, read cache should be cleared for this key,
-        // so re-reading should call snapshot again
-        let _ = ov.read(&k, TY).unwrap();
-        assert_eq!(snap.call_count(), 2);
-    }
-
-    #[test]
-    fn test_undo_events_truncated() {
-        let snap = CountingSnapshot::new(BTreeMap::new());
-        let mut ov = Overlay::new(&snap);
-        let k = cell(1, 0, 0);
-
-        ov.write(&k, Some(Value::U64(1)), TY); // event 0
-        ov.checkpoint();
-        ov.write(&k, Some(Value::U64(2)), TY); // event 1
-        ov.write(&k, Some(Value::U64(3)), TY); // event 2
-        ov.rollback();
-
-        // Only 1 event should remain
-        let result = ov.into_result();
-        assert_eq!(result.events.len(), 1);
-    }
-
-    #[test]
-    fn test_discard_clears_undo_log() {
-        let snap = CountingSnapshot::new(BTreeMap::new());
-        let mut ov = Overlay::new(&snap);
-        let k = cell(1, 0, 0);
-
-        ov.checkpoint();
-        ov.write(&k, Some(Value::U64(42)), TY);
-        ov.discard_checkpoint();
-
-        // After discard with no remaining checkpoints, value persists
-        let v = ov.read(&k, TY).unwrap();
-        assert_eq!(v, Some(Value::U64(42)));
-    }
-
-    #[test]
-    fn test_write_null_then_restore() {
-        let mut data = BTreeMap::new();
-        let k = cell(1, 0, 0);
-        data.insert(k, Value::U64(100));
-        let snap = CountingSnapshot::new(data);
-        let mut ov = Overlay::new(&snap);
-
-        // Write null (delete)
-        ov.write(&k, None, TY);
-        let v = ov.read(&k, TY).unwrap();
-        assert_eq!(v, None);
-
-        // Write value back
-        ov.write(&k, Some(Value::U64(200)), TY);
-        let v = ov.read(&k, TY).unwrap();
-        assert_eq!(v, Some(Value::U64(200)));
-    }
-
-    #[test]
-    fn test_read_absent_cell() {
-        let snap = CountingSnapshot::new(BTreeMap::new());
-        let mut ov = Overlay::new(&snap);
-        let k = cell(1, 0, 0);
-
-        let v = ov.read(&k, TY).unwrap();
-        assert_eq!(v, None);
-
-        // Event should record val_is_null=true with canonical zero
-        let result = ov.into_result();
-        assert_eq!(result.events.len(), 1);
-        assert!(result.events[0].val_is_null);
-        assert_eq!(result.events[0].value, Value::U64(0));
+        fn table_exists(&self, _: TableId) -> bool {
+            true
+        }
     }
 
     // ── ExecutionState unit tests ───────────────────────────────────────
@@ -608,9 +432,7 @@ mod tests {
         assert!(state.read_from_cache(&k).is_none());
         let v = state.read_from_snapshot(&k).unwrap();
         assert_eq!(v, Some(Value::U64(100)));
-        // Now cached
         assert_eq!(state.read_from_cache(&k), Some(&Some(Value::U64(100))));
-        // Snapshot called once
         assert_eq!(snap.call_count(), 1);
     }
 

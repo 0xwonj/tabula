@@ -11,4 +11,4 @@ pub mod trace;
 
 pub use air::ExecutionChip;
 pub use columns::{EXECUTION_STANDARD_WIDTH, ExecutionCols, MAX_SLOTS, execution_width};
-pub use trace::generate_execution_trace;
+pub use trace::{InstructionRecord, Opcode, generate_execution_trace, u64_to_limbs};

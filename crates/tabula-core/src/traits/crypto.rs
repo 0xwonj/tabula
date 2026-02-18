@@ -16,11 +16,15 @@ pub trait Hasher: Send + Sync {
     fn hash(&self, data: &[u8]) -> Digest;
     /// Hash two digests together.
     fn hash_pair(&self, left: &Digest, right: &Digest) -> Digest;
-    /// Hash a sequence of byte slices. Default: concatenate then hash.
+    /// Hash a sequence of byte slices. Default: length-prefix each item to prevent collisions.
+    ///
+    /// Each item is prefixed with its length as a little-endian u32. This ensures
+    /// `hash_many(&["ab", "c"])` differs from `hash_many(&["a", "bc"])`.
     fn hash_many(&self, items: &[&[u8]]) -> Digest {
-        let total_len = items.iter().map(|s| s.len()).sum();
+        let total_len: usize = items.iter().map(|s| 4 + s.len()).sum();
         let mut buf = Vec::with_capacity(total_len);
         for item in items {
+            buf.extend_from_slice(&(item.len() as u32).to_le_bytes());
             buf.extend_from_slice(item);
         }
         self.hash(&buf)

@@ -13,4 +13,5 @@ pub mod trace;
 
 pub use air::PoseidonChip;
 pub use columns::{POSEIDON_WIDTH, PoseidonCols, poseidon_width};
+pub use constants::WIDTH as POSEIDON_PERM_WIDTH;
 pub use trace::generate_poseidon_trace;

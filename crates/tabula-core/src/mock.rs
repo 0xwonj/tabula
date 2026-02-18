@@ -70,7 +70,7 @@ pub struct SequentialNonce;
 impl NoncePolicy for SequentialNonce {
     fn validate(
         &self,
-        _sender: &[u8; 32],
+        sender: &[u8; 32],
         tx_nonce: u64,
         current_nonce: u64,
     ) -> Result<(), TabulaError> {
@@ -78,7 +78,7 @@ impl NoncePolicy for SequentialNonce {
             Ok(())
         } else {
             Err(TabulaError::InvalidNonce {
-                sender: [0u8; 32],
+                sender: *sender,
                 expected: current_nonce,
                 actual: tx_nonce,
             })
@@ -133,7 +133,14 @@ impl StaticTableProvider for InMemoryStaticTables {
     }
 
     fn contains(&self, table: TableId, key: RowKey) -> Result<bool, TabulaError> {
-        Ok(self.data.keys().any(|(t, k, _)| *t == table && *k == key))
+        use std::ops::Bound;
+        let start = (table, key, ColId(u16::MIN));
+        let end = (table, key, ColId(u16::MAX));
+        Ok(self
+            .data
+            .range((Bound::Included(start), Bound::Included(end)))
+            .next()
+            .is_some())
     }
 }
 

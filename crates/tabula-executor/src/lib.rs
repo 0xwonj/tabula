@@ -8,8 +8,3 @@ pub mod consistency;
 pub mod interpreter;
 pub mod overlay;
 pub mod resolve;
-
-#[cfg(test)]
-mod proptest_tests;
-#[cfg(test)]
-pub(crate) mod test_fixtures;

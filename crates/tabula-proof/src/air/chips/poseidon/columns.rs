@@ -49,15 +49,3 @@ pub const fn poseidon_width() -> usize {
 
 /// Width constant for PoseidonCols.
 pub const POSEIDON_WIDTH: usize = poseidon_width();
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn width() {
-        // state(16) + rc(16) + sbox_y2(16) + sbox_y3(16) + control(5)
-        // = 16+16+16+16+5 = 69
-        assert_eq!(POSEIDON_WIDTH, 69);
-    }
-}

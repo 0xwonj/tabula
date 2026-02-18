@@ -10,9 +10,10 @@
 //! 7. Access log: access_is_write = op_write when is_access
 //! 8. SSA slot carry: non-written slots carry forward to next row
 //! 9. Arith sub-selectors: exactly one of {add, sub, mul} when op_arith
-//! 10. Per-opcode semantics (M8-4a: Add, Sub, Assert, Select)
+//! 10. Per-opcode semantics (M8-4a: Add, Sub, Assert, Select; M9-A3: Not, And, Or)
+//! 11. Transaction index monotonicity (M9-A3)
 //!
-//! NOT constrained in M8 (deferred to M9):
+//! NOT constrained yet (deferred to M9 Phase B/C or M10):
 //! - Operand-to-slot linkage (src1_val, src2_val match actual slots)
 //! - Memory bus (is_access rows → GlobalSortedMem LogUp)
 //! - Hash/Lookup bus interactions
@@ -59,15 +60,19 @@ impl<AB: AirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         constrain_timestamp(builder, local, is_real.clone());
         constrain_access_log(builder, local, is_real.clone());
         constrain_arith_sub_selectors(builder, local, is_real.clone());
-        constrain_slot_carry(builder, local, next, both_real);
+        constrain_slot_carry(builder, local, next, both_real.clone());
         constrain_first_row_init(builder, local);
 
-        // Per-opcode semantics (M8-4a)
+        // Per-opcode semantics (M8-4a + M9-A3)
         constrain_arith_add(builder, local, is_real.clone());
         constrain_arith_sub(builder, local, is_real.clone());
         constrain_assert(builder, local, is_real.clone());
         constrain_select(builder, local, is_real.clone());
+        constrain_not(builder, local, is_real.clone());
+        constrain_and(builder, local, is_real.clone());
+        constrain_or(builder, local, is_real.clone());
         constrain_arith_result_not_null(builder, local, is_real);
+        constrain_tx_index_monotonicity(builder, local, next, both_real);
     }
 }
 
@@ -418,6 +423,89 @@ fn constrain_select<AB: AirBuilder, const W: usize>(
     }
 }
 
+/// Not constraint: boolean negation.
+///
+/// For each written slot s:
+///   slots[s][0] = 1 − src1_val[0]   (boolean negation)
+///   slots[s][i] = 0                   for i ∈ {1, 2} (higher limbs zero)
+fn constrain_not<AB: AirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+    is_real: AB::Expr,
+) {
+    let op_not: AB::Expr = local.op_not.clone().into();
+
+    for s in 0..MAX_SLOTS {
+        let gate: AB::Expr =
+            is_real.clone() * op_not.clone() * local.slot_written[s].clone().into();
+
+        // Limb 0: dst = 1 - src1
+        let expected: AB::Expr = AB::Expr::ONE - local.src1_val[0].clone().into();
+        builder.assert_zero(gate.clone() * (local.slots[s][0].clone().into() - expected));
+
+        // Higher limbs must be zero
+        for i in 1..W {
+            builder.assert_zero(gate.clone() * local.slots[s][i].clone().into());
+        }
+    }
+}
+
+/// And constraint: boolean conjunction.
+///
+/// For each written slot s:
+///   slots[s][0] = src1_val[0] · src2_val[0]
+///   slots[s][i] = 0   for i ∈ {1, 2}
+fn constrain_and<AB: AirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+    is_real: AB::Expr,
+) {
+    let op_and: AB::Expr = local.op_and.clone().into();
+
+    for s in 0..MAX_SLOTS {
+        let gate: AB::Expr =
+            is_real.clone() * op_and.clone() * local.slot_written[s].clone().into();
+
+        // Limb 0: dst = src1 · src2
+        let expected: AB::Expr =
+            local.src1_val[0].clone().into() * local.src2_val[0].clone().into();
+        builder.assert_zero(gate.clone() * (local.slots[s][0].clone().into() - expected));
+
+        // Higher limbs must be zero
+        for i in 1..W {
+            builder.assert_zero(gate.clone() * local.slots[s][i].clone().into());
+        }
+    }
+}
+
+/// Or constraint: boolean disjunction.
+///
+/// For each written slot s:
+///   slots[s][0] = src1_val[0] + src2_val[0] − src1_val[0] · src2_val[0]
+///   slots[s][i] = 0   for i ∈ {1, 2}
+fn constrain_or<AB: AirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+    is_real: AB::Expr,
+) {
+    let op_or: AB::Expr = local.op_or.clone().into();
+
+    for s in 0..MAX_SLOTS {
+        let gate: AB::Expr = is_real.clone() * op_or.clone() * local.slot_written[s].clone().into();
+
+        // Limb 0: dst = src1 + src2 - src1 · src2
+        let s1: AB::Expr = local.src1_val[0].clone().into();
+        let s2: AB::Expr = local.src2_val[0].clone().into();
+        let expected: AB::Expr = s1.clone() + s2.clone() - s1 * s2;
+        builder.assert_zero(gate.clone() * (local.slots[s][0].clone().into() - expected));
+
+        // Higher limbs must be zero
+        for i in 1..W {
+            builder.assert_zero(gate.clone() * local.slots[s][i].clone().into());
+        }
+    }
+}
+
 /// Arithmetic result null constraint: written slots must not be null.
 ///
 /// All arithmetic operations (Add, Sub, Mul) produce non-null results.
@@ -436,4 +524,21 @@ fn constrain_arith_result_not_null<AB: AirBuilder, const W: usize>(
                 * local.slot_is_null[s].clone().into(),
         );
     }
+}
+
+/// Transaction index monotonicity: tx_index must be non-decreasing.
+///
+/// Constraint: `both_real · (next.tx_index − local.tx_index) · (next.tx_index − local.tx_index − 1) = 0`
+///
+/// This ensures `next.tx_index − local.tx_index ∈ {0, 1}` for consecutive real rows.
+fn constrain_tx_index_monotonicity<AB: AirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+    next: &ExecutionCols<AB::Var, W>,
+    both_real: AB::Expr,
+) {
+    let diff: AB::Expr = next.tx_index.clone().into() - local.tx_index.clone().into();
+    builder
+        .when_transition()
+        .assert_zero(both_real * diff.clone() * (diff - AB::Expr::ONE));
 }

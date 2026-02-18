@@ -120,23 +120,3 @@ pub const fn execution_width<const W: usize>() -> usize {
 
 /// Width for Standard value width (W=3).
 pub const EXECUTION_STANDARD_WIDTH: usize = execution_width::<3>();
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn standard_width() {
-        // Control: is_real(1) + tx_index(1) = 2
-        // Opcode: 12
-        // Arith sub: 2
-        // Clock: is_access(1) + clk(1) + tau(1) = 3
-        // Access: access_t(1) + access_c(1) + access_r(3) + access_is_write(1)
-        //       + access_val(3) + access_is_null(1) = 10
-        // Operand: src1_val(3) + src2_val(3) + cond_val(1) = 7
-        // Carry: carry0(1) + carry1(1) = 2
-        // Slots: slots(16*3=48) + slot_is_null(16) + slot_written(16) = 80
-        // Total: 2 + 12 + 2 + 3 + 10 + 7 + 2 + 80 = 118
-        assert_eq!(EXECUTION_STANDARD_WIDTH, 118);
-    }
-}

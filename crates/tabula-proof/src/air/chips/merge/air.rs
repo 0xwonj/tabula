@@ -11,8 +11,10 @@
 //! 5. Merge logic: new_val derivation + in_new correctness per source type
 //! 6. Delete null witness: is_delete ⟹ write_val = 0^W (canonical null)
 //! 7. Segment lex ordering: tc_changed detection via IsZero
+//! 8. Hash accumulator carry: within same segment, deleted rows (in_new=0)
+//!    must carry hash_acc forward unchanged (M9-A3)
 //!
-//! Hash chain (hash_acc) and LogUp declarations are deferred to M9.
+//! Hash chain input composition and LogUp declarations are deferred to M9.
 
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
@@ -51,6 +53,7 @@ impl<AB: AirBuilder, const W: usize> Air<AB> for GlobalMergeChip<W> {
         constrain_key_ordering(builder, local, next, both_real.clone());
         constrain_merge_logic(builder, local);
         constrain_delete_null(builder, local);
+        constrain_hash_acc_carry(builder, local, next, both_real);
     }
 }
 
@@ -182,5 +185,27 @@ fn constrain_delete_null<AB: AirBuilder, const W: usize>(
         builder
             .when(local.is_real.clone())
             .assert_zero(is_delete.clone() * local.write_val[i].clone().into());
+    }
+}
+
+/// 8. Hash accumulator carry: within same segment, deleted rows carry hash_acc forward.
+///
+/// When the current row has `in_new=0` (delete), the next row's hash_acc must
+/// equal the current row's hash_acc (within the same segment).
+///
+/// `both_real · (1 − tc_changed) · (1 − in_new) · (next.hash_acc[j] − local.hash_acc[j]) = 0`
+fn constrain_hash_acc_carry<AB: AirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &GlobalMergeCols<AB::Var, W>,
+    next: &GlobalMergeCols<AB::Var, W>,
+    both_real: AB::Expr,
+) {
+    let same_segment: AB::Expr = AB::Expr::ONE - local.tc_changed.clone().into();
+    let not_in_new: AB::Expr = AB::Expr::ONE - local.in_new.clone().into();
+    let gate: AB::Expr = both_real * same_segment * not_in_new;
+
+    for j in 0..8 {
+        let diff: AB::Expr = next.hash_acc[j].clone().into() - local.hash_acc[j].clone().into();
+        builder.when_transition().assert_zero(gate.clone() * diff);
     }
 }

@@ -36,6 +36,9 @@ impl Transaction {
 ///
 /// Verified by prover and verifier to ensure programs do not exceed
 /// allocated resources.
+///
+/// **Status: data structure only** — enforcement is not yet implemented
+/// in the executor or IR validation pipeline. See semantics-spec §1.8.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]

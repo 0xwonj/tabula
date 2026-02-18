@@ -57,14 +57,16 @@ pub struct ColId(pub u16);
 pub struct RowKey(pub u64);
 
 /// A fully-qualified cell address.
+///
+/// **Canonical ordering: `(table, col, row)`** — this is protocol-critical.
+/// The proof spec, SSMC trace layout, and GlobalSortedMem all depend on this
+/// ordering for correctness. Do not change the `Ord` implementation.
 #[derive(
     Debug,
     Clone,
     Copy,
     PartialEq,
     Eq,
-    PartialOrd,
-    Ord,
     Hash,
     Serialize,
     Deserialize,
@@ -80,6 +82,22 @@ pub struct CellKey {
     pub row: RowKey,
 }
 
+impl PartialOrd for CellKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for CellKey {
+    /// Canonical ordering: table → col → row.
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.table
+            .cmp(&other.table)
+            .then(self.col.cmp(&other.col))
+            .then(self.row.cmp(&other.row))
+    }
+}
+
 // ── Transaction type identifiers ────────────────────────────────────────
 
 /// Unique identifier for a transaction type.
@@ -92,12 +110,94 @@ pub struct CellKey {
     PartialOrd,
     Ord,
     Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    borsh::BorshSerialize,
-    borsh::BorshDeserialize,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
 )]
 pub struct TxTypeId(pub u32);
+
+// ── Display impls ──────────────────────────────────────────────────────
+
+impl std::fmt::Display for TableId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "table:{}", self.0)
+    }
+}
+
+impl std::fmt::Display for ColId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "col:{}", self.0)
+    }
+}
+
+impl std::fmt::Display for RowKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "row:{}", self.0)
+    }
+}
+
+impl std::fmt::Display for TxTypeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "tx_type:{}", self.0)
+    }
+}
+
+impl std::fmt::Display for CellKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}:{}:{})", self.table.0, self.col.0, self.row.0)
+    }
+}
+
+// ── From conversions ───────────────────────────────────────────────────
+
+impl From<u32> for TableId {
+    fn from(v: u32) -> Self {
+        Self(v)
+    }
+}
+
+impl From<TableId> for u32 {
+    fn from(id: TableId) -> Self {
+        id.0
+    }
+}
+
+impl From<u16> for ColId {
+    fn from(v: u16) -> Self {
+        Self(v)
+    }
+}
+
+impl From<ColId> for u16 {
+    fn from(id: ColId) -> Self {
+        id.0
+    }
+}
+
+impl From<u64> for RowKey {
+    fn from(v: u64) -> Self {
+        Self(v)
+    }
+}
+
+impl From<RowKey> for u64 {
+    fn from(key: RowKey) -> Self {
+        key.0
+    }
+}
+
+impl From<u32> for TxTypeId {
+    fn from(v: u32) -> Self {
+        Self(v)
+    }
+}
+
+impl From<TxTypeId> for u32 {
+    fn from(id: TxTypeId) -> Self {
+        id.0
+    }
+}
 
 // ── Commitment identifiers ──────────────────────────────────────────────
 
@@ -176,5 +276,36 @@ mod tests {
         let bytes = borsh::to_vec(&root).unwrap();
         let decoded: StateRoot = borsh::from_slice(&bytes).unwrap();
         assert_eq!(root, decoded);
+    }
+
+    #[test]
+    fn display_types() {
+        assert_eq!(format!("{}", TableId(5)), "table:5");
+        assert_eq!(format!("{}", ColId(3)), "col:3");
+        assert_eq!(format!("{}", RowKey(100)), "row:100");
+        assert_eq!(format!("{}", TxTypeId(7)), "tx_type:7");
+        assert_eq!(
+            format!(
+                "{}",
+                CellKey {
+                    table: TableId(1),
+                    col: ColId(2),
+                    row: RowKey(3)
+                }
+            ),
+            "(1:2:3)"
+        );
+    }
+
+    #[test]
+    fn from_conversions() {
+        assert_eq!(TableId::from(5u32), TableId(5));
+        assert_eq!(u32::from(TableId(5)), 5);
+        assert_eq!(ColId::from(3u16), ColId(3));
+        assert_eq!(u16::from(ColId(3)), 3);
+        assert_eq!(RowKey::from(100u64), RowKey(100));
+        assert_eq!(u64::from(RowKey(100)), 100);
+        assert_eq!(TxTypeId::from(7u32), TxTypeId(7));
+        assert_eq!(u32::from(TxTypeId(7)), 7);
     }
 }

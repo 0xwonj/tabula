@@ -85,18 +85,3 @@ pub const fn sorted_mem_width<const W: usize>() -> usize {
 
 /// Width for Standard value width (W=3).
 pub const SORTED_MEM_STANDARD_WIDTH: usize = sorted_mem_width::<3>();
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn standard_width() {
-        // is_real(1) + table_id(1) + col_id(1) + r(3) + tau(3) + is_init(1) + is_write(1)
-        // + val(3) + val_is_null(1) + mem(3) + mem_is_null(1)
-        // + is_last_for_key(1) + has_written(1) + tc_changed(1) + r_changed(1)
-        // + table_diff_iz(2) + col_diff_iz(2) + r_diff_iz(2) + ordering(3)
-        // = 1+1+1+3+3+1+1+3+1+3+1+1+1+1+1+2+2+2+3 = 32
-        assert_eq!(SORTED_MEM_STANDARD_WIDTH, 32);
-    }
-}

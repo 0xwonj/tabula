@@ -1,28 +1,32 @@
 //! Interaction bus types for cross-chip LogUp arguments.
 //!
-//! Each chip declares which buses it sends/receives on. The actual LogUp
-//! wiring is deferred to M9 (prover integration); M6 only defines the types.
+//! Eight LogUp buses, each identified by an `InteractionKind` tag with an
+//! integer discriminant used in the RLC fingerprint (m9-design §3.2).
 
 /// Named interaction channels for cross-chip LogUp.
 ///
-/// Each variant identifies a logical bus that connects two (or more) chips.
-/// The bus name determines the LogUp fingerprint namespace.
+/// Each variant identifies a logical bus connecting two or more chips.
+/// Integer discriminants are used as `kind_tag` in the RLC fingerprint
+/// formula: `f = α + β^0 · kind_tag + β^1 · values[0] + ...`
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum InteractionKind {
     /// Execution trace <-> GlobalSortedMem (memory consistency).
-    Memory,
+    Memory = 1,
     /// GlobalSortedMem init rows <-> GlobalSSMC (membership proof).
-    SsmcMembership,
-    /// GlobalMerge <-> GlobalSSMC + WriteSet (completeness).
-    MergeCompleteness,
-    /// Any chip <-> ColumnMeta (metadata join).
-    ColumnMetaJoin,
-    /// Execution trace -> Range check table.
-    RangeCheck,
-    /// Execution <-> VC opening for read-only keys (no state update).
-    ReadOnlyOpening,
-    /// Any chip <-> PoseidonChip (shared permutation, M8).
-    PoseidonPermutation,
+    SsmcMembership = 2,
+    /// GlobalSSMC -> GlobalMerge (OldList completeness).
+    MergeOldList = 3,
+    /// GlobalSortedMem write-set -> GlobalMerge (WriteSet completeness).
+    MergeWriteSet = 4,
+    /// SSMC/Merge hash chains <-> PoseidonChip (permutation verification).
+    PoseidonPermutation = 5,
+    /// SSMC/Merge segment hashes <-> ColumnMeta (commitment verification).
+    CommitmentVerification = 6,
+    /// GlobalSortedMem first-of-segment <-> ColumnMeta (metadata).
+    SortedMemMeta = 7,
+    /// All chips -> RangeCheckChip (u16 range proofs).
+    RangeCheck = 8,
 }
 
 /// Direction of an interaction: send or receive.

@@ -70,17 +70,3 @@ pub const fn merge_width<const W: usize>() -> usize {
 
 /// Width for Standard value width (W=3).
 pub const MERGE_STANDARD_WIDTH: usize = merge_width::<3>();
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn standard_width() {
-        // is_real(1) + table_id(1) + col_id(1) + key(3)
-        // + s1(1) + s0(1) + old_val(3) + write_val(3) + new_val(3) + in_new(1)
-        // + hash_acc(8) + key_ordering(3) + table_diff_iz(2) + col_diff_iz(2) + tc_changed(1)
-        // = 1+1+1+3+1+1+3+3+3+1+8+3+2+2+1 = 34
-        assert_eq!(MERGE_STANDARD_WIDTH, 34);
-    }
-}

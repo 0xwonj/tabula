@@ -11,7 +11,18 @@ use crate::error::TabulaError;
 ///
 /// Application-level only — field element encoding is handled by `ValueCodec`.
 /// Null/absence is represented by `Option<Value>`, not a variant.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
 pub enum Value {
     /// Unsigned 64-bit integer.
     U64(u64),
@@ -124,15 +135,49 @@ impl Value {
     }
 
     /// Compare two values of the same ordered type.
+    ///
+    /// `Bytes32` is not an ordered type — comparison returns `TypeMismatch`.
     pub fn compare(&self, rhs: &Value) -> Result<Ordering, TabulaError> {
         match (self, rhs) {
             (Value::U64(a), Value::U64(b)) => Ok(a.cmp(b)),
             (Value::I64(a), Value::I64(b)) => Ok(a.cmp(b)),
             (Value::Bool(a), Value::Bool(b)) => Ok(a.cmp(b)),
+            (Value::Bytes32(_), Value::Bytes32(_)) => Err(TabulaError::TypeMismatch {
+                expected: "ordered type (U64, I64, Bool)",
+                actual: "Bytes32",
+            }),
             _ => Err(TabulaError::TypeMismatch {
                 expected: self.type_name(),
                 actual: rhs.type_name(),
             }),
+        }
+    }
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::U64(v) => write!(f, "{v}u64"),
+            Value::I64(v) => write!(f, "{v}i64"),
+            Value::Bool(v) => write!(f, "{v}"),
+            Value::Bytes32(b) => {
+                write!(f, "0x")?;
+                for byte in &b[..4] {
+                    write!(f, "{byte:02x}")?;
+                }
+                write!(f, "..{:02x}", b[31])
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValueType::U64 => write!(f, "U64"),
+            ValueType::I64 => write!(f, "I64"),
+            ValueType::Bool => write!(f, "Bool"),
+            ValueType::Bytes32 => write!(f, "Bytes32"),
         }
     }
 }
@@ -374,5 +419,215 @@ mod tests {
         assert_eq!(zero_value(ValueType::I64), Value::I64(0));
         assert_eq!(zero_value(ValueType::Bool), Value::Bool(false));
         assert_eq!(zero_value(ValueType::Bytes32), Value::Bytes32([0; 32]));
+    }
+
+    // ── i64 boundary edge cases ──────────────────────────────────────
+
+    #[test]
+    fn checked_add_i64_max_overflow() {
+        assert_eq!(
+            Value::I64(i64::MAX)
+                .checked_add(&Value::I64(1))
+                .unwrap_err(),
+            TabulaError::ArithmeticOverflow
+        );
+    }
+
+    #[test]
+    fn checked_sub_i64_min_underflow() {
+        assert_eq!(
+            Value::I64(i64::MIN)
+                .checked_sub(&Value::I64(1))
+                .unwrap_err(),
+            TabulaError::ArithmeticOverflow
+        );
+    }
+
+    #[test]
+    fn checked_mul_i64_overflow() {
+        assert_eq!(
+            Value::I64(i64::MAX)
+                .checked_mul(&Value::I64(2))
+                .unwrap_err(),
+            TabulaError::ArithmeticOverflow
+        );
+    }
+
+    #[test]
+    fn checked_divmod_i64_by_zero() {
+        assert_eq!(
+            Value::I64(42).checked_divmod(&Value::I64(0)).unwrap_err(),
+            TabulaError::DivisionByZero
+        );
+    }
+
+    // ── i64 comparison ───────────────────────────────────────────────
+
+    #[test]
+    fn compare_i64() {
+        assert_eq!(
+            Value::I64(-10).compare(&Value::I64(10)).unwrap(),
+            Ordering::Less
+        );
+        assert_eq!(
+            Value::I64(0).compare(&Value::I64(0)).unwrap(),
+            Ordering::Equal
+        );
+        assert_eq!(
+            Value::I64(i64::MAX).compare(&Value::I64(i64::MIN)).unwrap(),
+            Ordering::Greater
+        );
+    }
+
+    // ── Bytes32 is not arithmetic / comparable ───────────────────────
+
+    #[test]
+    fn bytes32_arithmetic_rejected() {
+        let a = Value::Bytes32([1; 32]);
+        let b = Value::Bytes32([2; 32]);
+        assert!(a.checked_add(&b).is_err());
+        assert!(a.checked_sub(&b).is_err());
+        assert!(a.checked_mul(&b).is_err());
+        assert!(a.checked_divmod(&b).is_err());
+    }
+
+    #[test]
+    fn bytes32_compare_rejected() {
+        let a = Value::Bytes32([1; 32]);
+        let b = Value::Bytes32([2; 32]);
+        let err = a.compare(&b).unwrap_err();
+        match err {
+            TabulaError::TypeMismatch { actual, .. } => {
+                assert_eq!(actual, "Bytes32");
+            }
+            _ => panic!("expected TypeMismatch, got {err:?}"),
+        }
+    }
+
+    // ── Display ──────────────────────────────────────────────────────
+
+    #[test]
+    fn display_value() {
+        assert_eq!(format!("{}", Value::U64(42)), "42u64");
+        assert_eq!(format!("{}", Value::I64(-5)), "-5i64");
+        assert_eq!(format!("{}", Value::Bool(true)), "true");
+        assert!(format!("{}", Value::Bytes32([0xAB; 32])).starts_with("0xabababab"));
+    }
+
+    #[test]
+    fn display_value_type() {
+        assert_eq!(format!("{}", ValueType::U64), "U64");
+        assert_eq!(format!("{}", ValueType::Bytes32), "Bytes32");
+    }
+
+    // ── Value is Copy ────────────────────────────────────────────────
+
+    #[test]
+    fn value_is_copy() {
+        let a = Value::U64(42);
+        let b = a; // Copy, not move
+        assert_eq!(a, b); // a is still usable
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn u64_add_commutative(a in any::<u64>(), b in any::<u64>()) {
+            let va = Value::U64(a);
+            let vb = Value::U64(b);
+            // If a + b doesn't overflow, result must be commutative
+            if let (Ok(ab), Ok(ba)) = (va.checked_add(&vb), vb.checked_add(&va)) {
+                prop_assert_eq!(ab, ba);
+            }
+        }
+
+        #[test]
+        fn i64_add_commutative(a in any::<i64>(), b in any::<i64>()) {
+            let va = Value::I64(a);
+            let vb = Value::I64(b);
+            if let (Ok(ab), Ok(ba)) = (va.checked_add(&vb), vb.checked_add(&va)) {
+                prop_assert_eq!(ab, ba);
+            }
+        }
+
+        #[test]
+        fn u64_add_zero_identity(a in any::<u64>()) {
+            let va = Value::U64(a);
+            let zero = Value::U64(0);
+            prop_assert_eq!(va.checked_add(&zero).unwrap(), va);
+        }
+
+        #[test]
+        fn i64_add_zero_identity(a in any::<i64>()) {
+            let va = Value::I64(a);
+            let zero = Value::I64(0);
+            prop_assert_eq!(va.checked_add(&zero).unwrap(), va);
+        }
+
+        #[test]
+        fn u64_mul_commutative(a in any::<u64>(), b in any::<u64>()) {
+            let va = Value::U64(a);
+            let vb = Value::U64(b);
+            if let (Ok(ab), Ok(ba)) = (va.checked_mul(&vb), vb.checked_mul(&va)) {
+                prop_assert_eq!(ab, ba);
+            }
+        }
+
+        #[test]
+        fn u64_divmod_roundtrip(a in any::<u64>(), b in 1..=u64::MAX) {
+            let va = Value::U64(a);
+            let vb = Value::U64(b);
+            let (q, r) = va.checked_divmod(&vb).unwrap();
+            if let (Value::U64(qv), Value::U64(rv)) = (q, r) {
+                prop_assert_eq!(qv * b + rv, a);
+                prop_assert!(rv < b);
+            } else {
+                prop_assert!(false, "expected U64 results");
+            }
+        }
+
+        #[test]
+        fn u64_sub_inverse_of_add(a in any::<u64>(), b in any::<u64>()) {
+            let va = Value::U64(a);
+            let vb = Value::U64(b);
+            if let Ok(sum) = va.checked_add(&vb) {
+                prop_assert_eq!(sum.checked_sub(&vb).unwrap(), va);
+            }
+        }
+
+        #[test]
+        fn borsh_round_trip_any_u64(n in any::<u64>()) {
+            let v = Value::U64(n);
+            let bytes = borsh::to_vec(&v).unwrap();
+            let decoded: Value = borsh::from_slice(&bytes).unwrap();
+            prop_assert_eq!(v, decoded);
+        }
+
+        #[test]
+        fn borsh_round_trip_any_i64(n in any::<i64>()) {
+            let v = Value::I64(n);
+            let bytes = borsh::to_vec(&v).unwrap();
+            let decoded: Value = borsh::from_slice(&bytes).unwrap();
+            prop_assert_eq!(v, decoded);
+        }
+
+        #[test]
+        fn compare_consistent_with_std(a in any::<u64>(), b in any::<u64>()) {
+            let va = Value::U64(a);
+            let vb = Value::U64(b);
+            prop_assert_eq!(va.compare(&vb).unwrap(), a.cmp(&b));
+        }
+
+        #[test]
+        fn compare_i64_consistent_with_std(a in any::<i64>(), b in any::<i64>()) {
+            let va = Value::I64(a);
+            let vb = Value::I64(b);
+            prop_assert_eq!(va.compare(&vb).unwrap(), a.cmp(&b));
+        }
     }
 }

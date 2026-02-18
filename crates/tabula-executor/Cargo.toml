@@ -7,8 +7,6 @@ license.workspace = true
 [dependencies]
 tabula-core = { workspace = true }
 tabula-ir = { workspace = true }
-borsh = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

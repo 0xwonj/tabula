@@ -63,9 +63,7 @@ impl StateCell {
                 col: ColId(self.col),
                 row: RowKey(self.row),
             },
-            self.value
-                .clone()
-                .expect("state cell value must be present"),
+            self.value.expect("state cell value must be present"),
         )
     }
 
@@ -75,7 +73,7 @@ impl StateCell {
             table: key.table.0,
             row: key.row.0,
             col: key.col.0,
-            value: value.clone(),
+            value: *value,
         }
     }
 }

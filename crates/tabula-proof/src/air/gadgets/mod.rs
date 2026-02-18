@@ -23,6 +23,6 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
 /// Convert a `bool` to a `BabyBear` field element (1 or 0).
-pub(crate) fn bool_fe(b: bool) -> BabyBear {
+pub fn bool_fe(b: bool) -> BabyBear {
     if b { BabyBear::ONE } else { BabyBear::ZERO }
 }
