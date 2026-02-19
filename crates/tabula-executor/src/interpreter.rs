@@ -1,4 +1,4 @@
-//! Reference interpreter for the DB-IR instruction set.
+//! Reference interpreter for the Tabula IR instruction set.
 //!
 //! Walks `&[Instruction]` against an `Overlay`, maintaining a `Vec<Value>` slot
 //! environment. Records execution events and emitted events.
@@ -46,7 +46,7 @@ pub struct ExecContext<'a> {
 /// Execute a transaction body against an overlay.
 ///
 /// # Arguments
-/// - `instructions`: the DB-IR body of the transaction type
+/// - `instructions`: the Tabula IR body of the transaction type
 /// - `params`: concrete parameter values for this transaction
 /// - `overlay`: the mutable overlay for state reads/writes
 /// - `ctx`: read-only execution context (hasher, static tables, schemas)

@@ -13,7 +13,7 @@
 2. [Workspace Structure](#2-workspace-structure)
 3. [Crate Specifications](#4-crate-specifications)
 4. [Core Abstractions](#4-core-abstractions)
-5. [DB-IR: The Instruction Set](#5-db-ir-the-instruction-set)
+5. [Tabula IR: The Instruction Set](#5-tabula-ir-the-instruction-set)
 6. [Data Flow: ApplyBatch Pipeline](#6-data-flow-applybatch-pipeline)
 7. [Tech Stack](#7-tech-stack)
 8. [Design Decisions](#8-design-decisions)
@@ -114,7 +114,7 @@ IR definitions and validation passes. Extracted from core during M3 to keep core
 Deterministic execution engine. Produces `ExecutionResult` from a batch + state snapshot.
 
 - **`overlay.rs`** — Internally composed of **ExecutionState** (write buffer, read cache, undo log) and **TraceRecorder** (events, logical time). O(1) checkpoint, O(k) rollback.
-- **`interpreter.rs`** — Reference interpreter for DB-IR. Slot-based variable environment.
+- **`interpreter.rs`** — Reference interpreter for Tabula IR. Slot-based variable environment.
 - **`batch.rs`** — `BatchExecutor`: signature/nonce verification, per-tx rollback orchestration.
 - **`consistency.rs`** — Key-local RAM consistency checker.
 
@@ -223,7 +223,7 @@ All traits live in `tabula-core/src/traits/`. They keep the system crypto-agnost
 
 ---
 
-## 5. DB-IR: The Instruction Set
+## 5. Tabula IR: The Instruction Set
 
 > **Normative definition**: [semantics-spec.md](../spec/semantics-spec.md) §1. This section describes design philosophy; the spec is authoritative for semantics and NF rules.
 

@@ -1,4 +1,4 @@
-//! DB-IR instruction set: the language of Tabula transaction bodies.
+//! Tabula IR (TIR) instruction set: the language of Tabula transaction bodies.
 
 use std::cmp::Ordering;
 
@@ -111,7 +111,7 @@ impl CmpOp {
     }
 }
 
-/// A single DB-IR instruction.
+/// A single Tabula IR instruction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub enum Instruction {
     /// Read a cell from state, store value in `dst_val` and null flag in `dst_is_null`.

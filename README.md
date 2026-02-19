@@ -81,7 +81,7 @@ are behind traits defined in `tabula-core` and injected at the call site.
 This means the same execution engine works with Blake3 (testing),
 Poseidon (proving), or any future hash function.
 
-## The DB-IR
+## Tabula IR
 
 Transaction bodies are sequences of these instructions:
 

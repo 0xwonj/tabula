@@ -16,7 +16,7 @@ pub struct TxTypeDef {
     pub name: String,
     /// Parameter schema.
     pub param_schema: Vec<ParamDef>,
-    /// DB-IR body.
+    /// Tabula IR body.
     pub body: Vec<Instruction>,
 }
 

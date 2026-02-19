@@ -224,7 +224,7 @@ argument, and cannot enforce structural invariants like normal form.
 | | General-purpose zkVM | Tabula |
 |---|---|---|
 | State model | Flat byte memory | Typed, column-partitioned tables |
-| Instruction set | RISC-V / WASM | Domain-specific DB-IR |
+| Instruction set | RISC-V / WASM | Tabula IR (TIR) |
 | State commitment | Application-level (ISA/precompile) | Native AIR chips |
 | Value encoding | Word-granularity, untyped | Type-aware, per-column width class |
 | Access analysis | Runtime only | Compile-time (NF rules) |
