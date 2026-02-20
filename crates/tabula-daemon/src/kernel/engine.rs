@@ -181,11 +181,19 @@ impl TabulaEngine {
         match input {
             InputRef::Inline(inline) => match inline {
                 ProgramInline::Source(source) => compile_program_source(source),
-                ProgramInline::Program(pf) => Ok(LoadedProgram {
-                    schemas: pf.table_schemas.clone(),
-                    tx_types: pf.tx_types.clone(),
-                    contract_metadata: pf.contract_metadata.clone(),
-                }),
+                ProgramInline::Program(pf) => {
+                    if pf.contract_metadata.is_none() {
+                        return Err(ApiError::unprocessable(
+                            ErrorCode::ProgramSchemaError,
+                            "compiled program JSON is missing contract_metadata; recompile with current driver",
+                        ));
+                    }
+                    Ok(LoadedProgram {
+                        schemas: pf.table_schemas.clone(),
+                        tx_types: pf.tx_types.clone(),
+                        contract_metadata: pf.contract_metadata.clone(),
+                    })
+                }
             },
             InputRef::File(file_path) => self.load_program_from_file(file_path),
             InputRef::Artifact(artifact_id) => Err(ApiError::not_implemented(
@@ -309,6 +317,8 @@ fn merge_output_state_cells(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+
     use tabula_core::Value;
 
     #[test]
@@ -331,5 +341,21 @@ mod tests {
         let merged = merge_output_state_cells(&initial, &[]);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].value, Some(Value::U64(20)));
+    }
+
+    #[test]
+    fn inline_program_requires_contract_metadata() {
+        let cwd = env::current_dir().expect("cwd");
+        let engine = TabulaEngine::new(FileAccessPolicy::new(vec![cwd]).expect("policy"));
+
+        let result =
+            engine.load_program_sources(&InputRef::Inline(ProgramInline::Program(ProgramFile {
+                table_schemas: vec![],
+                tx_types: vec![],
+                contract_metadata: None,
+            })));
+        assert!(result.is_err(), "missing metadata must fail closed");
+        let err = result.err().expect("error");
+        assert!(format!("{err:?}").contains("missing contract_metadata"));
     }
 }
