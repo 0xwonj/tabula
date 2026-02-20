@@ -137,14 +137,14 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder.assert_bool(local.carry1.clone());
 
     // Cmp sub-selectors and witnesses
-    builder.assert_bool(local.cmp_is_eq.clone());
-    builder.assert_bool(local.cmp_is_ne.clone());
-    builder.assert_bool(local.cmp_is_lt.clone());
-    builder.assert_bool(local.cmp_is_lte.clone());
-    builder.assert_bool(local.cmp_is_gt.clone());
-    builder.assert_bool(local.cmp_is_gte.clone());
-    builder.assert_bool(local.cmp_lt_witness.clone());
-    builder.assert_bool(local.cmp_eq_witness.clone());
+    builder.assert_bool(local.cmp.is_eq.clone());
+    builder.assert_bool(local.cmp.is_ne.clone());
+    builder.assert_bool(local.cmp.is_lt.clone());
+    builder.assert_bool(local.cmp.is_lte.clone());
+    builder.assert_bool(local.cmp.is_gt.clone());
+    builder.assert_bool(local.cmp.is_gte.clone());
+    builder.assert_bool(local.cmp.lt_witness.clone());
+    builder.assert_bool(local.cmp.eq_witness.clone());
 
     // Per-slot flags
     for s in 0..MAX_SLOTS {
@@ -418,56 +418,56 @@ fn constrain_range_check_halves<AB: AirBuilder, const W: usize>(
     // Cmp inequality diff halves (gated by op_cmp * (1 - cmp_eq_witness))
     let cmp_gate: AB::Expr = is_real_for_cmp
         * local.op_cmp.clone().into()
-        * (AB::Expr::ONE - local.cmp_eq_witness.clone().into());
+        * (AB::Expr::ONE - local.cmp.eq_witness.clone().into());
 
-    let cmp_d0_diff: AB::Expr = local.cmp_ineq.diff0.clone().into()
-        - (local.cmp_ineq_diff0_halves.lo.clone().into()
-            + local.cmp_ineq_diff0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    let cmp_d0_diff: AB::Expr = local.cmp.ineq.diff0.clone().into()
+        - (local.cmp.ineq_diff0_halves.lo.clone().into()
+            + local.cmp.ineq_diff0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
     builder.assert_zero(cmp_gate.clone() * cmp_d0_diff);
 
-    let cmp_d1_diff: AB::Expr = local.cmp_ineq.diff1.clone().into()
-        - (local.cmp_ineq_diff1_halves.lo.clone().into()
-            + local.cmp_ineq_diff1_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    let cmp_d1_diff: AB::Expr = local.cmp.ineq.diff1.clone().into()
+        - (local.cmp.ineq_diff1_halves.lo.clone().into()
+            + local.cmp.ineq_diff1_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
     builder.assert_zero(cmp_gate * cmp_d1_diff);
 
     // Cmp ineq diff2 (4-bit boolean decomposition)
     constrain_limb2_bits(
         builder,
-        local.cmp_ineq.diff2.clone().into(),
-        &local.cmp_ineq_diff2_bits,
+        local.cmp.ineq.diff2.clone().into(),
+        &local.cmp.ineq_diff2_bits,
     );
 
     // Mul carry half-decomposition (gated by op_arith * arith_is_mul)
     let mul_gate: AB::Expr = is_real_for_mul_divmod.clone()
         * local.op_arith.clone().into()
         * local.arith_is_mul.clone().into();
-    let mul_c0_diff: AB::Expr = local.mul_c0.clone().into()
-        - (local.mul_c0_halves.lo.clone().into()
-            + local.mul_c0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    let mul_c0_diff: AB::Expr = local.mul.c0.clone().into()
+        - (local.mul.c0_halves.lo.clone().into()
+            + local.mul.c0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
     builder.assert_zero(mul_gate * mul_c0_diff);
 
     // DivMod carry + remainder half-decomposition (gated by op_divmod)
     let divmod_gate: AB::Expr = is_real_for_mul_divmod * local.op_divmod.clone().into();
-    let divmod_c0_diff: AB::Expr = local.divmod_c0.clone().into()
-        - (local.divmod_c0_halves.lo.clone().into()
-            + local.divmod_c0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    let divmod_c0_diff: AB::Expr = local.divmod.c0.clone().into()
+        - (local.divmod.c0_halves.lo.clone().into()
+            + local.divmod.c0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
     builder.assert_zero(divmod_gate.clone() * divmod_c0_diff);
 
-    let divmod_rd0_diff: AB::Expr = local.divmod_rem_ineq.diff0.clone().into()
-        - (local.divmod_rem_diff0_halves.lo.clone().into()
-            + local.divmod_rem_diff0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    let divmod_rd0_diff: AB::Expr = local.divmod.rem_ineq.diff0.clone().into()
+        - (local.divmod.rem_diff0_halves.lo.clone().into()
+            + local.divmod.rem_diff0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
     builder.assert_zero(divmod_gate.clone() * divmod_rd0_diff);
 
-    let divmod_rd1_diff: AB::Expr = local.divmod_rem_ineq.diff1.clone().into()
-        - (local.divmod_rem_diff1_halves.lo.clone().into()
-            + local.divmod_rem_diff1_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    let divmod_rd1_diff: AB::Expr = local.divmod.rem_ineq.diff1.clone().into()
+        - (local.divmod.rem_diff1_halves.lo.clone().into()
+            + local.divmod.rem_diff1_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
     builder.assert_zero(divmod_gate * divmod_rd1_diff);
 
     // DivMod remainder ineq diff2 (4-bit boolean decomposition)
     constrain_limb2_bits(
         builder,
-        local.divmod_rem_ineq.diff2.clone().into(),
-        &local.divmod_rem_diff2_bits,
+        local.divmod.rem_ineq.diff2.clone().into(),
+        &local.divmod.rem_diff2_bits,
     );
 }
 
@@ -533,7 +533,7 @@ fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
     // Cmp inequality diff limbs
     let cmp_mult: AB::Expr = local.is_real.clone().into()
         * local.op_cmp.clone().into()
-        * (AB::Expr::ONE - local.cmp_eq_witness.clone().into());
+        * (AB::Expr::ONE - local.cmp.eq_witness.clone().into());
     let mut send_cmp_rc = |val: AB::Expr| {
         builder.send(AirInteraction {
             values: vec![val],
@@ -541,10 +541,10 @@ fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
             kind: InteractionKind::RangeCheck,
         });
     };
-    send_cmp_rc(local.cmp_ineq_diff0_halves.lo.clone().into());
-    send_cmp_rc(local.cmp_ineq_diff0_halves.hi.clone().into());
-    send_cmp_rc(local.cmp_ineq_diff1_halves.lo.clone().into());
-    send_cmp_rc(local.cmp_ineq_diff1_halves.hi.clone().into());
+    send_cmp_rc(local.cmp.ineq_diff0_halves.lo.clone().into());
+    send_cmp_rc(local.cmp.ineq_diff0_halves.hi.clone().into());
+    send_cmp_rc(local.cmp.ineq_diff1_halves.lo.clone().into());
+    send_cmp_rc(local.cmp.ineq_diff1_halves.hi.clone().into());
     // diff2 proven by Limb2Bits, no RC send needed
 
     // Mul carry range checks
@@ -558,10 +558,10 @@ fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
             kind: InteractionKind::RangeCheck,
         });
     };
-    send_mul_rc(local.mul_c0_halves.lo.clone().into());
-    send_mul_rc(local.mul_c0_halves.hi.clone().into());
-    send_mul_rc(local.mul_c1_lo.clone().into());
-    send_mul_rc(local.mul_c1_hi.clone().into());
+    send_mul_rc(local.mul.c0_halves.lo.clone().into());
+    send_mul_rc(local.mul.c0_halves.hi.clone().into());
+    send_mul_rc(local.mul.c1_lo.clone().into());
+    send_mul_rc(local.mul.c1_hi.clone().into());
 
     // DivMod range checks
     let divmod_mult: AB::Expr = local.is_real.clone().into() * local.op_divmod.clone().into();
@@ -572,14 +572,14 @@ fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
             kind: InteractionKind::RangeCheck,
         });
     };
-    send_divmod_rc(local.divmod_c0_halves.lo.clone().into());
-    send_divmod_rc(local.divmod_c0_halves.hi.clone().into());
-    send_divmod_rc(local.divmod_c1_lo.clone().into());
-    send_divmod_rc(local.divmod_c1_hi.clone().into());
-    send_divmod_rc(local.divmod_rem_diff0_halves.lo.clone().into());
-    send_divmod_rc(local.divmod_rem_diff0_halves.hi.clone().into());
-    send_divmod_rc(local.divmod_rem_diff1_halves.lo.clone().into());
-    send_divmod_rc(local.divmod_rem_diff1_halves.hi.clone().into());
+    send_divmod_rc(local.divmod.c0_halves.lo.clone().into());
+    send_divmod_rc(local.divmod.c0_halves.hi.clone().into());
+    send_divmod_rc(local.divmod.c1_lo.clone().into());
+    send_divmod_rc(local.divmod.c1_hi.clone().into());
+    send_divmod_rc(local.divmod.rem_diff0_halves.lo.clone().into());
+    send_divmod_rc(local.divmod.rem_diff0_halves.hi.clone().into());
+    send_divmod_rc(local.divmod.rem_diff1_halves.lo.clone().into());
+    send_divmod_rc(local.divmod.rem_diff1_halves.hi.clone().into());
     // diff2 proven by Limb2Bits, no RC send needed
 }
 

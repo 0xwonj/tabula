@@ -933,8 +933,8 @@ fn divmod_wrong_q_sel_fails() {
     let cols: &mut ExecutionCols<BabyBear, W> =
         borrow_cols_mut(&mut trace.values[row2_offset..row2_offset + width]);
     // Clear current q_sel[2] = 1, set q_sel[3] = 1 (swap q and rem selectors)
-    cols.divmod_q_sel[2] = BabyBear::ZERO;
-    cols.divmod_q_sel[3] = BabyBear::ONE;
+    cols.divmod.q_sel[2] = BabyBear::ZERO;
+    cols.divmod.q_sel[3] = BabyBear::ONE;
     debug_check(&ExecutionChip::<W>, &trace)
         .expect_err("wrong q_sel should fail division identity");
 }
@@ -973,9 +973,9 @@ fn divmod_div_by_zero_rejected() {
 
     // Set is_zero=1 (rhs "is" zero) — this makes the IsZero witness consistent
     // but triggers the final `assert_zero(gate * is_zero)` constraint.
-    cols.divmod_rhs_iz.is_zero = BabyBear::ONE;
+    cols.divmod.rhs_iz.is_zero = BabyBear::ONE;
     // Set inv=0 (consistent with val=0 → no inverse).
-    cols.divmod_rhs_iz.inv = BabyBear::ZERO;
+    cols.divmod.rhs_iz.inv = BabyBear::ZERO;
 
     debug_check(&ExecutionChip::<W>, &trace)
         .expect_err("divmod with rhs=0 must fail non-zero divisor constraint");

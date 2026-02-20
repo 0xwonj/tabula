@@ -223,7 +223,7 @@ pub fn generate_execution_trace<const W: usize>(
             // Populate divmod_q_sel: first written slot is quotient
             if let Some(&q_slot) = rec.written_slots.first() {
                 assert!(q_slot < MAX_SLOTS, "divmod q_slot {q_slot} >= MAX_SLOTS");
-                cols.divmod_q_sel[q_slot] = BabyBear::ONE;
+                cols.divmod.q_sel[q_slot] = BabyBear::ONE;
             }
         }
 
@@ -346,12 +346,12 @@ fn populate_cmp_witness<const W: usize>(
 ) {
     // Set cmp sub-selector
     match cmp_op {
-        CmpOp::Eq => cols.cmp_is_eq = BabyBear::ONE,
-        CmpOp::Ne => cols.cmp_is_ne = BabyBear::ONE,
-        CmpOp::Lt => cols.cmp_is_lt = BabyBear::ONE,
-        CmpOp::Lte => cols.cmp_is_lte = BabyBear::ONE,
-        CmpOp::Gt => cols.cmp_is_gt = BabyBear::ONE,
-        CmpOp::Gte => cols.cmp_is_gte = BabyBear::ONE,
+        CmpOp::Eq => cols.cmp.is_eq = BabyBear::ONE,
+        CmpOp::Ne => cols.cmp.is_ne = BabyBear::ONE,
+        CmpOp::Lt => cols.cmp.is_lt = BabyBear::ONE,
+        CmpOp::Lte => cols.cmp.is_lte = BabyBear::ONE,
+        CmpOp::Gt => cols.cmp.is_gt = BabyBear::ONE,
+        CmpOp::Gte => cols.cmp.is_gte = BabyBear::ONE,
     }
 
     // Reconstruct u64 operands from limbs
@@ -361,8 +361,8 @@ fn populate_cmp_witness<const W: usize>(
     let is_eq = s1 == s2;
     let is_lt = s1 < s2;
 
-    cols.cmp_lt_witness = bool_fe(is_lt);
-    cols.cmp_eq_witness = bool_fe(is_eq);
+    cols.cmp.lt_witness = bool_fe(is_lt);
+    cols.cmp.eq_witness = bool_fe(is_eq);
 
     // Per-limb IsZero for equality detection (avoids field reconstruction collision).
     let limb0_diff = rec.src1_val[0] - rec.src2_val[0];
@@ -370,21 +370,21 @@ fn populate_cmp_witness<const W: usize>(
         - rec.src2_val.get(1).copied().unwrap_or(BabyBear::ZERO);
     let limb2_diff = rec.src1_val.get(2).copied().unwrap_or(BabyBear::ZERO)
         - rec.src2_val.get(2).copied().unwrap_or(BabyBear::ZERO);
-    cols.cmp_eq_limb0_iz.populate(limb0_diff);
-    cols.cmp_eq_limb1_iz.populate(limb1_diff);
-    cols.cmp_eq_limb2_iz.populate(limb2_diff);
+    cols.cmp.eq_limb0_iz.populate(limb0_diff);
+    cols.cmp.eq_limb1_iz.populate(limb1_diff);
+    cols.cmp.eq_limb2_iz.populate(limb2_diff);
 
     // StrictIneq + halves + diff2 bits: only when not equal
     if !is_eq {
         let (a, b) = if is_lt { (s1, s2) } else { (s2, s1) };
-        cols.cmp_ineq.populate(a, b);
+        cols.cmp.ineq.populate(a, b);
         let gap = b - a - 1;
         let d0 = (gap & MASK_30) as u32;
         let d1 = ((gap >> 30) & MASK_30) as u32;
         let d2 = (gap >> 60) as u32;
-        cols.cmp_ineq_diff0_halves.populate(d0);
-        cols.cmp_ineq_diff1_halves.populate(d1);
-        cols.cmp_ineq_diff2_bits.populate(d2);
+        cols.cmp.ineq_diff0_halves.populate(d0);
+        cols.cmp.ineq_diff1_halves.populate(d1);
+        cols.cmp.ineq_diff2_bits.populate(d2);
     }
 }
 
@@ -410,10 +410,10 @@ fn populate_mul_carry<const W: usize>(
     let t1_plus_c0 = a0 * b1 + a1 * b0 + c0;
     let c1 = t1_plus_c0 >> 30;
 
-    cols.mul_c0 = BabyBear::new(c0 as u32);
-    cols.mul_c0_halves.populate(c0 as u32);
-    cols.mul_c1_lo = BabyBear::new((c1 & 0xFFFF) as u32);
-    cols.mul_c1_hi = BabyBear::new((c1 >> 16) as u32);
+    cols.mul.c0 = BabyBear::new(c0 as u32);
+    cols.mul.c0_halves.populate(c0 as u32);
+    cols.mul.c1_lo = BabyBear::new((c1 & 0xFFFF) as u32);
+    cols.mul.c1_hi = BabyBear::new((c1 >> 16) as u32);
 }
 
 /// Populate DivMod columns: carry chain for q*rhs + remainder bound.
@@ -428,7 +428,7 @@ fn populate_divmod<const W: usize>(cols: &mut ExecutionCols<BabyBear, W>, rec: &
 
     if rhs == 0 {
         // Non-zero divisor check will fail — just populate IsZero witness
-        cols.divmod_rhs_iz.populate(BabyBear::ZERO);
+        cols.divmod.rhs_iz.populate(BabyBear::ZERO);
         return;
     }
 
@@ -454,26 +454,26 @@ fn populate_divmod<const W: usize>(cols: &mut ExecutionCols<BabyBear, W>, rec: &
     let t1_plus_c0 = q0 * d1 + q1 * d0 + rem1 + c0;
     let c1 = t1_plus_c0 >> 30;
 
-    cols.divmod_c0 = BabyBear::new(c0 as u32);
-    cols.divmod_c0_halves.populate(c0 as u32);
-    cols.divmod_c1_lo = BabyBear::new((c1 & 0xFFFF) as u32);
-    cols.divmod_c1_hi = BabyBear::new((c1 >> 16) as u32);
+    cols.divmod.c0 = BabyBear::new(c0 as u32);
+    cols.divmod.c0_halves.populate(c0 as u32);
+    cols.divmod.c1_lo = BabyBear::new((c1 & 0xFFFF) as u32);
+    cols.divmod.c1_hi = BabyBear::new((c1 >> 16) as u32);
 
     // Remainder bound: rem < rhs
-    cols.divmod_rem_ineq.populate(rem, rhs);
+    cols.divmod.rem_ineq.populate(rem, rhs);
     let gap = rhs - rem - 1;
     let d0_gap = (gap & MASK_30) as u32;
     let d1_gap = ((gap >> 30) & MASK_30) as u32;
     let d2_gap = (gap >> 60) as u32;
-    cols.divmod_rem_diff0_halves.populate(d0_gap);
-    cols.divmod_rem_diff1_halves.populate(d1_gap);
-    cols.divmod_rem_diff2_bits.populate(d2_gap);
+    cols.divmod.rem_diff0_halves.populate(d0_gap);
+    cols.divmod.rem_diff1_halves.populate(d1_gap);
+    cols.divmod.rem_diff2_bits.populate(d2_gap);
 
     // Non-zero divisor: IsZero on combined rhs
     let shift_30 = BabyBear::new(SHIFT_30_U32);
     let shift_60 = shift_30 * shift_30;
     let rhs_combined = rec.src2_val[0] + rec.src2_val[1] * shift_30 + rec.src2_val[2] * shift_60;
-    cols.divmod_rhs_iz.populate(rhs_combined);
+    cols.divmod.rhs_iz.populate(rhs_combined);
 }
 
 /// Reconstruct a u64 from limb-encoded BabyBear values.

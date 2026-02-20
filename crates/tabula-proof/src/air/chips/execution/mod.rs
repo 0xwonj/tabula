@@ -10,7 +10,7 @@
 pub mod air;
 pub mod columns;
 mod linkage;
-mod ops;
+pub(crate) mod ops;
 pub mod trace;
 
 pub use air::{ExecutionChip, HASH_INSTRUCTION_DOMAIN_TAG, HASH_INSTRUCTION_INPUT_COUNT};
