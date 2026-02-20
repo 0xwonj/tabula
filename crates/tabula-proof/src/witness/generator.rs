@@ -308,6 +308,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
                 value_fes: fes,
                 val_is_null: is_null,
                 tx_index: event.tx_index,
+                effect_ordinal_in_tx: event.effect_ordinal_in_tx,
             });
         }
 

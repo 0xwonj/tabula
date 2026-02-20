@@ -8,6 +8,27 @@ use crate::{CellKey, Value};
 /// Monotonically increasing logical timestamp within a batch execution.
 pub type LogicalTime = u64;
 
+/// Canonical event identity in M12 E-Trace.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub struct ETraceEventId {
+    /// Index of the transaction within the batch (0-based).
+    pub tx_index: u32,
+    /// Ordinal of this effect within the transaction (0-based).
+    pub effect_ordinal_in_tx: u32,
+}
+
 /// The kind of state operation.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
@@ -36,6 +57,23 @@ pub struct ExecutionEvent {
     /// Index of the transaction within the batch (0-based).
     #[serde(default)]
     pub tx_index: u32,
+    /// Ordinal of the effect within the transaction (0-based).
+    ///
+    /// Canonical identity for M12:
+    /// - `tx_index`
+    /// - `effect_ordinal_in_tx`
+    #[serde(default)]
+    pub effect_ordinal_in_tx: u32,
+}
+
+impl ExecutionEvent {
+    /// Canonical identity of this event in E-Trace.
+    pub fn etrace_id(&self) -> ETraceEventId {
+        ETraceEventId {
+            tx_index: self.tx_index,
+            effect_ordinal_in_tx: self.effect_ordinal_in_tx,
+        }
+    }
 }
 
 /// Per-transaction execution outcome.
@@ -63,6 +101,18 @@ pub struct EmittedEvent {
     pub topic: Vec<u8>,
     /// Payload data.
     pub data: Vec<Value>,
+}
+
+/// Typed consistency check status for command-level contracts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExecutionConsistencyStatus {
+    /// Consistency check passed.
+    Passed,
+    /// Consistency check failed with reason.
+    Failed {
+        /// Human-readable failure detail.
+        reason: String,
+    },
 }
 
 /// The output of deterministic batch execution.

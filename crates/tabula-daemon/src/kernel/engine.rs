@@ -1,15 +1,16 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde_json::json;
 
+use tabula_contract::ContractMetadataEnvelope;
 use tabula_core::mock::{
     InMemoryState, InMemoryStaticTables, MockHasher, MockSigVerifier, SequentialNonce,
 };
-use tabula_core::{Batch, CellKey, ColId, TableId, TableSchema, Value};
+use tabula_core::{Batch, CellKey, Value};
+use tabula_driver::{RegisteredProgram, register_program};
 use tabula_executor::batch::{BatchEnv, execute_batch};
-use tabula_executor::consistency::check_consistency;
-use tabula_ir::{Instruction, Program, TxTypeDef};
+use tabula_executor::consistency::check_consistency_status;
 
 use crate::kernel::domain::{
     BatchFile, Capabilities, CapabilityClientKind, CapabilityInputMode, CheckCommand, CheckResult,
@@ -77,7 +78,7 @@ impl KernelEngine for TabulaEngine {
 
     fn check(&self, req: CheckCommand) -> ApiResult<CheckResult> {
         let loaded = self.load_program_sources(&req.program)?;
-        register_program(&loaded.schemas, &loaded.tx_types)?;
+        register_loaded_program(&loaded)?;
 
         Ok(CheckResult {
             table_count: loaded.schemas.len(),
@@ -87,21 +88,22 @@ impl KernelEngine for TabulaEngine {
 
     fn compile(&self, req: CompileCommand) -> ApiResult<CompileResult> {
         let loaded = self.load_program_sources(&req.program)?;
-        register_program(&loaded.schemas, &loaded.tx_types)?;
+        let artifact = register_loaded_program(&loaded)?;
 
         Ok(CompileResult {
             table_count: loaded.schemas.len(),
             tx_type_count: loaded.tx_types.len(),
             program: ProgramFile {
-                table_schemas: loaded.schemas,
-                tx_types: loaded.tx_types,
+                table_schemas: artifact.table_schemas,
+                tx_types: artifact.tx_types,
+                contract_metadata: Some(artifact.metadata_envelope),
             },
         })
     }
 
     fn execute(&self, req: ExecuteCommand) -> ApiResult<ExecuteResult> {
         let loaded = self.load_program_sources(&req.program)?;
-        let program = register_program(&loaded.schemas, &loaded.tx_types)?;
+        let artifact = register_loaded_program(&loaded)?;
         let state_file = self.files.load_json_input(&req.state, "state")?;
         let batch_file = self
             .files
@@ -133,13 +135,10 @@ impl KernelEngine for TabulaEngine {
             static_tables: &st,
         };
 
-        let result = execute_batch(&batch, &program, &state, &env, &BTreeMap::new())
+        let result = execute_batch(&batch, &artifact.program, &state, &env, &BTreeMap::new())
             .map_err(|e| ApiError::unprocessable(ErrorCode::ExecutionError, e.to_string()))?;
 
-        let consistency = match check_consistency(&result.events, &result.read_set_old) {
-            Ok(()) => "PASSED".to_string(),
-            Err(e) => format!("FAILED: {e}"),
-        };
+        let consistency = check_consistency_status(&result.events, &result.read_set_old);
 
         let state_after = StateFile {
             cells: merge_output_state_cells(&state_file.cells, &result.write_set_final),
@@ -172,8 +171,9 @@ impl KernelEngine for TabulaEngine {
 }
 
 struct LoadedProgram {
-    schemas: Vec<TableSchema>,
-    tx_types: Vec<TxTypeDef>,
+    schemas: Vec<tabula_core::TableSchema>,
+    tx_types: Vec<tabula_ir::TxTypeDef>,
+    contract_metadata: Option<ContractMetadataEnvelope>,
 }
 
 impl TabulaEngine {
@@ -184,6 +184,7 @@ impl TabulaEngine {
                 ProgramInline::Program(pf) => Ok(LoadedProgram {
                     schemas: pf.table_schemas.clone(),
                     tx_types: pf.tx_types.clone(),
+                    contract_metadata: pf.contract_metadata.clone(),
                 }),
             },
             InputRef::File(file_path) => self.load_program_from_file(file_path),
@@ -201,9 +202,16 @@ impl TabulaEngine {
             compile_program_source(&source)
         } else {
             let pf: ProgramFile = self.files.read_json_file(path, "program")?;
+            if pf.contract_metadata.is_none() {
+                return Err(ApiError::unprocessable(
+                    ErrorCode::ProgramSchemaError,
+                    "compiled program JSON is missing contract_metadata; recompile with current driver",
+                ));
+            }
             Ok(LoadedProgram {
                 schemas: pf.table_schemas,
                 tx_types: pf.tx_types,
+                contract_metadata: pf.contract_metadata,
             })
         }
     }
@@ -214,6 +222,7 @@ fn compile_program_source(source: &str) -> ApiResult<LoadedProgram> {
         Ok(compiled) => Ok(LoadedProgram {
             schemas: compiled.schemas,
             tx_types: compiled.tx_types,
+            contract_metadata: None,
         }),
         Err(errors) => {
             let diagnostics: Vec<_> = errors
@@ -239,77 +248,27 @@ fn compile_program_source(source: &str) -> ApiResult<LoadedProgram> {
     }
 }
 
-fn register_program(schemas: &[TableSchema], tx_types: &[TxTypeDef]) -> ApiResult<Program> {
-    validate_schema_coverage(schemas, tx_types)?;
+fn register_loaded_program(loaded: &LoadedProgram) -> ApiResult<RegisteredProgram> {
+    let artifact = register_program(&loaded.schemas, &loaded.tx_types).map_err(|e| {
+        ApiError::unprocessable(
+            ErrorCode::ProgramValidationError,
+            format!("invalid program: {e}"),
+        )
+    })?;
 
-    let mut program = Program::new();
-    for schema in schemas {
-        program.add_schema(schema.clone());
-    }
-    for def in tx_types {
-        program.register(def.clone()).map_err(|e| {
-            ApiError::unprocessable(
-                ErrorCode::ProgramValidationError,
-                format!("invalid program: {e}"),
-            )
-        })?;
-    }
-    Ok(program)
-}
-
-fn validate_schema_coverage(schemas: &[TableSchema], tx_types: &[TxTypeDef]) -> ApiResult<()> {
-    let mut columns_by_table: BTreeMap<TableId, BTreeSet<ColId>> = BTreeMap::new();
-    for schema in schemas {
-        let cols = columns_by_table.entry(schema.id).or_default();
-        for col in &schema.columns {
-            cols.insert(col.id);
-        }
+    if let Some(meta) = &loaded.contract_metadata {
+        artifact
+            .compatibility_policy()
+            .validate(meta)
+            .map_err(|e| {
+                ApiError::unprocessable(
+                    ErrorCode::ProgramSchemaError,
+                    format!("contract metadata mismatch: {e}"),
+                )
+            })?;
     }
 
-    for tx in tx_types {
-        for (instr_idx, instr) in tx.body.iter().enumerate() {
-            match instr {
-                Instruction::Read { table, col, .. } | Instruction::Write { table, col, .. } => {
-                    ensure_table_col_exists(&columns_by_table, tx, instr_idx, *table, *col)?
-                }
-                Instruction::Lookup {
-                    static_table, col, ..
-                } => {
-                    ensure_table_col_exists(&columns_by_table, tx, instr_idx, *static_table, *col)?
-                }
-                _ => {}
-            }
-        }
-    }
-    Ok(())
-}
-
-fn ensure_table_col_exists(
-    columns_by_table: &BTreeMap<TableId, BTreeSet<ColId>>,
-    tx: &TxTypeDef,
-    instr_idx: usize,
-    table: TableId,
-    col: ColId,
-) -> ApiResult<()> {
-    let Some(cols) = columns_by_table.get(&table) else {
-        return Err(ApiError::unprocessable(
-            ErrorCode::ProgramSchemaError,
-            format!(
-                "tx '{}' (id {}), instruction {} references table {} but no schema is declared for it",
-                tx.name, tx.id.0, instr_idx, table.0
-            ),
-        ));
-    };
-    if !cols.contains(&col) {
-        return Err(ApiError::unprocessable(
-            ErrorCode::ProgramSchemaError,
-            format!(
-                "tx '{}' (id {}), instruction {} references table {} col {} but that column is missing in schema",
-                tx.name, tx.id.0, instr_idx, table.0, col.0
-            ),
-        ));
-    }
-    Ok(())
+    Ok(artifact)
 }
 
 fn merge_output_state_cells(

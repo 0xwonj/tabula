@@ -23,4 +23,7 @@ pub use state::value::{Value, ValueType, zero_value};
 pub use tx::{Batch, ProgramBudgets, Transaction};
 
 // ── Execution output ──
-pub use event::{EmittedEvent, ExecutionEvent, ExecutionResult, LogicalTime, OpKind, TxOutcome};
+pub use event::{
+    ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, ExecutionEvent, ExecutionResult,
+    LogicalTime, OpKind, TxOutcome,
+};

@@ -116,7 +116,7 @@ pub struct ExecuteResponse {
     pub read_set: Vec<StateCell>,
     pub write_set: Vec<StateCell>,
     pub emitted: Vec<tabula_core::EmittedEvent>,
-    pub consistency: String,
+    pub consistency: tabula_core::ExecutionConsistencyStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace: Option<Vec<tabula_core::ExecutionEvent>>,
     pub state_after: StateFile,

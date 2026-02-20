@@ -19,6 +19,7 @@ fn read_ev(key: CellKey, time: u64) -> ExecutionEvent {
         val_is_null: false,
         time,
         tx_index: 0,
+        effect_ordinal_in_tx: time as u32,
     }
 }
 
@@ -30,6 +31,7 @@ fn write_ev(key: CellKey, time: u64) -> ExecutionEvent {
         val_is_null: false,
         time,
         tx_index: 0,
+        effect_ordinal_in_tx: time as u32,
     }
 }
 

@@ -2,9 +2,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use tabula_contract::ContractMetadataEnvelope;
 use tabula_core::{
-    CellKey, ColId, EmittedEvent, ExecutionEvent, RowKey, TableId, TableSchema, Transaction,
-    TxOutcome, TxTypeId, Value,
+    CellKey, ColId, EmittedEvent, ExecutionConsistencyStatus, ExecutionEvent, RowKey, TableId,
+    TableSchema, Transaction, TxOutcome, TxTypeId, Value,
 };
 use tabula_ir::TxTypeDef;
 
@@ -88,7 +89,7 @@ pub struct ExecuteResult {
     pub read_set: Vec<StateCell>,
     pub write_set: Vec<StateCell>,
     pub emitted: Vec<EmittedEvent>,
-    pub consistency: String,
+    pub consistency: ExecutionConsistencyStatus,
     pub trace: Option<Vec<ExecutionEvent>>,
     pub state_after: StateFile,
 }
@@ -99,6 +100,8 @@ pub struct ProgramFile {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub table_schemas: Vec<TableSchema>,
     pub tx_types: Vec<TxTypeDef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract_metadata: Option<ContractMetadataEnvelope>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

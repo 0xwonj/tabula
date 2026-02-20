@@ -55,6 +55,7 @@ impl EntrySource {
 /// A single row for building the StateColumn trace.
 ///
 /// Pre-sorted by `(table_id, col_id, key)`.
+#[derive(Debug, Clone)]
 pub struct StateColumnRow {
     /// Table identifier.
     pub table_id: u32,

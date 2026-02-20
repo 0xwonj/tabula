@@ -2,13 +2,16 @@
 resolver = "2"
 members = [
     "crates/tabula-core",
+    "crates/tabula-contract",
     "crates/tabula-ir",
     "crates/tabula-executor",
     "crates/tabula-commitment",
     "crates/tabula-proof",
     "crates/tabula-lang",
+    "crates/tabula-driver",
     "crates/tabula-cli",
     "crates/tabula-daemon",
+    "crates/tabula-web-ide",
 ]
 
 [workspace.package]
@@ -20,11 +23,13 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 # Internal
 tabula-core = { path = "crates/tabula-core" }
+tabula-contract = { path = "crates/tabula-contract" }
 tabula-ir = { path = "crates/tabula-ir" }
 tabula-executor = { path = "crates/tabula-executor" }
 tabula-commitment = { path = "crates/tabula-commitment" }
 tabula-proof = { path = "crates/tabula-proof" }
 tabula-lang = { path = "crates/tabula-lang" }
+tabula-driver = { path = "crates/tabula-driver" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

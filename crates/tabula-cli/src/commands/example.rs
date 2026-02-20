@@ -1,6 +1,7 @@
 //! Handler for the `example` subcommand.
 
 use tabula_core::{ColId, ColumnDef, TableId, TableSchema, TxTypeId, Value, ValueType};
+use tabula_driver::register_program;
 use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
 
 use crate::io::{BatchFile, ProgramFile, StateCell, StateFile, TxInput, write_json};
@@ -25,7 +26,7 @@ pub fn cmd_example(dir: &std::path::Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(dir)?;
 
     // Program: token transfer (IR form)
-    let program = ProgramFile {
+    let mut program = ProgramFile {
         table_schemas: vec![TableSchema {
             id: TableId(0),
             name: "balances".into(),
@@ -112,7 +113,12 @@ pub fn cmd_example(dir: &std::path::Path) -> anyhow::Result<()> {
                 },
             ],
         }],
+        contract_metadata: None,
     };
+
+    // Emit a fully registered JSON artifact with canonical metadata.
+    let artifact = register_program(&program.table_schemas, &program.tx_types)?;
+    program.contract_metadata = Some(artifact.metadata_envelope);
 
     // State: 3 accounts
     let state = StateFile {

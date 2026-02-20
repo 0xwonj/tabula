@@ -144,6 +144,8 @@ tabula-commitment     Protocol crypto (out-of-circuit): Poseidon, SMT, SSMC
 tabula-proof          STARK proof system (in-circuit): AIR, constraints, Plonky3
 
 tabula-cli            Command-line interface
+tabula-daemon         Local HTTP control plane
+tabula-web-ide        Leptos browser IDE
 ```
 
 | Crate | Role |
@@ -155,6 +157,8 @@ tabula-cli            Command-line interface
 | [`tabula-commitment`](crates/tabula-commitment/) | Crypto — Poseidon, SMT, SSMC (out-of-circuit) |
 | [`tabula-proof`](crates/tabula-proof/) | Proving — STARK proof generation via Plonky3 |
 | [`tabula-cli`](crates/tabula-cli/) | CLI — JSON-based batch execution and inspection |
+| [`tabula-daemon`](crates/tabula-daemon/) | Local API — check/compile/execute/prove/verify endpoints |
+| [`tabula-web-ide`](crates/tabula-web-ide/) | Web IDE — browser UI for program/state/tx/proof workflows |
 
 ## Specs
 
@@ -177,6 +181,13 @@ cargo run -p tabula-cli -- execute \
     --program example_program.json \
     --state example_state.json \
     --batch example_batch.json
+
+# Run daemon + web IDE
+TABULA_DAEMON_TOKEN=secret cargo run -p tabula-daemon -- \
+    --host 127.0.0.1 --port 4317 \
+    --allow-path /tmp \
+    --allow-origin http://127.0.0.1:8080
+trunk serve --manifest-path crates/tabula-web-ide/Cargo.toml
 ```
 
 ## License

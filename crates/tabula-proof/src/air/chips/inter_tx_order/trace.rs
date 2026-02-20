@@ -16,6 +16,7 @@ use super::columns::{InterTxOrderCols, inter_tx_order_width};
 ///
 /// Pre-sorted by `(table_id, col_id, key, tx_index)`.
 /// Init rows have `is_init=true` and appear first for each key.
+#[derive(Debug, Clone)]
 pub struct InterTxOrderRow {
     /// Table identifier.
     pub table_id: u32,

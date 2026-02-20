@@ -18,6 +18,7 @@ fn read_event(key: CellKey, value: Value, time: u64) -> ExecutionEvent {
         val_is_null: false,
         time,
         tx_index: 0,
+        effect_ordinal_in_tx: time as u32,
     }
 }
 
@@ -29,6 +30,7 @@ fn write_event(key: CellKey, value: Value, time: u64) -> ExecutionEvent {
         val_is_null: false,
         time,
         tx_index: 0,
+        effect_ordinal_in_tx: time as u32,
     }
 }
 
@@ -40,6 +42,7 @@ fn null_write_event(key: CellKey, zero: Value, time: u64) -> ExecutionEvent {
         val_is_null: true,
         time,
         tx_index: 0,
+        effect_ordinal_in_tx: time as u32,
     }
 }
 
@@ -51,6 +54,7 @@ fn null_read_event(key: CellKey, zero: Value, time: u64) -> ExecutionEvent {
         val_is_null: true,
         time,
         tx_index: 0,
+        effect_ordinal_in_tx: time as u32,
     }
 }
 
@@ -108,6 +112,33 @@ fn multiple_interleaved_keys() {
 #[test]
 fn empty_events() {
     assert!(check_consistency(&[], &[]).is_ok());
+}
+
+#[test]
+fn invalid_etrace_identity_fails() {
+    let k = cell(1, 0, 0);
+    let events = vec![
+        ExecutionEvent {
+            key: k,
+            op: OpKind::Read,
+            value: Value::U64(10),
+            val_is_null: false,
+            time: 0,
+            tx_index: 0,
+            effect_ordinal_in_tx: 0,
+        },
+        ExecutionEvent {
+            key: k,
+            op: OpKind::Write,
+            value: Value::U64(11),
+            val_is_null: false,
+            time: 1,
+            tx_index: 0,
+            effect_ordinal_in_tx: 2, // skipped 1
+        },
+    ];
+    let read_set_old = vec![(k, Some(Value::U64(10)))];
+    assert!(check_consistency(&events, &read_set_old).is_err());
 }
 
 #[test]

@@ -6,24 +6,18 @@
 use serde::{Deserialize, Serialize};
 
 use tabula_core::{
-    CellKey, ColId, EmittedEvent, ExecutionEvent, RowKey, TableId, TableSchema, Transaction,
-    TxOutcome, TxTypeId, Value,
+    CellKey, ColId, EmittedEvent, ExecutionConsistencyStatus, ExecutionEvent, RowKey, TableId,
+    Transaction, TxOutcome, TxTypeId, Value,
 };
-use tabula_ir::TxTypeDef;
 
 // ---------------------------------------------------------------------------
 // Program input
 // ---------------------------------------------------------------------------
 
 /// JSON representation of a program file.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProgramFile {
-    /// Table schema definitions for type inference (omitted = empty).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub table_schemas: Vec<TableSchema>,
-    /// Transaction type definitions.
-    pub tx_types: Vec<TxTypeDef>,
-}
+///
+/// Semantic ownership lives in `tabula-driver`; CLI reuses the exact file type.
+pub type ProgramFile = tabula_driver::ProgramSourceFile;
 
 // ---------------------------------------------------------------------------
 // State input/output
@@ -139,121 +133,11 @@ pub struct ExecutionOutput {
     pub write_set: Vec<StateCell>,
     /// Emitted application events.
     pub emitted: Vec<EmittedEvent>,
-    /// Consistency check result.
-    pub consistency: String,
+    /// Typed consistency check result.
+    pub consistency: ExecutionConsistencyStatus,
     /// Full execution trace (only if requested).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace: Option<Vec<ExecutionEvent>>,
-}
-
-// ---------------------------------------------------------------------------
-// Program loading helpers
-// ---------------------------------------------------------------------------
-
-/// Load program sources from a `.tab` or `.json` file.
-///
-/// Returns (schemas, tx_types) regardless of input format.
-pub(crate) fn load_program_sources(
-    path: &std::path::Path,
-) -> anyhow::Result<(Vec<TableSchema>, Vec<TxTypeDef>)> {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if ext == "tab" {
-        let source = std::fs::read_to_string(path)
-            .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", path.display()))?;
-        match tabula_lang::compile(&source) {
-            Ok(compiled) => Ok((compiled.schemas, compiled.tx_types)),
-            Err(errors) => {
-                let mut msg = String::new();
-                for err in &errors {
-                    if !msg.is_empty() {
-                        msg.push_str("\n\n");
-                    }
-                    msg.push_str(&format!("{}", err.display_with_source(&source)));
-                }
-                Err(anyhow::anyhow!("{msg}"))
-            }
-        }
-    } else {
-        let pf: ProgramFile = load_json(path)?;
-        Ok((pf.table_schemas, pf.tx_types))
-    }
-}
-
-/// Register schemas and tx types into a `Program` (with NF validation).
-pub(crate) fn register_program(
-    schemas: &[TableSchema],
-    tx_types: &[TxTypeDef],
-) -> anyhow::Result<tabula_ir::Program> {
-    validate_schema_coverage(schemas, tx_types)?;
-
-    let mut program = tabula_ir::Program::new();
-    for schema in schemas {
-        program.add_schema(schema.clone());
-    }
-    for def in tx_types {
-        program.register(def.clone())?;
-    }
-    Ok(program)
-}
-
-/// Validate that every state/static-table access has a declared schema+column.
-fn validate_schema_coverage(schemas: &[TableSchema], tx_types: &[TxTypeDef]) -> anyhow::Result<()> {
-    use std::collections::{BTreeMap, BTreeSet};
-
-    let mut columns_by_table: BTreeMap<TableId, BTreeSet<ColId>> = BTreeMap::new();
-    for schema in schemas {
-        let cols = columns_by_table.entry(schema.id).or_default();
-        for col in &schema.columns {
-            cols.insert(col.id);
-        }
-    }
-
-    for tx in tx_types {
-        for (instr_idx, instr) in tx.body.iter().enumerate() {
-            match instr {
-                tabula_ir::Instruction::Read { table, col, .. }
-                | tabula_ir::Instruction::Write { table, col, .. } => {
-                    ensure_table_col_exists(&columns_by_table, tx, instr_idx, *table, *col)?
-                }
-                tabula_ir::Instruction::Lookup {
-                    static_table, col, ..
-                } => {
-                    ensure_table_col_exists(&columns_by_table, tx, instr_idx, *static_table, *col)?
-                }
-                _ => {}
-            }
-        }
-    }
-    Ok(())
-}
-
-fn ensure_table_col_exists(
-    columns_by_table: &std::collections::BTreeMap<TableId, std::collections::BTreeSet<ColId>>,
-    tx: &TxTypeDef,
-    instr_idx: usize,
-    table: TableId,
-    col: ColId,
-) -> anyhow::Result<()> {
-    let Some(cols) = columns_by_table.get(&table) else {
-        anyhow::bail!(
-            "tx '{}' (id {}), instruction {} references table {} but no schema is declared for it",
-            tx.name,
-            tx.id.0,
-            instr_idx,
-            table.0
-        );
-    };
-    if !cols.contains(&col) {
-        anyhow::bail!(
-            "tx '{}' (id {}), instruction {} references table {} col {} but that column is missing in schema",
-            tx.name,
-            tx.id.0,
-            instr_idx,
-            table.0,
-            col.0
-        );
-    }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -312,8 +196,6 @@ fn parse_hex_32(s: &str) -> anyhow::Result<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tabula_core::{ColumnDef, ValueType};
-    use tabula_ir::{Instruction, RowExpr, TxTypeDef};
 
     #[test]
     fn test_parse_hex_32_full() {
@@ -352,50 +234,5 @@ mod tests {
             value: None,
         };
         assert!(cell.to_cell_pair().is_err());
-    }
-
-    #[test]
-    fn test_register_program_rejects_missing_schema_for_accessed_table() {
-        let tx = TxTypeDef {
-            id: TxTypeId(0),
-            name: "read".into(),
-            param_schema: vec![],
-            body: vec![Instruction::Read {
-                dst_val: 0,
-                dst_is_null: 1,
-                table: TableId(10),
-                col: ColId(0),
-                row: RowExpr::Literal(RowKey(0)),
-            }],
-        };
-        let err = register_program(&[], &[tx]).unwrap_err();
-        assert!(err.to_string().contains("no schema"));
-    }
-
-    #[test]
-    fn test_register_program_rejects_missing_column_in_schema() {
-        let schemas = vec![TableSchema {
-            id: TableId(10),
-            name: "t".into(),
-            columns: vec![ColumnDef {
-                id: ColId(1),
-                name: "x".into(),
-                value_type: ValueType::U64,
-            }],
-        }];
-        let tx = TxTypeDef {
-            id: TxTypeId(0),
-            name: "read".into(),
-            param_schema: vec![],
-            body: vec![Instruction::Read {
-                dst_val: 0,
-                dst_is_null: 1,
-                table: TableId(10),
-                col: ColId(0),
-                row: RowExpr::Literal(RowKey(0)),
-            }],
-        };
-        let err = register_program(&schemas, &[tx]).unwrap_err();
-        assert!(err.to_string().contains("column is missing"));
     }
 }

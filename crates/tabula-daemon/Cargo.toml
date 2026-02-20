@@ -24,6 +24,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 tabula-core = { workspace = true, features = ["mock"] }
+tabula-contract = { workspace = true }
+tabula-driver = { workspace = true }
 tabula-executor = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-lang = { workspace = true }

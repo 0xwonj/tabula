@@ -41,6 +41,8 @@ pub struct AccessRow {
     pub val_is_null: bool,
     /// Transaction index within the batch.
     pub tx_index: u32,
+    /// Effect ordinal within the transaction.
+    pub effect_ordinal_in_tx: u32,
 }
 
 /// Complete witness data for a single `(table, col)`.

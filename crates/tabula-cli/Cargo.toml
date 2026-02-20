@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 tabula-core = { workspace = true, features = ["mock"] }
 tabula-ir = { workspace = true }
+tabula-driver = { workspace = true }
 tabula-executor = { workspace = true }
 tabula-lang = { workspace = true }
 clap = { workspace = true }

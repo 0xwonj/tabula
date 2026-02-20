@@ -15,6 +15,7 @@ fn test_execution_event_borsh_round_trip() {
         val_is_null: false,
         time: 1,
         tx_index: 0,
+        effect_ordinal_in_tx: 0,
     };
     let bytes = borsh::to_vec(&event).unwrap();
     let decoded: ExecutionEvent = borsh::from_slice(&bytes).unwrap();

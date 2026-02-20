@@ -4,6 +4,8 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 /// Current contract schema version.
 pub const CONTRACT_SCHEMA_VERSION_V1: u32 = 1;
 /// Current statement binding registry version.
@@ -22,7 +24,7 @@ const METADATA_HASH_DOMAIN: &[u8] = b"tabula.contract_metadata_envelope.v1";
 /// Field order, binary encoding, and hashing are fixed by
 /// [`ContractMetadataEnvelope::to_canonical_bytes`] and
 /// [`ContractMetadataEnvelope::canonical_hash`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractMetadataEnvelope {
     /// Compiler/runtime profile fingerprint.
     pub profile_hash: [u8; 32],

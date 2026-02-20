@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::{CellKey, ExecutionEvent, OpKind, Value};
+use tabula_core::{CellKey, ExecutionConsistencyStatus, ExecutionEvent, OpKind, Value};
 
 /// Check that the execution trace is consistent with last-write semantics.
 ///
@@ -20,6 +20,8 @@ pub fn check_consistency(
     events: &[ExecutionEvent],
     read_set_old: &[(CellKey, Option<Value>)],
 ) -> Result<(), TabulaError> {
+    check_etrace_identity(events)?;
+
     // Build initial value map from read_set_old
     let initial: BTreeMap<CellKey, Option<Value>> = read_set_old.iter().cloned().collect();
 
@@ -70,4 +72,37 @@ pub fn check_consistency(
     }
 
     Ok(())
+}
+
+/// Validate canonical E-Trace identity constraints.
+///
+/// For each transaction:
+/// - first event has `effect_ordinal_in_tx = 0`
+/// - ordinals increase contiguously by 1 in event order
+pub fn check_etrace_identity(events: &[ExecutionEvent]) -> Result<(), TabulaError> {
+    let mut expected_by_tx: BTreeMap<u32, u32> = BTreeMap::new();
+    for event in events {
+        let expected = expected_by_tx.entry(event.tx_index).or_insert(0);
+        if event.effect_ordinal_in_tx != *expected {
+            return Err(TabulaError::ConsistencyError(format!(
+                "invalid E-Trace identity for tx {} at time {}: expected effect ordinal {}, got {}",
+                event.tx_index, event.time, expected, event.effect_ordinal_in_tx
+            )));
+        }
+        *expected += 1;
+    }
+    Ok(())
+}
+
+/// Check consistency and return a typed status.
+pub fn check_consistency_status(
+    events: &[ExecutionEvent],
+    read_set_old: &[(CellKey, Option<Value>)],
+) -> ExecutionConsistencyStatus {
+    match check_consistency(events, read_set_old) {
+        Ok(()) => ExecutionConsistencyStatus::Passed,
+        Err(e) => ExecutionConsistencyStatus::Failed {
+            reason: e.to_string(),
+        },
+    }
 }

@@ -140,6 +140,7 @@ struct RecorderCheckpoint {
     events_len: usize,
     time: LogicalTime,
     tx_index: u32,
+    effect_ordinal_in_tx: u32,
 }
 
 /// Event recording sub-component of `Overlay`.
@@ -151,6 +152,7 @@ pub(crate) struct TraceRecorder {
     events: Vec<ExecutionEvent>,
     time: LogicalTime,
     current_tx_index: u32,
+    current_effect_ordinal_in_tx: u32,
     checkpoints: Vec<RecorderCheckpoint>,
 }
 
@@ -160,6 +162,7 @@ impl TraceRecorder {
             events: Vec::new(),
             time: 0,
             current_tx_index: 0,
+            current_effect_ordinal_in_tx: 0,
             checkpoints: Vec::new(),
         }
     }
@@ -183,7 +186,9 @@ impl TraceRecorder {
             val_is_null,
             time: self.time,
             tx_index: self.current_tx_index,
+            effect_ordinal_in_tx: self.current_effect_ordinal_in_tx,
         });
+        self.current_effect_ordinal_in_tx += 1;
         self.time += 1;
     }
 
@@ -192,6 +197,7 @@ impl TraceRecorder {
             events_len: self.events.len(),
             time: self.time,
             tx_index: self.current_tx_index,
+            effect_ordinal_in_tx: self.current_effect_ordinal_in_tx,
         });
     }
 
@@ -200,6 +206,7 @@ impl TraceRecorder {
         self.events.truncate(cp.events_len);
         self.time = cp.time;
         self.current_tx_index = cp.tx_index;
+        self.current_effect_ordinal_in_tx = cp.effect_ordinal_in_tx;
         Some(())
     }
 
@@ -213,6 +220,7 @@ impl TraceRecorder {
 
     fn set_tx_index(&mut self, idx: u32) {
         self.current_tx_index = idx;
+        self.current_effect_ordinal_in_tx = 0;
     }
 
     fn events_len(&self) -> usize {

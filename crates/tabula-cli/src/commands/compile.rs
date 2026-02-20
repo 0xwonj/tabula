@@ -2,22 +2,21 @@
 
 use std::path::Path;
 
-use crate::io::{ProgramFile, load_program_sources, register_program, write_json};
+use tabula_driver::{load_program_sources, register_program};
+
+use crate::io::{ProgramFile, write_json};
 
 pub fn cmd_compile(program_path: &Path, output: Option<&Path>) -> anyhow::Result<()> {
-    let (schemas, tx_types) = load_program_sources(program_path)?;
+    let sources = load_program_sources(program_path)?;
 
-    // Validate NF
-    register_program(&schemas, &tx_types)?;
+    // Validate + canonical registration via driver.
+    let artifact = register_program(&sources.table_schemas, &sources.tx_types)?;
 
     // Determine output path
     let default_output = program_path.with_extension("json");
     let output_path = output.unwrap_or(&default_output);
 
-    let program_file = ProgramFile {
-        table_schemas: schemas,
-        tx_types,
-    };
+    let program_file: ProgramFile = artifact.into_program_file();
     write_json(output_path, &program_file)?;
 
     println!(

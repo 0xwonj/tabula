@@ -91,6 +91,7 @@ fn read_event(table: u32, col: u16, row: u64, val: u64, time: u64, tx: u32) -> E
         val_is_null: false,
         time,
         tx_index: tx,
+        effect_ordinal_in_tx: time as u32,
     }
 }
 
@@ -102,6 +103,7 @@ fn write_event(table: u32, col: u16, row: u64, val: u64, time: u64, tx: u32) -> 
         val_is_null: false,
         time,
         tx_index: tx,
+        effect_ordinal_in_tx: time as u32,
     }
 }
 
@@ -113,6 +115,7 @@ fn null_read_event(table: u32, col: u16, row: u64, time: u64, tx: u32) -> Execut
         val_is_null: true,
         time,
         tx_index: tx,
+        effect_ordinal_in_tx: time as u32,
     }
 }
 
@@ -353,6 +356,7 @@ fn column_witness_delete() {
                 val_is_null: true,
                 time: 2,
                 tx_index: 0,
+                effect_ordinal_in_tx: 1,
             },
         ],
         emitted: vec![],
@@ -791,6 +795,7 @@ fn m5_m6_delete() {
                 val_is_null: true,
                 time: 2,
                 tx_index: 0,
+                effect_ordinal_in_tx: 1,
             },
         ],
         emitted: vec![],

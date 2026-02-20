@@ -3,14 +3,12 @@
 use tabula_core::mock::{
     InMemoryState, InMemoryStaticTables, MockHasher, MockSigVerifier, SequentialNonce,
 };
-use tabula_core::{Batch, CellKey, TxOutcome, Value};
+use tabula_core::{Batch, CellKey, ExecutionConsistencyStatus, TxOutcome, Value};
+use tabula_driver::load_and_register_program;
 use tabula_executor::batch::{BatchEnv, execute_batch};
-use tabula_executor::consistency::check_consistency;
+use tabula_executor::consistency::check_consistency_status;
 
-use crate::io::{
-    BatchFile, ExecutionOutput, StateCell, StateFile, load_json, load_program_sources,
-    register_program, write_json,
-};
+use crate::io::{BatchFile, ExecutionOutput, StateCell, StateFile, load_json, write_json};
 
 pub fn cmd_execute(
     program_path: &std::path::Path,
@@ -21,8 +19,7 @@ pub fn cmd_execute(
     json_output: bool,
 ) -> anyhow::Result<()> {
     // Load inputs
-    let (schemas, tx_types) = load_program_sources(program_path)?;
-    let program = register_program(&schemas, &tx_types)?;
+    let artifact = load_and_register_program(program_path)?;
     let state_file: StateFile = load_json(state_path)?;
     let batch_file: BatchFile = load_json(batch_path)?;
 
@@ -51,17 +48,14 @@ pub fn cmd_execute(
     };
     let result = execute_batch(
         &batch,
-        &program,
+        &artifact.program,
         &state,
         &env,
         &std::collections::BTreeMap::new(),
     )?;
 
     // Consistency check
-    let consistency = match check_consistency(&result.events, &result.read_set_old) {
-        Ok(()) => "PASSED".to_string(),
-        Err(e) => format!("FAILED: {e}"),
-    };
+    let consistency = check_consistency_status(&result.events, &result.read_set_old);
 
     // Build output state if requested
     if let Some(out_path) = output_state_path {
@@ -84,7 +78,7 @@ pub fn cmd_execute(
                 .map(|(k, v)| StateCell::from_cell_pair(k, v))
                 .collect(),
             emitted: result.emitted,
-            consistency,
+            consistency: consistency.clone(),
             trace: if include_trace {
                 Some(result.events)
             } else {
@@ -133,7 +127,12 @@ pub fn cmd_execute(
         }
         println!();
 
-        println!("Consistency check: {consistency}");
+        match consistency {
+            ExecutionConsistencyStatus::Passed => println!("Consistency check: PASSED"),
+            ExecutionConsistencyStatus::Failed { ref reason } => {
+                println!("Consistency check: FAILED ({reason})")
+            }
+        }
 
         if include_trace {
             println!("\n--- Execution Trace ---");

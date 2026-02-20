@@ -3,11 +3,13 @@
 
 //! Proof generation and verification for the Tabula kernel.
 
-pub mod contract;
+pub use tabula_contract as contract;
 pub mod statement;
 
 #[cfg(feature = "stark")]
 pub mod air;
+#[cfg(feature = "stark")]
+pub mod trace_builder;
 #[cfg(feature = "stark")]
 pub mod witness;
 
