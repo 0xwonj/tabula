@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use p3_baby_bear::BabyBear;
 
-use tabula_commitment::{BabyBearCodec, ColumnState, HybridVC, MockFieldHasher};
+use tabula_commitment::{BabyBearCodec, ColumnState, HybridVC, MockFieldHasher, PoseidonHasher};
 use tabula_core::traits::ValueCodec;
 use tabula_core::{
     CellKey, ColId, ColumnDef, ExecutionEvent, ExecutionResult, OpKind, RowKey, TableId,
@@ -674,6 +674,52 @@ fn assert_column_meta_air_valid(
         .expect("ColumnMeta AIR constraints should pass for witness-generated trace");
 }
 
+// ── PoseidonHasher variants for tests involving empty columns ──
+//
+// The ColumnMeta AIR's Com_empty constraint verifies `com = Poseidon(0x00||t||c)`.
+// MockFieldHasher produces different hashes, so tests with empty columns must
+// use PoseidonHasher to produce protocol-compatible commitments.
+
+fn poseidon_vc() -> HybridVC<PoseidonHasher> {
+    HybridVC::new(PoseidonHasher::new(), 100)
+}
+
+fn empty_column_state_poseidon(
+    vc: &HybridVC<PoseidonHasher>,
+    table: u32,
+    col: u16,
+) -> ((TableId, ColId), ColumnState<PoseidonHasher>) {
+    let (state, _) = vc.commit_column(t(table), c(col), vec![]);
+    ((t(table), c(col)), state)
+}
+
+fn column_state_with_poseidon(
+    vc: &HybridVC<PoseidonHasher>,
+    table: u32,
+    col: u16,
+    entries: &[(u64, u64)],
+) -> ((TableId, ColId), ColumnState<PoseidonHasher>) {
+    let codec = BabyBearCodec;
+    let enc: Vec<(RowKey, Vec<p3_baby_bear::BabyBear>)> = entries
+        .iter()
+        .map(|&(k, v)| (r(k), codec.encode(&Value::U64(v)).unwrap()))
+        .collect();
+    let (state, _) = vc.commit_column(t(table), c(col), enc);
+    ((t(table), c(col)), state)
+}
+
+fn assert_column_meta_air_valid_poseidon(
+    result: &ExecutionResult,
+    schema: &BTreeMap<TableId, TableSchema>,
+    states: &BTreeMap<(TableId, ColId), ColumnState<PoseidonHasher>>,
+) {
+    let wg = WitnessGenerator::new(poseidon_vc());
+    let witness = wg.generate(result, schema, states).unwrap();
+    let trace = generate_column_meta_trace(&witness.column_metas, &Default::default());
+    debug_check(&ColumnMetaChip, &trace)
+        .expect("ColumnMeta AIR constraints should pass for witness-generated trace");
+}
+
 #[test]
 fn m5_m6_single_column_write() {
     let vc = mock_vc();
@@ -716,7 +762,7 @@ fn m5_m6_multi_column_touched_and_untouched() {
 
 #[test]
 fn m5_m6_empty_to_nonempty() {
-    let vc = mock_vc();
+    let vc = poseidon_vc();
     let result = ExecutionResult {
         read_set_old: vec![(ck(1, 0, 1), None)],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(42)))],
@@ -728,13 +774,13 @@ fn m5_m6_empty_to_nonempty() {
         tx_outcomes: vec![TxOutcome::Success],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [empty_column_state(&vc, 1, 0)].into();
-    assert_column_meta_air_valid(&result, &schema, &states);
+    let states: BTreeMap<_, _> = [empty_column_state_poseidon(&vc, 1, 0)].into();
+    assert_column_meta_air_valid_poseidon(&result, &schema, &states);
 }
 
 #[test]
 fn m5_m6_delete() {
-    let vc = mock_vc();
+    let vc = poseidon_vc();
     let result = ExecutionResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![(ck(1, 0, 1), None)],
@@ -753,8 +799,8 @@ fn m5_m6_delete() {
         tx_outcomes: vec![TxOutcome::Success],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10)])].into();
-    assert_column_meta_air_valid(&result, &schema, &states);
+    let states: BTreeMap<_, _> = [column_state_with_poseidon(&vc, 1, 0, &[(1, 10)])].into();
+    assert_column_meta_air_valid_poseidon(&result, &schema, &states);
 }
 
 #[test]

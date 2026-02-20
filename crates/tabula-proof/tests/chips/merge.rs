@@ -195,22 +195,30 @@ fn soundness_key_order_swapped() {
         let cols0: &GlobalMergeCols<BabyBear, 3> = borrow_cols(&trace.values[0..width]);
         let cols1: &GlobalMergeCols<BabyBear, 3> = borrow_cols(&trace.values[width..2 * width]);
         (
-            (cols0.key.limb0, cols0.key.limb1, cols0.key.limb2),
-            (cols1.key.limb0, cols1.key.limb1, cols1.key.limb2),
+            (
+                cols0.key.limbs.limb0,
+                cols0.key.limbs.limb1,
+                cols0.key.limbs.limb2,
+            ),
+            (
+                cols1.key.limbs.limb0,
+                cols1.key.limbs.limb1,
+                cols1.key.limbs.limb2,
+            ),
         )
     };
     {
         let cols0: &mut GlobalMergeCols<BabyBear, 3> = borrow_cols_mut(&mut trace.values[0..width]);
-        cols0.key.limb0 = key1.0;
-        cols0.key.limb1 = key1.1;
-        cols0.key.limb2 = key1.2;
+        cols0.key.limbs.limb0 = key1.0;
+        cols0.key.limbs.limb1 = key1.1;
+        cols0.key.limbs.limb2 = key1.2;
     }
     {
         let cols1: &mut GlobalMergeCols<BabyBear, 3> =
             borrow_cols_mut(&mut trace.values[width..2 * width]);
-        cols1.key.limb0 = key0.0;
-        cols1.key.limb1 = key0.1;
-        cols1.key.limb2 = key0.2;
+        cols1.key.limbs.limb0 = key0.0;
+        cols1.key.limbs.limb1 = key0.1;
+        cols1.key.limbs.limb2 = key0.2;
     }
     debug_check(&GlobalMergeChip::<3>, &trace)
         .expect_err("swapped key order should fail StrictIneq constraint");
@@ -241,14 +249,61 @@ fn soundness_tc_changed_forged() {
     let mut trace = generate_merge_trace::<3>(&rows);
     let width = merge_width::<3>();
     let cols: &mut GlobalMergeCols<BabyBear, 3> = borrow_cols_mut(&mut trace.values[0..width]);
-    cols.tc_changed = BabyBear::ONE;
+    cols.segment.tc_changed = BabyBear::ONE;
     debug_check(&GlobalMergeChip::<3>, &trace)
         .expect_err("forged tc_changed should fail derivation constraint");
+}
+
+// ── T6: Merge write_only in_new=0 ──
+
+/// T6: write_only source with in_new=0 must fail.
+///
+/// The Merge AIR constraint enforces: is_write_only ⟹ in_new = 1.
+/// Setting in_new=0 on a write_only row violates this.
+#[test]
+fn invalid_write_only_in_new_zero() {
+    let mut rows = vec![write_only_row(0, 0, 10, [4, 5, 6])];
+    // write_only must have in_new=1. Force in_new=0 to trigger the constraint.
+    rows[0].in_new = false;
+    let trace = generate_merge_trace::<3>(&rows);
+    debug_check(&GlobalMergeChip::<3>, &trace)
+        .expect_err("write_only with in_new=0 must fail (write_only ⟹ in_new=1)");
+}
+
+/// T6b: both source with in_new=0 (same pattern) must also fail.
+#[test]
+fn invalid_both_in_new_zero() {
+    let mut rows = vec![both_row(0, 0, 10, [1, 2, 3], [4, 5, 6])];
+    // both must have in_new=1. Force in_new=0 to trigger the constraint.
+    rows[0].in_new = false;
+    let trace = generate_merge_trace::<3>(&rows);
+    debug_check(&GlobalMergeChip::<3>, &trace)
+        .expect_err("both with in_new=0 must fail (both ⟹ in_new=1)");
+}
+
+/// T6c: old_only source with all-zero old_val passes (old_only constraint only
+/// requires new_val = old_val, not that old_val is nonzero).
+#[test]
+fn valid_old_only_zero_old_val() {
+    let row = MergeRow {
+        table_id: 0,
+        col_id: 0,
+        key: 10,
+        source: MergeSource::OldOnly,
+        old_val: merge_zeros(),
+        write_val: merge_zeros(),
+        new_val: merge_zeros(), // new_val = old_val = 0 ✓
+        in_new: true,
+        hash_acc: [BabyBear::ZERO; 8],
+    };
+    let trace = generate_merge_trace::<3>(&[row]);
+    debug_check(&GlobalMergeChip::<3>, &trace)
+        .expect("old_only with zero old_val should pass");
 }
 
 // ── Column width test ──
 
 #[test]
 fn standard_width() {
-    assert_eq!(MERGE_STANDARD_WIDTH, 52);
+    assert_eq!(MERGE_STANDARD_WIDTH, 74);
 }

@@ -10,13 +10,9 @@
 //! 7. Access log: access_is_write = op_write when is_access
 //! 8. SSA slot carry: non-written slots carry forward to next row
 //! 9. Arith sub-selectors: exactly one of {add, sub, mul} when op_arith
-//! 10. Per-opcode semantics (M8-4a: Add, Sub, Assert, Select; M9-A3: Not, And, Or)
-//! 11. Transaction index monotonicity (M9-A3)
-//! 12. Operand-to-slot linkage (M9-A1: src1/src2/cond selectors, value/null matching)
-//!
-//! NOT constrained yet (deferred to M10):
-//! - Hash/Lookup bus interactions
-//! - Range checks on arithmetic carry/limbs
+//! 10. Per-opcode semantics (delegated to `ops/`)
+//! 11. Transaction index monotonicity
+//! 12. Operand-to-slot linkage (delegated to `linkage`)
 
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
@@ -25,10 +21,19 @@ use p3_matrix::Matrix;
 use crate::air::builder::InteractionAirBuilder;
 use crate::air::columns::borrow_cols;
 use crate::air::gadgets::constrain_is_real_prefix;
-use crate::air::gadgets::integer::{SHIFT_30_U32, expr_from_u32};
+use crate::air::gadgets::integer::{SHIFT_30_U32, constrain_limb2_bits, expr_from_u32};
 use crate::air::interaction::{AirInteraction, InteractionKind};
 
 use super::columns::{ExecutionCols, MAX_SLOTS, execution_width};
+
+/// Domain tag for the instruction-level Hash opcode.
+///
+/// Distinct from protocol-level domain tags (0x00=SSMC, 0x01=SMT, 0x10=leaf,
+/// 0x11=tables, 0x12=cols) to prevent cross-protocol hash collisions.
+pub const HASH_INSTRUCTION_DOMAIN_TAG: u32 = 0x20;
+
+/// Number of input values for the Hash instruction (always 2: src1 and src2).
+pub const HASH_INSTRUCTION_INPUT_COUNT: u32 = 2;
 
 /// The ExecutionChip AIR, generic over value width.
 #[derive(Debug)]
@@ -53,8 +58,9 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         let is_real: AB::Expr = local.is_real.clone().into();
         let both_real: AB::Expr = is_real.clone() * next.is_real.clone().into();
 
+        // ── Structural constraints ──
         constrain_booleans(builder, local);
-        constrain_is_real(builder, local, next);
+        constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
         constrain_opcode_one_hot(builder, local, is_real.clone());
         constrain_is_access(builder, local, is_real.clone());
         constrain_clock(builder, local, next, both_real.clone());
@@ -63,31 +69,41 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         constrain_arith_sub_selectors(builder, local, is_real.clone());
         constrain_slot_carry(builder, local, next, both_real.clone());
         constrain_first_row_init(builder, local);
+        constrain_slot_written_count(builder, local, is_real.clone());
 
-        // Per-opcode semantics (M8-4a + M9-A3)
-        constrain_arith_add(builder, local, is_real.clone());
-        constrain_arith_sub(builder, local, is_real.clone());
-        constrain_assert(builder, local, is_real.clone());
-        constrain_select(builder, local, is_real.clone());
-        constrain_not(builder, local, is_real.clone());
-        constrain_and(builder, local, is_real.clone());
-        constrain_or(builder, local, is_real.clone());
+        // ── Per-opcode semantics (delegated to ops/) ──
+        super::ops::arith::constrain_arith_add(builder, local, is_real.clone());
+        super::ops::arith::constrain_arith_sub(builder, local, is_real.clone());
+        super::ops::mul::constrain_arith_mul(builder, local, is_real.clone());
         constrain_arith_result_not_null(builder, local, is_real.clone());
+        super::ops::divmod::constrain_divmod(builder, local, is_real.clone());
+        super::ops::cmp::constrain_cmp(builder, local, is_real.clone());
+        super::ops::control::constrain_assert(builder, local, is_real.clone());
+        super::ops::control::constrain_select(builder, local, is_real.clone());
+        super::ops::logic::constrain_not(builder, local, is_real.clone());
+        super::ops::logic::constrain_and(builder, local, is_real.clone());
+        super::ops::logic::constrain_or(builder, local, is_real.clone());
+        super::ops::hash::constrain_hash(builder, local, is_real.clone());
+        constrain_lookup(builder, local, is_real.clone());
         constrain_tx_index_monotonicity(builder, local, next, both_real);
         constrain_tau_decomposition(builder, local, is_real.clone());
 
-        // Operand-to-slot linkage (M9 A1)
-        constrain_operand_selectors(builder, local, is_real.clone());
-        constrain_operand_value_linkage(builder, local);
-        constrain_write_operand(builder, local, is_real.clone());
-        constrain_read_destination(builder, local, is_real);
+        // ── Operand-to-slot linkage ──
+        super::linkage::constrain_operand_selectors(builder, local, is_real.clone());
+        super::linkage::constrain_operand_value_linkage(builder, local);
+        super::linkage::constrain_write_operand(builder, local, is_real.clone());
+        constrain_range_check_halves(builder, local, is_real.clone());
+        super::linkage::constrain_read_destination(builder, local, is_real);
 
         // ── LogUp buses ──
         send_memory(builder, local);
+        send_range_checks(builder, local);
+        send_hash_permutation(builder, local);
+        send_static_table_lookup(builder, local);
     }
 }
 
-// ── Private constraint helpers ──────────────────────────────────────────────
+// ── Structural constraint helpers ───────────────────────────────────────────
 
 /// 1. Boolean constraints on all selector and flag columns.
 fn constrain_booleans<AB: AirBuilder, const W: usize>(
@@ -120,20 +136,21 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder.assert_bool(local.carry0.clone());
     builder.assert_bool(local.carry1.clone());
 
+    // Cmp sub-selectors and witnesses
+    builder.assert_bool(local.cmp_is_eq.clone());
+    builder.assert_bool(local.cmp_is_ne.clone());
+    builder.assert_bool(local.cmp_is_lt.clone());
+    builder.assert_bool(local.cmp_is_lte.clone());
+    builder.assert_bool(local.cmp_is_gt.clone());
+    builder.assert_bool(local.cmp_is_gte.clone());
+    builder.assert_bool(local.cmp_lt_witness.clone());
+    builder.assert_bool(local.cmp_eq_witness.clone());
+
     // Per-slot flags
     for s in 0..MAX_SLOTS {
         builder.assert_bool(local.slot_is_null[s].clone());
         builder.assert_bool(local.slot_written[s].clone());
     }
-}
-
-/// 2. `is_real` prefix: monotonic 1→0.
-fn constrain_is_real<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &ExecutionCols<AB::Var, W>,
-    next: &ExecutionCols<AB::Var, W>,
-) {
-    constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
 }
 
 /// 3. Opcode exactly-one: sum of 12 selectors = 1 when is_real.
@@ -155,7 +172,6 @@ fn constrain_opcode_one_hot<AB: AirBuilder, const W: usize>(
         + local.op_hash.clone().into()
         + local.op_lookup.clone().into();
 
-    // is_real ⟹ opcode_sum = 1
     builder.assert_zero(is_real * (opcode_sum - AB::Expr::ONE));
 }
 
@@ -166,15 +182,10 @@ fn constrain_is_access<AB: AirBuilder, const W: usize>(
     is_real: AB::Expr,
 ) {
     let derived: AB::Expr = local.op_read.clone().into() + local.op_write.clone().into();
-
-    // is_real ⟹ is_access = op_read + op_write
     builder.assert_zero(is_real * (local.is_access.clone().into() - derived));
 }
 
-/// 5. Clock recurrence.
-///
-/// - First row: clk = 0 (handled by `constrain_first_row_init`)
-/// - Transition: next.clk = local.clk + local.is_access
+/// 5. Clock recurrence: next.clk = local.clk + local.is_access.
 fn constrain_clock<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -194,8 +205,6 @@ fn constrain_timestamp<AB: AirBuilder, const W: usize>(
 ) {
     let tau_expected: AB::Expr = local.clk.clone().into() + AB::Expr::ONE;
     let tau_diff: AB::Expr = local.tau.clone().into() - tau_expected;
-
-    // is_real * is_access * (tau - clk - 1) = 0
     builder.assert_zero(is_real * local.is_access.clone().into() * tau_diff);
 }
 
@@ -205,19 +214,12 @@ fn constrain_access_log<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    // is_real * is_access ⟹ access_is_write = op_write
     let gate: AB::Expr = is_real * local.is_access.clone().into();
     builder
         .assert_zero(gate * (local.access_is_write.clone().into() - local.op_write.clone().into()));
 }
 
 /// 8. SSA slot carry: slots not written by the NEXT instruction carry forward.
-///
-/// For each slot s and limb i:
-/// `both_real * (1 - next.slot_written[s]) * (next.slots[s][i] - local.slots[s][i]) = 0`
-///
-/// If the next instruction writes to slot s, its value is set by the opcode.
-/// If not, it must equal the current row's value (carry).
 fn constrain_slot_carry<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -228,13 +230,11 @@ fn constrain_slot_carry<AB: AirBuilder, const W: usize>(
         let not_written_next: AB::Expr = AB::Expr::ONE - next.slot_written[s].clone().into();
         let gate: AB::Expr = both_real.clone() * not_written_next;
 
-        // Value carry
         for i in 0..W {
             let diff: AB::Expr = next.slots[s][i].clone().into() - local.slots[s][i].clone().into();
             builder.when_transition().assert_zero(gate.clone() * diff);
         }
 
-        // Null flag carry
         let null_diff: AB::Expr =
             next.slot_is_null[s].clone().into() - local.slot_is_null[s].clone().into();
         builder.when_transition().assert_zero(gate * null_diff);
@@ -242,11 +242,6 @@ fn constrain_slot_carry<AB: AirBuilder, const W: usize>(
 }
 
 /// 9. Arith sub-selectors: when op_arith, exactly one of {add, sub, mul}.
-///
-/// Constraint: op_arith ⟹ arith_is_sub + arith_is_mul ∈ {0, 1}
-/// (add is implicit: op_arith * (1 - arith_is_sub) * (1 - arith_is_mul))
-///
-/// Also: arith sub-selectors must be 0 when not op_arith.
 fn constrain_arith_sub_selectors<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -254,7 +249,6 @@ fn constrain_arith_sub_selectors<AB: AirBuilder, const W: usize>(
 ) {
     let op_arith: AB::Expr = local.op_arith.clone().into();
 
-    // arith_is_sub + arith_is_mul <= 1 (both boolean, so product = 0 enforces mutual exclusion)
     builder.assert_zero(
         is_real.clone()
             * op_arith.clone()
@@ -262,11 +256,9 @@ fn constrain_arith_sub_selectors<AB: AirBuilder, const W: usize>(
             * local.arith_is_mul.clone().into(),
     );
 
-    // arith_is_sub = 0 when not op_arith
     builder.assert_zero(
         is_real.clone() * (AB::Expr::ONE - op_arith.clone()) * local.arith_is_sub.clone().into(),
     );
-    // arith_is_mul = 0 when not op_arith
     builder.assert_zero(is_real * (AB::Expr::ONE - op_arith) * local.arith_is_mul.clone().into());
 }
 
@@ -275,15 +267,11 @@ fn constrain_first_row_init<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
 ) {
-    // First row of trace: clk = 0
     builder
         .when_first_row()
         .when(local.is_real.clone())
         .assert_zero(local.clk.clone());
 
-    // First row: non-written slots must be zero (initial SSA state).
-    // Slot carry only applies to transitions (row i → i+1), so the first
-    // row's non-written slots need explicit zeroing.
     for s in 0..MAX_SLOTS {
         let not_written: AB::Expr = AB::Expr::ONE - local.slot_written[s].clone().into();
         for i in 0..W {
@@ -299,228 +287,24 @@ fn constrain_first_row_init<AB: AirBuilder, const W: usize>(
     }
 }
 
-// ── Per-opcode semantics (M8-4a) ──────────────────────────────────────────
-
-/// Arith(Add) constraint: integer add via limb carry chain.
-///
-/// For each written slot s:
-///   slots[s][0] + carry0 * 2^30 = src1_val[0] + src2_val[0]
-///   slots[s][1] + carry1 * 2^30 = src1_val[1] + src2_val[1] + carry0
-///   slots[s][2]                  = src1_val[2] + src2_val[2] + carry1
-fn constrain_arith_add<AB: AirBuilder, const W: usize>(
+/// Slot written count constraint: total `slot_written` flags must match the opcode.
+fn constrain_slot_written_count<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    if W < 3 {
-        return; // Only applicable for Standard width
-    }
+    let written_sum: AB::Expr = (0..MAX_SLOTS)
+        .map(|s| local.slot_written[s].clone().into())
+        .sum();
 
-    let op_add: AB::Expr = local.op_arith.clone().into()
-        * (AB::Expr::ONE - local.arith_is_sub.clone().into())
-        * (AB::Expr::ONE - local.arith_is_mul.clone().into());
+    let expected: AB::Expr =
+        AB::Expr::ONE - local.op_write.clone().into() - local.op_assert.clone().into()
+            + local.op_divmod.clone().into();
 
-    let shift_30: AB::Expr = expr_from_u32::<AB>(SHIFT_30_U32);
-
-    // For each slot that could be the destination
-    for s in 0..MAX_SLOTS {
-        let gate: AB::Expr =
-            is_real.clone() * op_add.clone() * local.slot_written[s].clone().into();
-
-        // Limb 0: slots[s][0] + carry0 * 2^30 = src1[0] + src2[0]
-        let lhs0: AB::Expr =
-            local.slots[s][0].clone().into() + local.carry0.clone().into() * shift_30.clone();
-        let rhs0: AB::Expr = local.src1_val[0].clone().into() + local.src2_val[0].clone().into();
-        builder.assert_zero(gate.clone() * (lhs0 - rhs0));
-
-        // Limb 1: slots[s][1] + carry1 * 2^30 = src1[1] + src2[1] + carry0
-        let lhs1: AB::Expr =
-            local.slots[s][1].clone().into() + local.carry1.clone().into() * shift_30.clone();
-        let rhs1: AB::Expr = local.src1_val[1].clone().into()
-            + local.src2_val[1].clone().into()
-            + local.carry0.clone().into();
-        builder.assert_zero(gate.clone() * (lhs1 - rhs1));
-
-        // Limb 2: slots[s][2] = src1[2] + src2[2] + carry1
-        let lhs2: AB::Expr = local.slots[s][2].clone().into();
-        let rhs2: AB::Expr = local.src1_val[2].clone().into()
-            + local.src2_val[2].clone().into()
-            + local.carry1.clone().into();
-        builder.assert_zero(gate * (lhs2 - rhs2));
-    }
-}
-
-/// Arith(Sub) constraint: integer sub via limb borrow chain.
-///
-/// For each written slot s:
-///   slots[s][0] = src1_val[0] - src2_val[0] + carry0 * 2^30
-///   slots[s][1] = src1_val[1] - src2_val[1] - carry0 + carry1 * 2^30
-///   slots[s][2] = src1_val[2] - src2_val[2] - carry1
-///
-/// Here carry0/carry1 are borrow flags.
-fn constrain_arith_sub<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &ExecutionCols<AB::Var, W>,
-    is_real: AB::Expr,
-) {
-    if W < 3 {
-        return;
-    }
-
-    let op_sub: AB::Expr = local.op_arith.clone().into() * local.arith_is_sub.clone().into();
-    let shift_30: AB::Expr = expr_from_u32::<AB>(SHIFT_30_U32);
-
-    for s in 0..MAX_SLOTS {
-        let gate: AB::Expr =
-            is_real.clone() * op_sub.clone() * local.slot_written[s].clone().into();
-
-        // Limb 0: slots[s][0] = src1[0] - src2[0] + carry0 * 2^30
-        let expected0: AB::Expr = local.src1_val[0].clone().into()
-            - local.src2_val[0].clone().into()
-            + local.carry0.clone().into() * shift_30.clone();
-        builder.assert_zero(gate.clone() * (local.slots[s][0].clone().into() - expected0));
-
-        // Limb 1: slots[s][1] = src1[1] - src2[1] - carry0 + carry1 * 2^30
-        let expected1: AB::Expr = local.src1_val[1].clone().into()
-            - local.src2_val[1].clone().into()
-            - local.carry0.clone().into()
-            + local.carry1.clone().into() * shift_30.clone();
-        builder.assert_zero(gate.clone() * (local.slots[s][1].clone().into() - expected1));
-
-        // Limb 2: slots[s][2] = src1[2] - src2[2] - carry1
-        let expected2: AB::Expr = local.src1_val[2].clone().into()
-            - local.src2_val[2].clone().into()
-            - local.carry1.clone().into();
-        builder.assert_zero(gate * (local.slots[s][2].clone().into() - expected2));
-    }
-}
-
-/// Assert constraint: condition value must be 1.
-///
-/// op_assert ⟹ src1_val[0] = 1
-fn constrain_assert<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &ExecutionCols<AB::Var, W>,
-    is_real: AB::Expr,
-) {
-    let gate: AB::Expr = is_real * local.op_assert.clone().into();
-    builder.assert_zero(gate * (local.src1_val[0].clone().into() - AB::Expr::ONE));
-}
-
-/// Select constraint: conditional value selection.
-///
-/// For each written slot s:
-///   slots[s][i] = cond * src1_val[i] + (1 - cond) * src2_val[i]
-///
-/// Simplified: slots[s][i] = src2_val[i] + cond * (src1_val[i] - src2_val[i])
-fn constrain_select<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &ExecutionCols<AB::Var, W>,
-    is_real: AB::Expr,
-) {
-    let op_select: AB::Expr = local.op_select.clone().into();
-    let cond: AB::Expr = local.cond_val.clone().into();
-
-    for s in 0..MAX_SLOTS {
-        let gate: AB::Expr =
-            is_real.clone() * op_select.clone() * local.slot_written[s].clone().into();
-
-        for i in 0..W {
-            let expected: AB::Expr = local.src2_val[i].clone().into()
-                + cond.clone()
-                    * (local.src1_val[i].clone().into() - local.src2_val[i].clone().into());
-            builder.assert_zero(gate.clone() * (local.slots[s][i].clone().into() - expected));
-        }
-    }
-}
-
-/// Not constraint: boolean negation.
-///
-/// For each written slot s:
-///   slots[s][0] = 1 − src1_val[0]   (boolean negation)
-///   slots[s][i] = 0                   for i ∈ {1, 2} (higher limbs zero)
-fn constrain_not<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &ExecutionCols<AB::Var, W>,
-    is_real: AB::Expr,
-) {
-    let op_not: AB::Expr = local.op_not.clone().into();
-
-    for s in 0..MAX_SLOTS {
-        let gate: AB::Expr =
-            is_real.clone() * op_not.clone() * local.slot_written[s].clone().into();
-
-        // Limb 0: dst = 1 - src1
-        let expected: AB::Expr = AB::Expr::ONE - local.src1_val[0].clone().into();
-        builder.assert_zero(gate.clone() * (local.slots[s][0].clone().into() - expected));
-
-        // Higher limbs must be zero
-        for i in 1..W {
-            builder.assert_zero(gate.clone() * local.slots[s][i].clone().into());
-        }
-    }
-}
-
-/// And constraint: boolean conjunction.
-///
-/// For each written slot s:
-///   slots[s][0] = src1_val[0] · src2_val[0]
-///   slots[s][i] = 0   for i ∈ {1, 2}
-fn constrain_and<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &ExecutionCols<AB::Var, W>,
-    is_real: AB::Expr,
-) {
-    let op_and: AB::Expr = local.op_and.clone().into();
-
-    for s in 0..MAX_SLOTS {
-        let gate: AB::Expr =
-            is_real.clone() * op_and.clone() * local.slot_written[s].clone().into();
-
-        // Limb 0: dst = src1 · src2
-        let expected: AB::Expr =
-            local.src1_val[0].clone().into() * local.src2_val[0].clone().into();
-        builder.assert_zero(gate.clone() * (local.slots[s][0].clone().into() - expected));
-
-        // Higher limbs must be zero
-        for i in 1..W {
-            builder.assert_zero(gate.clone() * local.slots[s][i].clone().into());
-        }
-    }
-}
-
-/// Or constraint: boolean disjunction.
-///
-/// For each written slot s:
-///   slots[s][0] = src1_val[0] + src2_val[0] − src1_val[0] · src2_val[0]
-///   slots[s][i] = 0   for i ∈ {1, 2}
-fn constrain_or<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &ExecutionCols<AB::Var, W>,
-    is_real: AB::Expr,
-) {
-    let op_or: AB::Expr = local.op_or.clone().into();
-
-    for s in 0..MAX_SLOTS {
-        let gate: AB::Expr = is_real.clone() * op_or.clone() * local.slot_written[s].clone().into();
-
-        // Limb 0: dst = src1 + src2 - src1 · src2
-        let s1: AB::Expr = local.src1_val[0].clone().into();
-        let s2: AB::Expr = local.src2_val[0].clone().into();
-        let expected: AB::Expr = s1.clone() + s2.clone() - s1 * s2;
-        builder.assert_zero(gate.clone() * (local.slots[s][0].clone().into() - expected));
-
-        // Higher limbs must be zero
-        for i in 1..W {
-            builder.assert_zero(gate.clone() * local.slots[s][i].clone().into());
-        }
-    }
+    builder.assert_zero(is_real * (written_sum - expected));
 }
 
 /// Arithmetic result null constraint: written slots must not be null.
-///
-/// All arithmetic operations (Add, Sub, Mul) produce non-null results.
-/// is_real * op_arith * slot_written[s] * slot_is_null[s] = 0
 fn constrain_arith_result_not_null<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -538,10 +322,6 @@ fn constrain_arith_result_not_null<AB: AirBuilder, const W: usize>(
 }
 
 /// Transaction index monotonicity: tx_index must be non-decreasing.
-///
-/// Constraint: `both_real · (next.tx_index − local.tx_index) · (next.tx_index − local.tx_index − 1) = 0`
-///
-/// This ensures `next.tx_index − local.tx_index ∈ {0, 1}` for consecutive real rows.
 fn constrain_tx_index_monotonicity<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -554,9 +334,7 @@ fn constrain_tx_index_monotonicity<AB: AirBuilder, const W: usize>(
         .assert_zero(both_real * diff.clone() * (diff - AB::Expr::ONE));
 }
 
-/// Tau decomposition: `is_access ⟹ tau = reconstruct(tau_limbs)`.
-///
-/// Ensures the single-FE `tau` matches its 3-limb decomposition for Memory bus.
+/// Tau decomposition: `is_access ⟹ tau = reconstruct(tau_rc.limbs)`.
 fn constrain_tau_decomposition<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -564,163 +342,138 @@ fn constrain_tau_decomposition<AB: AirBuilder, const W: usize>(
 ) {
     let shift_30: AB::Expr = expr_from_u32::<AB>(SHIFT_30_U32);
     let shift_60: AB::Expr = shift_30.clone() * shift_30.clone();
-    let reconstructed: AB::Expr = local.tau_limbs.limb0.clone().into()
-        + local.tau_limbs.limb1.clone().into() * shift_30
-        + local.tau_limbs.limb2.clone().into() * shift_60;
+    let reconstructed: AB::Expr = local.tau_rc.limbs.limb0.clone().into()
+        + local.tau_rc.limbs.limb1.clone().into() * shift_30
+        + local.tau_rc.limbs.limb2.clone().into() * shift_60;
     builder.assert_zero(
         is_real * local.is_access.clone().into() * (local.tau.clone().into() - reconstructed),
     );
 }
 
-// ── Operand-to-slot linkage (M9 A1) ────────────────────────────────────────
-
-/// 12a. Operand selector constraints: boolean + exactly-one (gated).
-///
-/// Each selector array must be boolean per-element, and when the opcode
-/// needs that operand, exactly one selector must be 1.
-fn constrain_operand_selectors<AB: AirBuilder, const W: usize>(
+/// Lookup constraint: result binding from access columns.
+fn constrain_lookup<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    // Boolean constraints on all selector elements
+    let gate: AB::Expr = is_real * local.op_lookup.clone().into();
+
     for s in 0..MAX_SLOTS {
-        builder.assert_bool(local.src1_sel[s].clone());
-        builder.assert_bool(local.src2_sel[s].clone());
-        builder.assert_bool(local.cond_sel[s].clone());
-    }
-    builder.assert_bool(local.src1_is_null.clone());
-
-    // Opcodes that need src1
-    let needs_src1: AB::Expr = local.op_arith.clone().into()
-        + local.op_cmp.clone().into()
-        + local.op_not.clone().into()
-        + local.op_and.clone().into()
-        + local.op_or.clone().into()
-        + local.op_assert.clone().into()
-        + local.op_select.clone().into()
-        + local.op_write.clone().into();
-
-    // Opcodes that need src2
-    let needs_src2: AB::Expr = local.op_arith.clone().into()
-        + local.op_cmp.clone().into()
-        + local.op_and.clone().into()
-        + local.op_or.clone().into()
-        + local.op_select.clone().into();
-
-    // Opcodes that need cond
-    let needs_cond: AB::Expr = local.op_select.clone().into();
-
-    // Sum of selectors
-    let src1_sum: AB::Expr = (0..MAX_SLOTS)
-        .map(|s| local.src1_sel[s].clone().into())
-        .sum();
-    let src2_sum: AB::Expr = (0..MAX_SLOTS)
-        .map(|s| local.src2_sel[s].clone().into())
-        .sum();
-    let cond_sum: AB::Expr = (0..MAX_SLOTS)
-        .map(|s| local.cond_sel[s].clone().into())
-        .sum();
-
-    // Exactly-one when needed: is_real * needs_src1 * (sum - 1) = 0
-    builder.assert_zero(is_real.clone() * needs_src1 * (src1_sum - AB::Expr::ONE));
-    builder.assert_zero(is_real.clone() * needs_src2 * (src2_sum - AB::Expr::ONE));
-    builder.assert_zero(is_real * needs_cond * (cond_sum - AB::Expr::ONE));
-}
-
-/// 12b. Operand value linkage: selector gates operand-to-slot equality.
-///
-/// For each slot s and limb i:
-///   `src1_sel[s] * (src1_val[i] - slots[s][i]) = 0`
-///   `src2_sel[s] * (src2_val[i] - slots[s][i]) = 0`
-///   `src1_sel[s] * (src1_is_null - slot_is_null[s]) = 0`
-///   `cond_sel[s] * (cond_val - slots[s][0]) = 0`
-fn constrain_operand_value_linkage<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &ExecutionCols<AB::Var, W>,
-) {
-    for s in 0..MAX_SLOTS {
-        let sel1: AB::Expr = local.src1_sel[s].clone().into();
-        let sel2: AB::Expr = local.src2_sel[s].clone().into();
-        let selc: AB::Expr = local.cond_sel[s].clone().into();
-
-        for i in 0..W {
-            // src1 linkage
-            builder.assert_zero(
-                sel1.clone()
-                    * (local.src1_val[i].clone().into() - local.slots[s][i].clone().into()),
-            );
-            // src2 linkage
-            builder.assert_zero(
-                sel2.clone()
-                    * (local.src2_val[i].clone().into() - local.slots[s][i].clone().into()),
-            );
-        }
-
-        // src1 null flag linkage
-        builder.assert_zero(
-            sel1 * (local.src1_is_null.clone().into() - local.slot_is_null[s].clone().into()),
-        );
-
-        // cond linkage (single boolean from limb 0)
-        builder
-            .assert_zero(selc * (local.cond_val.clone().into() - local.slots[s][0].clone().into()));
-    }
-}
-
-/// 12c. Write operand constraint: access_val must equal src1_val for writes.
-///
-/// `is_real * op_write * (access_val[i] - src1_val[i]) = 0`
-/// `is_real * op_write * (access_is_null - src1_is_null) = 0`
-fn constrain_write_operand<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &ExecutionCols<AB::Var, W>,
-    is_real: AB::Expr,
-) {
-    let gate: AB::Expr = is_real.clone() * local.op_write.clone().into();
-
-    for i in 0..W {
-        builder.assert_zero(
-            gate.clone() * (local.access_val[i].clone().into() - local.src1_val[i].clone().into()),
-        );
-    }
-    builder.assert_zero(
-        gate * (local.access_is_null.clone().into() - local.src1_is_null.clone().into()),
-    );
-}
-
-/// 12d. Read destination constraint: read value flows to the written slot.
-///
-/// For each written slot s:
-///   `is_real * op_read * slot_written[s] * (slots[s][i] - access_val[i]) = 0`
-///   `is_real * op_read * slot_written[s] * (slot_is_null[s] - access_is_null) = 0`
-fn constrain_read_destination<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &ExecutionCols<AB::Var, W>,
-    is_real: AB::Expr,
-) {
-    for s in 0..MAX_SLOTS {
-        let gate: AB::Expr =
-            is_real.clone() * local.op_read.clone().into() * local.slot_written[s].clone().into();
-
+        let slot_gate: AB::Expr = gate.clone() * local.slot_written[s].clone().into();
         for i in 0..W {
             builder.assert_zero(
-                gate.clone()
+                slot_gate.clone()
                     * (local.slots[s][i].clone().into() - local.access_val[i].clone().into()),
             );
         }
-        builder.assert_zero(
-            gate * (local.slot_is_null[s].clone().into() - local.access_is_null.clone().into()),
-        );
+        builder.assert_zero(slot_gate * local.slot_is_null[s].clone().into());
     }
+}
+
+/// Range-check half-decomposition constraints for access_r, tau_rc, cmp, mul, divmod.
+fn constrain_range_check_halves<AB: AirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+    is_real: AB::Expr,
+) {
+    let is_real_for_cmp = is_real.clone();
+    let is_real_for_mul_divmod = is_real.clone();
+    let gate: AB::Expr = is_real * local.is_access.clone().into();
+
+    // access_r limbs
+    let r_l0_diff: AB::Expr = local.access_r.limbs.limb0.clone().into()
+        - (local.access_r.l0_halves.lo.clone().into()
+            + local.access_r.l0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    builder.assert_zero(gate.clone() * r_l0_diff);
+
+    let r_l1_diff: AB::Expr = local.access_r.limbs.limb1.clone().into()
+        - (local.access_r.l1_halves.lo.clone().into()
+            + local.access_r.l1_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    builder.assert_zero(gate.clone() * r_l1_diff);
+
+    // tau_rc.limbs
+    let tau_l0_diff: AB::Expr = local.tau_rc.limbs.limb0.clone().into()
+        - (local.tau_rc.l0_halves.lo.clone().into()
+            + local.tau_rc.l0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    builder.assert_zero(gate.clone() * tau_l0_diff);
+
+    let tau_l1_diff: AB::Expr = local.tau_rc.limbs.limb1.clone().into()
+        - (local.tau_rc.l1_halves.lo.clone().into()
+            + local.tau_rc.l1_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    builder.assert_zero(gate * tau_l1_diff);
+
+    // access_r and tau_rc limb2 (4-bit boolean decomposition — no gating needed,
+    // zero columns satisfy the constraint trivially)
+    constrain_limb2_bits(
+        builder,
+        local.access_r.limbs.limb2.clone().into(),
+        &local.access_r.limb2_bits,
+    );
+    constrain_limb2_bits(
+        builder,
+        local.tau_rc.limbs.limb2.clone().into(),
+        &local.tau_rc.limb2_bits,
+    );
+
+    // Cmp inequality diff halves (gated by op_cmp * (1 - cmp_eq_witness))
+    let cmp_gate: AB::Expr = is_real_for_cmp
+        * local.op_cmp.clone().into()
+        * (AB::Expr::ONE - local.cmp_eq_witness.clone().into());
+
+    let cmp_d0_diff: AB::Expr = local.cmp_ineq.diff0.clone().into()
+        - (local.cmp_ineq_diff0_halves.lo.clone().into()
+            + local.cmp_ineq_diff0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    builder.assert_zero(cmp_gate.clone() * cmp_d0_diff);
+
+    let cmp_d1_diff: AB::Expr = local.cmp_ineq.diff1.clone().into()
+        - (local.cmp_ineq_diff1_halves.lo.clone().into()
+            + local.cmp_ineq_diff1_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    builder.assert_zero(cmp_gate * cmp_d1_diff);
+
+    // Cmp ineq diff2 (4-bit boolean decomposition)
+    constrain_limb2_bits(
+        builder,
+        local.cmp_ineq.diff2.clone().into(),
+        &local.cmp_ineq_diff2_bits,
+    );
+
+    // Mul carry half-decomposition (gated by op_arith * arith_is_mul)
+    let mul_gate: AB::Expr = is_real_for_mul_divmod.clone()
+        * local.op_arith.clone().into()
+        * local.arith_is_mul.clone().into();
+    let mul_c0_diff: AB::Expr = local.mul_c0.clone().into()
+        - (local.mul_c0_halves.lo.clone().into()
+            + local.mul_c0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    builder.assert_zero(mul_gate * mul_c0_diff);
+
+    // DivMod carry + remainder half-decomposition (gated by op_divmod)
+    let divmod_gate: AB::Expr = is_real_for_mul_divmod * local.op_divmod.clone().into();
+    let divmod_c0_diff: AB::Expr = local.divmod_c0.clone().into()
+        - (local.divmod_c0_halves.lo.clone().into()
+            + local.divmod_c0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    builder.assert_zero(divmod_gate.clone() * divmod_c0_diff);
+
+    let divmod_rd0_diff: AB::Expr = local.divmod_rem_ineq.diff0.clone().into()
+        - (local.divmod_rem_diff0_halves.lo.clone().into()
+            + local.divmod_rem_diff0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    builder.assert_zero(divmod_gate.clone() * divmod_rd0_diff);
+
+    let divmod_rd1_diff: AB::Expr = local.divmod_rem_ineq.diff1.clone().into()
+        - (local.divmod_rem_diff1_halves.lo.clone().into()
+            + local.divmod_rem_diff1_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
+    builder.assert_zero(divmod_gate * divmod_rd1_diff);
+
+    // DivMod remainder ineq diff2 (4-bit boolean decomposition)
+    constrain_limb2_bits(
+        builder,
+        local.divmod_rem_ineq.diff2.clone().into(),
+        &local.divmod_rem_diff2_bits,
+    );
 }
 
 // ── LogUp bus interactions ──────────────────────────────────────────────────
 
-/// C1 Memory bus send: execution access rows → GlobalSortedMem.
-///
-/// Tuple: `(access_t, access_c, access_r[3], tau_limbs[3], access_is_write, access_val[W], access_is_null)`.
-/// Multiplicity: `is_real · is_access`.
+/// C1 Memory bus send.
 fn send_memory<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -730,12 +483,12 @@ fn send_memory<AB: InteractionAirBuilder, const W: usize>(
     let mut values: Vec<AB::Expr> = vec![
         local.access_t.clone().into(),
         local.access_c.clone().into(),
-        local.access_r.limb0.clone().into(),
-        local.access_r.limb1.clone().into(),
-        local.access_r.limb2.clone().into(),
-        local.tau_limbs.limb0.clone().into(),
-        local.tau_limbs.limb1.clone().into(),
-        local.tau_limbs.limb2.clone().into(),
+        local.access_r.limbs.limb0.clone().into(),
+        local.access_r.limbs.limb1.clone().into(),
+        local.access_r.limbs.limb2.clone().into(),
+        local.tau_rc.limbs.limb0.clone().into(),
+        local.tau_rc.limbs.limb1.clone().into(),
+        local.tau_rc.limbs.limb2.clone().into(),
         local.access_is_write.clone().into(),
     ];
     for i in 0..W {
@@ -747,5 +500,132 @@ fn send_memory<AB: InteractionAirBuilder, const W: usize>(
         values,
         multiplicity,
         kind: InteractionKind::Memory,
+    });
+}
+
+/// C8 RangeCheck bus sends.
+fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let mult: AB::Expr = local.is_real.clone().into() * local.is_access.clone().into();
+
+    let mut send_rc = |val: AB::Expr| {
+        builder.send(AirInteraction {
+            values: vec![val],
+            multiplicity: mult.clone(),
+            kind: InteractionKind::RangeCheck,
+        });
+    };
+
+    // access_r limbs (limb2 proven by Limb2Bits, no RC send needed)
+    send_rc(local.access_r.l0_halves.lo.clone().into());
+    send_rc(local.access_r.l0_halves.hi.clone().into());
+    send_rc(local.access_r.l1_halves.lo.clone().into());
+    send_rc(local.access_r.l1_halves.hi.clone().into());
+
+    // tau limbs (limb2 proven by Limb2Bits, no RC send needed)
+    send_rc(local.tau_rc.l0_halves.lo.clone().into());
+    send_rc(local.tau_rc.l0_halves.hi.clone().into());
+    send_rc(local.tau_rc.l1_halves.lo.clone().into());
+    send_rc(local.tau_rc.l1_halves.hi.clone().into());
+
+    // Cmp inequality diff limbs
+    let cmp_mult: AB::Expr = local.is_real.clone().into()
+        * local.op_cmp.clone().into()
+        * (AB::Expr::ONE - local.cmp_eq_witness.clone().into());
+    let mut send_cmp_rc = |val: AB::Expr| {
+        builder.send(AirInteraction {
+            values: vec![val],
+            multiplicity: cmp_mult.clone(),
+            kind: InteractionKind::RangeCheck,
+        });
+    };
+    send_cmp_rc(local.cmp_ineq_diff0_halves.lo.clone().into());
+    send_cmp_rc(local.cmp_ineq_diff0_halves.hi.clone().into());
+    send_cmp_rc(local.cmp_ineq_diff1_halves.lo.clone().into());
+    send_cmp_rc(local.cmp_ineq_diff1_halves.hi.clone().into());
+    // diff2 proven by Limb2Bits, no RC send needed
+
+    // Mul carry range checks
+    let mul_mult: AB::Expr = local.is_real.clone().into()
+        * local.op_arith.clone().into()
+        * local.arith_is_mul.clone().into();
+    let mut send_mul_rc = |val: AB::Expr| {
+        builder.send(AirInteraction {
+            values: vec![val],
+            multiplicity: mul_mult.clone(),
+            kind: InteractionKind::RangeCheck,
+        });
+    };
+    send_mul_rc(local.mul_c0_halves.lo.clone().into());
+    send_mul_rc(local.mul_c0_halves.hi.clone().into());
+    send_mul_rc(local.mul_c1_lo.clone().into());
+    send_mul_rc(local.mul_c1_hi.clone().into());
+
+    // DivMod range checks
+    let divmod_mult: AB::Expr = local.is_real.clone().into() * local.op_divmod.clone().into();
+    let mut send_divmod_rc = |val: AB::Expr| {
+        builder.send(AirInteraction {
+            values: vec![val],
+            multiplicity: divmod_mult.clone(),
+            kind: InteractionKind::RangeCheck,
+        });
+    };
+    send_divmod_rc(local.divmod_c0_halves.lo.clone().into());
+    send_divmod_rc(local.divmod_c0_halves.hi.clone().into());
+    send_divmod_rc(local.divmod_c1_lo.clone().into());
+    send_divmod_rc(local.divmod_c1_hi.clone().into());
+    send_divmod_rc(local.divmod_rem_diff0_halves.lo.clone().into());
+    send_divmod_rc(local.divmod_rem_diff0_halves.hi.clone().into());
+    send_divmod_rc(local.divmod_rem_diff1_halves.lo.clone().into());
+    send_divmod_rc(local.divmod_rem_diff1_halves.hi.clone().into());
+    // diff2 proven by Limb2Bits, no RC send needed
+}
+
+/// C5 PoseidonPermutation bus send for Hash opcode.
+fn send_hash_permutation<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr = local.is_real.clone().into() * local.op_hash.clone().into();
+
+    let mut values: Vec<AB::Expr> = Vec::with_capacity(24);
+    for i in 0..16 {
+        values.push(local.hash_perm_input[i].clone().into());
+    }
+    for i in 0..8 {
+        values.push(local.hash_perm_output[i].clone().into());
+    }
+
+    builder.send(AirInteraction {
+        values,
+        multiplicity,
+        kind: InteractionKind::PoseidonPermutation,
+    });
+}
+
+/// C9 StaticTableLookup bus send for Lookup opcode.
+fn send_static_table_lookup<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr = local.is_real.clone().into() * local.op_lookup.clone().into();
+
+    let mut values: Vec<AB::Expr> = vec![
+        local.access_t.clone().into(),
+        local.access_c.clone().into(),
+        local.access_r.limbs.limb0.clone().into(),
+        local.access_r.limbs.limb1.clone().into(),
+        local.access_r.limbs.limb2.clone().into(),
+    ];
+    for i in 0..W {
+        values.push(local.access_val[i].clone().into());
+    }
+
+    builder.send(AirInteraction {
+        values,
+        multiplicity,
+        kind: InteractionKind::StaticTableLookup,
     });
 }

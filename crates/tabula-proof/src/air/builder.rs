@@ -9,7 +9,7 @@
 
 use p3_air::{AirBuilder, PairBuilder};
 
-use super::interaction::{AirInteraction, InteractionKind};
+use super::interaction::AirInteraction;
 
 /// Extension to [`AirBuilder`] for declaring LogUp interactions.
 ///
@@ -36,28 +36,3 @@ pub trait InteractionAirBuilder: AirBuilder + PairBuilder {
     fn receive(&mut self, interaction: AirInteraction<Self::Expr>);
 }
 
-/// Construct a send [`AirInteraction`].
-pub fn send_interaction<E>(
-    kind: InteractionKind,
-    values: Vec<E>,
-    multiplicity: E,
-) -> AirInteraction<E> {
-    AirInteraction {
-        values,
-        multiplicity,
-        kind,
-    }
-}
-
-/// Construct a receive [`AirInteraction`].
-pub fn receive_interaction<E>(
-    kind: InteractionKind,
-    values: Vec<E>,
-    multiplicity: E,
-) -> AirInteraction<E> {
-    AirInteraction {
-        values,
-        multiplicity,
-        kind,
-    }
-}

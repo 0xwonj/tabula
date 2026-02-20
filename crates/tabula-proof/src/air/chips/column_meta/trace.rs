@@ -10,6 +10,7 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_commitment::ColumnMeta;
 
+use crate::air::chips::poseidon::constants::poseidon2_permutation;
 use crate::air::columns::borrow_cols_mut;
 use crate::air::gadgets::bool_fe;
 
@@ -59,6 +60,15 @@ pub fn generate_column_meta_trace(
 
             let c_diff = BabyBear::new(next_meta.col.0 as u32) - BabyBear::new(meta.col.0 as u32);
             cols.col_diff_iz.populate(c_diff);
+
+            // Lex ordering direction (A2)
+            cols.lex.populate(
+                meta.table.0,
+                next_meta.table.0,
+                meta.col.0 as u32,
+                next_meta.col.0 as u32,
+                true, // every real→real pair is a (t,c) boundary in ColumnMeta
+            );
         } else {
             // Last real row or padding: IsZero witnesses for zero diffs
             // (transition to padding where both IDs are 0).
@@ -66,6 +76,21 @@ pub fn generate_column_meta_trace(
                 .populate(BabyBear::ZERO - BabyBear::new(meta.table.0));
             cols.col_diff_iz
                 .populate(BabyBear::ZERO - BabyBear::new(meta.col.0 as u32));
+        }
+
+        // Com_empty verification (B4)
+        let has_empty = meta.is_empty_old || meta.is_empty_new;
+        cols.has_empty_check = bool_fe(has_empty);
+        if has_empty {
+            // Compose: [0x00, table_id, col_id, 0..]
+            let mut perm_input = [BabyBear::ZERO; 16];
+            perm_input[1] = BabyBear::new(meta.table.0);
+            perm_input[2] = BabyBear::new(meta.col.0 as u32);
+            cols.empty_perm_input = perm_input;
+
+            let (_rounds, perm_output_full) = poseidon2_permutation(perm_input);
+            let perm_output: [BabyBear; 8] = core::array::from_fn(|j| perm_output_full[j]);
+            cols.empty_perm_output = perm_output;
         }
     }
 

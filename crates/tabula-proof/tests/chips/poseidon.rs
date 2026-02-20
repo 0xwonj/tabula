@@ -242,6 +242,80 @@ fn sbox_correct() {
     assert_eq!(si.out, expected);
 }
 
+// ── T13: Poseidon round flip ──
+
+/// T13: Swap full/partial round flags between two rows in preprocessed → should fail.
+///
+/// Full rounds apply the S-box to all 16 elements, partial rounds only to element 0.
+/// Swapping is_full_round between a full-round row (row 0) and a partial-round row
+/// (row 4, the first partial round after the initial full rounds) means the main
+/// trace is computing the wrong S-box application, causing a mismatch.
+#[test]
+fn invalid_round_flip_full_to_partial() {
+    let inputs = vec![poseidon_test_input(1)];
+    let trace = generate_poseidon_trace(&inputs);
+    let mut prep = generate_poseidon_preprocessed(inputs.len());
+
+    // Row 0 is a full round (is_full_round=1). Flip it to partial (0).
+    // Row 4 is the first partial round (is_full_round=0). Flip it to full (1).
+    let prep_width = POSEIDON_PREPROCESSED_WIDTH;
+
+    // Flip row 0: full → partial
+    {
+        let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+            borrow_cols_mut(&mut prep.values[0..prep_width]);
+        cols.is_full_round = BabyBear::ZERO;
+    }
+    // Flip row 4: partial → full
+    {
+        let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+            borrow_cols_mut(&mut prep.values[4 * prep_width..5 * prep_width]);
+        cols.is_full_round = BabyBear::ONE;
+    }
+
+    debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep))
+        .expect_err("swapping full/partial round flags must fail preprocessed RC or sbox constraint");
+}
+
+/// T13b: Swap two full-round RC vectors to verify round-constant matching fails.
+///
+/// Even within full rounds, each row has distinct RC values. Swapping RC between
+/// rounds 0 and 1 violates the main-trace RC equality constraint.
+#[test]
+fn invalid_round_constants_swapped_between_rounds() {
+    let inputs = vec![poseidon_test_input(1)];
+    let trace = generate_poseidon_trace(&inputs);
+    let mut prep = generate_poseidon_preprocessed(inputs.len());
+
+    let prep_width = POSEIDON_PREPROCESSED_WIDTH;
+
+    // Read RC from row 0 and row 1.
+    let rc0: [BabyBear; 16] = {
+        let cols: &PoseidonPreprocessedCols<BabyBear> = borrow_cols_mut(&mut prep.values[0..prep_width]);
+        cols.rc
+    };
+    let rc1: [BabyBear; 16] = {
+        let cols: &PoseidonPreprocessedCols<BabyBear> =
+            borrow_cols_mut(&mut prep.values[prep_width..2 * prep_width]);
+        cols.rc
+    };
+
+    // Write rc1 into row 0 and rc0 into row 1.
+    {
+        let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+            borrow_cols_mut(&mut prep.values[0..prep_width]);
+        cols.rc = rc1;
+    }
+    {
+        let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+            borrow_cols_mut(&mut prep.values[prep_width..2 * prep_width]);
+        cols.rc = rc0;
+    }
+
+    debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep))
+        .expect_err("swapped round constants must fail RC equality constraint");
+}
+
 // ── Column width tests ──
 
 #[test]
@@ -251,5 +325,5 @@ fn width() {
 
 #[test]
 fn preprocessed_width() {
-    assert_eq!(POSEIDON_PREPROCESSED_WIDTH, 17);
+    assert_eq!(POSEIDON_PREPROCESSED_WIDTH, 19);
 }

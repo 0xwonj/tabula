@@ -3,7 +3,7 @@ use p3_field::PrimeCharacteristicRing;
 
 use tabula_proof::air::chips::sorted_mem::air::GlobalSortedMemChip;
 use tabula_proof::air::chips::sorted_mem::columns::{
-    GlobalSortedMemCols, SORTED_MEM_STANDARD_WIDTH,
+    GlobalSortedMemCols, SORTED_MEM_STANDARD_WIDTH, sorted_mem_width,
 };
 use tabula_proof::air::chips::sorted_mem::trace::{SortedMemRow, generate_sorted_mem_trace};
 use tabula_proof::air::{borrow_cols, borrow_cols_mut, debug_check};
@@ -164,28 +164,36 @@ fn invalid_tau_regression() {
     // Save tau from row 1 and row 2.
     let (tau1_l0, tau1_l1, tau1_l2) = {
         let cols: &GlobalSortedMemCols<BabyBear, 3> = borrow_cols(&trace.values[width..2 * width]);
-        (cols.tau.limb0, cols.tau.limb1, cols.tau.limb2)
+        (
+            cols.tau.limbs.limb0,
+            cols.tau.limbs.limb1,
+            cols.tau.limbs.limb2,
+        )
     };
     let (tau2_l0, tau2_l1, tau2_l2) = {
         let cols: &GlobalSortedMemCols<BabyBear, 3> =
             borrow_cols(&trace.values[2 * width..3 * width]);
-        (cols.tau.limb0, cols.tau.limb1, cols.tau.limb2)
+        (
+            cols.tau.limbs.limb0,
+            cols.tau.limbs.limb1,
+            cols.tau.limbs.limb2,
+        )
     };
 
     // Swap: row 1 gets tau=2, row 2 gets tau=1.
     {
         let cols: &mut GlobalSortedMemCols<BabyBear, 3> =
             borrow_cols_mut(&mut trace.values[width..2 * width]);
-        cols.tau.limb0 = tau2_l0;
-        cols.tau.limb1 = tau2_l1;
-        cols.tau.limb2 = tau2_l2;
+        cols.tau.limbs.limb0 = tau2_l0;
+        cols.tau.limbs.limb1 = tau2_l1;
+        cols.tau.limbs.limb2 = tau2_l2;
     }
     {
         let cols: &mut GlobalSortedMemCols<BabyBear, 3> =
             borrow_cols_mut(&mut trace.values[2 * width..3 * width]);
-        cols.tau.limb0 = tau1_l0;
-        cols.tau.limb1 = tau1_l1;
-        cols.tau.limb2 = tau1_l2;
+        cols.tau.limbs.limb0 = tau1_l0;
+        cols.tau.limbs.limb1 = tau1_l1;
+        cols.tau.limbs.limb2 = tau1_l2;
     }
 
     debug_check(&GlobalSortedMemChip::<3>, &trace)
@@ -204,7 +212,7 @@ fn invalid_ordering_witness_corrupted() {
     {
         let cols: &mut GlobalSortedMemCols<BabyBear, 3> =
             borrow_cols_mut(&mut trace.values[0..width]);
-        cols.ordering.diff0 = BabyBear::new(999);
+        cols.ordering.ineq.diff0 = BabyBear::new(999);
     }
 
     debug_check(&GlobalSortedMemChip::<3>, &trace).expect_err("corrupted ordering gap should fail");
@@ -297,9 +305,202 @@ fn soundness_is_last_for_key_forged() {
         .expect_err("forged is_last_for_key=0 on last real row should fail");
 }
 
+// ── Lex ordering direction tests (A2) ──
+
+#[test]
+fn soundness_reversed_table_at_boundary() {
+    // Valid trace: (t=0,c=0) → (t=1,c=0). Swap table_ids to make reversed.
+    let rows = vec![
+        init_row(0, 0, 10, [1, 0, 0], false),
+        init_row(1, 0, 20, [2, 0, 0], false),
+    ];
+    let mut trace = generate_sorted_mem_trace::<3>(&rows);
+    let width = sorted_mem_width::<3>();
+    // Swap table_id: row 0 gets 1, row 1 gets 0
+    let cols0: &mut GlobalSortedMemCols<BabyBear, 3> = borrow_cols_mut(&mut trace.values[0..width]);
+    cols0.table_id = BabyBear::ONE;
+    let cols1: &mut GlobalSortedMemCols<BabyBear, 3> =
+        borrow_cols_mut(&mut trace.values[width..2 * width]);
+    cols1.table_id = BabyBear::ZERO;
+    debug_check(&GlobalSortedMemChip::<3>, &trace)
+        .expect_err("reversed table order should fail lex or derivation constraint");
+}
+
+#[test]
+fn soundness_reversed_col_same_table() {
+    // Valid trace: (t=0,c=0) → (t=0,c=1). Swap col_ids to make reversed.
+    let rows = vec![
+        init_row(0, 0, 10, [1, 0, 0], false),
+        init_row(0, 1, 20, [2, 0, 0], false),
+    ];
+    let mut trace = generate_sorted_mem_trace::<3>(&rows);
+    let width = sorted_mem_width::<3>();
+    // Swap col_id: row 0 gets 1, row 1 gets 0
+    let cols0: &mut GlobalSortedMemCols<BabyBear, 3> = borrow_cols_mut(&mut trace.values[0..width]);
+    cols0.col_id = BabyBear::ONE;
+    let cols1: &mut GlobalSortedMemCols<BabyBear, 3> =
+        borrow_cols_mut(&mut trace.values[width..2 * width]);
+    cols1.col_id = BabyBear::ZERO;
+    debug_check(&GlobalSortedMemChip::<3>, &trace)
+        .expect_err("reversed col order should fail lex or derivation constraint");
+}
+
+#[test]
+fn valid_lex_ordering_multiple_segments() {
+    // Valid: (t=0,c=0) → (t=0,c=1) → (t=1,c=0).
+    let rows = vec![
+        init_row(0, 0, 10, [1, 0, 0], false),
+        init_row(0, 1, 10, [2, 0, 0], false),
+        init_row(1, 0, 10, [3, 0, 0], false),
+    ];
+    let trace = generate_sorted_mem_trace::<3>(&rows);
+    debug_check(&GlobalSortedMemChip::<3>, &trace)
+        .expect("valid lex ordering across multiple segments should pass");
+}
+
+// ── T3: Init row uniqueness ──
+
+/// T3: Two init rows (τ=0) for the same key must fail.
+///
+/// The init row uniqueness constraint requires τ_{i+1} > 0 when r_{i+1} = r_i and τ_i = 0.
+/// We build a valid init+read trace then forge row 1 to be a second init (τ=0, is_init=1).
+/// This bypasses trace-gen's StrictIneq panic while still violating the AIR constraint.
+#[test]
+fn invalid_two_init_rows_same_key() {
+    // Start with init(τ=0) + read(τ=1): valid trace.
+    let rows = vec![
+        init_row(0, 0, 100, [1, 2, 3], false),
+        read_row(0, 0, 100, 1, [1, 2, 3], false),
+    ];
+    let mut trace = generate_sorted_mem_trace::<3>(&rows);
+    let width = SORTED_MEM_STANDARD_WIDTH;
+
+    // Forge row 1 as a second init: set is_init=1 and timestamp=0.
+    // The init format constraint requires τ=0 on init rows — this is already satisfied.
+    // The init row uniqueness constraint requires τ_next > 0 when same key and τ_prev=0.
+    // Row 0 has τ=0 (init), row 1 forged to τ=0 (init) → uniqueness violated.
+    {
+        let cols: &mut GlobalSortedMemCols<BabyBear, 3> =
+            borrow_cols_mut(&mut trace.values[width..2 * width]);
+        cols.is_init = BabyBear::ONE;
+        cols.tau.limbs.limb0 = BabyBear::ZERO;
+        cols.tau.limbs.limb1 = BabyBear::ZERO;
+        cols.tau.limbs.limb2 = BabyBear::ZERO;
+        // Also set is_write=0 to match init format.
+        cols.is_write = BabyBear::ZERO;
+    }
+
+    debug_check(&GlobalSortedMemChip::<3>, &trace)
+        .expect_err("two init rows for same key must fail init row uniqueness constraint");
+}
+
+/// T3b: Two init rows for different keys must succeed (different key segments).
+#[test]
+fn valid_two_init_rows_different_keys() {
+    let rows = vec![
+        init_row(0, 0, 100, [1, 0, 0], false),
+        init_row(0, 0, 200, [2, 0, 0], false),
+    ];
+    let trace = generate_sorted_mem_trace::<3>(&rows);
+    debug_check(&GlobalSortedMemChip::<3>, &trace)
+        .expect("two init rows for different keys should pass");
+}
+
+// ── T5: Multiple writes same key ──
+
+/// T5: Multiple writes to the same key at different timestamps must succeed.
+///
+/// The SortedMem chip must allow arbitrary writes as long as timestamps
+/// strictly increase within the same key segment.
+#[test]
+fn valid_multiple_writes_same_key() {
+    let rows = vec![
+        init_row(0, 0, 100, [1, 0, 0], false),
+        write_row(0, 0, 100, 1, [2, 0, 0], false),
+        write_row(0, 0, 100, 2, [3, 0, 0], false),
+        write_row(0, 0, 100, 3, [4, 0, 0], false),
+        read_row(0, 0, 100, 4, [4, 0, 0], false),
+    ];
+    let trace = generate_sorted_mem_trace::<3>(&rows);
+    debug_check(&GlobalSortedMemChip::<3>, &trace)
+        .expect("multiple writes to same key should pass");
+}
+
+/// T5b: Multiple writes across non-consecutive timestamps must succeed.
+#[test]
+fn valid_multiple_writes_sparse_timestamps() {
+    let rows = vec![
+        init_row(0, 0, 50, [10, 0, 0], false),
+        write_row(0, 0, 50, 5, [20, 0, 0], false),
+        write_row(0, 0, 50, 100, [30, 0, 0], false),
+        read_row(0, 0, 50, 200, [30, 0, 0], false),
+    ];
+    let trace = generate_sorted_mem_trace::<3>(&rows);
+    debug_check(&GlobalSortedMemChip::<3>, &trace)
+        .expect("sparse timestamp writes should pass");
+}
+
+// ── T12: Large tau ──
+
+/// T12: Large timestamp values (near 2^60) must be handled correctly.
+#[test]
+fn valid_large_tau() {
+    let large_tau = (1u64 << 60) + 42;
+    let rows = vec![
+        init_row(0, 0, 100, [1, 0, 0], false),
+        read_row(0, 0, 100, large_tau, [1, 0, 0], false),
+    ];
+    let trace = generate_sorted_mem_trace::<3>(&rows);
+    debug_check(&GlobalSortedMemChip::<3>, &trace).expect("large tau should pass");
+}
+
+/// T12b: Large tau with write and subsequent read must succeed.
+#[test]
+fn valid_large_tau_write_then_read() {
+    let tau_write = (1u64 << 50) + 7;
+    let tau_read = (1u64 << 50) + 100;
+    let rows = vec![
+        init_row(0, 0, 200, [5, 0, 0], false),
+        write_row(0, 0, 200, tau_write, [99, 0, 0], false),
+        read_row(0, 0, 200, tau_read, [99, 0, 0], false),
+    ];
+    let trace = generate_sorted_mem_trace::<3>(&rows);
+    debug_check(&GlobalSortedMemChip::<3>, &trace)
+        .expect("large tau with write+read should pass");
+}
+
+/// T12c: Tau not strictly increasing within same key segment must fail.
+///
+/// The ordering constraint requires tau strictly increases for same (t,c,r).
+/// Build a valid trace (tau=5 then tau=10), then tamper tau of row 2 to equal tau of row 1.
+/// We avoid calling trace gen with equal taus (which panics in StrictIneq).
+#[test]
+fn invalid_tau_not_strictly_increasing() {
+    // Build valid trace: init(τ=0) + read(τ=5) + read(τ=10).
+    let rows = vec![
+        init_row(0, 0, 100, [1, 0, 0], false),
+        read_row(0, 0, 100, 5, [1, 0, 0], false),
+        read_row(0, 0, 100, 10, [1, 0, 0], false),
+    ];
+    let mut trace = generate_sorted_mem_trace::<3>(&rows);
+    let width = SORTED_MEM_STANDARD_WIDTH;
+
+    // Tamper row 2 tau from 10 → 5 (equal to row 1's tau → not strictly increasing).
+    {
+        let cols: &mut GlobalSortedMemCols<BabyBear, 3> =
+            borrow_cols_mut(&mut trace.values[2 * width..3 * width]);
+        cols.tau.limbs.limb0 = BabyBear::new(5);
+        cols.tau.limbs.limb1 = BabyBear::ZERO;
+        cols.tau.limbs.limb2 = BabyBear::ZERO;
+    }
+
+    debug_check(&GlobalSortedMemChip::<3>, &trace)
+        .expect_err("equal tau for same key should fail strict monotone constraint");
+}
+
 // ── Column width test ──
 
 #[test]
 fn standard_width() {
-    assert_eq!(SORTED_MEM_STANDARD_WIDTH, 42);
+    assert_eq!(SORTED_MEM_STANDARD_WIDTH, 67);
 }

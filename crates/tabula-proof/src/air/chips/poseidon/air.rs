@@ -52,7 +52,7 @@ impl<AB: InteractionAirBuilder> Air<AB> for PoseidonChip {
         let not_last: AB::Expr = AB::Expr::ONE - local.is_last_round.clone().into();
 
         constrain_booleans(builder, local);
-        constrain_is_real(builder, local, next);
+        constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
         constrain_sbox_element0(builder, local, is_real.clone());
         constrain_sbox_full_round(builder, local, is_real.clone(), is_full.clone());
         // Linear layer transitions: NOT applied to last round (row 20 → next permutation or padding).
@@ -76,15 +76,6 @@ fn constrain_booleans<AB: AirBuilder>(builder: &mut AB, local: &PoseidonCols<AB:
     builder.assert_bool(local.is_full_round.clone());
     builder.assert_bool(local.is_first_round.clone());
     builder.assert_bool(local.is_last_round.clone());
-}
-
-/// 2. `is_real` prefix: monotonic 1→0.
-fn constrain_is_real<AB: AirBuilder>(
-    builder: &mut AB,
-    local: &PoseidonCols<AB::Var>,
-    next: &PoseidonCols<AB::Var>,
-) {
-    constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
 }
 
 /// 3a. S-box decomposition for element 0 (always active when is_real).
@@ -414,7 +405,16 @@ fn constrain_round_constants<AB: InteractionAirBuilder>(
             );
         }
         builder.assert_zero(
-            is_real * (local.is_full_round.clone().into() - prep.is_full_round.clone().into()),
+            is_real.clone()
+                * (local.is_full_round.clone().into() - prep.is_full_round.clone().into()),
+        );
+        builder.assert_zero(
+            is_real.clone()
+                * (local.is_first_round.clone().into() - prep.is_first_round.clone().into()),
+        );
+        builder.assert_zero(
+            is_real
+                * (local.is_last_round.clone().into() - prep.is_last_round.clone().into()),
         );
     }
 }

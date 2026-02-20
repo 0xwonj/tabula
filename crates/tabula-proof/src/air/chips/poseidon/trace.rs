@@ -76,9 +76,11 @@ pub fn generate_poseidon_preprocessed(num_perms: usize) -> RowMajorMatrix<BabyBe
 
             cols.rc = round_constants(r);
             cols.is_full_round = bool_fe(is_full_round(r));
+            cols.is_first_round = bool_fe(r == 0);
+            cols.is_last_round = bool_fe(r == TOTAL_ROUNDS - 1);
         }
     }
-    // Padding rows remain zero (rc=0, is_full_round=0).
+    // Padding rows remain zero (rc=0, all flags=0).
 
     RowMajorMatrix::new(values, POSEIDON_PREPROCESSED_WIDTH)
 }

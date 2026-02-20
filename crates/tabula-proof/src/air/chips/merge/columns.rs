@@ -7,7 +7,9 @@
 //! by `(table_id, col_id)` changes.
 
 use crate::air::columns::num_cols;
-use crate::air::gadgets::{IsZero, StrictIneq, U64Limbs};
+use crate::air::gadgets::{
+    HashChainInput, KeyRangeChecked, LexOrderingDirection, OrderingRangeChecked, SameKeyDetection,
+};
 
 /// Column layout for the GlobalMerge AIR.
 ///
@@ -26,8 +28,8 @@ pub struct GlobalMergeCols<T, const W: usize> {
     pub col_id: T,
 
     // ── Merged key ──
-    /// Strictly increasing row key within segment.
-    pub key: U64Limbs<T>,
+    /// Row key (u64 limbs + half-decomposition for range checks).
+    pub key: KeyRangeChecked<T>,
 
     // ── Source encoding ──
     /// Source bit 1: high bit of 2-bit source selector.
@@ -48,33 +50,29 @@ pub struct GlobalMergeCols<T, const W: usize> {
     /// 1 if this entry is in NewList, 0 if deleted.
     pub in_new: T,
 
-    // ── Hash accumulator ──
+    // ── Hash chain ──
     /// Running hash of NewList entries (8 field elements).
     pub hash_acc: [T; 8],
-
-    // ── Hash chain Poseidon input (C5 PoseidonPermutation bus) ──
-    /// Composed 16-element Poseidon input for the NewList hash chain.
-    /// First-in-new entry: `[0x00, t, c, key[3], new_val[W], 0..]`.
-    /// Continuation: `[prev_hash_acc[8], key[3], new_val[W], 0..]`.
-    /// Rows with `in_new=0` are unconstrained (multiplicity = 0).
-    pub perm_input: [T; 16],
+    /// Hash chain Poseidon input (16 field elements).
+    pub hash_chain: HashChainInput<T>,
     /// 1 if this is the first `in_new=1` row of the segment.
-    /// Prover witness; soundness from LogUp (wrong composition → Poseidon mismatch).
     pub is_first_in_new: T,
+    /// Running flag: 1 if any prior row in this segment had `in_new=1`.
+    pub has_prev_in_new: T,
 
     // ── Segment boundary ──
-    /// 1 if this is the last row of a `(t,c)` segment (for CommitmentVerification bus).
+    /// 1 if this is the last row of a `(t,c)` segment.
     pub is_last_segment: T,
 
-    // ── Ordering gadgets ──
-    /// Proves `key < next_key` within same segment.
-    pub key_ordering: StrictIneq<T>,
-    /// IsZero for `(next.table_id - table_id)`.
-    pub table_diff_iz: IsZero<T>,
-    /// IsZero for `(next.col_id - col_id)`.
-    pub col_diff_iz: IsZero<T>,
-    /// 1 if `(table_id, col_id)` changes from this row to the next.
-    pub tc_changed: T,
+    // ── Ordering ──
+    /// Proves `key < next_key` within same segment (StrictIneq + halves for range checks).
+    pub key_ordering: OrderingRangeChecked<T>,
+    /// Same-(t,c) detection via IsZero gadgets + tc_changed flag.
+    pub segment: SameKeyDetection<T>,
+
+    // ── Lex ordering direction ──
+    /// Lex ordering direction at segment boundaries (3 cols).
+    pub lex: LexOrderingDirection<T>,
 }
 
 /// Compute the width of GlobalMergeCols for a given value width.

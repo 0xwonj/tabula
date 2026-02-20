@@ -38,6 +38,8 @@ pub enum InteractionKind {
     SortedMemMeta = 7,
     /// All chips → RangeCheckChip (u16 range proofs).
     RangeCheck = 8,
+    /// ExecutionChip → StaticTableChip (static table lookups, receiver deferred to M11).
+    StaticTableLookup = 9,
 }
 
 impl InteractionKind {
@@ -169,6 +171,7 @@ mod tests {
             InteractionKind::CommitmentVerification,
             InteractionKind::SortedMemMeta,
             InteractionKind::RangeCheck,
+            InteractionKind::StaticTableLookup,
         ];
         let mut tags: Vec<u8> = kinds.iter().map(|k| k.tag()).collect();
         tags.sort();
@@ -181,6 +184,7 @@ mod tests {
         // Tag 0 is reserved (unused) so kind_tag is always nonzero in fingerprints.
         assert_eq!(InteractionKind::Memory.tag(), 1);
         assert_eq!(InteractionKind::RangeCheck.tag(), 8);
+        assert_eq!(InteractionKind::StaticTableLookup.tag(), 9);
     }
 
     #[test]

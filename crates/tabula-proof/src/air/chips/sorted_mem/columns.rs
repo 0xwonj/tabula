@@ -8,7 +8,9 @@
 //! followed by access rows in timestamp order.
 
 use crate::air::columns::num_cols;
-use crate::air::gadgets::{IsZero, LimbHalves, StrictIneq, U64Limbs};
+use crate::air::gadgets::{
+    IsZero, KeyRangeChecked, LexOrderingDirection, OrderingRangeChecked, SameKeyDetection,
+};
 
 /// Column layout for the GlobalSortedMem AIR.
 ///
@@ -27,12 +29,13 @@ pub struct GlobalSortedMemCols<T, const W: usize> {
     pub col_id: T,
 
     // ── Cell address ──
-    /// Row key (u64 as 3 BabyBear limbs).
-    pub r: U64Limbs<T>,
+    /// Row key (u64 limbs + half-decomposition for range checks).
+    pub r: KeyRangeChecked<T>,
 
     // ── Timestamp ──
-    /// Timestamp (u64 as 3 BabyBear limbs). tau = clk + 1 for access rows; tau = 0 for init.
-    pub tau: U64Limbs<T>,
+    /// Timestamp (u64 limbs + half-decomposition for range checks).
+    /// tau = clk + 1 for access rows; tau = 0 for init.
+    pub tau: KeyRangeChecked<T>,
     /// Init row flag (1 = init, 0 = access).
     pub is_init: T,
     /// Write flag (1 = write, 0 = read). Init rows have is_write = 0.
@@ -62,36 +65,27 @@ pub struct GlobalSortedMemCols<T, const W: usize> {
     /// For first-of-segment rows: 1 if the column was empty in the old state.
     pub meta_is_empty_old: T,
 
-    // ── Range-check half-decomposition (for RangeCheck bus) ──
-    /// Half-decomposition of r.limb0 (15+15 bits).
-    pub r_l0_halves: LimbHalves<T>,
-    /// Half-decomposition of r.limb1 (15+15 bits).
-    pub r_l1_halves: LimbHalves<T>,
-    /// Half-decomposition of tau.limb0 (15+15 bits).
-    pub tau_l0_halves: LimbHalves<T>,
-    /// Half-decomposition of tau.limb1 (15+15 bits).
-    pub tau_l1_halves: LimbHalves<T>,
-
-    // ── Ordering helpers ──
-    /// 1 if `(table_id, col_id)` changes from this row to the next.
-    pub tc_changed: T,
+    // ── Key-change detection (SortedMem-specific) ──
     /// 1 if the row key `r` changes from this row to the next (within same `(t,c)`).
     pub r_changed: T,
-
-    // ── Inverse helpers for same-key detection ──
-    /// IsZero for `(next.table_id - table_id)`.
-    pub table_diff_iz: IsZero<T>,
-    /// IsZero for `(next.col_id - col_id)`.
-    pub col_diff_iz: IsZero<T>,
-    /// IsZero for combined row key diff (used for r_changed detection).
-    /// We compute `r_diff = (next.r0 - r0) + (next.r1 - r1) * alpha + (next.r2 - r2) * alpha^2`
-    /// using a random-challenge-free approach: just check all 3 limbs individually.
-    /// `r_diff_iz` tracks whether ALL limbs are equal (via product).
-    pub r_diff_iz: IsZero<T>,
+    /// Per-limb IsZero for row key diff (avoids field reconstruction collision).
+    pub r_limb0_diff_iz: IsZero<T>,
+    /// IsZero for r.limb1 diff.
+    pub r_limb1_diff_iz: IsZero<T>,
+    /// IsZero for r.limb2 diff.
+    pub r_limb2_diff_iz: IsZero<T>,
 
     // ── Shared ordering gadget (r or tau strict inequality) ──
     /// Proves either `r_next > r` (when key changes) or `tau_next > tau` (same key).
-    pub ordering: StrictIneq<T>,
+    pub ordering: OrderingRangeChecked<T>,
+
+    // ── Segment detection ──
+    /// Same-(t,c) detection via IsZero gadgets + tc_changed flag.
+    pub segment: SameKeyDetection<T>,
+
+    // ── Lex ordering direction ──
+    /// Lex ordering direction at segment boundaries (3 cols).
+    pub lex: LexOrderingDirection<T>,
 }
 
 /// Compute the width of GlobalSortedMemCols for a given value width.

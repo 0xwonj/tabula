@@ -138,18 +138,21 @@ Behind `stark` feature flag (Plonky3 deps).
 Proof generation and verification for the `ApplyBatch` statement.
 
 - **`witness/`** — `WitnessGenerator` transforms `ExecutionResult` → `BatchWitness`. Key routing classifies keys into ReadOnly / ShortRun / SortedMemory proof paths.
+- **`air/builder.rs`** — `InteractionAirBuilder` trait (extends `AirBuilder + PairBuilder`) for LogUp send/receive declarations.
+- **`air/interaction.rs`** — `InteractionKind` enum (8 bus types), `Interaction` struct, `VirtualPairCol` for column references.
+- **`air/debug.rs`** — `DebugConstraintBuilder` with `PairBuilder` support for preprocessed traces; `check_logup_balance()` for cross-chip verification.
 - **`air/gadgets/`** — Reusable constraint primitives: boolean prefix, integer limbs, null canonicalization.
 - **`air/chips/`** — 7 AIR chips (3-file pattern: columns / air / trace):
 
-| Chip | Cols | Role |
-|------|------|------|
-| ExecutionChip | 118 | Instruction-level constraints, SSA slot carry |
-| GlobalSortedMem | 32 | Inter-tx memory consistency (sorted by key + timestamp) |
-| GlobalSSMC | 27 | SSMC hash chain + boundary constraints |
-| GlobalMerge | 34 | 3-way merge proof (old + write → new) |
-| PoseidonChip | 69 | Poseidon2 permutation (21 rows/perm) |
-| ColumnMeta | 25 | Wires column commitments to state root proofs |
-| RangeCheck | 2 | 2^16 preprocessed range table |
+| Chip | Main Cols | Preprocessed | Role |
+|------|-----------|-------------|------|
+| ExecutionChip | 170 | — | Instruction-level constraints, SSA slot carry, operand-to-slot linkage |
+| GlobalSortedMem | 42 | — | Inter-tx memory consistency (sorted by key + timestamp) |
+| GlobalSSMC | 45 | — | SSMC hash chain + boundary constraints |
+| GlobalMerge | 52 | — | 3-way merge proof (old + write → new) |
+| PoseidonChip | 93 | 17 | Poseidon2 permutation (21 rows/perm), RC verification |
+| ColumnMeta | 28 | — | Wires column commitments to state root proofs |
+| RangeCheck | 2 | — | 2^16 preprocessed range table |
 
 Behind `stark` feature flag (Plonky3 deps).
 
@@ -545,13 +548,11 @@ Deterministic execution, all crypto mocked. 191 tests at completion.
 - **M6**: AIR Foundation (chip/gadget patterns, ColumnMetaChip, debug checker)
 - **M7**: Gadgets + Memory Layer (integer/memory gadgets, GlobalSortedMem, RangeCheck)
 - **M8**: Execution + Hashing (ExecutionChip, PoseidonChip, GlobalSSMC, GlobalMerge)
+- **M9**: LogUp Bus Wiring (8 buses, operand-to-slot linkage, Poseidon RC verification, multi-chip integration)
 
-512 tests. Zero clippy warnings. ~22,500 LOC across 7 crates.
+250 tests in tabula-proof. Zero clippy warnings.
 
 ### Phase 3: LogUp Wiring + End-to-End — IN PROGRESS
 
-See [TODO.md](../TODO.md) §M9 for detailed task breakdown.
-
-- **M9**: LogUp cross-chip wiring, operand-slot linkage, hash chain constraints
-- **Post-M9**: SmtPathChip, StarkProver/Verifier, proof chaining, benchmarks
+- **Post-M9**: Range-check full wiring (M10), SmtPathChip, StarkProver/Verifier, proof chaining, benchmarks
 - **Optimization**: Phases 2-4 from [proof-optimization-architecture.md](./proof-optimization-architecture.md)

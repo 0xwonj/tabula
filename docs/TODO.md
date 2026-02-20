@@ -19,9 +19,12 @@
 | M6: AIR Foundation | ✅ DONE | Chip/gadget patterns, ColumnMetaChip, debug checker, InteractionKind |
 | M7: Gadgets + Memory Layer | ✅ DONE | Integer gadgets (U64Limbs, IsZero, StrictIneq), memory gadgets, GlobalSortedMemChip, RangeCheckChip |
 | M8: Execution + Hashing | ✅ DONE | ExecutionChip, PoseidonChip, GlobalSSMCChip, GlobalMergeChip, ColumnMeta finalization |
-| M9: LogUp Wiring | **Next** | Cross-chip LogUp buses, operand-slot linkage, hash chain constraints |
+| M9: LogUp Wiring | ✅ DONE | 8 LogUp buses, operand-slot linkage, Poseidon RC verification, multi-chip integration |
+| M10: Constraint Completeness | **Next** | Range checks, lex ordering, missing opcodes (Cmp/Hash/Lookup/Mul/DivMod), Com_empty |
 
-**Current state**: ~22,500 LOC across 7 crates, 512 tests, `cargo clippy` zero warnings.
+**Current state**: 250 tests in tabula-proof, `cargo clippy` zero warnings.
+
+**Design docs**: [m10-design.md](design/m10-design.md), [roadmap-m11-m13.md](design/roadmap-m11-m13.md)
 
 ### Structural changes since original plan
 
@@ -188,61 +191,29 @@ The original task IDs (B1-B7, C1-C5) below are kept for traceability but their m
 
 ---
 
-## M9 — LogUp Wiring (Next)
+<details>
+<summary>M9 — LogUp Wiring (click to expand)</summary>
 
-> Wire all chip interactions via LogUp cross-table arguments.
-> This is the critical step between "chips with local constraints" and "a sound proof system."
+- **L1**: LogUp framework — `InteractionAirBuilder` trait, `InteractionKind` (8 buses), `DebugConstraintBuilder` with `PairBuilder`, `check_logup_balance()` cross-chip verifier
+- **L2**: Operand-to-slot linkage — one-hot selectors (`src1_sel/src2_sel/cond_sel`), value linkage, write operand, read destination
+- **L3**: Hash chain constraints — SSMC and Merge `hash_acc` wired via PoseidonPermutation bus
+- **L4**: Poseidon RC verification — 17-column preprocessed trace, `constrain_round_constants()`
+- 8 LogUp buses wired across 7 chips, 250 tests, zero warnings
+- Column widths: Execution 170, Poseidon 93+17prep, SSMC 45, Merge 52, SortedMem 42, ColumnMeta 28, RangeCheck 2
+- Design doc: [m9-design.md](design/m9-design.md)
 
-### L1. LogUp Framework
-
-**What**: Implement the LogUp running-sum argument infrastructure.
-
-Each chip declares its interactions as `(kind, direction, fingerprint_columns, multiplicity)`. The framework accumulates running sums across all chips and asserts that send/receive totals match.
-
-**Fingerprint**: Random-challenge linear combination `Φ(row) = Σ_j α^j · col_j` over interaction columns.
-
-| Interaction | Send | Receive |
-|-------------|------|---------|
-| Memory | ExecutionChip (is_access rows) | GlobalSortedMemChip (non-init rows) |
-| SsmcMembership | GlobalSortedMemChip (init rows) | GlobalSSMCChip |
-| MergeCompleteness | GlobalSSMCChip + WriteSet | GlobalMergeChip |
-| ColumnMetaJoin | Chips with (t,c) columns | ColumnMetaChip |
-| RangeCheck | Execution/gadget limbs | RangeCheckChip |
-| PoseidonPermutation | SSMC/Merge/Hash ops | PoseidonChip |
-
-### L2. Operand-to-Slot Linkage
-
-**What**: Constrain `src1_val`, `src2_val`, `cond_val` in ExecutionChip to match actual SSA slot values.
-
-Currently these are unconstrained witness columns. Linkage options:
-- **Direct column equality**: `src1_val[i] = slots[src1_idx][i]` (requires decode of src operand)
-- **LogUp def-use**: (Layout B alternative, deferred)
-
-### L3. Hash Chain Constraints
-
-**What**: Constrain `hash_acc` in GlobalSSMC and GlobalMerge via PoseidonPermutation bus.
-
-Currently `hash_acc` values are populated in trace but NOT constrained. Wiring them to PoseidonChip ensures commitment integrity.
-
-### L4. Poseidon Round Constant Verification
-
-**What**: Constrain `rc` witness columns in PoseidonChip against known round constants (preprocessed or verified via boundary constraints).
-
-### Acceptance
-
-- All 8 InteractionKind buses wired with correct multiplicities
-- `debug_check()` extended to verify LogUp running-sum balance
-- Operand values provably match slot contents
-- Hash chain commitments provably correct
-- All existing 177 proof tests pass + ~30 new LogUp tests
+</details>
 
 ---
 
-## Remaining Work (post-M9)
+## M10 — Constraint Completeness (Next)
 
-### End-to-End Proving
+> See [m10-design.md](design/m10-design.md) for detailed specification.
+> See [roadmap-m11-m13.md](design/roadmap-m11-m13.md) for M11-M13 overview.
 
-After M9, the constraint system is complete. Remaining steps for end-to-end proofs:
+### Remaining Work (post-M10)
+
+Remaining steps for end-to-end proofs:
 
 | Task | Original ID | Description |
 |------|-------------|-------------|

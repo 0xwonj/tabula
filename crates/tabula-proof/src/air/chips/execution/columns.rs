@@ -9,7 +9,7 @@
 //! - SSA slots (Layout A: full carry)
 
 use crate::air::columns::num_cols;
-use crate::air::gadgets::U64Limbs;
+use crate::air::gadgets::{IsZero, KeyRangeChecked, Limb2Bits, LimbHalves, StrictIneq};
 
 /// Maximum number of SSA slots per program.
 ///
@@ -72,17 +72,17 @@ pub struct ExecutionCols<T, const W: usize> {
     pub clk: T,
     /// Timestamp for memory bus: tau = clk + 1 when is_access=1.
     pub tau: T,
-    /// Timestamp as u64 limbs for Memory bus fingerprint (3 limbs: 30+30+4).
-    /// Constrained: `is_access ⟹ tau = reconstruct(tau_limbs)`.
-    pub tau_limbs: U64Limbs<T>,
+    /// Timestamp as u64 limbs + half-decomposition for range checks.
+    /// Constrained: `is_access ⟹ tau = reconstruct(tau_rc.limbs)`.
+    pub tau_rc: KeyRangeChecked<T>,
 
     // ── Access log (populated when is_access=1, zeros otherwise) ──
     /// Table identifier for the access.
     pub access_t: T,
     /// Column identifier for the access.
     pub access_c: T,
-    /// Row key for the access (u64 limbs).
-    pub access_r: U64Limbs<T>,
+    /// Row key for the access (u64 limbs + half-decomposition for range checks).
+    pub access_r: KeyRangeChecked<T>,
     /// 1 if Write, 0 if Read (when is_access=1).
     pub access_is_write: T,
     /// Value field elements for the access.
@@ -123,6 +123,78 @@ pub struct ExecutionCols<T, const W: usize> {
     pub slot_is_null: [T; MAX_SLOTS],
     /// 1 if this instruction writes to slot s.
     pub slot_written: [T; MAX_SLOTS],
+
+    // ── Cmp opcode (M10-B1) ──
+    /// Cmp sub-selector: Eq.
+    pub cmp_is_eq: T,
+    /// Cmp sub-selector: Ne.
+    pub cmp_is_ne: T,
+    /// Cmp sub-selector: Lt.
+    pub cmp_is_lt: T,
+    /// Cmp sub-selector: Lte.
+    pub cmp_is_lte: T,
+    /// Cmp sub-selector: Gt.
+    pub cmp_is_gt: T,
+    /// Cmp sub-selector: Gte.
+    pub cmp_is_gte: T,
+    /// 1 if src1 < src2 (ordering witness).
+    pub cmp_lt_witness: T,
+    /// 1 if src1 == src2 (equality witness).
+    pub cmp_eq_witness: T,
+    /// StrictIneq gap for ordering proof.
+    pub cmp_ineq: StrictIneq<T>,
+    /// Range check halves for cmp_ineq.diff0.
+    pub cmp_ineq_diff0_halves: LimbHalves<T>,
+    /// Range check halves for cmp_ineq.diff1.
+    pub cmp_ineq_diff1_halves: LimbHalves<T>,
+    /// 4-bit boolean decomposition of cmp_ineq.diff2 (proves diff2 ∈ [0, 16)).
+    pub cmp_ineq_diff2_bits: Limb2Bits<T>,
+    /// Per-limb IsZero for equality detection (avoids field reconstruction collision).
+    /// Equality holds iff all three limb diffs are zero.
+    pub cmp_eq_limb0_iz: IsZero<T>,
+    /// IsZero for limb1 diff.
+    pub cmp_eq_limb1_iz: IsZero<T>,
+    /// IsZero for limb2 diff.
+    pub cmp_eq_limb2_iz: IsZero<T>,
+
+    // ── Hash opcode (M10-B2) ──
+    /// Poseidon permutation input (16 field elements).
+    pub hash_perm_input: [T; 16],
+    /// Poseidon permutation output / digest (8 field elements).
+    pub hash_perm_output: [T; 8],
+
+    // ── Mul opcode (M10-C1) ──
+    /// Carry from limb0 to limb1 in Mul (c0 ∈ [0, 2^30)).
+    pub mul_c0: T,
+    /// Half-decomposition of mul_c0 for range check.
+    pub mul_c0_halves: LimbHalves<T>,
+    /// Low part of carry from limb1 to limb2 (c1_lo ∈ [0, 2^16)).
+    pub mul_c1_lo: T,
+    /// High part of carry from limb1 to limb2 (c1_hi ∈ [0, 2^15)).
+    pub mul_c1_hi: T,
+
+    // ── DivMod opcode (M10-C2) ──
+    /// One-hot selector: which slot holds the quotient.
+    /// Derived: `r_sel[s] = slot_written[s] - divmod_q_sel[s]` gives remainder slot.
+    pub divmod_q_sel: [T; MAX_SLOTS],
+    /// Carry from product limb0 in DivMod (c0 ∈ [0, 2^30)).
+    pub divmod_c0: T,
+    /// Half-decomposition of divmod_c0 for range check.
+    pub divmod_c0_halves: LimbHalves<T>,
+    /// Low part of carry from product limb1 (c1_lo ∈ [0, 2^16)).
+    pub divmod_c1_lo: T,
+    /// High part of carry from product limb1 (c1_hi ∈ [0, 2^15)).
+    pub divmod_c1_hi: T,
+    /// StrictIneq gap for rem < rhs.
+    pub divmod_rem_ineq: StrictIneq<T>,
+    /// Range check halves for divmod_rem_ineq.diff0.
+    pub divmod_rem_diff0_halves: LimbHalves<T>,
+    /// Range check halves for divmod_rem_ineq.diff1.
+    pub divmod_rem_diff1_halves: LimbHalves<T>,
+    /// 4-bit boolean decomposition of divmod_rem_ineq.diff2 (proves diff2 ∈ [0, 16)).
+    pub divmod_rem_diff2_bits: Limb2Bits<T>,
+    /// IsZero for rhs ≠ 0 check.
+    pub divmod_rhs_iz: IsZero<T>,
 }
 
 /// Compute the width of ExecutionCols for a given value width.

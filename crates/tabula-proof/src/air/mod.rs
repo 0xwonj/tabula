@@ -9,6 +9,7 @@
 //! - Chip implementations (`chips`) — per-chip `BaseAir` + `Air`
 
 pub mod builder;
+pub mod bus;
 pub mod chips;
 pub mod columns;
 pub mod debug;
@@ -19,7 +20,10 @@ pub use builder::InteractionAirBuilder;
 pub use chips::column_meta::{
     COLUMN_META_WIDTH, ColumnMetaChip, ColumnMetaCols, generate_column_meta_trace,
 };
-pub use chips::execution::{InstructionRecord, Opcode, u64_to_limbs};
+pub use chips::execution::{
+    CmpOp, HASH_INSTRUCTION_DOMAIN_TAG, HASH_INSTRUCTION_INPUT_COUNT, InstructionRecord, Opcode,
+    u64_to_limbs,
+};
 pub use chips::merge::{MergeRow, MergeSource};
 pub use chips::poseidon::POSEIDON_PERM_WIDTH;
 pub use chips::range_check::{
@@ -44,3 +48,10 @@ pub use gadgets::{
     constrain_u64_decomposition,
 };
 pub use interaction::{AirInteraction, InteractionKind};
+
+// ── Bus builder traits ──
+pub use bus::{
+    CommitmentAirBuilder, MemoryAirBuilder, MergeAirBuilder, PoseidonAirBuilder,
+    RangeCheckAirBuilder, SortedMemMetaAirBuilder, SsmcMembershipAirBuilder,
+    StaticTableLookupAirBuilder,
+};

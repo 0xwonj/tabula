@@ -23,9 +23,11 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
 use crate::air::builder::InteractionAirBuilder;
+use crate::air::bus::{CommitmentAirBuilder, PoseidonAirBuilder, SortedMemMetaAirBuilder};
 use crate::air::columns::borrow_cols;
-use crate::air::gadgets::{constrain_is_real_prefix, constrain_is_zero};
-use crate::air::interaction::{AirInteraction, InteractionKind};
+use crate::air::gadgets::{
+    constrain_is_real_prefix, constrain_is_zero, constrain_lex_direction, send_lex_range_checks,
+};
 
 use super::columns::{COLUMN_META_WIDTH, ColumnMetaCols, DIGEST_WIDTH};
 
@@ -72,7 +74,7 @@ impl<AB: InteractionAirBuilder> Air<AB> for ColumnMetaChip {
         //   - If table_diff ≠ 0: no constraint on col_diff
         //
         // Note: This enforces uniqueness but not direction (strictly increasing).
-        // Full direction enforcement requires range checks on diffs (deferred to M9).
+        // Full direction enforcement requires range checks on diffs (deferred to M10).
         {
             let table_diff: AB::Expr = next.table_id.clone().into() - local.table_id.clone().into();
             let col_diff: AB::Expr = next.col_id.clone().into() - local.col_id.clone().into();
@@ -126,92 +128,131 @@ impl<AB: InteractionAirBuilder> Air<AB> for ColumnMetaChip {
         // ── 7. has_sorted_mem boolean ──
         builder.assert_bool(local.has_sorted_mem.clone());
 
+        // ── 8. Lex ordering direction (M10-A2) ──
+        {
+            let both_real: AB::Expr = local.is_real.clone().into() * next.is_real.clone().into();
+            constrain_lex_direction(
+                builder,
+                &local.lex,
+                next.table_id.clone().into(),
+                local.table_id.clone().into(),
+                next.col_id.clone().into(),
+                local.col_id.clone().into(),
+                both_real,
+            );
+        }
+
+        // ── 9. Com_empty verification (M10-B4) ──
+        constrain_com_empty(builder, local);
+
         // ── LogUp buses ──
-        receive_sorted_mem_meta(builder, local);
-        receive_commitment_verification_old(builder, local);
-        receive_commitment_verification_new(builder, local);
-    }
-}
 
-/// SortedMemMeta bus receive for ColumnMeta.
-///
-/// Tuple: `(table_id, col_id, is_empty_old)`.
-/// Multiplicity: `is_real · has_sorted_mem`.
-fn receive_sorted_mem_meta<AB: InteractionAirBuilder>(
-    builder: &mut AB,
-    local: &ColumnMetaCols<AB::Var>,
-) {
-    let multiplicity: AB::Expr = local.is_real.clone().into() * local.has_sorted_mem.clone().into();
+        // C8 RangeCheck: lex ordering diffs
+        {
+            let is_real: AB::Expr = local.is_real.clone().into();
+            let table_same: AB::Expr = local.table_diff_iz.is_zero.clone().into();
+            let col_same: AB::Expr = local.col_diff_iz.is_zero.clone().into();
+            let tc_changed: AB::Expr = AB::Expr::ONE - table_same * col_same;
+            send_lex_range_checks(builder, &local.lex, is_real * tc_changed);
+        }
 
-    builder.receive(AirInteraction {
-        values: vec![
+        // C7 SortedMemMeta receive
+        builder.receive_sorted_mem_meta(
             local.table_id.clone().into(),
             local.col_id.clone().into(),
             local.is_empty_old.clone().into(),
-        ],
-        multiplicity,
-        kind: InteractionKind::SortedMemMeta,
-    });
+            local.is_real.clone().into() * local.has_sorted_mem.clone().into(),
+        );
+
+        // C6 CommitmentVerification receive: Com_old
+        {
+            let not_tag: AB::Expr = AB::Expr::ONE - local.tag.clone().into();
+            let not_empty_old: AB::Expr = AB::Expr::ONE - local.is_empty_old.clone().into();
+            builder.receive_commitment(
+                local.table_id.clone().into(),
+                local.col_id.clone().into(),
+                AB::Expr::ZERO, // comm_type = 0 (Com_old)
+                local.is_touched.clone().into(),
+                &local.com_old,
+                local.is_real.clone().into() * not_tag * not_empty_old,
+            );
+        }
+
+        // C6 CommitmentVerification receive: Com_new
+        {
+            let not_tag: AB::Expr = AB::Expr::ONE - local.tag.clone().into();
+            builder.receive_commitment(
+                local.table_id.clone().into(),
+                local.col_id.clone().into(),
+                AB::Expr::ONE, // comm_type = 1 (Com_new)
+                local.is_touched.clone().into(),
+                &local.com_new,
+                local.is_real.clone().into() * not_tag * local.is_touched.clone().into(),
+            );
+        }
+
+        // C5 PoseidonPermutation send: Com_empty verification
+        builder.send_poseidon_perm(
+            &local.empty_perm_input,
+            &local.empty_perm_output,
+            local.is_real.clone().into() * local.has_empty_check.clone().into(),
+        );
+    }
 }
 
-/// C6 CommitmentVerification bus receive for Com_old.
+/// Com_empty verification: when is_empty_old or is_empty_new, verify the commitment
+/// equals `Poseidon(0x00 || t || c || 0..)`.
 ///
-/// Tuple: `(table_id, col_id, 0, is_touched, com_old[0..8])`.
-/// Multiplicity: `is_real · (1 − tag) · (1 − is_empty_old)`.
-///
-/// Only SSMC-tagged (tag=0), non-empty-old columns have SSMC data to verify.
-fn receive_commitment_verification_old<AB: InteractionAirBuilder>(
-    builder: &mut AB,
-    local: &ColumnMetaCols<AB::Var>,
-) {
-    let not_tag: AB::Expr = AB::Expr::ONE - local.tag.clone().into();
-    let not_empty_old: AB::Expr = AB::Expr::ONE - local.is_empty_old.clone().into();
-    let multiplicity: AB::Expr = local.is_real.clone().into() * not_tag * not_empty_old;
+/// - `has_empty_check = is_empty_old OR is_empty_new`
+/// - Input composition: `perm_input = [0x00, table_id, col_id, 0..]`
+/// - Com_old = perm_output when is_empty_old
+/// - Com_new = perm_output when is_empty_new
+fn constrain_com_empty<AB: AirBuilder>(builder: &mut AB, local: &ColumnMetaCols<AB::Var>) {
+    let is_real: AB::Expr = local.is_real.clone().into();
 
-    let mut values: Vec<AB::Expr> = vec![
-        local.table_id.clone().into(),
-        local.col_id.clone().into(),
-        AB::Expr::ZERO, // comm_type = 0 (Com_old)
-        local.is_touched.clone().into(),
-    ];
-    for j in 0..DIGEST_WIDTH {
-        values.push(local.com_old[j].clone().into());
+    // has_empty_check = is_empty_old + is_empty_new - is_empty_old * is_empty_new
+    let expected_has_empty: AB::Expr = local.is_empty_old.clone().into()
+        + local.is_empty_new.clone().into()
+        - local.is_empty_old.clone().into() * local.is_empty_new.clone().into();
+    builder
+        .assert_zero(is_real.clone() * (local.has_empty_check.clone().into() - expected_has_empty));
+    builder.assert_bool(local.has_empty_check.clone());
+
+    let gate: AB::Expr = is_real.clone() * local.has_empty_check.clone().into();
+
+    // Input composition: perm_input[0] = 0x00 (SSMC domain tag)
+    builder.assert_zero(gate.clone() * local.empty_perm_input[0].clone().into());
+
+    // perm_input[1] = table_id
+    builder.assert_zero(
+        gate.clone() * (local.empty_perm_input[1].clone().into() - local.table_id.clone().into()),
+    );
+
+    // perm_input[2] = col_id
+    builder.assert_zero(
+        gate.clone() * (local.empty_perm_input[2].clone().into() - local.col_id.clone().into()),
+    );
+
+    // perm_input[3..16] = 0 (zero padding)
+    for i in 3..16 {
+        builder.assert_zero(gate.clone() * local.empty_perm_input[i].clone().into());
     }
 
-    builder.receive(AirInteraction {
-        values,
-        multiplicity,
-        kind: InteractionKind::CommitmentVerification,
-    });
-}
-
-/// C6 CommitmentVerification bus receive for Com_new.
-///
-/// Tuple: `(table_id, col_id, 1, is_touched, com_new[0..8])`.
-/// Multiplicity: `is_real · (1 − tag) · is_touched`.
-///
-/// Only SSMC-tagged, touched columns have Merge data producing Com_new.
-fn receive_commitment_verification_new<AB: InteractionAirBuilder>(
-    builder: &mut AB,
-    local: &ColumnMetaCols<AB::Var>,
-) {
-    let not_tag: AB::Expr = AB::Expr::ONE - local.tag.clone().into();
-    let multiplicity: AB::Expr =
-        local.is_real.clone().into() * not_tag * local.is_touched.clone().into();
-
-    let mut values: Vec<AB::Expr> = vec![
-        local.table_id.clone().into(),
-        local.col_id.clone().into(),
-        AB::Expr::ONE, // comm_type = 1 (Com_new)
-        local.is_touched.clone().into(),
-    ];
-    for j in 0..DIGEST_WIDTH {
-        values.push(local.com_new[j].clone().into());
+    // Com_old = perm_output when is_empty_old
+    let old_gate: AB::Expr = is_real.clone() * local.is_empty_old.clone().into();
+    for i in 0..DIGEST_WIDTH {
+        builder.assert_zero(
+            old_gate.clone()
+                * (local.com_old[i].clone().into() - local.empty_perm_output[i].clone().into()),
+        );
     }
 
-    builder.receive(AirInteraction {
-        values,
-        multiplicity,
-        kind: InteractionKind::CommitmentVerification,
-    });
+    // Com_new = perm_output when is_empty_new
+    let new_gate: AB::Expr = is_real * local.is_empty_new.clone().into();
+    for i in 0..DIGEST_WIDTH {
+        builder.assert_zero(
+            new_gate.clone()
+                * (local.com_new[i].clone().into() - local.empty_perm_output[i].clone().into()),
+        );
+    }
 }

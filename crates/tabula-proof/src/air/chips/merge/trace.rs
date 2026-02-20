@@ -9,7 +9,6 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::air::columns::borrow_cols_mut;
 use crate::air::gadgets::bool_fe;
-use crate::air::gadgets::integer::MASK_30;
 
 use super::columns::{GlobalMergeCols, merge_width};
 
@@ -60,45 +59,6 @@ pub struct MergeRow {
     pub in_new: bool,
     /// Running Poseidon hash chain accumulator (precomputed).
     pub hash_acc: [BabyBear; 8],
-}
-
-/// Compose the 16-element Poseidon input for a Merge hash chain step.
-///
-/// - First-in-new: `[0x00, table_id, col_id, key[3], new_val[W], 0..]`
-/// - Continuation: `[prev_hash_acc[8], key[3], new_val[W], 0..]`
-fn compose_merge_perm_input(
-    row: &MergeRow,
-    is_first_in_new: bool,
-    prev_hash_acc: Option<&[BabyBear; 8]>,
-) -> [BabyBear; 16] {
-    let key_limbs = [
-        BabyBear::new((row.key & MASK_30) as u32),
-        BabyBear::new(((row.key >> 30) & MASK_30) as u32),
-        BabyBear::new((row.key >> 60) as u32),
-    ];
-
-    let mut input = [BabyBear::ZERO; 16];
-    if is_first_in_new {
-        input[0] = BabyBear::ZERO; // domain tag 0x00
-        input[1] = BabyBear::new(row.table_id);
-        input[2] = BabyBear::new(row.col_id as u32);
-        input[3] = key_limbs[0];
-        input[4] = key_limbs[1];
-        input[5] = key_limbs[2];
-        for (i, v) in row.new_val.iter().enumerate() {
-            input[6 + i] = *v;
-        }
-    } else {
-        let prev = prev_hash_acc.expect("continuation row must have prev_hash_acc");
-        input[..8].copy_from_slice(prev);
-        input[8] = key_limbs[0];
-        input[9] = key_limbs[1];
-        input[10] = key_limbs[2];
-        for (i, v) in row.new_val.iter().enumerate() {
-            input[11 + i] = *v;
-        }
-    }
-    input
 }
 
 /// Generate a GlobalMerge trace from pre-sorted merge rows.
@@ -165,14 +125,29 @@ pub fn generate_merge_trace<const W: usize>(rows: &[MergeRow]) -> RowMajorMatrix
             prev_hash_acc = None;
         }
 
+        // has_prev_in_new: 1 if any prior row in this segment had in_new=1.
+        cols.has_prev_in_new = bool_fe(seen_in_new_in_segment);
+
         // is_first_in_new: first in_new=1 row in segment.
         let is_first_in_new = row.in_new && !seen_in_new_in_segment;
         cols.is_first_in_new = bool_fe(is_first_in_new);
 
         // Compose perm_input for rows that participate in hashing (in_new=1).
         if row.in_new {
-            cols.perm_input =
-                compose_merge_perm_input(row, is_first_in_new, prev_hash_acc.as_ref());
+            if is_first_in_new {
+                cols.hash_chain.populate_first(
+                    row.table_id,
+                    row.col_id as u32,
+                    row.key,
+                    &row.new_val,
+                );
+            } else {
+                cols.hash_chain.populate_continuation(
+                    prev_hash_acc.as_ref().expect("continuation must have prev"),
+                    row.key,
+                    &row.new_val,
+                );
+            }
             prev_hash_acc = Some(row.hash_acc);
             seen_in_new_in_segment = true;
         }
@@ -181,11 +156,8 @@ pub fn generate_merge_trace<const W: usize>(rows: &[MergeRow]) -> RowMajorMatrix
         // tc_changed and is_last_segment: compare with next row.
         let is_last_segment = if i + 1 < num_real {
             let nxt = &rows[i + 1];
-            let tc_changed = row.table_id != nxt.table_id || row.col_id != nxt.col_id;
-            cols.tc_changed = bool_fe(tc_changed);
-            tc_changed
+            row.table_id != nxt.table_id || row.col_id != nxt.col_id
         } else {
-            cols.tc_changed = BabyBear::ONE;
             true // last real row is always last of segment
         };
         cols.is_last_segment = bool_fe(is_last_segment);
@@ -196,7 +168,7 @@ pub fn generate_merge_trace<const W: usize>(rows: &[MergeRow]) -> RowMajorMatrix
     RowMajorMatrix::new(values, width)
 }
 
-/// Populate IsZero and StrictIneq ordering witnesses (second pass).
+/// Populate ordering witnesses (second pass over all rows including padding).
 fn populate_ordering_witnesses<const W: usize>(
     rows: &[MergeRow],
     num_real: usize,
@@ -208,36 +180,46 @@ fn populate_ordering_witnesses<const W: usize>(
         let next_idx = (i + 1) % num_rows;
 
         let (cur_table, cur_col) = if i < num_real {
-            let r = &rows[i];
-            (BabyBear::new(r.table_id), BabyBear::new(r.col_id as u32))
+            (rows[i].table_id, rows[i].col_id as u32)
         } else {
-            (BabyBear::ZERO, BabyBear::ZERO)
+            (0, 0)
         };
         let (next_table, next_col) = if next_idx < num_real {
-            let r = &rows[next_idx];
-            (BabyBear::new(r.table_id), BabyBear::new(r.col_id as u32))
+            (rows[next_idx].table_id, rows[next_idx].col_id as u32)
         } else {
-            (BabyBear::ZERO, BabyBear::ZERO)
+            (0, 0)
         };
 
-        let table_diff = next_table - cur_table;
-        let col_diff = next_col - cur_col;
+        let table_diff = BabyBear::new(next_table) - BabyBear::new(cur_table);
+        let col_diff = BabyBear::new(next_col) - BabyBear::new(cur_col);
 
         let cur_offset = i * width;
         let cols: &mut GlobalMergeCols<BabyBear, W> =
             borrow_cols_mut(&mut values[cur_offset..cur_offset + width]);
-        cols.table_diff_iz.populate(table_diff);
-        cols.col_diff_iz.populate(col_diff);
 
-        // StrictIneq for key ordering: only within same segment, real→real.
+        // Same-key detection
+        cols.segment.populate(table_diff, col_diff);
+
         let is_real_cur = i < num_real;
         let is_real_next = next_idx < num_real;
+
         if is_real_cur && is_real_next {
             let cur_row = &rows[i];
             let next_row = &rows[next_idx];
             let tc_changed =
                 cur_row.table_id != next_row.table_id || cur_row.col_id != next_row.col_id;
+
+            // Lex ordering direction at segment boundaries
+            cols.lex.populate(
+                cur_row.table_id,
+                next_row.table_id,
+                cur_row.col_id as u32,
+                next_row.col_id as u32,
+                tc_changed,
+            );
+
             if !tc_changed {
+                // Same segment: key ordering + half-decomposition
                 cols.key_ordering.populate(cur_row.key, next_row.key);
             }
         }

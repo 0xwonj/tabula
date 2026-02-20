@@ -249,6 +249,8 @@ fn strict_ineq_populate_panics_on_equal() {
         diff0: BabyBear::ZERO,
         diff1: BabyBear::ZERO,
         diff2: BabyBear::ZERO,
+        borrow0: BabyBear::ZERO,
+        borrow1: BabyBear::ZERO,
     };
     ineq.populate(5, 5);
 }
@@ -260,6 +262,8 @@ fn strict_ineq_populate_panics_on_reversed() {
         diff0: BabyBear::ZERO,
         diff1: BabyBear::ZERO,
         diff2: BabyBear::ZERO,
+        borrow0: BabyBear::ZERO,
+        borrow1: BabyBear::ZERO,
     };
     ineq.populate(10, 5);
 }

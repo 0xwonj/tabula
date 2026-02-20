@@ -1,7 +1,7 @@
 //! Column layout for the ColumnMeta AIR.
 
 use crate::air::columns::num_cols;
-use crate::air::gadgets::IsZero;
+use crate::air::gadgets::{IsZero, LexOrderingDirection};
 
 /// Number of BabyBear field elements in a NativeDigest.
 pub const DIGEST_WIDTH: usize = 8;
@@ -41,6 +41,18 @@ pub struct ColumnMetaCols<T> {
     pub table_diff_iz: IsZero<T>,
     /// IsZero gadget for `(col_id_next - col_id)` — meaningful only when table IDs match.
     pub col_diff_iz: IsZero<T>,
+
+    // ── Lex ordering direction (M10-A2) ──
+    /// Lex ordering direction at segment boundaries (3 cols).
+    pub lex: LexOrderingDirection<T>,
+
+    // ── Com_empty verification (M10-B4) ──
+    /// Poseidon permutation input for Com_empty: `[0x00, table_id, col_id, 0..]`.
+    pub empty_perm_input: [T; 16],
+    /// Poseidon permutation output: expected Com_empty digest (8 FE).
+    pub empty_perm_output: [T; DIGEST_WIDTH],
+    /// 1 if any empty verification needed (is_empty_old OR is_empty_new).
+    pub has_empty_check: T,
 }
 
 /// Width of the ColumnMeta trace.

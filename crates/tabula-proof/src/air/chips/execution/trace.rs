@@ -8,9 +8,26 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::air::columns::borrow_cols_mut;
 use crate::air::gadgets::bool_fe;
-use crate::air::gadgets::integer::MASK_30;
+use crate::air::gadgets::integer::{MASK_30, SHIFT_30_U32};
 
 use super::columns::{ExecutionCols, MAX_SLOTS, execution_width};
+
+/// Comparison sub-operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CmpOp {
+    /// Equal.
+    Eq,
+    /// Not equal.
+    Ne,
+    /// Less than.
+    Lt,
+    /// Less than or equal.
+    Lte,
+    /// Greater than.
+    Gt,
+    /// Greater than or equal.
+    Gte,
+}
 
 /// Opcode discriminant for trace generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,8 +44,8 @@ pub enum Opcode {
     Mul,
     /// Integer division + modulo.
     DivMod,
-    /// Comparison.
-    Cmp,
+    /// Comparison (with sub-operation).
+    Cmp(CmpOp),
     /// Boolean NOT.
     Not,
     /// Boolean AND.
@@ -84,6 +101,14 @@ pub struct InstructionRecord {
     pub dst_val: Vec<BabyBear>,
     /// Destination null flag for the written slot.
     pub dst_is_null: bool,
+    /// For DivMod: second destination value (remainder), written to second slot.
+    pub dst2_val: Vec<BabyBear>,
+    /// For DivMod: second destination null flag.
+    pub dst2_is_null: bool,
+    /// For Hash: precomputed Poseidon permutation input (16 FE).
+    pub hash_perm_input: Option<[BabyBear; 16]>,
+    /// For Hash: precomputed Poseidon permutation output (8 FE).
+    pub hash_perm_output: Option<[BabyBear; 8]>,
 }
 
 /// Generate an ExecutionChip trace from instruction records.
@@ -98,13 +123,9 @@ pub fn generate_execution_trace<const W: usize>(
     let mut values = vec![BabyBear::ZERO; num_rows * width];
 
     // Running state
-    let mut slot_vals = [[BabyBear::ZERO; 3]; MAX_SLOTS];
+    let mut slot_vals = [[BabyBear::ZERO; W]; MAX_SLOTS];
     let mut slot_nulls = [BabyBear::ZERO; MAX_SLOTS];
     let mut clk: u32 = 0;
-
-    // Slot values need W-sized arrays but we use fixed 3 for Standard.
-    // This is safe because W=3 for all current uses.
-    const { assert!(W <= 3, "trace gen only supports W <= 3") };
 
     for (i, rec) in records.iter().enumerate() {
         let offset = i * width;
@@ -121,13 +142,20 @@ pub fn generate_execution_trace<const W: usize>(
         cols.is_access = bool_fe(is_access);
         cols.clk = BabyBear::new(clk);
 
+        // Populate access columns for Read, Write, and Lookup.
+        // Only Read/Write set is_access and advance the clock.
+        let uses_access_cols = matches!(rec.opcode, Opcode::Read | Opcode::Write | Opcode::Lookup);
+
         if is_access {
             let tau_val = clk as u64 + 1;
             cols.tau = BabyBear::new(clk + 1);
-            cols.tau_limbs.populate(tau_val);
+            cols.tau_rc.populate(tau_val);
             clk += 1;
 
-            // Access log
+            cols.access_is_write = bool_fe(matches!(rec.opcode, Opcode::Write));
+        }
+
+        if uses_access_cols {
             if let Some(t) = rec.access_t {
                 cols.access_t = BabyBear::new(t);
             }
@@ -137,7 +165,6 @@ pub fn generate_execution_trace<const W: usize>(
             if let Some(r) = rec.access_r {
                 cols.access_r.populate(r);
             }
-            cols.access_is_write = bool_fe(matches!(rec.opcode, Opcode::Write));
             if let Some(ref val) = rec.access_val {
                 for (j, v) in val.iter().enumerate().take(W) {
                     cols.access_val[j] = *v;
@@ -185,6 +212,36 @@ pub fn generate_execution_trace<const W: usize>(
             populate_arith_carry(cols, rec);
         }
 
+        // Mul carry (M10-C1)
+        if rec.opcode == Opcode::Mul && W >= 3 {
+            populate_mul_carry(cols, rec);
+        }
+
+        // DivMod carry + remainder bound (M10-C2)
+        if rec.opcode == Opcode::DivMod && W >= 3 {
+            populate_divmod(cols, rec);
+            // Populate divmod_q_sel: first written slot is quotient
+            if let Some(&q_slot) = rec.written_slots.first() {
+                assert!(q_slot < MAX_SLOTS, "divmod q_slot {q_slot} >= MAX_SLOTS");
+                cols.divmod_q_sel[q_slot] = BabyBear::ONE;
+            }
+        }
+
+        // Cmp witness columns
+        if let Opcode::Cmp(cmp_op) = rec.opcode {
+            populate_cmp_witness(cols, rec, cmp_op);
+        }
+
+        // Hash permutation columns
+        if rec.opcode == Opcode::Hash {
+            if let Some(ref input) = rec.hash_perm_input {
+                cols.hash_perm_input = *input;
+            }
+            if let Some(ref output) = rec.hash_perm_output {
+                cols.hash_perm_output = *output;
+            }
+        }
+
         // Slot written flags
         for &s in &rec.written_slots {
             assert!(s < MAX_SLOTS, "slot index {s} >= MAX_SLOTS ({MAX_SLOTS})");
@@ -197,6 +254,14 @@ pub fn generate_execution_trace<const W: usize>(
                 slot_vals[first_slot][j] = *v;
             }
             slot_nulls[first_slot] = bool_fe(rec.dst_is_null);
+        }
+        // DivMod second slot (remainder)
+        if rec.written_slots.len() >= 2 && !rec.dst2_val.is_empty() {
+            let second_slot = rec.written_slots[1];
+            for (j, v) in rec.dst2_val.iter().enumerate().take(W) {
+                slot_vals[second_slot][j] = *v;
+            }
+            slot_nulls[second_slot] = bool_fe(rec.dst2_is_null);
         }
 
         // Write all slot values to trace (carry + new writes)
@@ -219,7 +284,7 @@ fn set_opcode_selectors<T: PrimeCharacteristicRing, const W: usize>(
         Opcode::Write => cols.op_write = T::ONE,
         Opcode::Add | Opcode::Sub | Opcode::Mul => cols.op_arith = T::ONE,
         Opcode::DivMod => cols.op_divmod = T::ONE,
-        Opcode::Cmp => cols.op_cmp = T::ONE,
+        Opcode::Cmp(_) => cols.op_cmp = T::ONE,
         Opcode::Not => cols.op_not = T::ONE,
         Opcode::And => cols.op_and = T::ONE,
         Opcode::Or => cols.op_or = T::ONE,
@@ -271,6 +336,153 @@ fn populate_arith_carry<const W: usize>(
         }
         _ => {}
     }
+}
+
+/// Populate Cmp witness columns: sub-selectors, lt/eq witnesses, inequality proof.
+fn populate_cmp_witness<const W: usize>(
+    cols: &mut ExecutionCols<BabyBear, W>,
+    rec: &InstructionRecord,
+    cmp_op: CmpOp,
+) {
+    // Set cmp sub-selector
+    match cmp_op {
+        CmpOp::Eq => cols.cmp_is_eq = BabyBear::ONE,
+        CmpOp::Ne => cols.cmp_is_ne = BabyBear::ONE,
+        CmpOp::Lt => cols.cmp_is_lt = BabyBear::ONE,
+        CmpOp::Lte => cols.cmp_is_lte = BabyBear::ONE,
+        CmpOp::Gt => cols.cmp_is_gt = BabyBear::ONE,
+        CmpOp::Gte => cols.cmp_is_gte = BabyBear::ONE,
+    }
+
+    // Reconstruct u64 operands from limbs
+    let s1 = reconstruct_u64_from_limbs(&rec.src1_val);
+    let s2 = reconstruct_u64_from_limbs(&rec.src2_val);
+
+    let is_eq = s1 == s2;
+    let is_lt = s1 < s2;
+
+    cols.cmp_lt_witness = bool_fe(is_lt);
+    cols.cmp_eq_witness = bool_fe(is_eq);
+
+    // Per-limb IsZero for equality detection (avoids field reconstruction collision).
+    let limb0_diff = rec.src1_val[0] - rec.src2_val[0];
+    let limb1_diff = rec.src1_val.get(1).copied().unwrap_or(BabyBear::ZERO)
+        - rec.src2_val.get(1).copied().unwrap_or(BabyBear::ZERO);
+    let limb2_diff = rec.src1_val.get(2).copied().unwrap_or(BabyBear::ZERO)
+        - rec.src2_val.get(2).copied().unwrap_or(BabyBear::ZERO);
+    cols.cmp_eq_limb0_iz.populate(limb0_diff);
+    cols.cmp_eq_limb1_iz.populate(limb1_diff);
+    cols.cmp_eq_limb2_iz.populate(limb2_diff);
+
+    // StrictIneq + halves + diff2 bits: only when not equal
+    if !is_eq {
+        let (a, b) = if is_lt { (s1, s2) } else { (s2, s1) };
+        cols.cmp_ineq.populate(a, b);
+        let gap = b - a - 1;
+        let d0 = (gap & MASK_30) as u32;
+        let d1 = ((gap >> 30) & MASK_30) as u32;
+        let d2 = (gap >> 60) as u32;
+        cols.cmp_ineq_diff0_halves.populate(d0);
+        cols.cmp_ineq_diff1_halves.populate(d1);
+        cols.cmp_ineq_diff2_bits.populate(d2);
+    }
+}
+
+/// Populate Mul carry columns: carry chain for u64 multiplication.
+fn populate_mul_carry<const W: usize>(
+    cols: &mut ExecutionCols<BabyBear, W>,
+    rec: &InstructionRecord,
+) {
+    if rec.src1_val.len() < 3 || rec.src2_val.len() < 3 {
+        return;
+    }
+
+    let a0 = babybear_to_u32(rec.src1_val[0]) as u64;
+    let a1 = babybear_to_u32(rec.src1_val[1]) as u64;
+    let b0 = babybear_to_u32(rec.src2_val[0]) as u64;
+    let b1 = babybear_to_u32(rec.src2_val[1]) as u64;
+
+    // T0 = a0*b0, carry0 = T0 >> 30
+    let t0 = a0 * b0;
+    let c0 = t0 >> 30;
+
+    // T1 + c0, carry1 = (T1 + c0) >> 30
+    let t1_plus_c0 = a0 * b1 + a1 * b0 + c0;
+    let c1 = t1_plus_c0 >> 30;
+
+    cols.mul_c0 = BabyBear::new(c0 as u32);
+    cols.mul_c0_halves.populate(c0 as u32);
+    cols.mul_c1_lo = BabyBear::new((c1 & 0xFFFF) as u32);
+    cols.mul_c1_hi = BabyBear::new((c1 >> 16) as u32);
+}
+
+/// Populate DivMod columns: carry chain for q*rhs + remainder bound.
+fn populate_divmod<const W: usize>(cols: &mut ExecutionCols<BabyBear, W>, rec: &InstructionRecord) {
+    if rec.src1_val.len() < 3 || rec.src2_val.len() < 3 || rec.dst_val.len() < 3 {
+        return;
+    }
+
+    // lhs (src1) / rhs (src2) = q (first written slot) remainder r (second written slot)
+    let lhs = reconstruct_u64_from_limbs(&rec.src1_val);
+    let rhs = reconstruct_u64_from_limbs(&rec.src2_val);
+
+    if rhs == 0 {
+        // Non-zero divisor check will fail — just populate IsZero witness
+        cols.divmod_rhs_iz.populate(BabyBear::ZERO);
+        return;
+    }
+
+    let q = lhs / rhs;
+    let rem = lhs % rhs;
+
+    // Carry chain for q * rhs + rem (matches AIR identity: q*d + rem = lhs)
+    let q_limbs = u64_to_limbs(q);
+    let q0 = babybear_to_u32(q_limbs[0]) as u64;
+    let q1 = babybear_to_u32(q_limbs[1]) as u64;
+    let d0 = babybear_to_u32(rec.src2_val[0]) as u64;
+    let d1 = babybear_to_u32(rec.src2_val[1]) as u64;
+
+    let rem_limbs = u64_to_limbs(rem);
+    let rem0 = babybear_to_u32(rem_limbs[0]) as u64;
+    let rem1 = babybear_to_u32(rem_limbs[1]) as u64;
+
+    // AIR: q0*d0 + rem0 = l0 + c0 * 2^30
+    let t0 = q0 * d0 + rem0;
+    let c0 = t0 >> 30;
+
+    // AIR: q0*d1 + q1*d0 + rem1 + c0 = l1 + c1 * 2^30
+    let t1_plus_c0 = q0 * d1 + q1 * d0 + rem1 + c0;
+    let c1 = t1_plus_c0 >> 30;
+
+    cols.divmod_c0 = BabyBear::new(c0 as u32);
+    cols.divmod_c0_halves.populate(c0 as u32);
+    cols.divmod_c1_lo = BabyBear::new((c1 & 0xFFFF) as u32);
+    cols.divmod_c1_hi = BabyBear::new((c1 >> 16) as u32);
+
+    // Remainder bound: rem < rhs
+    cols.divmod_rem_ineq.populate(rem, rhs);
+    let gap = rhs - rem - 1;
+    let d0_gap = (gap & MASK_30) as u32;
+    let d1_gap = ((gap >> 30) & MASK_30) as u32;
+    let d2_gap = (gap >> 60) as u32;
+    cols.divmod_rem_diff0_halves.populate(d0_gap);
+    cols.divmod_rem_diff1_halves.populate(d1_gap);
+    cols.divmod_rem_diff2_bits.populate(d2_gap);
+
+    // Non-zero divisor: IsZero on combined rhs
+    let shift_30 = BabyBear::new(SHIFT_30_U32);
+    let shift_60 = shift_30 * shift_30;
+    let rhs_combined = rec.src2_val[0] + rec.src2_val[1] * shift_30 + rec.src2_val[2] * shift_60;
+    cols.divmod_rhs_iz.populate(rhs_combined);
+}
+
+/// Reconstruct a u64 from limb-encoded BabyBear values.
+fn reconstruct_u64_from_limbs(limbs: &[BabyBear]) -> u64 {
+    use p3_field::PrimeField32;
+    let l0 = limbs.first().map_or(0, |v| v.as_canonical_u32() as u64);
+    let l1 = limbs.get(1).map_or(0, |v| v.as_canonical_u32() as u64);
+    let l2 = limbs.get(2).map_or(0, |v| v.as_canonical_u32() as u64);
+    l0 | (l1 << 30) | (l2 << 60)
 }
 
 /// Extract the canonical u32 value from a BabyBear element.

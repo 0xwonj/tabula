@@ -61,16 +61,21 @@ pub const POSEIDON_WIDTH: usize = poseidon_width();
 
 /// Preprocessed column layout for the Poseidon2 AIR.
 ///
-/// Contains the expected round constants and is_full_round flag for each row.
+/// Contains the expected round constants, is_full_round, is_first_round,
+/// and is_last_round flags for each row.
 /// The prover cannot forge these values — they are fixed at setup time.
 ///
-/// 17 columns: rc(16) + is_full_round(1).
+/// 19 columns total: rc(16) + is_full_round(1) + is_first_round(1) + is_last_round(1).
 #[repr(C)]
 pub struct PoseidonPreprocessedCols<T> {
     /// Expected round constants for this row.
     pub rc: [T; WIDTH],
     /// Expected is_full_round flag for this row.
     pub is_full_round: T,
+    /// Expected is_first_round flag (round 0).
+    pub is_first_round: T,
+    /// Expected is_last_round flag (round 20).
+    pub is_last_round: T,
 }
 
 /// Width of the Poseidon preprocessed trace.

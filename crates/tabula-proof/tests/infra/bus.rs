@@ -38,7 +38,7 @@ use crate::common::builders::{
     init_row, make_read, make_write, merge_val, merge_zeros, old_only_row, read_row, ssmc_entry,
     write_only_row, write_row,
 };
-use crate::common::values::distinct_digest;
+use crate::common::values::{com_empty, distinct_digest};
 
 // ── Helpers ──
 
@@ -217,7 +217,7 @@ fn c7_sorted_mem_meta_is_empty_old_matches() {
         table: TableId(0),
         col: ColId(0),
         tag: CommitmentStrategy::Ssmc,
-        com_old: NativeDigest([BabyBear::ZERO; 8]),
+        com_old: com_empty(0, 0),
         com_new: distinct_digest(1),
         is_empty_old: true,
         is_empty_new: false,
@@ -479,7 +479,6 @@ fn c6_commitment_verification_balanced_com_old() {
 fn c6_commitment_verification_balanced_com_new() {
     // Merge segment → C6 send Com_new. ColumnMeta receives Com_new.
     let zero_digest = NativeDigest([BabyBear::ZERO; 8]);
-    let d1 = distinct_digest(1);
 
     let merge_rows = vec![write_only_row(0, 0, 100, [1, 2, 3])];
     let merge_trace = generate_merge_trace::<3>(&merge_rows);
@@ -488,9 +487,9 @@ fn c6_commitment_verification_balanced_com_new() {
         table: TableId(0),
         col: ColId(0),
         tag: CommitmentStrategy::Ssmc,
-        com_old: d1,
-        com_new: zero_digest, // hash_acc=[0;8] in Merge → matches com_new
-        is_empty_old: true,   // suppresses Com_old receive (1-is_empty_old=0)
+        com_old: com_empty(0, 0), // Com_empty for is_empty_old=true
+        com_new: zero_digest,     // hash_acc=[0;8] in Merge → matches com_new
+        is_empty_old: true,       // suppresses Com_old receive (1-is_empty_old=0)
         is_empty_new: false,
         is_touched: true,
     }];
@@ -534,12 +533,13 @@ fn c6_commitment_verification_smt_suppressed() {
 #[test]
 fn c6_commitment_verification_empty_old_suppressed() {
     // is_empty_old=true suppresses C6 Com_old receive.
+    let zero_digest = NativeDigest([BabyBear::ZERO; 8]);
     let metas = vec![ColumnMeta {
         table: TableId(0),
         col: ColId(0),
         tag: CommitmentStrategy::Ssmc,
-        com_old: NativeDigest([BabyBear::ZERO; 8]),
-        com_new: NativeDigest([BabyBear::ZERO; 8]),
+        com_old: com_empty(0, 0), // Com_empty for is_empty_old=true
+        com_new: zero_digest,     // hash_acc=[0;8] in Merge → matches com_new
         is_empty_old: true,
         is_empty_new: false,
         is_touched: true,
@@ -634,12 +634,16 @@ fn c1_memory_imbalanced_no_sorted_mem() {
 
 /// Count range-check multiplicities from SortedMem rows.
 ///
-/// Each real row sends 10 values: 4 halves for r, r.limb2, 4 halves for tau, tau.limb2.
+/// Each real row sends 12 values:
+/// - 4 halves for r (limb2 proven by Limb2Bits)
+/// - 4 halves for tau (limb2 proven by Limb2Bits)
+/// - 4 halves for ordering diff (diff2 proven by Limb2Bits)
 fn count_range_check_multiplicities(
     rows: &[tabula_proof::air::SortedMemRow],
 ) -> [u32; RANGE_CHECK_SIZE] {
     let mask_15: u64 = (1 << 15) - 1;
     let mask_30: u64 = (1 << 30) - 1;
+    let num_real = rows.len();
 
     let mut mults = [0u32; RANGE_CHECK_SIZE];
 
@@ -651,26 +655,77 @@ fn count_range_check_multiplicities(
         mults[val as usize] += 1;
     };
 
-    for row in rows {
+    let num_rows = (num_real + 1).next_power_of_two().max(2);
+
+    for i in 0..num_real {
+        let row = &rows[i];
         let r = row.row_key;
         let r_l0 = (r & mask_30) as u32;
         let r_l1 = ((r >> 30) & mask_30) as u32;
-        let r_l2 = (r >> 60) as u32;
         add(&mut mults, r_l0 & mask_15 as u32);
         add(&mut mults, r_l0 >> 15);
         add(&mut mults, r_l1 & mask_15 as u32);
         add(&mut mults, r_l1 >> 15);
-        add(&mut mults, r_l2);
+        // r_l2 proven by Limb2Bits (4-bit boolean decomposition), no RC send
 
         let t = row.timestamp;
         let t_l0 = (t & mask_30) as u32;
         let t_l1 = ((t >> 30) & mask_30) as u32;
-        let t_l2 = (t >> 60) as u32;
         add(&mut mults, t_l0 & mask_15 as u32);
         add(&mut mults, t_l0 >> 15);
         add(&mut mults, t_l1 & mask_15 as u32);
         add(&mut mults, t_l1 >> 15);
-        add(&mut mults, t_l2);
+        // t_l2 proven by Limb2Bits (4-bit boolean decomposition), no RC send
+
+        // Ordering diff halves (M10-A1): populated only for same-segment transitions.
+        let next_idx = (i + 1) % num_rows;
+        let mut gap = 0u64;
+        if next_idx < num_real {
+            let next = &rows[next_idx];
+            let tc_changed = row.table_id != next.table_id || row.col_id != next.col_id;
+            let r_changed = tc_changed || row.row_key != next.row_key;
+            if !r_changed {
+                gap = next.timestamp - row.timestamp - 1;
+            } else if !tc_changed {
+                gap = next.row_key - row.row_key - 1;
+            }
+        }
+        let d0 = (gap & mask_30) as u32;
+        let d1 = ((gap >> 30) & mask_30) as u32;
+        add(&mut mults, d0 & mask_15 as u32);
+        add(&mut mults, d0 >> 15);
+        add(&mut mults, d1 & mask_15 as u32);
+        add(&mut mults, d1 >> 15);
+        // diff2 proven by Limb2Bits (4-bit boolean decomposition), no RC send
+
+        // Lex ordering direction sends (A2): 1 send per row with tc_changed=1.
+        // tc_changed is derived from segment.populate(), which wraps around:
+        // for last real row, next is padding (t=0, c=0).
+        // When next is padding, lex columns are zeros (populate not called),
+        // so the RC send is value=0 with mult = is_real * tc_changed * (1-diff_is_table).
+        let (next_t, next_c) = if next_idx < num_real {
+            (rows[next_idx].table_id, rows[next_idx].col_id as u32)
+        } else {
+            (0, 0) // padding row
+        };
+        let tc_changed_val = row.table_id != next_t || (row.col_id as u32) != next_c;
+        if tc_changed_val {
+            if next_idx >= num_real {
+                // Padding transition: lex columns unpopulated (zeros),
+                // diff_is_table=0, so col_diff=0 sent with mult=1.
+                add(&mut mults, 0);
+            } else if row.table_id != next_t {
+                add(
+                    &mut mults,
+                    next_t.wrapping_sub(row.table_id).wrapping_sub(1),
+                );
+            } else {
+                add(
+                    &mut mults,
+                    next_c.wrapping_sub(row.col_id as u32).wrapping_sub(1),
+                );
+            }
+        }
     }
 
     mults
@@ -901,4 +956,72 @@ fn c5_poseidon_perm_imbalanced_wrong_hash() {
     ];
     check_bus_balance(&records, InteractionKind::PoseidonPermutation)
         .expect_err("C5 wrong hash should be imbalanced");
+}
+
+// ── C5: PoseidonPermutation bus (Execution Hash opcode) ──
+
+#[test]
+fn c5_poseidon_perm_balanced_execution_hash() {
+    // Execution Hash opcode sends on C5, Poseidon chip receives.
+    // Reads put u64_to_limbs(1)=[1,0,0] into slot 0 and u64_to_limbs(4)=[4,0,0] into slot 1.
+    // Hash src1/src2 must match these slot values for operand linkage to pass.
+    let hash_rec = crate::common::builders::make_hash(
+        2, // dst_slot
+        0, // src1_slot
+        1, // src2_slot
+        0x20, 2, // 0x20 = HASH_INSTRUCTION_DOMAIN_TAG
+        [1, 0, 0], [4, 0, 0],
+    );
+    let perm_input = hash_rec.hash_perm_input.unwrap();
+
+    let exec_records = vec![
+        make_read(0, 0, 0, 100, 1, false), // seeds slot 0 with [1,0,0]
+        make_read(1, 0, 0, 200, 4, false), // seeds slot 1 with [4,0,0]
+        hash_rec,
+    ];
+    let exec_trace = generate_execution_trace::<3>(&exec_records);
+
+    let poseidon_trace = generate_poseidon_trace(&[perm_input]);
+
+    let records = vec![
+        evaluate_chip("Execution", &ExecutionChip::<3>, &exec_trace).unwrap(),
+        evaluate_chip("Poseidon", &PoseidonChip, &poseidon_trace).unwrap(),
+    ];
+    check_bus_balance(&records, InteractionKind::PoseidonPermutation)
+        .expect("C5 Execution Hash should balance with Poseidon");
+}
+
+// ── C4: MergeWriteSet bus (delete scenario) ──
+
+#[test]
+fn c4_merge_write_set_balanced_delete() {
+    // SortedMem: init + write(null) → has_written=1, val_is_null=1.
+    // Merge: delete_row receives write-set entry.
+    // Write null = delete semantics: SortedMem send, Merge receive.
+    let sm_rows = vec![
+        init_row(0, 0, 100, [42, 0, 0], false),
+        write_row(0, 0, 100, 1, [0, 0, 0], true), // null write = delete
+    ];
+    let sm_trace = generate_sorted_mem_trace::<3>(&sm_rows);
+
+    // Merge delete_row receives (t=0, c=0, key=100, val=[0,0,0], is_null=1).
+    let merge_rows = vec![MergeRow {
+        table_id: 0,
+        col_id: 0,
+        key: 100,
+        source: MergeSource::Delete,
+        old_val: merge_val([42, 0, 0]),
+        write_val: merge_zeros(),
+        new_val: merge_zeros(),
+        in_new: false,
+        hash_acc: [BabyBear::ZERO; 8],
+    }];
+    let merge_trace = generate_merge_trace::<3>(&merge_rows);
+
+    let records = vec![
+        evaluate_chip("SortedMem", &GlobalSortedMemChip::<3>, &sm_trace).unwrap(),
+        evaluate_chip("Merge", &GlobalMergeChip::<3>, &merge_trace).unwrap(),
+    ];
+    check_bus_balance(&records, InteractionKind::MergeWriteSet)
+        .expect("C4 delete write-set should balance");
 }
