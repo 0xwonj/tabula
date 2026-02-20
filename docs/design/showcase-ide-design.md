@@ -25,6 +25,9 @@
 2. proving 계산량/메모리 부담을 브라우저에서 분리
 3. 로컬 아티팩트 재현성과 디버깅 안정성 확보
 
+데몬은 Web IDE 전용이 아니라, **CLI/자동화/에디터 플러그인도 공유 가능한
+client-neutral local control plane**으로 정의한다.
+
 ---
 
 ## 2. Product Goals and Non-Goals

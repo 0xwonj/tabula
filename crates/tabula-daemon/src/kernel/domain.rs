@@ -8,18 +8,16 @@ use tabula_core::{
 };
 use tabula_ir::TxTypeDef;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone)]
 pub enum InputRef<T> {
-    Inline { inline: T },
-    File { file_path: PathBuf },
-    Artifact { artifact_id: String },
+    Inline(T),
+    File(PathBuf),
+    Artifact(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 pub enum ProgramInline {
-    Source { source: String },
+    Source(String),
     Program(ProgramFile),
 }
 
@@ -27,118 +25,90 @@ pub type ProgramInputRef = InputRef<ProgramInline>;
 pub type StateInputRef = InputRef<StateFile>;
 pub type BatchInputRef = InputRef<BatchFile>;
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct CheckRequest {
-    pub program: ProgramInputRef,
+#[derive(Debug, Clone, Copy)]
+pub enum CapabilityInputMode {
+    Inline,
+    File,
+    Artifact,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct CompileRequest {
-    pub program: ProgramInputRef,
+#[derive(Debug, Clone, Copy)]
+pub enum CapabilityClientKind {
+    WebIde,
+    Cli,
+    Automation,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct ExecuteRequest {
-    pub program: ProgramInputRef,
-    pub state: StateInputRef,
-    pub batch: BatchInputRef,
-    #[serde(default)]
-    pub include_trace: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct HealthResponse {
-    pub ok: bool,
-    pub status: &'static str,
-    pub service: &'static str,
-    pub version: &'static str,
-}
-
-impl HealthResponse {
-    pub fn ok() -> Self {
-        Self {
-            ok: true,
-            status: "ok",
-            service: "tabula-daemon",
-            version: env!("CARGO_PKG_VERSION"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct CapabilitiesResponse {
-    pub ok: bool,
+#[derive(Debug, Clone)]
+pub struct Capabilities {
+    pub service_role: &'static str,
+    pub clients: Vec<CapabilityClientKind>,
     pub compile: bool,
     pub check: bool,
     pub execute: bool,
     pub prove: bool,
     pub verify: bool,
-    pub input_modes: Vec<&'static str>,
+    pub input_modes: Vec<CapabilityInputMode>,
 }
 
-impl CapabilitiesResponse {
-    pub fn v0() -> Self {
-        Self {
-            ok: true,
-            compile: true,
-            check: true,
-            execute: true,
-            prove: false,
-            verify: false,
-            input_modes: vec!["inline", "file", "artifact"],
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct CheckCommand {
+    pub program: ProgramInputRef,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct CheckResponse {
-    pub ok: bool,
+#[derive(Debug, Clone)]
+pub struct CompileCommand {
+    pub program: ProgramInputRef,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExecuteCommand {
+    pub program: ProgramInputRef,
+    pub state: StateInputRef,
+    pub batch: BatchInputRef,
+    pub include_trace: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CheckResult {
     pub table_count: usize,
     pub tx_type_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct CompileResponse {
-    pub ok: bool,
+#[derive(Debug, Clone)]
+pub struct CompileResult {
     pub table_count: usize,
     pub tx_type_count: usize,
     pub program: ProgramFile,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct ExecuteResponse {
-    pub ok: bool,
+#[derive(Debug, Clone)]
+pub struct ExecuteResult {
     pub tx_outcomes: Vec<TxOutcome>,
     pub read_set: Vec<StateCell>,
     pub write_set: Vec<StateCell>,
     pub emitted: Vec<EmittedEvent>,
     pub consistency: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub trace: Option<Vec<ExecutionEvent>>,
     pub state_after: StateFile,
 }
 
-// ---------------------------------------------------------------------------
-// Program input
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProgramFile {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub table_schemas: Vec<TableSchema>,
     pub tx_types: Vec<TxTypeDef>,
 }
 
-// ---------------------------------------------------------------------------
-// State input/output
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StateFile {
     pub cells: Vec<StateCell>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StateCell {
     pub table: u32,
     pub row: u64,
@@ -172,16 +142,14 @@ impl StateCell {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Batch input
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BatchFile {
     pub transactions: Vec<TxInput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TxInput {
     pub tx_type: u32,
     pub params: Vec<Value>,
