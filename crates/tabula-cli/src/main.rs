@@ -1,4 +1,4 @@
-//! Tabula CLI: execute batches from JSON files.
+//! Tabula CLI: compile, check, and execute Tabula programs.
 
 mod commands;
 mod io;
@@ -16,9 +16,25 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Compile a .tab program to IR JSON.
+    Compile {
+        /// Path to .tab source file.
+        program: PathBuf,
+
+        /// Output path (default: replace .tab with .json).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
+    /// Validate a program (syntax, types, normal form).
+    Check {
+        /// Path to program (.tab or .json).
+        program: PathBuf,
+    },
+
     /// Execute a batch of transactions.
     Execute {
-        /// Path to program definition (JSON).
+        /// Path to program definition (JSON or .tab).
         #[arg(short, long)]
         program: PathBuf,
 
@@ -54,7 +70,7 @@ enum Command {
         table: Option<u32>,
     },
 
-    /// Generate example JSON files in the specified directory.
+    /// Generate example files in the specified directory.
     Example {
         /// Output directory for example files (default: current directory).
         #[arg(short, long, default_value = ".")]
@@ -66,6 +82,10 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Compile { program, output } => {
+            commands::compile::cmd_compile(&program, output.as_deref())
+        }
+        Command::Check { program } => commands::check::cmd_check(&program),
         Command::Execute {
             program,
             state,

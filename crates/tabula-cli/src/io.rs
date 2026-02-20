@@ -142,6 +142,58 @@ pub struct ExecutionOutput {
 }
 
 // ---------------------------------------------------------------------------
+// Program loading helpers
+// ---------------------------------------------------------------------------
+
+/// Load program sources from a `.tab` or `.json` file.
+///
+/// Returns (schemas, tx_types) regardless of input format.
+pub(crate) fn load_program_sources(
+    path: &std::path::Path,
+) -> anyhow::Result<(Vec<TableSchema>, Vec<TxTypeDef>)> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if ext == "tab" {
+        let source = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", path.display()))?;
+        match tabula_lang::compile(&source) {
+            Ok(compiled) => Ok((compiled.schemas, compiled.tx_types)),
+            Err(errors) => {
+                let mut msg = String::new();
+                for err in &errors {
+                    if !msg.is_empty() {
+                        msg.push_str("\n\n");
+                    }
+                    msg.push_str(&format!("{}", err.display_with_source(&source)));
+                }
+                Err(anyhow::anyhow!("{msg}"))
+            }
+        }
+    } else {
+        let pf: ProgramFile = load_json(path)?;
+        Ok((pf.table_schemas, pf.tx_types))
+    }
+}
+
+/// Register schemas and tx types into a `Program`.
+///
+/// Uses `register_lenient` (canonicalize + typecheck, no NF validation)
+/// because NF-4 currently rejects the common transfer pattern where
+/// different params access the same column.
+pub(crate) fn register_program(
+    schemas: &[TableSchema],
+    tx_types: &[TxTypeDef],
+) -> anyhow::Result<tabula_ir::Program> {
+    let mut program = tabula_ir::Program::new();
+    for schema in schemas {
+        program.add_schema(schema.clone());
+    }
+    for def in tx_types {
+        program.register_lenient(def.clone())?;
+    }
+    Ok(program)
+}
+
+// ---------------------------------------------------------------------------
 // JSON I/O helpers
 // ---------------------------------------------------------------------------
 

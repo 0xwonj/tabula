@@ -1,4 +1,4 @@
-use tabula_lang::span::{Span, line_col};
+use tabula_lang::span::{Span, line_col, source_line};
 
 #[test]
 fn test_span_merge() {
@@ -20,4 +20,19 @@ fn test_line_col_second_line() {
 #[test]
 fn test_line_col_mid_line() {
     assert_eq!(line_col("ab\ncde", 5), (2, 3));
+}
+
+#[test]
+fn test_source_line_first() {
+    assert_eq!(source_line("hello\nworld", 2), (1, "hello"));
+}
+
+#[test]
+fn test_source_line_second() {
+    assert_eq!(source_line("hello\nworld", 7), (2, "world"));
+}
+
+#[test]
+fn test_source_line_no_trailing_newline() {
+    assert_eq!(source_line("abc", 1), (1, "abc"));
 }

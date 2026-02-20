@@ -42,3 +42,24 @@ pub fn line_col(source: &str, offset: usize) -> (usize, usize) {
     }
     (line, col)
 }
+
+/// Return the (1-indexed line number, line text) for the line containing `offset`.
+pub fn source_line(source: &str, offset: usize) -> (usize, &str) {
+    let offset = offset.min(source.len());
+    let mut line_num = 1;
+    let mut line_start = 0;
+    for (i, ch) in source.char_indices() {
+        if i >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line_num += 1;
+            line_start = i + 1;
+        }
+    }
+    let line_end = source[line_start..]
+        .find('\n')
+        .map(|pos| line_start + pos)
+        .unwrap_or(source.len());
+    (line_num, &source[line_start..line_end])
+}

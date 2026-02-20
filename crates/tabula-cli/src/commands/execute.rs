@@ -6,10 +6,10 @@ use tabula_core::mock::{
 use tabula_core::{Batch, TxOutcome};
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency;
-use tabula_ir::Program;
 
 use crate::io::{
-    BatchFile, ExecutionOutput, ProgramFile, StateCell, StateFile, load_json, write_json,
+    BatchFile, ExecutionOutput, StateCell, StateFile, load_json, load_program_sources,
+    register_program, write_json,
 };
 
 pub fn cmd_execute(
@@ -21,18 +21,10 @@ pub fn cmd_execute(
     json_output: bool,
 ) -> anyhow::Result<()> {
     // Load inputs
-    let program_file: ProgramFile = load_json(program_path)?;
+    let (schemas, tx_types) = load_program_sources(program_path)?;
+    let program = register_program(&schemas, &tx_types)?;
     let state_file: StateFile = load_json(state_path)?;
     let batch_file: BatchFile = load_json(batch_path)?;
-
-    // Build program
-    let mut program = Program::new();
-    for schema in &program_file.table_schemas {
-        program.add_schema(schema.clone());
-    }
-    for def in &program_file.tx_types {
-        program.register(def.clone())?;
-    }
 
     // Build state
     let mut state = InMemoryState::new();

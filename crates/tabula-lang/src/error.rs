@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::span::{Span, line_col};
+use crate::span::{Span, line_col, source_line};
 
 /// A compile error with source location and human-readable message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,10 +51,37 @@ pub struct ErrorDisplay<'a> {
 impl fmt::Display for ErrorDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (line, col) = line_col(self.source, self.error.span.start);
+        let (line_num, line_text) = source_line(self.source, self.error.span.start);
+        let gutter_width = line_num.to_string().len();
+
+        // Header: error[Kind]: message
+        writeln!(f, "error[{:?}]: {}", self.error.kind, self.error.message)?;
+
+        // Location: --> line:col
+        writeln!(f, "{:>width$}--> {}:{}", "", line, col, width = gutter_width)?;
+
+        // Gutter separator
+        writeln!(f, "{:>width$} |", "", width = gutter_width)?;
+
+        // Source line
+        writeln!(f, "{} | {}", line_num, line_text)?;
+
+        // Caret underline
+        // col is 1-indexed; compute underline width (clamp to current line)
+        let line_start_offset = self.error.span.start - (col - 1);
+        let line_end_offset = line_start_offset + line_text.len();
+        let span_end_on_line = self.error.span.end.min(line_end_offset);
+        let underline_width = span_end_on_line.saturating_sub(self.error.span.start).max(1);
+
         write!(
             f,
-            "error[{:?}] at {}:{}: {}",
-            self.error.kind, line, col, self.error.message
+            "{:>width$} | {:>pad$}{} {}",
+            "",
+            "",
+            "^".repeat(underline_width),
+            self.error.message,
+            width = gutter_width,
+            pad = col - 1,
         )
     }
 }
