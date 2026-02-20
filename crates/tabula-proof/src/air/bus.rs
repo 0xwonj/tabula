@@ -33,106 +33,6 @@ impl<AB: InteractionAirBuilder> RangeCheckAirBuilder for AB {
     }
 }
 
-// ── C1 Memory ─────────────────────────────────────────────────────────────
-
-/// Extension trait for send/receive on the Memory bus (C1).
-///
-/// Tuple (13 elements): `(t, c, r[3], tau[3], is_write, val[W], val_is_null)`.
-#[allow(clippy::too_many_arguments)]
-pub trait MemoryAirBuilder: InteractionAirBuilder {
-    /// Send a memory access to the Memory bus.
-    fn send_memory_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        r: &U64Limbs<Self::Var>,
-        tau: &U64Limbs<Self::Var>,
-        is_write: Self::Expr,
-        val: &[Self::Var],
-        val_is_null: Self::Expr,
-        mult: Self::Expr,
-    );
-
-    /// Receive a memory access from the Memory bus.
-    fn receive_memory_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        r: &U64Limbs<Self::Var>,
-        tau: &U64Limbs<Self::Var>,
-        is_write: Self::Expr,
-        val: &[Self::Var],
-        val_is_null: Self::Expr,
-        mult: Self::Expr,
-    );
-}
-
-fn memory_values<AB: InteractionAirBuilder>(
-    t: AB::Expr,
-    c: AB::Expr,
-    r: &U64Limbs<AB::Var>,
-    tau: &U64Limbs<AB::Var>,
-    is_write: AB::Expr,
-    val: &[AB::Var],
-    val_is_null: AB::Expr,
-) -> Vec<AB::Expr> {
-    let mut values: Vec<AB::Expr> = vec![
-        t,
-        c,
-        r.limb0.clone().into(),
-        r.limb1.clone().into(),
-        r.limb2.clone().into(),
-        tau.limb0.clone().into(),
-        tau.limb1.clone().into(),
-        tau.limb2.clone().into(),
-        is_write,
-    ];
-    for v in val {
-        values.push(v.clone().into());
-    }
-    values.push(val_is_null);
-    values
-}
-
-#[allow(clippy::too_many_arguments)]
-impl<AB: InteractionAirBuilder> MemoryAirBuilder for AB {
-    fn send_memory_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        r: &U64Limbs<Self::Var>,
-        tau: &U64Limbs<Self::Var>,
-        is_write: Self::Expr,
-        val: &[Self::Var],
-        val_is_null: Self::Expr,
-        mult: Self::Expr,
-    ) {
-        self.send(AirInteraction {
-            values: memory_values::<AB>(t, c, r, tau, is_write, val, val_is_null),
-            multiplicity: mult,
-            kind: InteractionKind::Memory,
-        });
-    }
-
-    fn receive_memory_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        r: &U64Limbs<Self::Var>,
-        tau: &U64Limbs<Self::Var>,
-        is_write: Self::Expr,
-        val: &[Self::Var],
-        val_is_null: Self::Expr,
-        mult: Self::Expr,
-    ) {
-        self.receive(AirInteraction {
-            values: memory_values::<AB>(t, c, r, tau, is_write, val, val_is_null),
-            multiplicity: mult,
-            kind: InteractionKind::Memory,
-        });
-    }
-}
-
 // ── C5 PoseidonPermutation ────────────────────────────────────────────────
 
 /// Extension trait for send/receive on the PoseidonPermutation bus (C5).
@@ -275,38 +175,41 @@ impl<AB: InteractionAirBuilder> CommitmentAirBuilder for AB {
     }
 }
 
-// ── C2 SsmcMembership ─────────────────────────────────────────────────────
+// ── C10 ReadAccess ───────────────────────────────────────────────────────
 
-/// Extension trait for send/receive on the SsmcMembership bus (C2).
+/// Extension trait for send/receive on the ReadAccess bus (C10).
 ///
-/// Tuple (5+W elements): `(t, c, key[3], value[W])`.
-pub trait SsmcMembershipAirBuilder: InteractionAirBuilder {
-    /// Send on the SsmcMembership bus.
-    fn send_ssmc_membership(
+/// Tuple (7+W elements): `(t, c, key[3], val[W], is_null)`.
+pub trait ReadAccessAirBuilder: InteractionAirBuilder {
+    /// Send on the ReadAccess bus.
+    fn send_read_access(
         &mut self,
         t: Self::Expr,
         c: Self::Expr,
         key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
+        val: &[Self::Var],
+        is_null: Self::Expr,
         mult: Self::Expr,
     );
 
-    /// Receive on the SsmcMembership bus.
-    fn receive_ssmc_membership(
+    /// Receive on the ReadAccess bus.
+    fn receive_read_access(
         &mut self,
         t: Self::Expr,
         c: Self::Expr,
         key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
+        val: &[Self::Var],
+        is_null: Self::Expr,
         mult: Self::Expr,
     );
 }
 
-fn ssmc_membership_values<AB: InteractionAirBuilder>(
+fn read_access_values<AB: InteractionAirBuilder>(
     t: AB::Expr,
     c: AB::Expr,
     key: &U64Limbs<AB::Var>,
-    value: &[AB::Var],
+    val: &[AB::Var],
+    is_null: AB::Expr,
 ) -> Vec<AB::Expr> {
     let mut values: Vec<AB::Expr> = vec![
         t,
@@ -315,214 +218,265 @@ fn ssmc_membership_values<AB: InteractionAirBuilder>(
         key.limb1.clone().into(),
         key.limb2.clone().into(),
     ];
-    for v in value {
+    for v in val {
         values.push(v.clone().into());
     }
+    values.push(is_null);
     values
 }
 
-impl<AB: InteractionAirBuilder> SsmcMembershipAirBuilder for AB {
-    fn send_ssmc_membership(
+impl<AB: InteractionAirBuilder> ReadAccessAirBuilder for AB {
+    fn send_read_access(
         &mut self,
         t: Self::Expr,
         c: Self::Expr,
         key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
+        val: &[Self::Var],
+        is_null: Self::Expr,
         mult: Self::Expr,
     ) {
         self.send(AirInteraction {
-            values: ssmc_membership_values::<AB>(t, c, key, value),
+            values: read_access_values::<AB>(t, c, key, val, is_null),
             multiplicity: mult,
-            kind: InteractionKind::SsmcMembership,
+            kind: InteractionKind::ReadAccess,
         });
     }
 
-    fn receive_ssmc_membership(
+    fn receive_read_access(
         &mut self,
         t: Self::Expr,
         c: Self::Expr,
         key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
+        val: &[Self::Var],
+        is_null: Self::Expr,
         mult: Self::Expr,
     ) {
         self.receive(AirInteraction {
-            values: ssmc_membership_values::<AB>(t, c, key, value),
+            values: read_access_values::<AB>(t, c, key, val, is_null),
             multiplicity: mult,
-            kind: InteractionKind::SsmcMembership,
+            kind: InteractionKind::ReadAccess,
         });
     }
 }
 
-// ── C3/C4 Merge buses ─────────────────────────────────────────────────────
+// ── C11 WriteAccess ──────────────────────────────────────────────────────
 
-/// Extension trait for send/receive on the MergeOldList (C3) and MergeWriteSet (C4) buses.
-pub trait MergeAirBuilder: InteractionAirBuilder {
-    /// Send on the MergeOldList bus (C3).
-    ///
-    /// Tuple (5+W): `(t, c, key[3], old_val[W])`.
-    fn send_merge_old_list(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
-        mult: Self::Expr,
-    );
-
-    /// Receive on the MergeOldList bus (C3).
-    fn receive_merge_old_list(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
-        mult: Self::Expr,
-    );
-
-    /// Send on the MergeWriteSet bus (C4).
-    ///
-    /// Tuple (6+W): `(t, c, key[3], write_val[W], is_delete)`.
-    fn send_merge_write_set(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
-        is_delete: Self::Expr,
-        mult: Self::Expr,
-    );
-
-    /// Receive on the MergeWriteSet bus (C4).
-    fn receive_merge_write_set(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
-        is_delete: Self::Expr,
-        mult: Self::Expr,
-    );
-}
-
-impl<AB: InteractionAirBuilder> MergeAirBuilder for AB {
-    fn send_merge_old_list(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
-        mult: Self::Expr,
-    ) {
-        self.send(AirInteraction {
-            values: ssmc_membership_values::<AB>(t, c, key, value), // same schema as C2
-            multiplicity: mult,
-            kind: InteractionKind::MergeOldList,
-        });
-    }
-
-    fn receive_merge_old_list(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
-        mult: Self::Expr,
-    ) {
-        self.receive(AirInteraction {
-            values: ssmc_membership_values::<AB>(t, c, key, value),
-            multiplicity: mult,
-            kind: InteractionKind::MergeOldList,
-        });
-    }
-
-    fn send_merge_write_set(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
-        is_delete: Self::Expr,
-        mult: Self::Expr,
-    ) {
-        let mut values = ssmc_membership_values::<AB>(t, c, key, value);
-        values.push(is_delete);
-        self.send(AirInteraction {
-            values,
-            multiplicity: mult,
-            kind: InteractionKind::MergeWriteSet,
-        });
-    }
-
-    fn receive_merge_write_set(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        value: &[Self::Var],
-        is_delete: Self::Expr,
-        mult: Self::Expr,
-    ) {
-        let mut values = ssmc_membership_values::<AB>(t, c, key, value);
-        values.push(is_delete);
-        self.receive(AirInteraction {
-            values,
-            multiplicity: mult,
-            kind: InteractionKind::MergeWriteSet,
-        });
-    }
-}
-
-// ── C7 SortedMemMeta ──────────────────────────────────────────────────────
-
-/// Extension trait for send/receive on the SortedMemMeta bus (C7).
+/// Extension trait for send/receive on the WriteAccess bus (C11).
 ///
-/// Tuple (3 elements): `(t, c, is_empty_old)`.
-pub trait SortedMemMetaAirBuilder: InteractionAirBuilder {
-    /// Send on the SortedMemMeta bus.
-    fn send_sorted_mem_meta(
+/// Tuple (7+W elements): `(t, c, key[3], val[W], is_null)`.
+pub trait WriteAccessAirBuilder: InteractionAirBuilder {
+    /// Send on the WriteAccess bus.
+    fn send_write_access(
         &mut self,
         t: Self::Expr,
         c: Self::Expr,
-        is_empty_old: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
         mult: Self::Expr,
     );
 
-    /// Receive on the SortedMemMeta bus.
-    fn receive_sorted_mem_meta(
+    /// Receive on the WriteAccess bus.
+    fn receive_write_access(
         &mut self,
         t: Self::Expr,
         c: Self::Expr,
-        is_empty_old: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
         mult: Self::Expr,
     );
 }
 
-impl<AB: InteractionAirBuilder> SortedMemMetaAirBuilder for AB {
-    fn send_sorted_mem_meta(
+impl<AB: InteractionAirBuilder> WriteAccessAirBuilder for AB {
+    fn send_write_access(
         &mut self,
         t: Self::Expr,
         c: Self::Expr,
-        is_empty_old: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
         mult: Self::Expr,
     ) {
         self.send(AirInteraction {
-            values: vec![t, c, is_empty_old],
+            values: read_access_values::<AB>(t, c, key, val, is_null),
             multiplicity: mult,
-            kind: InteractionKind::SortedMemMeta,
+            kind: InteractionKind::WriteAccess,
         });
     }
 
-    fn receive_sorted_mem_meta(
+    fn receive_write_access(
         &mut self,
         t: Self::Expr,
         c: Self::Expr,
-        is_empty_old: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
         mult: Self::Expr,
     ) {
         self.receive(AirInteraction {
-            values: vec![t, c, is_empty_old],
+            values: read_access_values::<AB>(t, c, key, val, is_null),
             multiplicity: mult,
-            kind: InteractionKind::SortedMemMeta,
+            kind: InteractionKind::WriteAccess,
+        });
+    }
+}
+
+// ── C12 EmptyColRead ─────────────────────────────────────────────────────
+
+/// Extension trait for send/receive on the EmptyColRead bus (C12).
+///
+/// Tuple (2 elements): `(t, c)`.
+pub trait EmptyColReadAirBuilder: InteractionAirBuilder {
+    /// Send on the EmptyColRead bus.
+    fn send_empty_col_read(&mut self, t: Self::Expr, c: Self::Expr, mult: Self::Expr);
+
+    /// Receive on the EmptyColRead bus.
+    fn receive_empty_col_read(&mut self, t: Self::Expr, c: Self::Expr, mult: Self::Expr);
+}
+
+impl<AB: InteractionAirBuilder> EmptyColReadAirBuilder for AB {
+    fn send_empty_col_read(&mut self, t: Self::Expr, c: Self::Expr, mult: Self::Expr) {
+        self.send(AirInteraction {
+            values: vec![t, c],
+            multiplicity: mult,
+            kind: InteractionKind::EmptyColRead,
+        });
+    }
+
+    fn receive_empty_col_read(&mut self, t: Self::Expr, c: Self::Expr, mult: Self::Expr) {
+        self.receive(AirInteraction {
+            values: vec![t, c],
+            multiplicity: mult,
+            kind: InteractionKind::EmptyColRead,
+        });
+    }
+}
+
+// ── C13 BaseStateEntry ────────────────────────────────────────────────────
+
+/// Extension trait for send/receive on the BaseStateEntry bus (C13).
+///
+/// Tuple (7+W elements): `(t, c, key[3], val[W], is_null)`.
+/// Same schema as ReadAccess/WriteAccess — only the bus ID differs.
+pub trait BaseStateEntryAirBuilder: InteractionAirBuilder {
+    /// Send on the BaseStateEntry bus.
+    fn send_base_state_entry(
+        &mut self,
+        t: Self::Expr,
+        c: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
+        mult: Self::Expr,
+    );
+
+    /// Receive on the BaseStateEntry bus.
+    fn receive_base_state_entry(
+        &mut self,
+        t: Self::Expr,
+        c: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
+        mult: Self::Expr,
+    );
+}
+
+impl<AB: InteractionAirBuilder> BaseStateEntryAirBuilder for AB {
+    fn send_base_state_entry(
+        &mut self,
+        t: Self::Expr,
+        c: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
+        mult: Self::Expr,
+    ) {
+        self.send(AirInteraction {
+            values: read_access_values::<AB>(t, c, key, val, is_null),
+            multiplicity: mult,
+            kind: InteractionKind::BaseStateEntry,
+        });
+    }
+
+    fn receive_base_state_entry(
+        &mut self,
+        t: Self::Expr,
+        c: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
+        mult: Self::Expr,
+    ) {
+        self.receive(AirInteraction {
+            values: read_access_values::<AB>(t, c, key, val, is_null),
+            multiplicity: mult,
+            kind: InteractionKind::BaseStateEntry,
+        });
+    }
+}
+
+// ── C14 CoalescedWrite ───────────────────────────────────────────────────
+
+/// Extension trait for send/receive on the CoalescedWrite bus (C14).
+///
+/// Tuple (7+W elements): `(t, c, key[3], val[W], is_null)`.
+/// Same schema as ReadAccess/WriteAccess — only the bus ID differs.
+pub trait CoalescedWriteAirBuilder: InteractionAirBuilder {
+    /// Send on the CoalescedWrite bus.
+    fn send_coalesced_write(
+        &mut self,
+        t: Self::Expr,
+        c: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
+        mult: Self::Expr,
+    );
+
+    /// Receive on the CoalescedWrite bus.
+    fn receive_coalesced_write(
+        &mut self,
+        t: Self::Expr,
+        c: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
+        mult: Self::Expr,
+    );
+}
+
+impl<AB: InteractionAirBuilder> CoalescedWriteAirBuilder for AB {
+    fn send_coalesced_write(
+        &mut self,
+        t: Self::Expr,
+        c: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
+        mult: Self::Expr,
+    ) {
+        self.send(AirInteraction {
+            values: read_access_values::<AB>(t, c, key, val, is_null),
+            multiplicity: mult,
+            kind: InteractionKind::CoalescedWrite,
+        });
+    }
+
+    fn receive_coalesced_write(
+        &mut self,
+        t: Self::Expr,
+        c: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        val: &[Self::Var],
+        is_null: Self::Expr,
+        mult: Self::Expr,
+    ) {
+        self.receive(AirInteraction {
+            values: read_access_values::<AB>(t, c, key, val, is_null),
+            multiplicity: mult,
+            kind: InteractionKind::CoalescedWrite,
         });
     }
 }
@@ -544,6 +498,25 @@ pub trait StaticTableLookupAirBuilder: InteractionAirBuilder {
     );
 }
 
+fn key_value_tuple<AB: InteractionAirBuilder>(
+    t: AB::Expr,
+    c: AB::Expr,
+    key: &U64Limbs<AB::Var>,
+    value: &[AB::Var],
+) -> Vec<AB::Expr> {
+    let mut values: Vec<AB::Expr> = vec![
+        t,
+        c,
+        key.limb0.clone().into(),
+        key.limb1.clone().into(),
+        key.limb2.clone().into(),
+    ];
+    for v in value {
+        values.push(v.clone().into());
+    }
+    values
+}
+
 impl<AB: InteractionAirBuilder> StaticTableLookupAirBuilder for AB {
     fn send_static_table_lookup(
         &mut self,
@@ -554,7 +527,7 @@ impl<AB: InteractionAirBuilder> StaticTableLookupAirBuilder for AB {
         mult: Self::Expr,
     ) {
         self.send(AirInteraction {
-            values: ssmc_membership_values::<AB>(t, c, key, value), // same schema
+            values: key_value_tuple::<AB>(t, c, key, value),
             multiplicity: mult,
             kind: InteractionKind::StaticTableLookup,
         });

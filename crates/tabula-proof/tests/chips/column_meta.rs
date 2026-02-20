@@ -267,7 +267,7 @@ fn invalid_is_zero_soundness_forged_table_diff() {
 
     // Column layout: is_real(0), table_id(1), col_id(2), tag(3),
     //   com_old[8](4-11), com_new[8](12-19),
-    //   is_empty_old(20), is_empty_new(21), is_touched(22), has_sorted_mem(23),
+    //   is_empty_old(20), is_empty_new(21), is_touched(22), empty_read_mult(23),
     //   table_diff_iz.inv(24), table_diff_iz.is_zero(25),
     //   col_diff_iz.inv(26), col_diff_iz.is_zero(27)
     let table_diff_iz_is_zero_offset = 25;

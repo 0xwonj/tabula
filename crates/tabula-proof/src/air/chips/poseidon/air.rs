@@ -413,8 +413,7 @@ fn constrain_round_constants<AB: InteractionAirBuilder>(
                 * (local.is_first_round.clone().into() - prep.is_first_round.clone().into()),
         );
         builder.assert_zero(
-            is_real
-                * (local.is_last_round.clone().into() - prep.is_last_round.clone().into()),
+            is_real * (local.is_last_round.clone().into() - prep.is_last_round.clone().into()),
         );
     }
 }

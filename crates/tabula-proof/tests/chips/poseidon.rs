@@ -273,8 +273,9 @@ fn invalid_round_flip_full_to_partial() {
         cols.is_full_round = BabyBear::ONE;
     }
 
-    debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep))
-        .expect_err("swapping full/partial round flags must fail preprocessed RC or sbox constraint");
+    debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep)).expect_err(
+        "swapping full/partial round flags must fail preprocessed RC or sbox constraint",
+    );
 }
 
 /// T13b: Swap two full-round RC vectors to verify round-constant matching fails.
@@ -291,7 +292,8 @@ fn invalid_round_constants_swapped_between_rounds() {
 
     // Read RC from row 0 and row 1.
     let rc0: [BabyBear; 16] = {
-        let cols: &PoseidonPreprocessedCols<BabyBear> = borrow_cols_mut(&mut prep.values[0..prep_width]);
+        let cols: &PoseidonPreprocessedCols<BabyBear> =
+            borrow_cols_mut(&mut prep.values[0..prep_width]);
         cols.rc
     };
     let rc1: [BabyBear; 16] = {

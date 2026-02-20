@@ -309,10 +309,9 @@ pub fn constrain_strict_ineq<AB: AirBuilder>(
     builder.assert_eq(ineq.diff0.clone().into(), expected0);
 
     // Limb 1: diff1 = b.limb1 - a.limb1 - borrow0 + borrow1 * 2^30
-    let expected1: AB::Expr = b.limb1.clone().into()
-        - a.limb1.clone().into()
-        - ineq.borrow0.clone().into()
-        + ineq.borrow1.clone().into() * shift_30;
+    let expected1: AB::Expr =
+        b.limb1.clone().into() - a.limb1.clone().into() - ineq.borrow0.clone().into()
+            + ineq.borrow1.clone().into() * shift_30;
     builder.assert_eq(ineq.diff1.clone().into(), expected1);
 
     // Limb 2: diff2 = b.limb2 - a.limb2 - borrow1

@@ -12,7 +12,7 @@ use crate::air::builder::InteractionAirBuilder;
 use crate::air::interaction::{AirInteraction, InteractionKind};
 
 use super::integer::{
-    Limb2Bits, LimbHalves, MASK_30, StrictIneq, constrain_limb2_bits, constrain_limb_halves,
+    Limb2Bits, LimbHalves, MASK_30, StrictIneq, constrain_limb_halves, constrain_limb2_bits,
 };
 
 /// Strict inequality with range-check half-decomposition.

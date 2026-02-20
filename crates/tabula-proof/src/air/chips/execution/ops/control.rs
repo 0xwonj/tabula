@@ -39,8 +39,7 @@ pub(crate) fn constrain_select<AB: AirBuilder, const W: usize>(
             let expected: AB::Expr = local.src2_val[i].clone().into()
                 + cond.clone()
                     * (local.src1_val[i].clone().into() - local.src2_val[i].clone().into());
-            builder
-                .assert_zero(gate.clone() * (local.slots[s][i].clone().into() - expected));
+            builder.assert_zero(gate.clone() * (local.slots[s][i].clone().into() - expected));
         }
 
         // Select result is always non-null (Select is a value-level operation)

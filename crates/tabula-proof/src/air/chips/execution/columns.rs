@@ -69,16 +69,13 @@ pub struct ExecutionCols<T, const W: usize> {
     /// 1 if Mul, 0 otherwise.
     pub arith_is_mul: T,
 
-    // ── Clock & Timestamp ──
+    // ── Clock & Access flags ──
     /// 1 if this instruction accesses state (= op_read + op_write).
     pub is_access: T,
     /// Access counter (running count of access instructions so far).
     pub clk: T,
-    /// Timestamp for memory bus: tau = clk + 1 when is_access=1.
-    pub tau: T,
-    /// Timestamp as u64 limbs + half-decomposition for range checks.
-    /// Constrained: `is_access ⟹ tau = reconstruct(tau_rc.limbs)`.
-    pub tau_rc: KeyRangeChecked<T>,
+    /// 1 if reading from an empty column (implies op_read and access_is_null).
+    pub is_empty_col: T,
 
     // ── Access log (populated when is_access=1, zeros otherwise) ──
     /// Table identifier for the access.

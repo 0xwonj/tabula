@@ -1,7 +1,6 @@
 mod column_meta;
 mod execution;
-mod merge;
+mod inter_tx_order;
 mod poseidon;
 mod range_check;
-mod sorted_mem;
-mod ssmc;
+mod state_column;

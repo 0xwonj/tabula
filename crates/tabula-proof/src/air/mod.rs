@@ -24,16 +24,18 @@ pub use chips::execution::{
     CmpOp, HASH_INSTRUCTION_DOMAIN_TAG, HASH_INSTRUCTION_INPUT_COUNT, InstructionRecord, Opcode,
     u64_to_limbs,
 };
-pub use chips::merge::{MergeRow, MergeSource};
+pub use chips::inter_tx_order::{
+    INTER_TX_ORDER_STANDARD_WIDTH, InterTxOrderChip, InterTxOrderCols, InterTxOrderRow,
+    generate_inter_tx_order_trace, inter_tx_order_width,
+};
 pub use chips::poseidon::POSEIDON_PERM_WIDTH;
 pub use chips::range_check::{
     RangeCheckChip, generate_range_check_preprocessed, generate_range_check_trace,
 };
-pub use chips::sorted_mem::{
-    GlobalSortedMemChip, GlobalSortedMemCols, SORTED_MEM_STANDARD_WIDTH, SortedMemRow,
-    generate_sorted_mem_trace, sorted_mem_width,
+pub use chips::state_column::{
+    STATE_COLUMN_STANDARD_WIDTH, StateColumnChip, StateColumnCols, StateColumnRow,
+    generate_state_column_trace, state_column_width,
 };
-pub use chips::ssmc::SsmcEntry;
 pub use chips::{ChipMeta, TabulaAir};
 pub use columns::{borrow_cols, borrow_cols_mut, num_cols};
 pub use debug::{
@@ -51,7 +53,7 @@ pub use interaction::{AirInteraction, InteractionKind};
 
 // ── Bus builder traits ──
 pub use bus::{
-    CommitmentAirBuilder, MemoryAirBuilder, MergeAirBuilder, PoseidonAirBuilder,
-    RangeCheckAirBuilder, SortedMemMetaAirBuilder, SsmcMembershipAirBuilder,
-    StaticTableLookupAirBuilder,
+    BaseStateEntryAirBuilder, CoalescedWriteAirBuilder, CommitmentAirBuilder,
+    EmptyColReadAirBuilder, PoseidonAirBuilder, RangeCheckAirBuilder, ReadAccessAirBuilder,
+    StaticTableLookupAirBuilder, WriteAccessAirBuilder,
 };

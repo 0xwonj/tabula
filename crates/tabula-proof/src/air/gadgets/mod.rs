@@ -35,8 +35,8 @@ pub mod segment;
 
 pub use boolean::constrain_is_real_prefix;
 pub use integer::{
-    IsZero, Limb2Bits, LimbHalves, StrictIneq, U64Limbs, constrain_is_zero, constrain_limb2_bits,
-    constrain_limb_halves, constrain_strict_ineq, constrain_u64_decomposition,
+    IsZero, Limb2Bits, LimbHalves, StrictIneq, U64Limbs, constrain_is_zero, constrain_limb_halves,
+    constrain_limb2_bits, constrain_strict_ineq, constrain_u64_decomposition,
 };
 pub use mem::{constrain_mem_read, constrain_mem_write, constrain_null_canon};
 

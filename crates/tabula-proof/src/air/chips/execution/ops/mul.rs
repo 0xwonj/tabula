@@ -52,8 +52,7 @@ pub(crate) fn constrain_arith_mul<AB: AirBuilder, const W: usize>(
     let b2: AB::Expr = local.src2_val[2].clone().into();
 
     let c0: AB::Expr = local.mul.c0.clone().into();
-    let c1: AB::Expr =
-        local.mul.c1_lo.clone().into() + local.mul.c1_hi.clone().into() * shift_16;
+    let c1: AB::Expr = local.mul.c1_lo.clone().into() + local.mul.c1_hi.clone().into() * shift_16;
 
     for s in 0..MAX_SLOTS {
         let gate: AB::Expr =

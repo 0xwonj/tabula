@@ -109,6 +109,8 @@ pub struct InstructionRecord {
     pub hash_perm_input: Option<[BabyBear; 16]>,
     /// For Hash: precomputed Poseidon permutation output (8 FE).
     pub hash_perm_output: Option<[BabyBear; 8]>,
+    /// For Read: whether the column being read is empty.
+    pub is_empty_col: bool,
 }
 
 /// Generate an ExecutionChip trace from instruction records.
@@ -147,13 +149,11 @@ pub fn generate_execution_trace<const W: usize>(
         let uses_access_cols = matches!(rec.opcode, Opcode::Read | Opcode::Write | Opcode::Lookup);
 
         if is_access {
-            let tau_val = clk as u64 + 1;
-            cols.tau = BabyBear::new(clk + 1);
-            cols.tau_rc.populate(tau_val);
             clk += 1;
-
             cols.access_is_write = bool_fe(matches!(rec.opcode, Opcode::Write));
         }
+
+        cols.is_empty_col = bool_fe(rec.is_empty_col);
 
         if uses_access_cols {
             if let Some(t) = rec.access_t {

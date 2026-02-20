@@ -2,134 +2,7 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 use tabula_commitment::{ColumnMeta, CommitmentStrategy, NativeDigest};
 use tabula_core::{ColId, TableId};
-use tabula_proof::air::{
-    CmpOp, InstructionRecord, MergeRow, MergeSource, Opcode, SortedMemRow, SsmcEntry, bool_fe,
-    u64_to_limbs,
-};
-
-// ── Sorted Memory ──
-
-pub fn init_row(t: u32, c: u16, r: u64, val: [u32; 3], is_null: bool) -> SortedMemRow {
-    SortedMemRow {
-        table_id: t,
-        col_id: c,
-        row_key: r,
-        timestamp: 0,
-        is_init: true,
-        is_write: false,
-        val: val.iter().map(|v| BabyBear::new(*v)).collect(),
-        val_is_null: is_null,
-        meta_is_empty_old: false,
-    }
-}
-
-pub fn read_row(t: u32, c: u16, r: u64, tau: u64, val: [u32; 3], is_null: bool) -> SortedMemRow {
-    SortedMemRow {
-        table_id: t,
-        col_id: c,
-        row_key: r,
-        timestamp: tau,
-        is_init: false,
-        is_write: false,
-        val: val.iter().map(|v| BabyBear::new(*v)).collect(),
-        val_is_null: is_null,
-        meta_is_empty_old: false,
-    }
-}
-
-pub fn write_row(t: u32, c: u16, r: u64, tau: u64, val: [u32; 3], is_null: bool) -> SortedMemRow {
-    SortedMemRow {
-        table_id: t,
-        col_id: c,
-        row_key: r,
-        timestamp: tau,
-        is_init: false,
-        is_write: true,
-        val: val.iter().map(|v| BabyBear::new(*v)).collect(),
-        val_is_null: is_null,
-        meta_is_empty_old: false,
-    }
-}
-
-// ── SSMC ──
-
-pub fn ssmc_entry(t: u32, c: u16, key: u64, val: [u32; 3]) -> SsmcEntry {
-    SsmcEntry {
-        table_id: t,
-        col_id: c,
-        key,
-        value: val.iter().map(|v| BabyBear::new(*v)).collect(),
-        hash_acc: [BabyBear::ZERO; 8],
-        mult_witness: false,
-        segment_is_touched: false,
-    }
-}
-
-// ── Merge ──
-
-pub fn merge_val(v: [u32; 3]) -> Vec<BabyBear> {
-    v.iter().map(|x| BabyBear::new(*x)).collect()
-}
-
-pub fn merge_zeros() -> Vec<BabyBear> {
-    vec![BabyBear::ZERO; 3]
-}
-
-pub fn old_only_row(t: u32, c: u16, key: u64, old: [u32; 3]) -> MergeRow {
-    MergeRow {
-        table_id: t,
-        col_id: c,
-        key,
-        source: MergeSource::OldOnly,
-        old_val: merge_val(old),
-        write_val: merge_zeros(),
-        new_val: merge_val(old),
-        in_new: true,
-        hash_acc: [BabyBear::ZERO; 8],
-    }
-}
-
-pub fn write_only_row(t: u32, c: u16, key: u64, write: [u32; 3]) -> MergeRow {
-    MergeRow {
-        table_id: t,
-        col_id: c,
-        key,
-        source: MergeSource::WriteOnly,
-        old_val: merge_zeros(),
-        write_val: merge_val(write),
-        new_val: merge_val(write),
-        in_new: true,
-        hash_acc: [BabyBear::ZERO; 8],
-    }
-}
-
-pub fn both_row(t: u32, c: u16, key: u64, old: [u32; 3], write: [u32; 3]) -> MergeRow {
-    MergeRow {
-        table_id: t,
-        col_id: c,
-        key,
-        source: MergeSource::Both,
-        old_val: merge_val(old),
-        write_val: merge_val(write),
-        new_val: merge_val(write),
-        in_new: true,
-        hash_acc: [BabyBear::ZERO; 8],
-    }
-}
-
-pub fn delete_row(t: u32, c: u16, key: u64, old: [u32; 3]) -> MergeRow {
-    MergeRow {
-        table_id: t,
-        col_id: c,
-        key,
-        source: MergeSource::Delete,
-        old_val: merge_val(old),
-        write_val: merge_zeros(),
-        new_val: merge_zeros(),
-        in_new: false,
-        hash_acc: [BabyBear::ZERO; 8],
-    }
-}
+use tabula_proof::air::{CmpOp, InstructionRecord, Opcode, bool_fe, u64_to_limbs};
 
 // ── Execution ──
 
@@ -162,6 +35,7 @@ pub fn make_add(
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -194,6 +68,7 @@ pub fn make_sub(
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -219,6 +94,7 @@ pub fn make_assert(src1_slot: usize, src_val: bool) -> InstructionRecord {
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -253,6 +129,7 @@ pub fn make_select(
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -285,6 +162,7 @@ pub fn make_read(
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -317,6 +195,7 @@ pub fn make_write(
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -342,6 +221,7 @@ pub fn make_not(dst_slot: usize, src1_slot: usize, src: bool) -> InstructionReco
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -373,6 +253,7 @@ pub fn make_and(
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -404,6 +285,7 @@ pub fn make_or(
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -444,6 +326,7 @@ pub fn make_cmp(
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -462,6 +345,212 @@ pub fn make_read_then_add(
         make_read(slot1, 0, 0, 200, val2, false),
         make_add(dst_slot, slot0, slot1, val1, val2),
     ]
+}
+
+// ── InterTxOrder ──
+
+use tabula_proof::air::InterTxOrderRow;
+
+fn ito_val(v: [u32; 3]) -> Vec<BabyBear> {
+    v.iter().map(|x| BabyBear::new(*x)).collect()
+}
+
+/// Init row: base state seed for a key.
+pub fn ito_init(t: u32, c: u16, key: u64, val: [u32; 3], is_null: bool) -> InterTxOrderRow {
+    InterTxOrderRow {
+        table_id: t,
+        col_id: c,
+        key,
+        tx_index: 0,
+        is_init: true,
+        has_read: false,
+        has_write: false,
+        input_val: ito_val(val),
+        input_is_null: is_null,
+        output_val: ito_val(val),
+        output_is_null: is_null,
+    }
+}
+
+/// Read-only access row: tx reads input value, output = input.
+pub fn ito_read(
+    t: u32,
+    c: u16,
+    key: u64,
+    tx_index: u32,
+    input: [u32; 3],
+    input_is_null: bool,
+) -> InterTxOrderRow {
+    InterTxOrderRow {
+        table_id: t,
+        col_id: c,
+        key,
+        tx_index,
+        is_init: false,
+        has_read: true,
+        has_write: false,
+        input_val: ito_val(input),
+        input_is_null,
+        output_val: ito_val(input), // read-only: output = input
+        output_is_null: input_is_null,
+    }
+}
+
+/// Write-only access row: tx writes without reading.
+#[allow(clippy::too_many_arguments)]
+pub fn ito_write(
+    t: u32,
+    c: u16,
+    key: u64,
+    tx_index: u32,
+    input: [u32; 3],
+    input_is_null: bool,
+    output: [u32; 3],
+    output_is_null: bool,
+) -> InterTxOrderRow {
+    InterTxOrderRow {
+        table_id: t,
+        col_id: c,
+        key,
+        tx_index,
+        is_init: false,
+        has_read: false,
+        has_write: true,
+        input_val: ito_val(input),
+        input_is_null,
+        output_val: ito_val(output),
+        output_is_null,
+    }
+}
+
+/// Read+write access row: tx reads and writes.
+#[allow(clippy::too_many_arguments)]
+pub fn ito_read_write(
+    t: u32,
+    c: u16,
+    key: u64,
+    tx_index: u32,
+    input: [u32; 3],
+    input_is_null: bool,
+    output: [u32; 3],
+    output_is_null: bool,
+) -> InterTxOrderRow {
+    InterTxOrderRow {
+        table_id: t,
+        col_id: c,
+        key,
+        tx_index,
+        is_init: false,
+        has_read: true,
+        has_write: true,
+        input_val: ito_val(input),
+        input_is_null,
+        output_val: ito_val(output),
+        output_is_null,
+    }
+}
+
+// ── StateColumn ──
+
+use tabula_proof::air::StateColumnRow;
+use tabula_proof::air::chips::state_column::trace::EntrySource;
+
+fn sc_val(v: [u32; 3]) -> Vec<BabyBear> {
+    v.iter().map(|x| BabyBear::new(*x)).collect()
+}
+
+fn sc_zeros() -> Vec<BabyBear> {
+    vec![BabyBear::ZERO; 3]
+}
+
+/// Entry: old_only — key in old, not written. old_val=new_val. Both chains.
+pub fn sc_old_only(t: u32, c: u16, key: u64, val: [u32; 3]) -> StateColumnRow {
+    StateColumnRow {
+        table_id: t,
+        col_id: c,
+        key,
+        is_gap: false,
+        source: EntrySource::OldOnly,
+        old_val: sc_val(val),
+        new_val: sc_val(val),
+        segment_is_touched: false,
+        old_hash_acc: [BabyBear::ZERO; 8],
+        new_hash_acc: [BabyBear::ZERO; 8],
+        read_mult: false,
+        write_mult: false,
+    }
+}
+
+/// Entry: write_only — key not in old, newly written. New chain only.
+pub fn sc_write_only(t: u32, c: u16, key: u64, val: [u32; 3]) -> StateColumnRow {
+    StateColumnRow {
+        table_id: t,
+        col_id: c,
+        key,
+        is_gap: false,
+        source: EntrySource::WriteOnly,
+        old_val: sc_zeros(),
+        new_val: sc_val(val),
+        segment_is_touched: true,
+        old_hash_acc: [BabyBear::ZERO; 8],
+        new_hash_acc: [BabyBear::ZERO; 8],
+        read_mult: false,
+        write_mult: false,
+    }
+}
+
+/// Entry: both — key in old AND written. Both chains with different values.
+pub fn sc_both(t: u32, c: u16, key: u64, old: [u32; 3], new: [u32; 3]) -> StateColumnRow {
+    StateColumnRow {
+        table_id: t,
+        col_id: c,
+        key,
+        is_gap: false,
+        source: EntrySource::Both,
+        old_val: sc_val(old),
+        new_val: sc_val(new),
+        segment_is_touched: true,
+        old_hash_acc: [BabyBear::ZERO; 8],
+        new_hash_acc: [BabyBear::ZERO; 8],
+        read_mult: false,
+        write_mult: false,
+    }
+}
+
+/// Entry: delete — key in old, written as null. Old chain only.
+pub fn sc_delete(t: u32, c: u16, key: u64, old: [u32; 3]) -> StateColumnRow {
+    StateColumnRow {
+        table_id: t,
+        col_id: c,
+        key,
+        is_gap: false,
+        source: EntrySource::Delete,
+        old_val: sc_val(old),
+        new_val: sc_zeros(),
+        segment_is_touched: true,
+        old_hash_acc: [BabyBear::ZERO; 8],
+        new_hash_acc: [BabyBear::ZERO; 8],
+        read_mult: false,
+        write_mult: false,
+    }
+}
+
+/// Gap row — non-membership proof. No hash chains.
+pub fn sc_gap(t: u32, c: u16, key: u64) -> StateColumnRow {
+    StateColumnRow {
+        table_id: t,
+        col_id: c,
+        key,
+        is_gap: true,
+        source: EntrySource::OldOnly, // ignored for gap
+        old_val: sc_zeros(),
+        new_val: sc_zeros(),
+        segment_is_touched: false,
+        old_hash_acc: [BabyBear::ZERO; 8],
+        new_hash_acc: [BabyBear::ZERO; 8],
+        read_mult: false,
+        write_mult: false,
+    }
 }
 
 // ── Column Meta ──
@@ -550,6 +639,7 @@ pub fn make_hash(
         dst2_is_null: false,
         hash_perm_input: Some(perm_input),
         hash_perm_output: Some(perm_output),
+        is_empty_col: false,
     }
 }
 
@@ -584,6 +674,7 @@ pub fn make_mul(
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -620,6 +711,7 @@ pub fn make_divmod(
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }
 
@@ -656,5 +748,6 @@ pub fn make_lookup(
         dst2_is_null: false,
         hash_perm_input: None,
         hash_perm_output: None,
+        is_empty_col: false,
     }
 }

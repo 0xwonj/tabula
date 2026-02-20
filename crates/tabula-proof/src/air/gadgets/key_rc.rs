@@ -12,7 +12,7 @@ use crate::air::builder::InteractionAirBuilder;
 use crate::air::interaction::{AirInteraction, InteractionKind};
 
 use super::integer::{
-    Limb2Bits, LimbHalves, MASK_30, U64Limbs, constrain_limb2_bits, constrain_limb_halves,
+    Limb2Bits, LimbHalves, MASK_30, U64Limbs, constrain_limb_halves, constrain_limb2_bits,
 };
 
 /// U64 value with range-check half-decomposition.

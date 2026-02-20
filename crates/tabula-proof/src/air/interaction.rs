@@ -22,24 +22,24 @@ use p3_field::Field;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum InteractionKind {
-    /// Execution trace ↔ GlobalSortedMem (memory consistency).
-    Memory = 1,
-    /// GlobalSortedMem init rows ↔ GlobalSSMC (membership proof).
-    SsmcMembership = 2,
-    /// GlobalSSMC → GlobalMerge (OldList completeness).
-    MergeOldList = 3,
-    /// GlobalSortedMem write-set → GlobalMerge (WriteSet completeness).
-    MergeWriteSet = 4,
-    /// SSMC/Merge hash chains ↔ PoseidonChip (permutation verification).
+    /// StateColumn/ColumnMeta hash chains ↔ PoseidonChip (permutation verification).
     PoseidonPermutation = 5,
-    /// SSMC/Merge segment hashes ↔ ColumnMeta (commitment verification).
+    /// StateColumn segment hashes ↔ ColumnMeta (commitment verification).
     CommitmentVerification = 6,
-    /// GlobalSortedMem first-of-segment ↔ ColumnMeta (metadata).
-    SortedMemMeta = 7,
     /// All chips → RangeCheckChip (u16 range proofs).
     RangeCheck = 8,
     /// ExecutionChip → StaticTableChip (static table lookups, receiver deferred to M11).
     StaticTableLookup = 9,
+    /// Execution → InterTxOrder (non-null read access entries + null gap rows).
+    ReadAccess = 10,
+    /// Execution → InterTxOrder (write entries).
+    WriteAccess = 11,
+    /// Execution → ColumnMeta (read from empty column).
+    EmptyColRead = 12,
+    /// InterTxOrder → StateColumn (base state entries from init rows).
+    BaseStateEntry = 13,
+    /// InterTxOrder → StateColumn (coalesced writes from last-for-key rows).
+    CoalescedWrite = 14,
 }
 
 impl InteractionKind {
@@ -163,15 +163,15 @@ mod tests {
     #[test]
     fn interaction_kind_tags_are_unique() {
         let kinds = [
-            InteractionKind::Memory,
-            InteractionKind::SsmcMembership,
-            InteractionKind::MergeOldList,
-            InteractionKind::MergeWriteSet,
             InteractionKind::PoseidonPermutation,
             InteractionKind::CommitmentVerification,
-            InteractionKind::SortedMemMeta,
             InteractionKind::RangeCheck,
             InteractionKind::StaticTableLookup,
+            InteractionKind::ReadAccess,
+            InteractionKind::WriteAccess,
+            InteractionKind::EmptyColRead,
+            InteractionKind::BaseStateEntry,
+            InteractionKind::CoalescedWrite,
         ];
         let mut tags: Vec<u8> = kinds.iter().map(|k| k.tag()).collect();
         tags.sort();
@@ -180,11 +180,11 @@ mod tests {
     }
 
     #[test]
-    fn interaction_kind_tags_start_at_one() {
+    fn interaction_kind_tags_are_nonzero() {
         // Tag 0 is reserved (unused) so kind_tag is always nonzero in fingerprints.
-        assert_eq!(InteractionKind::Memory.tag(), 1);
+        assert_eq!(InteractionKind::PoseidonPermutation.tag(), 5);
         assert_eq!(InteractionKind::RangeCheck.tag(), 8);
-        assert_eq!(InteractionKind::StaticTableLookup.tag(), 9);
+        assert_eq!(InteractionKind::ReadAccess.tag(), 10);
     }
 
     #[test]

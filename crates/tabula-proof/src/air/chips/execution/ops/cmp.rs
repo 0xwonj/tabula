@@ -100,8 +100,7 @@ pub(crate) fn constrain_cmp<AB: AirBuilder, const W: usize>(
         gate.clone() * limb0_diff.clone() * local.cmp.eq_limb0_iz.is_zero.clone().into(),
     );
     let not_zero0: AB::Expr = AB::Expr::ONE - local.cmp.eq_limb0_iz.is_zero.clone().into();
-    let has_inv0: AB::Expr =
-        AB::Expr::ONE - limb0_diff * local.cmp.eq_limb0_iz.inv.clone().into();
+    let has_inv0: AB::Expr = AB::Expr::ONE - limb0_diff * local.cmp.eq_limb0_iz.inv.clone().into();
     builder.assert_zero(gate.clone() * not_zero0 * has_inv0);
 
     builder.assert_bool(local.cmp.eq_limb1_iz.is_zero.clone());
@@ -109,8 +108,7 @@ pub(crate) fn constrain_cmp<AB: AirBuilder, const W: usize>(
         gate.clone() * limb1_diff.clone() * local.cmp.eq_limb1_iz.is_zero.clone().into(),
     );
     let not_zero1: AB::Expr = AB::Expr::ONE - local.cmp.eq_limb1_iz.is_zero.clone().into();
-    let has_inv1: AB::Expr =
-        AB::Expr::ONE - limb1_diff * local.cmp.eq_limb1_iz.inv.clone().into();
+    let has_inv1: AB::Expr = AB::Expr::ONE - limb1_diff * local.cmp.eq_limb1_iz.inv.clone().into();
     builder.assert_zero(gate.clone() * not_zero1 * has_inv1);
 
     builder.assert_bool(local.cmp.eq_limb2_iz.is_zero.clone());
@@ -118,8 +116,7 @@ pub(crate) fn constrain_cmp<AB: AirBuilder, const W: usize>(
         gate.clone() * limb2_diff.clone() * local.cmp.eq_limb2_iz.is_zero.clone().into(),
     );
     let not_zero2: AB::Expr = AB::Expr::ONE - local.cmp.eq_limb2_iz.is_zero.clone().into();
-    let has_inv2: AB::Expr =
-        AB::Expr::ONE - limb2_diff * local.cmp.eq_limb2_iz.inv.clone().into();
+    let has_inv2: AB::Expr = AB::Expr::ONE - limb2_diff * local.cmp.eq_limb2_iz.inv.clone().into();
     builder.assert_zero(gate.clone() * not_zero2 * has_inv2);
 
     // Equality = all three limbs equal: eq_witness = iz0 * iz1 * iz2
@@ -155,7 +152,8 @@ pub(crate) fn constrain_cmp<AB: AirBuilder, const W: usize>(
     builder.assert_zero(
         gate_lt.clone()
             * (local.cmp.ineq.diff0.clone().into()
-                - (local.src2_val[0].clone().into() - local.src1_val[0].clone().into()
+                - (local.src2_val[0].clone().into()
+                    - local.src1_val[0].clone().into()
                     - AB::Expr::ONE
                     + local.cmp.ineq.borrow0.clone().into() * shift_30.clone())),
     );
@@ -163,7 +161,8 @@ pub(crate) fn constrain_cmp<AB: AirBuilder, const W: usize>(
     builder.assert_zero(
         gate_lt.clone()
             * (local.cmp.ineq.diff1.clone().into()
-                - (local.src2_val[1].clone().into() - local.src1_val[1].clone().into()
+                - (local.src2_val[1].clone().into()
+                    - local.src1_val[1].clone().into()
                     - local.cmp.ineq.borrow0.clone().into()
                     + local.cmp.ineq.borrow1.clone().into() * shift_30.clone())),
     );
@@ -171,7 +170,8 @@ pub(crate) fn constrain_cmp<AB: AirBuilder, const W: usize>(
     builder.assert_zero(
         gate_lt
             * (local.cmp.ineq.diff2.clone().into()
-                - (local.src2_val[2].clone().into() - local.src1_val[2].clone().into()
+                - (local.src2_val[2].clone().into()
+                    - local.src1_val[2].clone().into()
                     - local.cmp.ineq.borrow1.clone().into())),
     );
 
@@ -180,21 +180,24 @@ pub(crate) fn constrain_cmp<AB: AirBuilder, const W: usize>(
     builder.assert_zero(
         gate_gt.clone()
             * (local.cmp.ineq.diff0.clone().into()
-                - (local.src1_val[0].clone().into() - local.src2_val[0].clone().into()
+                - (local.src1_val[0].clone().into()
+                    - local.src2_val[0].clone().into()
                     - AB::Expr::ONE
                     + local.cmp.ineq.borrow0.clone().into() * shift_30.clone())),
     );
     builder.assert_zero(
         gate_gt.clone()
             * (local.cmp.ineq.diff1.clone().into()
-                - (local.src1_val[1].clone().into() - local.src2_val[1].clone().into()
+                - (local.src1_val[1].clone().into()
+                    - local.src2_val[1].clone().into()
                     - local.cmp.ineq.borrow0.clone().into()
                     + local.cmp.ineq.borrow1.clone().into() * shift_30)),
     );
     builder.assert_zero(
         gate_gt
             * (local.cmp.ineq.diff2.clone().into()
-                - (local.src1_val[2].clone().into() - local.src2_val[2].clone().into()
+                - (local.src1_val[2].clone().into()
+                    - local.src2_val[2].clone().into()
                     - local.cmp.ineq.borrow1.clone().into())),
     );
 

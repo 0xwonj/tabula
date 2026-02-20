@@ -20,11 +20,12 @@
 | M7: Gadgets + Memory Layer | ✅ DONE | Integer gadgets (U64Limbs, IsZero, StrictIneq), memory gadgets, GlobalSortedMemChip, RangeCheckChip |
 | M8: Execution + Hashing | ✅ DONE | ExecutionChip, PoseidonChip, GlobalSSMCChip, GlobalMergeChip, ColumnMeta finalization |
 | M9: LogUp Wiring | ✅ DONE | 8 LogUp buses, operand-slot linkage, Poseidon RC verification, multi-chip integration |
-| M10: Constraint Completeness | **Next** | Range checks, lex ordering, missing opcodes (Cmp/Hash/Lookup/Mul/DivMod), Com_empty |
+| M10: Constraint Completeness | ✅ DONE | Range checks, lex ordering, opcodes (Cmp/Hash/Lookup/Mul/DivMod), Com_empty, Operation pattern |
+| M11: State Root + Gap Proofs | **Next** | SmtPathChip, SSMC next_key + gap witness, leaf digests, public inputs, StaticTableChip |
 
-**Current state**: 250 tests in tabula-proof, `cargo clippy` zero warnings.
+**Current state**: 359 tests in tabula-proof, `cargo clippy` zero warnings.
 
-**Design docs**: [m10-design.md](design/m10-design.md), [roadmap-m11-m13.md](design/roadmap-m11-m13.md)
+**Design docs**: [m11-design.md](design/m11-design.md), [roadmap-m11-m13.md](design/roadmap-m11-m13.md)
 
 ### Structural changes since original plan
 
@@ -204,14 +205,33 @@ The original task IDs (B1-B7, C1-C5) below are kept for traceability but their m
 
 </details>
 
+<details>
+<summary>M10 — Constraint Completeness (click to expand)</summary>
+
+- **A1**: Range check wiring — LimbHalves + direct sends for all u64 limbs across 5 chips
+- **A2**: Lex ordering direction — strict (t,c) lexicographic order at segment boundaries in 4 chips
+- **B1**: Cmp constraint — 6 sub-operators (Eq/Ne/Lt/Lte/Gt/Gte) with StrictIneq + IsZero
+- **B2**: Hash constraint — single-permutation Hash via PoseidonPermutation bus
+- **B3**: Lookup constraint — new StaticTableLookup bus (InteractionKind = 9)
+- **B4**: Com_empty verification — Poseidon hash check in ColumnMeta
+- **C1**: Mul constraint — carry chain with c1 sub-limb decomposition (c1_lo + c1_hi × 2^16)
+- **C2**: DivMod constraint — dual-slot write (q + rem), reuses Mul carry + StrictIneq + IsZero
+- **Operation pattern migration**: 5 shared gadgets + 3 execution-specific operations + 8 bus builder traits
+- **Execution decomposition**: air.rs split into ops/ module (7 files: arith, cmp, mul, divmod, logic, control, hash)
+- Column widths: Execution 278, SSMC 66, Merge 74, SortedMem 67, ColumnMeta 56, Poseidon 93+19prep, RangeCheck 2
+- 359 tests, zero clippy warnings
+- Design doc: [m10-design.md](design/m10-design.md)
+
+</details>
+
 ---
 
-## M10 — Constraint Completeness (Next)
+## M11 — State Root + Gap Proofs (Next)
 
-> See [m10-design.md](design/m10-design.md) for detailed specification.
-> See [roadmap-m11-m13.md](design/roadmap-m11-m13.md) for M11-M13 overview.
+> See [m11-design.md](design/m11-design.md) for detailed specification.
+> See [roadmap-m11-m13.md](design/roadmap-m11-m13.md) for M12-M13 overview.
 
-### Remaining Work (post-M10)
+### Remaining Work (post-M11)
 
 Remaining steps for end-to-end proofs:
 
@@ -296,15 +316,19 @@ See [proof-optimization-architecture.md](./design/proof-optimization-architectur
 ✅ M8 — Execution + Hashing (Execution, Poseidon, SSMC, Merge)
      │
      ▼
-► M9 — LogUp Wiring (L1-L4)
+✅ M9 — LogUp Wiring (L1-L4)
      │
-     ├──► SmtPathChip (B4)
+     ▼
+✅ M10 — Constraint Completeness (range checks, opcodes, Com_empty, Operation pattern)
      │
-     ├──► End-to-End Proving (B5-B7)
+     ▼
+► M11 — State Root + Gap Proofs (SmtPathChip, gap witness, public inputs)
      │
-     └──► Proof Optimizations (Phase 2-4)
+     ├──► M12 — Trace Assembly
+     │
+     └──► M13 — Plonky3 Prover/Verifier
 
 Parallel: CB1 → CB2, CLI1, DSL1-3
 ```
 
-**Critical path**: M9 → B4 → B5 (end-to-end proof)
+**Critical path**: M11 → M12 → M13 (end-to-end proof)

@@ -6,13 +6,13 @@
 //! 3. Opcode exactly-one: sum of 12 opcode selectors = 1 when is_real
 //! 4. `is_access` derived: is_access = op_read + op_write
 //! 5. Clock recurrence: clk increments by is_access; first row clk=0
-//! 6. Timestamp binding: is_access ⟹ tau = clk + 1
-//! 7. Access log: access_is_write = op_write when is_access
-//! 8. SSA slot carry: non-written slots carry forward to next row
-//! 9. Arith sub-selectors: exactly one of {add, sub, mul} when op_arith
-//! 10. Per-opcode semantics (delegated to `ops/`)
-//! 11. Transaction index monotonicity
-//! 12. Operand-to-slot linkage (delegated to `linkage`)
+//! 6. Access log: access_is_write = op_write when is_access
+//! 7. SSA slot carry: non-written slots carry forward to next row
+//! 8. Arith sub-selectors: exactly one of {add, sub, mul} when op_arith
+//! 9. Per-opcode semantics (delegated to `ops/`)
+//! 10. Transaction index monotonicity
+//! 11. Operand-to-slot linkage (delegated to `linkage`)
+//! 12. Empty column flag: is_empty_col → op_read ∧ access_is_null
 
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
@@ -21,7 +21,7 @@ use p3_matrix::Matrix;
 use crate::air::builder::InteractionAirBuilder;
 use crate::air::columns::borrow_cols;
 use crate::air::gadgets::constrain_is_real_prefix;
-use crate::air::gadgets::integer::{SHIFT_30_U32, constrain_limb2_bits, expr_from_u32};
+use crate::air::gadgets::integer::{constrain_limb2_bits, expr_from_u32};
 use crate::air::interaction::{AirInteraction, InteractionKind};
 
 use super::columns::{ExecutionCols, MAX_SLOTS, execution_width};
@@ -64,8 +64,8 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         constrain_opcode_one_hot(builder, local, is_real.clone());
         constrain_is_access(builder, local, is_real.clone());
         constrain_clock(builder, local, next, both_real.clone());
-        constrain_timestamp(builder, local, is_real.clone());
         constrain_access_log(builder, local, is_real.clone());
+        constrain_empty_col(builder, local, is_real.clone());
         constrain_arith_sub_selectors(builder, local, is_real.clone());
         constrain_slot_carry(builder, local, next, both_real.clone());
         constrain_first_row_init(builder, local);
@@ -86,7 +86,6 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         super::ops::hash::constrain_hash(builder, local, is_real.clone());
         constrain_lookup(builder, local, is_real.clone());
         constrain_tx_index_monotonicity(builder, local, next, both_real);
-        constrain_tau_decomposition(builder, local, is_real.clone());
 
         // ── Operand-to-slot linkage ──
         super::linkage::constrain_operand_selectors(builder, local, is_real.clone());
@@ -96,7 +95,9 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         super::linkage::constrain_read_destination(builder, local, is_real);
 
         // ── LogUp buses ──
-        send_memory(builder, local);
+        send_read_access(builder, local);
+        send_write_access(builder, local);
+        send_empty_col_read(builder, local);
         send_range_checks(builder, local);
         send_hash_permutation(builder, local);
         send_static_table_lookup(builder, local);
@@ -130,6 +131,7 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
 
     // Flags
     builder.assert_bool(local.is_access.clone());
+    builder.assert_bool(local.is_empty_col.clone());
     builder.assert_bool(local.access_is_write.clone());
     builder.assert_bool(local.access_is_null.clone());
     builder.assert_bool(local.cond_val.clone());
@@ -197,15 +199,19 @@ fn constrain_clock<AB: AirBuilder, const W: usize>(
     builder.when_transition().assert_zero(both_real * clk_diff);
 }
 
-/// 6. Timestamp binding: is_access ⟹ tau = clk + 1.
-fn constrain_timestamp<AB: AirBuilder, const W: usize>(
+/// 6. Empty column flag semantics.
+///
+/// `is_empty_col = 1` implies `op_read = 1` and `access_is_null = 1`.
+fn constrain_empty_col<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let tau_expected: AB::Expr = local.clk.clone().into() + AB::Expr::ONE;
-    let tau_diff: AB::Expr = local.tau.clone().into() - tau_expected;
-    builder.assert_zero(is_real * local.is_access.clone().into() * tau_diff);
+    let gate: AB::Expr = is_real.clone() * local.is_empty_col.clone().into();
+    // is_empty_col → op_read
+    builder.assert_zero(gate.clone() * (AB::Expr::ONE - local.op_read.clone().into()));
+    // is_empty_col → access_is_null
+    builder.assert_zero(gate * (AB::Expr::ONE - local.access_is_null.clone().into()));
 }
 
 /// 7. Access log: access_is_write = op_write when is_access.
@@ -334,22 +340,6 @@ fn constrain_tx_index_monotonicity<AB: AirBuilder, const W: usize>(
         .assert_zero(both_real * diff.clone() * (diff - AB::Expr::ONE));
 }
 
-/// Tau decomposition: `is_access ⟹ tau = reconstruct(tau_rc.limbs)`.
-fn constrain_tau_decomposition<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &ExecutionCols<AB::Var, W>,
-    is_real: AB::Expr,
-) {
-    let shift_30: AB::Expr = expr_from_u32::<AB>(SHIFT_30_U32);
-    let shift_60: AB::Expr = shift_30.clone() * shift_30.clone();
-    let reconstructed: AB::Expr = local.tau_rc.limbs.limb0.clone().into()
-        + local.tau_rc.limbs.limb1.clone().into() * shift_30
-        + local.tau_rc.limbs.limb2.clone().into() * shift_60;
-    builder.assert_zero(
-        is_real * local.is_access.clone().into() * (local.tau.clone().into() - reconstructed),
-    );
-}
-
 /// Lookup constraint: result binding from access columns.
 fn constrain_lookup<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
@@ -370,7 +360,7 @@ fn constrain_lookup<AB: AirBuilder, const W: usize>(
     }
 }
 
-/// Range-check half-decomposition constraints for access_r, tau_rc, cmp, mul, divmod.
+/// Range-check half-decomposition constraints for access_r, cmp, mul, divmod.
 fn constrain_range_check_halves<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -389,30 +379,14 @@ fn constrain_range_check_halves<AB: AirBuilder, const W: usize>(
     let r_l1_diff: AB::Expr = local.access_r.limbs.limb1.clone().into()
         - (local.access_r.l1_halves.lo.clone().into()
             + local.access_r.l1_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
-    builder.assert_zero(gate.clone() * r_l1_diff);
+    builder.assert_zero(gate * r_l1_diff);
 
-    // tau_rc.limbs
-    let tau_l0_diff: AB::Expr = local.tau_rc.limbs.limb0.clone().into()
-        - (local.tau_rc.l0_halves.lo.clone().into()
-            + local.tau_rc.l0_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
-    builder.assert_zero(gate.clone() * tau_l0_diff);
-
-    let tau_l1_diff: AB::Expr = local.tau_rc.limbs.limb1.clone().into()
-        - (local.tau_rc.l1_halves.lo.clone().into()
-            + local.tau_rc.l1_halves.hi.clone().into() * expr_from_u32::<AB>(1 << 15));
-    builder.assert_zero(gate * tau_l1_diff);
-
-    // access_r and tau_rc limb2 (4-bit boolean decomposition — no gating needed,
+    // access_r limb2 (4-bit boolean decomposition — no gating needed,
     // zero columns satisfy the constraint trivially)
     constrain_limb2_bits(
         builder,
         local.access_r.limbs.limb2.clone().into(),
         &local.access_r.limb2_bits,
-    );
-    constrain_limb2_bits(
-        builder,
-        local.tau_rc.limbs.limb2.clone().into(),
-        &local.tau_rc.limb2_bits,
     );
 
     // Cmp inequality diff halves (gated by op_cmp * (1 - cmp_eq_witness))
@@ -473,12 +447,17 @@ fn constrain_range_check_halves<AB: AirBuilder, const W: usize>(
 
 // ── LogUp bus interactions ──────────────────────────────────────────────────
 
-/// C1 Memory bus send.
-fn send_memory<AB: InteractionAirBuilder, const W: usize>(
+/// C10 ReadAccess bus send: non-empty reads.
+///
+/// Tuple: `(t, c, key[3], val[W], is_null)`.
+/// Multiplicity: `is_real * op_read * (1 - is_empty_col)`.
+fn send_read_access<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
 ) {
-    let multiplicity: AB::Expr = local.is_real.clone().into() * local.is_access.clone().into();
+    let mult: AB::Expr = local.is_real.clone().into()
+        * local.op_read.clone().into()
+        * (AB::Expr::ONE - local.is_empty_col.clone().into());
 
     let mut values: Vec<AB::Expr> = vec![
         local.access_t.clone().into(),
@@ -486,10 +465,6 @@ fn send_memory<AB: InteractionAirBuilder, const W: usize>(
         local.access_r.limbs.limb0.clone().into(),
         local.access_r.limbs.limb1.clone().into(),
         local.access_r.limbs.limb2.clone().into(),
-        local.tau_rc.limbs.limb0.clone().into(),
-        local.tau_rc.limbs.limb1.clone().into(),
-        local.tau_rc.limbs.limb2.clone().into(),
-        local.access_is_write.clone().into(),
     ];
     for i in 0..W {
         values.push(local.access_val[i].clone().into());
@@ -498,8 +473,54 @@ fn send_memory<AB: InteractionAirBuilder, const W: usize>(
 
     builder.send(AirInteraction {
         values,
-        multiplicity,
-        kind: InteractionKind::Memory,
+        multiplicity: mult,
+        kind: InteractionKind::ReadAccess,
+    });
+}
+
+/// C11 WriteAccess bus send: writes.
+///
+/// Tuple: `(t, c, key[3], val[W], is_null)`.
+/// Multiplicity: `is_real * op_write`.
+fn send_write_access<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let mult: AB::Expr = local.is_real.clone().into() * local.op_write.clone().into();
+
+    let mut values: Vec<AB::Expr> = vec![
+        local.access_t.clone().into(),
+        local.access_c.clone().into(),
+        local.access_r.limbs.limb0.clone().into(),
+        local.access_r.limbs.limb1.clone().into(),
+        local.access_r.limbs.limb2.clone().into(),
+    ];
+    for i in 0..W {
+        values.push(local.access_val[i].clone().into());
+    }
+    values.push(local.access_is_null.clone().into());
+
+    builder.send(AirInteraction {
+        values,
+        multiplicity: mult,
+        kind: InteractionKind::WriteAccess,
+    });
+}
+
+/// C12 EmptyColRead bus send: reads from empty columns.
+///
+/// Tuple: `(t, c)`.
+/// Multiplicity: `is_real * is_empty_col`.
+fn send_empty_col_read<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let mult: AB::Expr = local.is_real.clone().into() * local.is_empty_col.clone().into();
+
+    builder.send(AirInteraction {
+        values: vec![local.access_t.clone().into(), local.access_c.clone().into()],
+        multiplicity: mult,
+        kind: InteractionKind::EmptyColRead,
     });
 }
 
@@ -523,12 +544,6 @@ fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
     send_rc(local.access_r.l0_halves.hi.clone().into());
     send_rc(local.access_r.l1_halves.lo.clone().into());
     send_rc(local.access_r.l1_halves.hi.clone().into());
-
-    // tau limbs (limb2 proven by Limb2Bits, no RC send needed)
-    send_rc(local.tau_rc.l0_halves.lo.clone().into());
-    send_rc(local.tau_rc.l0_halves.hi.clone().into());
-    send_rc(local.tau_rc.l1_halves.lo.clone().into());
-    send_rc(local.tau_rc.l1_halves.hi.clone().into());
 
     // Cmp inequality diff limbs
     let cmp_mult: AB::Expr = local.is_real.clone().into()

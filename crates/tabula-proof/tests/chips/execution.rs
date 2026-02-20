@@ -1036,8 +1036,7 @@ fn select_valid_null_propagation_passes() {
         make_select(3, 0, 1, 2, false, 42, 99),
     ];
     let trace = generate_execution_trace::<W>(&records);
-    debug_check(&ExecutionChip::<W>, &trace)
-        .expect("valid select with false cond should pass");
+    debug_check(&ExecutionChip::<W>, &trace).expect("valid select with false cond should pass");
 }
 
 // ── T10: Mul u64::MAX boundary ──
@@ -1111,5 +1110,5 @@ fn lookup_forged_null_dst_fails() {
 
 #[test]
 fn standard_width() {
-    assert_eq!(EXECUTION_STANDARD_WIDTH, 278);
+    assert_eq!(EXECUTION_STANDARD_WIDTH, 267);
 }

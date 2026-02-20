@@ -35,4 +35,3 @@ pub trait InteractionAirBuilder: AirBuilder + PairBuilder {
     /// The chip asserts that it consumes a matching tuple from the bus.
     fn receive(&mut self, interaction: AirInteraction<Self::Expr>);
 }
-

@@ -189,15 +189,15 @@ pub(crate) fn constrain_divmod<AB: AirBuilder, const W: usize>(
     builder.assert_zero(
         gate.clone()
             * (local.divmod.rem_ineq.diff1.clone().into()
-                - (d1 - rem_vals[1].clone()
-                    - local.divmod.rem_ineq.borrow0.clone().into()
+                - (d1 - rem_vals[1].clone() - local.divmod.rem_ineq.borrow0.clone().into()
                     + local.divmod.rem_ineq.borrow1.clone().into() * shift_30.clone())),
     );
     // diff2 = rhs[2] - rem[2] - borrow1
     builder.assert_zero(
         gate.clone()
             * (local.divmod.rem_ineq.diff2.clone().into()
-                - (d2.clone() - rem_vals[2].clone()
+                - (d2.clone()
+                    - rem_vals[2].clone()
                     - local.divmod.rem_ineq.borrow1.clone().into())),
     );
 
@@ -211,9 +211,7 @@ pub(crate) fn constrain_divmod<AB: AirBuilder, const W: usize>(
 
     // ── Non-zero divisor: gated IsZero on combined rhs ──
     builder.assert_bool(local.divmod.rhs_iz.is_zero.clone());
-    builder.assert_zero(
-        gate.clone() * rhs_combined * local.divmod.rhs_iz.is_zero.clone().into(),
-    );
+    builder.assert_zero(gate.clone() * rhs_combined * local.divmod.rhs_iz.is_zero.clone().into());
     let not_zero: AB::Expr = AB::Expr::ONE - local.divmod.rhs_iz.is_zero.clone().into();
     let rhs_combined_for_inv: AB::Expr = local.src2_val[0].clone().into()
         + local.src2_val[1].clone().into() * shift_30

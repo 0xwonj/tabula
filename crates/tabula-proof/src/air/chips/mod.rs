@@ -6,11 +6,10 @@
 
 pub mod column_meta;
 pub mod execution;
-pub mod merge;
+pub mod inter_tx_order;
 pub mod poseidon;
 pub mod range_check;
-pub mod sorted_mem;
-pub mod ssmc;
+pub mod state_column;
 
 use p3_air::{Air, BaseAir};
 
@@ -18,11 +17,10 @@ use super::builder::InteractionAirBuilder;
 
 use column_meta::ColumnMetaChip;
 use execution::ExecutionChip;
-use merge::GlobalMergeChip;
+use inter_tx_order::InterTxOrderChip;
 use poseidon::PoseidonChip;
 use range_check::RangeCheckChip;
-use sorted_mem::GlobalSortedMemChip;
-use ssmc::GlobalSsmcChip;
+use state_column::StateColumnChip;
 
 /// Metadata interface for AIR chips.
 ///
@@ -48,24 +46,6 @@ impl ChipMeta for RangeCheckChip {
     }
 }
 
-impl<const W: usize> ChipMeta for GlobalSortedMemChip<W> {
-    fn chip_name(&self) -> &'static str {
-        "GlobalSortedMem"
-    }
-}
-
-impl<const W: usize> ChipMeta for GlobalSsmcChip<W> {
-    fn chip_name(&self) -> &'static str {
-        "GlobalSSMC"
-    }
-}
-
-impl<const W: usize> ChipMeta for GlobalMergeChip<W> {
-    fn chip_name(&self) -> &'static str {
-        "GlobalMerge"
-    }
-}
-
 impl ChipMeta for PoseidonChip {
     fn chip_name(&self) -> &'static str {
         "Poseidon"
@@ -78,7 +58,19 @@ impl<const W: usize> ChipMeta for ExecutionChip<W> {
     }
 }
 
-/// Top-level AIR enum for multi-chip proving (M9).
+impl<const W: usize> ChipMeta for StateColumnChip<W> {
+    fn chip_name(&self) -> &'static str {
+        "StateColumn"
+    }
+}
+
+impl<const W: usize> ChipMeta for InterTxOrderChip<W> {
+    fn chip_name(&self) -> &'static str {
+        "InterTxOrder"
+    }
+}
+
+/// Top-level AIR enum for multi-chip proving.
 ///
 /// Delegates `BaseAir`, `Air`, and `ChipMeta` to the contained chip variant.
 #[derive(Debug)]
@@ -87,16 +79,14 @@ pub enum TabulaAir {
     ColumnMeta(ColumnMetaChip),
     /// Range check preprocessed table.
     RangeCheck(RangeCheckChip),
-    /// GlobalSortedMem with Standard value width (W=3).
-    SortedMemStandard(GlobalSortedMemChip<3>),
-    /// GlobalSSMC with Standard value width (W=3).
-    SsmcStandard(GlobalSsmcChip<3>),
-    /// GlobalMerge with Standard value width (W=3).
-    MergeStandard(GlobalMergeChip<3>),
     /// Poseidon2 permutation chip.
     Poseidon(PoseidonChip),
     /// Execution chip with Standard value width (W=3).
     ExecutionStandard(ExecutionChip<3>),
+    /// StateColumn chip with Standard value width (W=3).
+    StateColumnStandard(StateColumnChip<3>),
+    /// InterTxOrder chip with Standard value width (W=3).
+    InterTxOrderStandard(InterTxOrderChip<3>),
 }
 
 /// Dispatch macro: delegates a method call to all TabulaAir variants.
@@ -105,11 +95,10 @@ macro_rules! dispatch_tabula_air {
         match $self {
             Self::ColumnMeta(chip) => chip.$method($($arg),*),
             Self::RangeCheck(chip) => chip.$method($($arg),*),
-            Self::SortedMemStandard(chip) => chip.$method($($arg),*),
-            Self::SsmcStandard(chip) => chip.$method($($arg),*),
-            Self::MergeStandard(chip) => chip.$method($($arg),*),
             Self::Poseidon(chip) => chip.$method($($arg),*),
             Self::ExecutionStandard(chip) => chip.$method($($arg),*),
+            Self::StateColumnStandard(chip) => chip.$method($($arg),*),
+            Self::InterTxOrderStandard(chip) => chip.$method($($arg),*),
         }
     };
 }
@@ -125,11 +114,10 @@ impl<F> BaseAir<F> for TabulaAir {
         match self {
             Self::ColumnMeta(chip) => <ColumnMetaChip as BaseAir<F>>::width(chip),
             Self::RangeCheck(chip) => <RangeCheckChip as BaseAir<F>>::width(chip),
-            Self::SortedMemStandard(chip) => <GlobalSortedMemChip<3> as BaseAir<F>>::width(chip),
-            Self::SsmcStandard(chip) => <GlobalSsmcChip<3> as BaseAir<F>>::width(chip),
-            Self::MergeStandard(chip) => <GlobalMergeChip<3> as BaseAir<F>>::width(chip),
             Self::Poseidon(chip) => <PoseidonChip as BaseAir<F>>::width(chip),
             Self::ExecutionStandard(chip) => <ExecutionChip<3> as BaseAir<F>>::width(chip),
+            Self::StateColumnStandard(chip) => <StateColumnChip<3> as BaseAir<F>>::width(chip),
+            Self::InterTxOrderStandard(chip) => <InterTxOrderChip<3> as BaseAir<F>>::width(chip),
         }
     }
 }

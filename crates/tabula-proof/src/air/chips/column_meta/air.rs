@@ -23,7 +23,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
 use crate::air::builder::InteractionAirBuilder;
-use crate::air::bus::{CommitmentAirBuilder, PoseidonAirBuilder, SortedMemMetaAirBuilder};
+use crate::air::bus::{CommitmentAirBuilder, EmptyColReadAirBuilder, PoseidonAirBuilder};
 use crate::air::columns::borrow_cols;
 use crate::air::gadgets::{
     constrain_is_real_prefix, constrain_is_zero, constrain_lex_direction, send_lex_range_checks,
@@ -125,8 +125,7 @@ impl<AB: InteractionAirBuilder> Air<AB> for ColumnMetaChip {
                 * local.is_empty_new.clone().into(),
         );
 
-        // ── 7. has_sorted_mem boolean ──
-        builder.assert_bool(local.has_sorted_mem.clone());
+        // ── 7. (removed: was has_sorted_mem boolean) ──
 
         // ── 8. Lex ordering direction (M10-A2) ──
         {
@@ -156,12 +155,13 @@ impl<AB: InteractionAirBuilder> Air<AB> for ColumnMetaChip {
             send_lex_range_checks(builder, &local.lex, is_real * tc_changed);
         }
 
-        // C7 SortedMemMeta receive
-        builder.receive_sorted_mem_meta(
+        // C12 EmptyColRead receive: reads from empty columns
+        builder.receive_empty_col_read(
             local.table_id.clone().into(),
             local.col_id.clone().into(),
-            local.is_empty_old.clone().into(),
-            local.is_real.clone().into() * local.has_sorted_mem.clone().into(),
+            local.is_real.clone().into()
+                * local.is_empty_old.clone().into()
+                * local.empty_read_mult.clone().into(),
         );
 
         // C6 CommitmentVerification receive: Com_old

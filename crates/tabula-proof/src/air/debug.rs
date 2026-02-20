@@ -232,6 +232,7 @@ pub struct RecordedInteraction<F> {
 /// Recorded interactions from evaluating a single chip.
 ///
 /// Produced by [`evaluate_chip`]. Passed to [`check_logup_balance`].
+#[derive(Clone)]
 pub struct ChipRecord<F> {
     /// Human-readable chip name (for error messages).
     pub name: String,
@@ -578,7 +579,7 @@ mod tests {
             builder.send(AirInteraction {
                 values: vec![value],
                 multiplicity: is_real,
-                kind: InteractionKind::Memory,
+                kind: InteractionKind::ReadAccess,
             });
         }
     }
@@ -603,7 +604,7 @@ mod tests {
             builder.receive(AirInteraction {
                 values: vec![value],
                 multiplicity: is_real,
-                kind: InteractionKind::Memory,
+                kind: InteractionKind::ReadAccess,
             });
         }
     }
@@ -723,8 +724,8 @@ mod tests {
         let beta = bb(200);
         let values = [bb(1), bb(2), bb(3)];
 
-        let f1 = compute_fingerprint(&values, InteractionKind::Memory, alpha, beta);
-        let f2 = compute_fingerprint(&values, InteractionKind::Memory, alpha, beta);
+        let f1 = compute_fingerprint(&values, InteractionKind::ReadAccess, alpha, beta);
+        let f2 = compute_fingerprint(&values, InteractionKind::ReadAccess, alpha, beta);
         assert_eq!(f1, f2);
 
         // Different bus kind produces different fingerprint.
@@ -737,8 +738,8 @@ mod tests {
         let alpha = bb(100);
         let beta = bb(200);
 
-        let f1 = compute_fingerprint(&[bb(1), bb(2)], InteractionKind::Memory, alpha, beta);
-        let f2 = compute_fingerprint(&[bb(1), bb(3)], InteractionKind::Memory, alpha, beta);
+        let f1 = compute_fingerprint(&[bb(1), bb(2)], InteractionKind::ReadAccess, alpha, beta);
+        let f2 = compute_fingerprint(&[bb(1), bb(3)], InteractionKind::ReadAccess, alpha, beta);
         assert_ne!(f1, f2);
     }
 
@@ -761,7 +762,7 @@ mod tests {
             .filter(|i| i.multiplicity != BabyBear::ZERO)
             .collect();
         assert_eq!(nonzero.len(), 1);
-        assert_eq!(nonzero[0].kind, InteractionKind::Memory);
+        assert_eq!(nonzero[0].kind, InteractionKind::ReadAccess);
         assert_eq!(nonzero[0].direction, InteractionDirection::Send);
     }
 }
