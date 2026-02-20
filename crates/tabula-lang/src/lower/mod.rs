@@ -9,7 +9,7 @@ mod stmt;
 use std::collections::HashMap;
 
 use tabula_core::{ColId, TableId, TableSchema, TxTypeId, Value, ValueType};
-use tabula_ir::{Instruction, ParamDef, RowExpr, Slot, TxTypeDef, ValueExpr};
+use tabula_ir::{Instruction, ParamDef, Slot, TxTypeDef, ValueExpr};
 
 use crate::ast::{self, TypeName};
 use crate::error::{CompileError, ErrorKind};
@@ -197,18 +197,6 @@ impl Binding {
             Binding::Slot(s, _) => ValueExpr::Slot(*s),
             Binding::Alias(ve, _) => ve.clone(),
             Binding::ReadSlot { val, .. } => ValueExpr::Slot(*val),
-        }
-    }
-
-    pub(super) fn to_row_expr(&self) -> RowExpr {
-        match self {
-            Binding::Slot(s, _) | Binding::ReadSlot { val: s, .. } => RowExpr::Slot(*s),
-            Binding::Alias(ve, _) => match ve {
-                ValueExpr::Literal(Value::U64(n)) => RowExpr::Literal(tabula_core::RowKey(*n)),
-                ValueExpr::Slot(s) => RowExpr::Slot(*s),
-                ValueExpr::Param(p) => RowExpr::Param(*p),
-                _ => RowExpr::Slot(0), // fallback — type checker should prevent this
-            },
         }
     }
 

@@ -8,7 +8,8 @@
 //! - C13 BaseStateEntry: InterTxOrder → StateColumn
 //! - C14 CoalescedWrite: InterTxOrder → StateColumn
 //! - C5  PoseidonPerm: ColumnMeta → Poseidon (tested below)
-//! - C6  CommitmentVerif, C8 RangeCheck, C9 StaticTableLookup, C12 EmptyColRead: deferred
+//! - C9  StaticTableLookup: Execution → StaticTable (tested below)
+//! - C6  CommitmentVerif, C8 RangeCheck, C12 EmptyColRead: deferred
 
 use std::collections::BTreeMap;
 
@@ -30,12 +31,14 @@ use tabula_proof::air::chips::poseidon::trace::{
 };
 use tabula_proof::air::chips::state_column::air::StateColumnChip;
 use tabula_proof::air::chips::state_column::trace::generate_state_column_trace;
+use tabula_proof::air::chips::static_table::air::StaticTableChip;
+use tabula_proof::air::chips::static_table::trace::{StaticTableRow, generate_static_table_trace};
 use tabula_proof::air::debug::{check_bus_balance, evaluate_chip, evaluate_chip_with_preprocessed};
 use tabula_proof::air::interaction::InteractionKind;
 
 use crate::common::builders::{
-    ito_init, ito_read, ito_read_write, ito_write, make_read, make_write, sc_both, sc_old_only,
-    sc_write_only,
+    ito_init, ito_read, ito_read_write, ito_write, make_lookup, make_read, make_write, sc_both,
+    sc_old_only, sc_write_only,
 };
 use crate::common::values::com_empty;
 
@@ -62,12 +65,24 @@ fn c5_poseidon_com_empty_balance() {
     let cm_record = evaluate_chip("ColumnMeta", &cm_chip, &cm_trace).unwrap();
 
     // Poseidon: com_empty input = [0x00, table_id, col_id, 0..]
-    let mut perm_input = [BabyBear::ZERO; 16];
-    perm_input[1] = BabyBear::new(1); // table_id
-    // perm_input[2] = 0 (col_id)
-    let pos_trace = generate_poseidon_trace(&[perm_input]);
+    let mut perm_input_empty = [BabyBear::ZERO; 16];
+    perm_input_empty[1] = BabyBear::new(1); // table_id
+    // perm_input_empty[2] = 0 (col_id)
+
+    // Leaf digest inputs: [0x10, t, c, tag, 0,0,0,0, com[8]]
+    // com = com_empty(1, 0) for both old and new (untouched empty column)
+    let mut leaf_input = [BabyBear::ZERO; 16];
+    leaf_input[0] = BabyBear::new(0x10);
+    leaf_input[1] = BabyBear::new(1); // table_id
+    // leaf_input[2] = 0 (col_id), leaf_input[3] = 0 (tag=SSMC)
+    // leaf_input[8..16] = com_empty
+    let com_fes = com.0;
+    leaf_input[8..16].copy_from_slice(&com_fes);
+
+    // ColumnMeta sends: 1 com_empty + 2 leaf digests (old + new, same since untouched)
+    let pos_trace = generate_poseidon_trace(&[perm_input_empty, leaf_input, leaf_input]);
     let pos_chip = PoseidonChip;
-    let pos_pre = generate_poseidon_preprocessed(1);
+    let pos_pre = generate_poseidon_preprocessed(3);
     let pos_record =
         evaluate_chip_with_preprocessed("Poseidon", &pos_chip, &pos_trace, Some(&pos_pre)).unwrap();
 
@@ -76,6 +91,36 @@ fn c5_poseidon_com_empty_balance() {
         InteractionKind::PoseidonPermutation,
     )
     .expect("C5 PoseidonPermutation bus should balance");
+}
+
+// ── C9 StaticTableLookup: Execution → StaticTable ──
+
+#[test]
+fn c9_static_table_lookup_balance_multiple_lookups() {
+    // Two Lookup ops read the same static tuple.
+    let mut l0 = make_lookup(0, 7, 0, 100, 42);
+    l0.tx_index = 0;
+    let mut l1 = make_lookup(1, 7, 0, 100, 42);
+    l1.tx_index = 1;
+    let exec_trace = generate_execution_trace::<3>(&[l0, l1]);
+    let exec_record = evaluate_chip("Execution", &ExecutionChip::<3>, &exec_trace).unwrap();
+
+    // Static table row receives the same tuple with multiplicity 2.
+    let static_rows = vec![StaticTableRow {
+        table_id: 7,
+        col_id: 0,
+        row_key: 100,
+        value: vec![BabyBear::new(42), BabyBear::ZERO, BabyBear::ZERO],
+        lookup_mult: 2,
+    }];
+    let static_trace = generate_static_table_trace::<3>(&static_rows);
+    let static_record = evaluate_chip("StaticTable", &StaticTableChip::<3>, &static_trace).unwrap();
+
+    check_bus_balance(
+        &[exec_record, static_record],
+        InteractionKind::StaticTableLookup,
+    )
+    .expect("C9 StaticTableLookup should balance for duplicate lookups");
 }
 
 // ── C10 ReadAccess: Execution → InterTxOrder ──

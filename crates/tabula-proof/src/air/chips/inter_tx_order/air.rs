@@ -456,9 +456,7 @@ fn constrain_has_ever_written<AB: AirBuilder, const W: usize>(
     let local_hew: AB::Expr = local.has_ever_written.clone().into();
     let next_hw: AB::Expr = next.has_write.clone().into();
     let expected: AB::Expr = local_hew.clone() + next_hw.clone() - local_hew * next_hw;
-    builder.when_transition().assert_zero(
-        both_real
-            * same_key
-            * (next.has_ever_written.clone().into() - expected),
-    );
+    builder
+        .when_transition()
+        .assert_zero(both_real * same_key * (next.has_ever_written.clone().into() - expected));
 }

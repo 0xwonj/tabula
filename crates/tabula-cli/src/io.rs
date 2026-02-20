@@ -54,17 +54,22 @@ pub struct StateCell {
 impl StateCell {
     /// Convert to a `(CellKey, Value)` pair.
     ///
-    /// Panics if value is `None` — only use for state file input where cells
-    /// are always present.
-    pub fn to_cell_pair(&self) -> (CellKey, Value) {
-        (
-            CellKey {
-                table: TableId(self.table),
-                col: ColId(self.col),
-                row: RowKey(self.row),
-            },
-            self.value.expect("state cell value must be present"),
-        )
+    /// Returns an error if value is `None`.
+    pub fn to_cell_pair(&self) -> anyhow::Result<(CellKey, Value)> {
+        let key = CellKey {
+            table: TableId(self.table),
+            col: ColId(self.col),
+            row: RowKey(self.row),
+        };
+        let Some(value) = self.value else {
+            anyhow::bail!(
+                "state cell is missing value (table={}, row={}, col={})",
+                self.table,
+                self.row,
+                self.col
+            );
+        };
+        Ok((key, value))
     }
 
     /// Create from a `(CellKey, Option<Value>)` pair.
@@ -174,23 +179,81 @@ pub(crate) fn load_program_sources(
     }
 }
 
-/// Register schemas and tx types into a `Program`.
-///
-/// Uses `register_lenient` (canonicalize + typecheck, no NF validation)
-/// because NF-4 currently rejects the common transfer pattern where
-/// different params access the same column.
+/// Register schemas and tx types into a `Program` (with NF validation).
 pub(crate) fn register_program(
     schemas: &[TableSchema],
     tx_types: &[TxTypeDef],
 ) -> anyhow::Result<tabula_ir::Program> {
+    validate_schema_coverage(schemas, tx_types)?;
+
     let mut program = tabula_ir::Program::new();
     for schema in schemas {
         program.add_schema(schema.clone());
     }
     for def in tx_types {
-        program.register_lenient(def.clone())?;
+        program.register(def.clone())?;
     }
     Ok(program)
+}
+
+/// Validate that every state/static-table access has a declared schema+column.
+fn validate_schema_coverage(schemas: &[TableSchema], tx_types: &[TxTypeDef]) -> anyhow::Result<()> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut columns_by_table: BTreeMap<TableId, BTreeSet<ColId>> = BTreeMap::new();
+    for schema in schemas {
+        let cols = columns_by_table.entry(schema.id).or_default();
+        for col in &schema.columns {
+            cols.insert(col.id);
+        }
+    }
+
+    for tx in tx_types {
+        for (instr_idx, instr) in tx.body.iter().enumerate() {
+            match instr {
+                tabula_ir::Instruction::Read { table, col, .. }
+                | tabula_ir::Instruction::Write { table, col, .. } => {
+                    ensure_table_col_exists(&columns_by_table, tx, instr_idx, *table, *col)?
+                }
+                tabula_ir::Instruction::Lookup {
+                    static_table, col, ..
+                } => {
+                    ensure_table_col_exists(&columns_by_table, tx, instr_idx, *static_table, *col)?
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_table_col_exists(
+    columns_by_table: &std::collections::BTreeMap<TableId, std::collections::BTreeSet<ColId>>,
+    tx: &TxTypeDef,
+    instr_idx: usize,
+    table: TableId,
+    col: ColId,
+) -> anyhow::Result<()> {
+    let Some(cols) = columns_by_table.get(&table) else {
+        anyhow::bail!(
+            "tx '{}' (id {}), instruction {} references table {} but no schema is declared for it",
+            tx.name,
+            tx.id.0,
+            instr_idx,
+            table.0
+        );
+    };
+    if !cols.contains(&col) {
+        anyhow::bail!(
+            "tx '{}' (id {}), instruction {} references table {} col {} but that column is missing in schema",
+            tx.name,
+            tx.id.0,
+            instr_idx,
+            table.0,
+            col.0
+        );
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +312,8 @@ fn parse_hex_32(s: &str) -> anyhow::Result<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tabula_core::{ColumnDef, ValueType};
+    use tabula_ir::{Instruction, RowExpr, TxTypeDef};
 
     #[test]
     fn test_parse_hex_32_full() {
@@ -276,5 +341,61 @@ mod tests {
     fn test_parse_hex_32_empty() {
         let result = parse_hex_32("").unwrap();
         assert_eq!(result, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_state_cell_to_cell_pair_rejects_null() {
+        let cell = StateCell {
+            table: 1,
+            row: 2,
+            col: 3,
+            value: None,
+        };
+        assert!(cell.to_cell_pair().is_err());
+    }
+
+    #[test]
+    fn test_register_program_rejects_missing_schema_for_accessed_table() {
+        let tx = TxTypeDef {
+            id: TxTypeId(0),
+            name: "read".into(),
+            param_schema: vec![],
+            body: vec![Instruction::Read {
+                dst_val: 0,
+                dst_is_null: 1,
+                table: TableId(10),
+                col: ColId(0),
+                row: RowExpr::Literal(RowKey(0)),
+            }],
+        };
+        let err = register_program(&[], &[tx]).unwrap_err();
+        assert!(err.to_string().contains("no schema"));
+    }
+
+    #[test]
+    fn test_register_program_rejects_missing_column_in_schema() {
+        let schemas = vec![TableSchema {
+            id: TableId(10),
+            name: "t".into(),
+            columns: vec![ColumnDef {
+                id: ColId(1),
+                name: "x".into(),
+                value_type: ValueType::U64,
+            }],
+        }];
+        let tx = TxTypeDef {
+            id: TxTypeId(0),
+            name: "read".into(),
+            param_schema: vec![],
+            body: vec![Instruction::Read {
+                dst_val: 0,
+                dst_is_null: 1,
+                table: TableId(10),
+                col: ColId(0),
+                row: RowExpr::Literal(RowKey(0)),
+            }],
+        };
+        let err = register_program(&schemas, &[tx]).unwrap_err();
+        assert!(err.to_string().contains("column is missing"));
     }
 }

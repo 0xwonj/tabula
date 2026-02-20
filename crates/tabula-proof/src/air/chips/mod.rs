@@ -9,9 +9,11 @@ pub mod execution;
 pub mod inter_tx_order;
 pub mod poseidon;
 pub mod range_check;
+pub mod smt_path;
 pub mod state_column;
+pub mod static_table;
 
-use p3_air::{Air, BaseAir};
+use p3_air::{Air, AirBuilderWithPublicValues, BaseAir};
 
 use super::builder::InteractionAirBuilder;
 
@@ -20,7 +22,9 @@ use execution::ExecutionChip;
 use inter_tx_order::InterTxOrderChip;
 use poseidon::PoseidonChip;
 use range_check::RangeCheckChip;
+use smt_path::{SmtColPathChip, SmtTablePathChip};
 use state_column::StateColumnChip;
+use static_table::StaticTableChip;
 
 /// Metadata interface for AIR chips.
 ///
@@ -70,6 +74,24 @@ impl<const W: usize> ChipMeta for InterTxOrderChip<W> {
     }
 }
 
+impl<const W: usize> ChipMeta for StaticTableChip<W> {
+    fn chip_name(&self) -> &'static str {
+        "StaticTable"
+    }
+}
+
+impl ChipMeta for SmtColPathChip {
+    fn chip_name(&self) -> &'static str {
+        "SmtColPath"
+    }
+}
+
+impl ChipMeta for SmtTablePathChip {
+    fn chip_name(&self) -> &'static str {
+        "SmtTablePath"
+    }
+}
+
 /// Top-level AIR enum for multi-chip proving.
 ///
 /// Delegates `BaseAir`, `Air`, and `ChipMeta` to the contained chip variant.
@@ -87,6 +109,12 @@ pub enum TabulaAir {
     StateColumnStandard(StateColumnChip<3>),
     /// InterTxOrder chip with Standard value width (W=3).
     InterTxOrderStandard(InterTxOrderChip<3>),
+    /// StaticTable chip with Standard value width (W=3).
+    StaticTableStandard(StaticTableChip<3>),
+    /// SmtColPath chip (column-level SMT paths).
+    SmtColPath(SmtColPathChip),
+    /// SmtTablePath chip (table-level SMT paths).
+    SmtTablePath(SmtTablePathChip),
 }
 
 /// Dispatch macro: delegates a method call to all TabulaAir variants.
@@ -99,6 +127,9 @@ macro_rules! dispatch_tabula_air {
             Self::ExecutionStandard(chip) => chip.$method($($arg),*),
             Self::StateColumnStandard(chip) => chip.$method($($arg),*),
             Self::InterTxOrderStandard(chip) => chip.$method($($arg),*),
+            Self::StaticTableStandard(chip) => chip.$method($($arg),*),
+            Self::SmtColPath(chip) => chip.$method($($arg),*),
+            Self::SmtTablePath(chip) => chip.$method($($arg),*),
         }
     };
 }
@@ -118,11 +149,17 @@ impl<F> BaseAir<F> for TabulaAir {
             Self::ExecutionStandard(chip) => <ExecutionChip<3> as BaseAir<F>>::width(chip),
             Self::StateColumnStandard(chip) => <StateColumnChip<3> as BaseAir<F>>::width(chip),
             Self::InterTxOrderStandard(chip) => <InterTxOrderChip<3> as BaseAir<F>>::width(chip),
+            Self::StaticTableStandard(chip) => <StaticTableChip<3> as BaseAir<F>>::width(chip),
+            Self::SmtColPath(chip) => <SmtColPathChip as BaseAir<F>>::width(chip),
+            Self::SmtTablePath(chip) => <SmtTablePathChip as BaseAir<F>>::width(chip),
         }
     }
 }
 
-impl<AB: InteractionAirBuilder> Air<AB> for TabulaAir {
+impl<AB> Air<AB> for TabulaAir
+where
+    AB: InteractionAirBuilder + AirBuilderWithPublicValues,
+{
     fn eval(&self, builder: &mut AB) {
         dispatch_tabula_air!(self, eval, builder)
     }

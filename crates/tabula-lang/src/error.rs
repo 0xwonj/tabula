@@ -58,7 +58,14 @@ impl fmt::Display for ErrorDisplay<'_> {
         writeln!(f, "error[{:?}]: {}", self.error.kind, self.error.message)?;
 
         // Location: --> line:col
-        writeln!(f, "{:>width$}--> {}:{}", "", line, col, width = gutter_width)?;
+        writeln!(
+            f,
+            "{:>width$}--> {}:{}",
+            "",
+            line,
+            col,
+            width = gutter_width
+        )?;
 
         // Gutter separator
         writeln!(f, "{:>width$} |", "", width = gutter_width)?;
@@ -71,7 +78,9 @@ impl fmt::Display for ErrorDisplay<'_> {
         let line_start_offset = self.error.span.start - (col - 1);
         let line_end_offset = line_start_offset + line_text.len();
         let span_end_on_line = self.error.span.end.min(line_end_offset);
-        let underline_width = span_end_on_line.saturating_sub(self.error.span.start).max(1);
+        let underline_width = span_end_on_line
+            .saturating_sub(self.error.span.start)
+            .max(1);
 
         write!(
             f,

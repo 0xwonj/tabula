@@ -346,8 +346,7 @@ fn invalid_forged_has_ever_written() {
         borrow_cols_mut(&mut trace.values[width..2 * width]);
     cols.has_ever_written = BabyBear::ONE;
 
-    debug_check(&InterTxOrderChip::<3>, &trace)
-        .expect_err("forged has_ever_written should fail");
+    debug_check(&InterTxOrderChip::<3>, &trace).expect_err("forged has_ever_written should fail");
 }
 
 // ── Helper functions ──

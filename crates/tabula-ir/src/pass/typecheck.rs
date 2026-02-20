@@ -69,7 +69,7 @@ pub fn check(
                 col,
                 row,
             } => {
-                check_row_expr(row, param_count, &slot_types, i)?;
+                check_row_expr(row, param_count, &param_types, &slot_types, i)?;
                 let ty = schema_col_type(schemas, table, col);
                 assign_slot(
                     *dst_val,
@@ -96,7 +96,7 @@ pub fn check(
                 src_val,
                 src_is_null,
             } => {
-                check_row_expr(row, param_count, &slot_types, i)?;
+                check_row_expr(row, param_count, &param_types, &slot_types, i)?;
                 check_value_expr(src_val, param_count, &slot_types, i)?;
                 check_value_expr(src_is_null, param_count, &slot_types, i)?;
                 if let Some(expected) = schema_col_type(schemas, table, col)
@@ -123,7 +123,7 @@ pub fn check(
                 col,
                 row,
             } => {
-                check_row_expr(row, param_count, &slot_types, i)?;
+                check_row_expr(row, param_count, &param_types, &slot_types, i)?;
                 let ty = schema_col_type(schemas, static_table, col);
                 assign_slot(
                     *dst,
@@ -315,13 +315,34 @@ pub fn check(
 fn check_row_expr(
     expr: &RowExpr,
     param_count: u16,
+    param_types: &[ValueType],
     slot_types: &[Option<ValueType>],
     instr_idx: usize,
 ) -> Result<(), TabulaError> {
     match expr {
         RowExpr::Literal(_) => Ok(()),
-        RowExpr::Param(idx) => check_param_idx(*idx, param_count, instr_idx),
-        RowExpr::Slot(idx) => check_slot_defined(*idx, slot_types, instr_idx),
+        RowExpr::Param(idx) => {
+            check_param_idx(*idx, param_count, instr_idx)?;
+            if let Some(ty) = param_types.get(*idx as usize)
+                && *ty != ValueType::U64
+            {
+                return Err(TabulaError::InvalidIr(format!(
+                    "instruction {instr_idx}: row expression param {idx} must be U64, got {ty:?}"
+                )));
+            }
+            Ok(())
+        }
+        RowExpr::Slot(idx) => {
+            check_slot_defined(*idx, slot_types, instr_idx)?;
+            if let Some(Some(ty)) = slot_types.get(*idx as usize)
+                && *ty != ValueType::U64
+            {
+                return Err(TabulaError::InvalidIr(format!(
+                    "instruction {instr_idx}: row expression slot {idx} must be U64, got {ty:?}"
+                )));
+            }
+            Ok(())
+        }
     }
 }
 

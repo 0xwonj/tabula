@@ -23,7 +23,9 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
 use crate::air::builder::InteractionAirBuilder;
-use crate::air::bus::{CommitmentAirBuilder, EmptyColReadAirBuilder, PoseidonAirBuilder};
+use crate::air::bus::{
+    CommitmentAirBuilder, EmptyColReadAirBuilder, PoseidonAirBuilder, SmtLeafDigestAirBuilder,
+};
 use crate::air::columns::borrow_cols;
 use crate::air::gadgets::{
     constrain_is_real_prefix, constrain_is_zero, constrain_lex_direction, send_lex_range_checks,
@@ -196,6 +198,97 @@ impl<AB: InteractionAirBuilder> Air<AB> for ColumnMetaChip {
             &local.empty_perm_input,
             &local.empty_perm_output,
             local.is_real.clone().into() * local.has_empty_check.clone().into(),
+        );
+
+        // ── Leaf digest (M11 Phase 3) ──
+        constrain_leaf_digest(builder, local);
+
+        // C5 PoseidonPermutation send: leaf digest old
+        builder.send_poseidon_perm(
+            &local.leaf_perm_input_old,
+            &local.leaf_digest_old,
+            local.is_real.clone().into(),
+        );
+
+        // C5 PoseidonPermutation send: leaf digest new
+        builder.send_poseidon_perm(
+            &local.leaf_perm_input_new,
+            &local.leaf_digest_new,
+            local.is_real.clone().into(),
+        );
+
+        // C15 SmtLeafDigest send
+        builder.send_smt_leaf_digest(
+            local.table_id.clone().into(),
+            local.col_id.clone().into(),
+            &local.leaf_digest_old,
+            &local.leaf_digest_new,
+            local.is_real.clone().into(),
+        );
+    }
+}
+
+/// Leaf digest perm input composition:
+/// `leaf_perm_input = [DOMAIN_LEAF, table_id, col_id, tag, 0, 0, 0, 0, com[8]]`
+///
+/// This mirrors the single-permutation compress used in `HybridVC::compute_leaf()`.
+fn constrain_leaf_digest<AB: AirBuilder>(builder: &mut AB, local: &ColumnMetaCols<AB::Var>) {
+    let is_real: AB::Expr = local.is_real.clone().into();
+
+    // Old leaf: perm_input[0] = 0x10 (DOMAIN_LEAF)
+    builder.assert_zero(
+        is_real.clone() * (local.leaf_perm_input_old[0].clone().into() - AB::Expr::from_u64(0x10)),
+    );
+    // perm_input[1] = table_id
+    builder.assert_zero(
+        is_real.clone()
+            * (local.leaf_perm_input_old[1].clone().into() - local.table_id.clone().into()),
+    );
+    // perm_input[2] = col_id
+    builder.assert_zero(
+        is_real.clone()
+            * (local.leaf_perm_input_old[2].clone().into() - local.col_id.clone().into()),
+    );
+    // perm_input[3] = tag
+    builder.assert_zero(
+        is_real.clone() * (local.leaf_perm_input_old[3].clone().into() - local.tag.clone().into()),
+    );
+    // perm_input[4..8] = 0 (zero padding)
+    for i in 4..8 {
+        builder.assert_zero(is_real.clone() * local.leaf_perm_input_old[i].clone().into());
+    }
+    // perm_input[8..16] = com_old[0..8]
+    for i in 0..DIGEST_WIDTH {
+        builder.assert_zero(
+            is_real.clone()
+                * (local.leaf_perm_input_old[8 + i].clone().into()
+                    - local.com_old[i].clone().into()),
+        );
+    }
+
+    // New leaf: same structure with com_new
+    builder.assert_zero(
+        is_real.clone() * (local.leaf_perm_input_new[0].clone().into() - AB::Expr::from_u64(0x10)),
+    );
+    builder.assert_zero(
+        is_real.clone()
+            * (local.leaf_perm_input_new[1].clone().into() - local.table_id.clone().into()),
+    );
+    builder.assert_zero(
+        is_real.clone()
+            * (local.leaf_perm_input_new[2].clone().into() - local.col_id.clone().into()),
+    );
+    builder.assert_zero(
+        is_real.clone() * (local.leaf_perm_input_new[3].clone().into() - local.tag.clone().into()),
+    );
+    for i in 4..8 {
+        builder.assert_zero(is_real.clone() * local.leaf_perm_input_new[i].clone().into());
+    }
+    for i in 0..DIGEST_WIDTH {
+        builder.assert_zero(
+            is_real.clone()
+                * (local.leaf_perm_input_new[8 + i].clone().into()
+                    - local.com_new[i].clone().into()),
         );
     }
 }

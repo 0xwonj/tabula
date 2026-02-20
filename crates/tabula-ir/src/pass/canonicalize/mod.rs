@@ -1,8 +1,9 @@
 //! IR canonicalization: automatically fix fixable NF violations.
 //!
-//! Pipeline: NF-1 read dedup → slot alias rewriting → slot renumbering.
+//! Pipeline: NF-1 read dedup → slot alias rewriting → NF-4 alias guard → slot renumbering.
 
 mod nf1_dedup_read;
+mod nf4_alias_guard;
 
 use std::collections::BTreeMap;
 
@@ -10,11 +11,15 @@ use crate::{Instruction, Slot};
 
 /// Canonicalize an instruction body.
 ///
-/// Currently performs NF-1 read deduplication and slot compaction.
-/// Returns a new body with duplicate reads removed and slots renumbered.
+/// Pipeline:
+/// 1. NF-1 read deduplication (remove duplicate reads to same cell)
+/// 2. Slot alias rewriting (fix references to removed slots)
+/// 3. NF-4 alias guard insertion (Cmp(Ne)+Assert for write-involved ambiguous pairs)
+/// 4. Slot renumbering (compact to contiguous 0..N-1)
 pub fn canonicalize(body: Vec<Instruction>) -> Vec<Instruction> {
     let (body, alias_map) = nf1_dedup_read::dedup_reads(body);
     let body = apply_slot_aliases(body, &alias_map);
+    let body = nf4_alias_guard::insert_alias_guards(body);
     renumber_slots(body)
 }
 

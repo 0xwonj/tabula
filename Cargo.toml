@@ -8,6 +8,7 @@ members = [
     "crates/tabula-proof",
     "crates/tabula-lang",
     "crates/tabula-cli",
+    "crates/tabula-daemon",
 ]
 
 [workspace.package]

@@ -2,7 +2,7 @@
 
 use super::*;
 
-use tabula_ir::{ArithOp, CmpOp};
+use tabula_ir::{ArithOp, CmpOp, RowExpr};
 
 use crate::ast::{BinOp, Expr, ExprKind, UnaryOp};
 
@@ -195,9 +195,77 @@ impl<'a> TxLower<'a> {
         match &expr.kind {
             ExprKind::IntLit(n) => Some(RowExpr::Literal(tabula_core::RowKey(*n))),
             ExprKind::Ident(name) => {
-                if let Some(binding) = self.locals.get(name) {
-                    Some(binding.to_row_expr())
-                } else if let Some((idx, _)) = self.params.get(name) {
+                if let Some(binding) = self.locals.get(name).cloned() {
+                    match binding {
+                        Binding::Slot(slot, ty) => {
+                            if ty != ValueType::U64 {
+                                self.errors.push(CompileError::new(
+                                    ErrorKind::TypeMismatch,
+                                    expr.span,
+                                    format!(
+                                        "row key expression must have type u64, found {:?}",
+                                        ty
+                                    ),
+                                ));
+                                return None;
+                            }
+                            Some(RowExpr::Slot(slot))
+                        }
+                        Binding::ReadSlot { val, ty, .. } => {
+                            if ty != ValueType::U64 {
+                                self.errors.push(CompileError::new(
+                                    ErrorKind::TypeMismatch,
+                                    expr.span,
+                                    format!(
+                                        "row key expression must have type u64, found {:?}",
+                                        ty
+                                    ),
+                                ));
+                                return None;
+                            }
+                            Some(RowExpr::Slot(val))
+                        }
+                        Binding::Alias(value_expr, ty) => {
+                            if ty != ValueType::U64 {
+                                self.errors.push(CompileError::new(
+                                    ErrorKind::TypeMismatch,
+                                    expr.span,
+                                    format!(
+                                        "row key expression must have type u64, found {:?}",
+                                        ty
+                                    ),
+                                ));
+                                return None;
+                            }
+                            match value_expr {
+                                ValueExpr::Literal(Value::U64(n)) => {
+                                    Some(RowExpr::Literal(tabula_core::RowKey(n)))
+                                }
+                                ValueExpr::Slot(slot) => Some(RowExpr::Slot(slot)),
+                                ValueExpr::Param(param) => Some(RowExpr::Param(param)),
+                                ValueExpr::Literal(other) => {
+                                    self.errors.push(CompileError::new(
+                                        ErrorKind::TypeMismatch,
+                                        expr.span,
+                                        format!(
+                                            "row key expression must have type u64, found {}",
+                                            other.type_name()
+                                        ),
+                                    ));
+                                    None
+                                }
+                            }
+                        }
+                    }
+                } else if let Some((idx, ty)) = self.params.get(name) {
+                    if *ty != ValueType::U64 {
+                        self.errors.push(CompileError::new(
+                            ErrorKind::TypeMismatch,
+                            expr.span,
+                            format!("row key expression must have type u64, found {:?}", ty),
+                        ));
+                        return None;
+                    }
                     Some(RowExpr::Param(*idx))
                 } else {
                     self.errors.push(CompileError::new(

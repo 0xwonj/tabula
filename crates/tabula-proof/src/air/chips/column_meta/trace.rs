@@ -96,6 +96,36 @@ pub fn generate_column_meta_trace(
             let perm_output: [BabyBear; 8] = core::array::from_fn(|j| perm_output_full[j]);
             cols.empty_perm_output = perm_output;
         }
+
+        // Leaf digest (M11 Phase 3)
+        {
+            let tag_fe = match meta.tag {
+                tabula_commitment::CommitmentStrategy::Ssmc => BabyBear::ZERO,
+                tabula_commitment::CommitmentStrategy::Smt => BabyBear::ONE,
+            };
+
+            // Old leaf perm input: [0x10, t, c, tag, 0,0,0,0, com_old[8]]
+            let mut leaf_input_old = [BabyBear::ZERO; 16];
+            leaf_input_old[0] = BabyBear::new(0x10);
+            leaf_input_old[1] = BabyBear::new(meta.table.0);
+            leaf_input_old[2] = BabyBear::new(meta.col.0 as u32);
+            leaf_input_old[3] = tag_fe;
+            leaf_input_old[8..16].copy_from_slice(&meta.com_old.0);
+            cols.leaf_perm_input_old = leaf_input_old;
+            let (_rounds, perm_out_old) = poseidon2_permutation(leaf_input_old);
+            cols.leaf_digest_old = core::array::from_fn(|j| perm_out_old[j]);
+
+            // New leaf perm input: [0x10, t, c, tag, 0,0,0,0, com_new[8]]
+            let mut leaf_input_new = [BabyBear::ZERO; 16];
+            leaf_input_new[0] = BabyBear::new(0x10);
+            leaf_input_new[1] = BabyBear::new(meta.table.0);
+            leaf_input_new[2] = BabyBear::new(meta.col.0 as u32);
+            leaf_input_new[3] = tag_fe;
+            leaf_input_new[8..16].copy_from_slice(&meta.com_new.0);
+            cols.leaf_perm_input_new = leaf_input_new;
+            let (_rounds, perm_out_new) = poseidon2_permutation(leaf_input_new);
+            cols.leaf_digest_new = core::array::from_fn(|j| perm_out_new[j]);
+        }
     }
 
     // Padding rows: IsZero witnesses must be consistent with the actual diffs.

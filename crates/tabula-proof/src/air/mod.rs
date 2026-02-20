@@ -32,16 +32,28 @@ pub use chips::poseidon::POSEIDON_PERM_WIDTH;
 pub use chips::range_check::{
     RangeCheckChip, generate_range_check_preprocessed, generate_range_check_trace,
 };
+pub use chips::smt_path::{
+    SMT_COL_PATH_WIDTH, SMT_TABLE_PATH_NEW_ROOT_PV_OFFSET, SMT_TABLE_PATH_NUM_PUBLIC_VALUES,
+    SMT_TABLE_PATH_OLD_ROOT_PV_OFFSET, SMT_TABLE_PATH_WIDTH, SmtColPathChip, SmtPathCols,
+    SmtPathWitness, SmtTablePathChip, SmtTablePathCols, SmtTablePathWitness,
+    generate_smt_col_path_trace, generate_smt_table_path_trace,
+};
 pub use chips::state_column::{
     STATE_COLUMN_STANDARD_WIDTH, StateColumnChip, StateColumnCols, StateColumnRow,
     generate_state_column_trace, state_column_width,
 };
+pub use chips::static_table::{
+    STATIC_TABLE_STANDARD_WIDTH, StaticTableChip, StaticTableCols, StaticTableRow,
+    generate_static_table_trace, static_table_width,
+};
 pub use chips::{ChipMeta, TabulaAir};
 pub use columns::{borrow_cols, borrow_cols_mut, num_cols};
 pub use debug::{
-    ChipRecord, ChipTrace, check_bus_balance, check_logup_balance, debug_check, debug_check_all,
-    debug_check_logup, debug_check_with_preprocessed, evaluate_chip,
-    evaluate_chip_with_preprocessed,
+    ChipRecord, ChipTrace, check_bus_balance, check_logup_balance, check_public_input_binding,
+    debug_check, debug_check_all, debug_check_logup, debug_check_with_preprocessed,
+    debug_check_with_preprocessed_and_public_values, debug_check_with_public_values, evaluate_chip,
+    evaluate_chip_with_preprocessed, evaluate_chip_with_preprocessed_and_public_values,
+    evaluate_chip_with_public_values,
 };
 pub use gadgets::bool_fe;
 pub use gadgets::{
@@ -55,5 +67,6 @@ pub use interaction::{AirInteraction, InteractionKind};
 pub use bus::{
     BaseStateEntryAirBuilder, CoalescedWriteAirBuilder, CommitmentAirBuilder,
     EmptyColReadAirBuilder, PoseidonAirBuilder, RangeCheckAirBuilder, ReadAccessAirBuilder,
-    StaticTableLookupAirBuilder, WriteAccessAirBuilder,
+    SmtLeafDigestAirBuilder, SmtTableRootAirBuilder, StaticTableLookupAirBuilder,
+    WriteAccessAirBuilder,
 };

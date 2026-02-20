@@ -53,6 +53,16 @@ pub struct ColumnMetaCols<T> {
     pub empty_perm_output: [T; DIGEST_WIDTH],
     /// 1 if any empty verification needed (is_empty_old OR is_empty_new).
     pub has_empty_check: T,
+
+    // ── Leaf digest (M11 Phase 3) ──
+    /// Poseidon input for old leaf: `[0x10, t, c, tag, 0,0,0,0, com_old[8]]`.
+    pub leaf_perm_input_old: [T; 16],
+    /// Poseidon output: old leaf digest (8 FE).
+    pub leaf_digest_old: [T; DIGEST_WIDTH],
+    /// Poseidon input for new leaf: `[0x10, t, c, tag, 0,0,0,0, com_new[8]]`.
+    pub leaf_perm_input_new: [T; 16],
+    /// Poseidon output: new leaf digest (8 FE).
+    pub leaf_digest_new: [T; DIGEST_WIDTH],
 }
 
 /// Width of the ColumnMeta trace.

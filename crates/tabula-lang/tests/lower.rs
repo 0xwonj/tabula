@@ -297,6 +297,22 @@ fn test_lower_undefined_table() {
     assert!(err.iter().any(|e| e.kind == ErrorKind::UndefinedTable));
 }
 
+#[test]
+fn test_lower_row_key_param_must_be_u64() {
+    let tokens = lex("table t { v: u64 }\ntx bad(id: bool) { t[id].v = 1 }").unwrap();
+    let ast = parse(tokens).unwrap();
+    let err = lower(&ast).unwrap_err();
+    assert!(err.iter().any(|e| e.kind == ErrorKind::TypeMismatch));
+}
+
+#[test]
+fn test_lower_row_key_alias_bool_rejected() {
+    let tokens = lex("table t { v: u64 }\ntx bad(id: u64) { let b = true\nt[b].v = 1 }").unwrap();
+    let ast = parse(tokens).unwrap();
+    let err = lower(&ast).unwrap_err();
+    assert!(err.iter().any(|e| e.kind == ErrorKind::TypeMismatch));
+}
+
 // --- Full transfer ---
 
 #[test]

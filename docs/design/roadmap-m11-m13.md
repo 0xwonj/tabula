@@ -13,6 +13,11 @@ non-membership via gap witnesses, and connect public inputs to the AIR.
 
 **Depends on**: M10 (range checks required for gap witness strict inequalities)
 
+> Status update (February 2026): core M11 state-root binding is implemented on the
+> current chip architecture (`ColumnMeta -> SmtColPath -> SmtTablePath`, C9 StaticTable
+> receiver, root public-value constraints). Remaining end-to-end work is tracked under
+> M12 (trace assembly) and M13 (prover/verifier integration).
+
 ### Scope
 
 | Task | Description | Complexity |
@@ -146,15 +151,15 @@ non-membership via gap witnesses, and connect public inputs to the AIR.
 ## Dependency Graph
 
 ```
-M10: Constraint Completeness
+✅ M10: Constraint Completeness
   │   Range checks, lex ordering, opcodes (Cmp/Hash/Lookup/Mul/DivMod), Com_empty
   │
   ▼
-M11: State Root + Gap Proofs
+✅ M11: State Root + Gap Proofs (core)
   │   SmtPathChip, SSMC next_key + gap witness, public inputs, StaticTableChip
   │
   ▼
-M12: Trace Assembly
+► M12: Trace Assembly
   │   Instruction lowering, BatchWitness → chip traces, integration tests
   │
   ▼

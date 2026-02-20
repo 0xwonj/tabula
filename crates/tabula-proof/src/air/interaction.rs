@@ -40,6 +40,10 @@ pub enum InteractionKind {
     BaseStateEntry = 13,
     /// InterTxOrder → StateColumn (coalesced writes from last-for-key rows).
     CoalescedWrite = 14,
+    /// ColumnMeta → SmtColPathChip (leaf digests for SMT column paths).
+    SmtLeafDigest = 15,
+    /// SmtColPathChip → SmtTablePathChip (per-table SMT roots).
+    SmtTableRoot = 16,
 }
 
 impl InteractionKind {
@@ -172,6 +176,8 @@ mod tests {
             InteractionKind::EmptyColRead,
             InteractionKind::BaseStateEntry,
             InteractionKind::CoalescedWrite,
+            InteractionKind::SmtLeafDigest,
+            InteractionKind::SmtTableRoot,
         ];
         let mut tags: Vec<u8> = kinds.iter().map(|k| k.tag()).collect();
         tags.sort();

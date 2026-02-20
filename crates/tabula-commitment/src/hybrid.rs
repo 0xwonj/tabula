@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 
 use p3_baby_bear::BabyBear;
+use p3_field::PrimeCharacteristicRing;
 
 use tabula_core::{ColId, RowKey, TableId};
 
@@ -26,7 +27,9 @@ const COL_DATA_SMT_DEPTH: usize = 32;
 const COL_STATE_SMT_DEPTH: usize = 16;
 
 /// Depth for the table-level state SMT (`SMT_tables`).
-const TABLE_STATE_SMT_DEPTH: usize = 32;
+///
+/// 2^30 ≈ 1B tables, sufficient. 2^31 > BabyBear p, so depth 32 is unsafe.
+const TABLE_STATE_SMT_DEPTH: usize = 30;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -208,7 +211,10 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
 
     /// Compute the ColumnMeta leaf digest.
     ///
-    /// `Poseidon(DOMAIN_LEAF || t || c || tag || Com[0..8])`
+    /// Single-permutation compress:
+    /// `compress([0x10, t, c, tag, 0, 0, 0, 0], com[8])`
+    ///
+    /// The left half carries the domain tag + identity; the right half is the commitment.
     pub fn compute_leaf(
         &self,
         table: TableId,
@@ -220,12 +226,17 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
             CommitmentStrategy::Ssmc => 0,
             CommitmentStrategy::Smt => 1,
         };
-        let mut input = Vec::with_capacity(3 + 8);
-        input.push(BabyBear::new(table.0));
-        input.push(BabyBear::new(col.0 as u32));
-        input.push(BabyBear::new(tag_val));
-        input.extend_from_slice(&commitment.0);
-        self.hasher.hash_domain(DOMAIN_LEAF, &input)
+        let left = NativeDigest([
+            BabyBear::new(DOMAIN_LEAF),
+            BabyBear::new(table.0),
+            BabyBear::new(col.0 as u32),
+            BabyBear::new(tag_val),
+            BabyBear::ZERO,
+            BabyBear::ZERO,
+            BabyBear::ZERO,
+            BabyBear::ZERO,
+        ]);
+        self.hasher.compress(&left, commitment)
     }
 
     /// Build column-level SMT from column leaves.
@@ -241,15 +252,24 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
 
     /// Build table-level SMT from table roots.
     ///
-    /// `SMT_tables(depth=32, domain=DOMAIN_TABLE)`.
+    /// `SMT_tables(depth=30, domain=DOMAIN_TABLE)`.
     pub fn compute_state_root(
         &self,
         table_roots: &BTreeMap<TableId, NativeDigest>,
     ) -> NativeDigest {
         let mut tree =
             SparseMerkleTree::new(self.hasher.clone(), TABLE_STATE_SMT_DEPTH, DOMAIN_TABLE);
+        let table_domain_size = 1u64 << TABLE_STATE_SMT_DEPTH;
         for (&table, &root) in table_roots {
-            tree.insert(table.0 as u64, root);
+            let table_key = table.0 as u64;
+            assert!(
+                table_key < table_domain_size,
+                "table id {} out of range for TABLE_STATE_SMT_DEPTH={} (max allowed: {})",
+                table.0,
+                TABLE_STATE_SMT_DEPTH,
+                table_domain_size - 1
+            );
+            tree.insert(table_key, root);
         }
         tree.root()
     }
@@ -377,6 +397,18 @@ mod tests {
         single.insert(TableId(1), NativeDigest([BabyBear::new(1); 8]));
 
         assert_ne!(h.compute_state_root(&tables), h.compute_state_root(&single));
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn state_root_rejects_out_of_range_table_id() {
+        let h = vc(10);
+        let mut tables = BTreeMap::new();
+        tables.insert(
+            TableId(1u32 << TABLE_STATE_SMT_DEPTH),
+            NativeDigest([BabyBear::new(7); 8]),
+        );
+        let _ = h.compute_state_root(&tables);
     }
 
     // ── apply_column_writes ────────────────────────────────────────────────

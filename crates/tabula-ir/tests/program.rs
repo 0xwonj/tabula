@@ -148,6 +148,63 @@ fn test_param_out_of_bounds_rejected() {
 }
 
 #[test]
+fn test_row_param_non_u64_rejected() {
+    let def = TxTypeDef {
+        id: TxTypeId(20),
+        name: "bad_row_param".into(),
+        param_schema: vec![ParamDef {
+            name: "row".into(),
+            value_type: ValueType::Bool,
+        }],
+        body: vec![Instruction::Write {
+            table: TableId(1),
+            row: RowExpr::Param(0),
+            col: ColId(0),
+            src_val: ValueExpr::Literal(Value::U64(1)),
+            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+        }],
+    };
+    let mut prog = Program::new();
+    prog.add_schema(balances_schema());
+    let err = prog.register(def).unwrap_err();
+    assert!(matches!(
+        err,
+        TabulaError::InvalidIr(ref msg) if msg.contains("row expression param")
+    ));
+}
+
+#[test]
+fn test_row_slot_non_u64_rejected() {
+    let def = TxTypeDef {
+        id: TxTypeId(21),
+        name: "bad_row_slot".into(),
+        param_schema: vec![],
+        body: vec![
+            Instruction::Cmp {
+                dst: 0,
+                op: CmpOp::Eq,
+                lhs: ValueExpr::Literal(Value::Bool(true)),
+                rhs: ValueExpr::Literal(Value::Bool(false)),
+            },
+            Instruction::Write {
+                table: TableId(1),
+                row: RowExpr::Slot(0),
+                col: ColId(0),
+                src_val: ValueExpr::Literal(Value::U64(1)),
+                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            },
+        ],
+    };
+    let mut prog = Program::new();
+    prog.add_schema(balances_schema());
+    let err = prog.register(def).unwrap_err();
+    assert!(matches!(
+        err,
+        TabulaError::InvalidIr(ref msg) if msg.contains("row expression slot")
+    ));
+}
+
+#[test]
 fn test_slot_read_before_assign_rejected() {
     let def = TxTypeDef {
         id: TxTypeId(4),
@@ -649,7 +706,8 @@ fn test_nf3_read_after_write_rejected() {
 }
 
 #[test]
-fn test_nf4_ambiguous_alias_rejected() {
+fn test_nf4_write_involved_ambiguous_auto_guarded() {
+    // Slot(0) vs Param(0) with read+write: canonicalize auto-inserts guard.
     let def = TxTypeDef {
         id: TxTypeId(33),
         name: "ambiguous".into(),
@@ -681,12 +739,12 @@ fn test_nf4_ambiguous_alias_rejected() {
         ],
     };
     let mut prog = Program::new();
-    let err = prog.register(def).unwrap_err();
-    assert!(matches!(err, TabulaError::NfAmbiguousAlias { .. }));
+    prog.register(def).unwrap(); // succeeds: canonicalize inserts guard
 }
 
 #[test]
-fn test_nf4_different_params_ambiguous() {
+fn test_nf4_read_read_ambiguous_allowed() {
+    // Read-read ambiguous pairs are safe under SSA — no guard needed.
     let def = TxTypeDef {
         id: TxTypeId(34),
         name: "diff_params".into(),
@@ -718,8 +776,7 @@ fn test_nf4_different_params_ambiguous() {
         ],
     };
     let mut prog = Program::new();
-    let err = prog.register(def).unwrap_err();
-    assert!(matches!(err, TabulaError::NfAmbiguousAlias { .. }));
+    prog.register(def).unwrap(); // succeeds: read-read ambiguous is safe
 }
 
 #[test]

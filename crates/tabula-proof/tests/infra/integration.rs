@@ -1,18 +1,39 @@
 //! Multi-chip integration tests: end-to-end LogUp bus verification.
 //!
-//! Tests coordinated traces across Execution → InterTxOrder → StateColumn.
+//! Tests coordinated traces across Execution → InterTxOrder → StateColumn,
+//! and ColumnMeta → SmtColPath → SmtTablePath.
+
+use std::collections::BTreeMap;
 
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
+use tabula_commitment::{ColumnMeta, CommitmentStrategy, NativeDigest};
+use tabula_core::{ColId, TableId};
+
+use tabula_proof::air::SMT_TABLE_PATH_WIDTH;
+use tabula_proof::air::chips::column_meta::air::ColumnMetaChip;
+use tabula_proof::air::chips::column_meta::trace::generate_column_meta_trace;
 use tabula_proof::air::chips::execution::air::ExecutionChip;
 use tabula_proof::air::chips::execution::trace::generate_execution_trace;
 use tabula_proof::air::chips::inter_tx_order::air::InterTxOrderChip;
 use tabula_proof::air::chips::inter_tx_order::trace::generate_inter_tx_order_trace;
+use tabula_proof::air::chips::poseidon::air::PoseidonChip;
+use tabula_proof::air::chips::poseidon::constants::poseidon2_permutation;
+use tabula_proof::air::chips::poseidon::trace::{
+    generate_poseidon_preprocessed, generate_poseidon_trace,
+};
+use tabula_proof::air::chips::smt_path::air::{SmtColPathChip, SmtTablePathChip};
+use tabula_proof::air::chips::smt_path::trace::{
+    SmtPathWitness, SmtTablePathWitness, generate_smt_col_path_trace, generate_smt_table_path_trace,
+};
 use tabula_proof::air::chips::state_column::air::StateColumnChip;
-use tabula_proof::air::chips::state_column::trace::{EntrySource, StateColumnRow};
 use tabula_proof::air::chips::state_column::trace::generate_state_column_trace;
-use tabula_proof::air::debug::{check_bus_balance, evaluate_chip};
+use tabula_proof::air::chips::state_column::trace::{EntrySource, StateColumnRow};
+use tabula_proof::air::debug::{
+    check_bus_balance, check_public_input_binding, evaluate_chip, evaluate_chip_with_preprocessed,
+    evaluate_chip_with_public_values,
+};
 use tabula_proof::air::interaction::InteractionKind;
 
 use crate::common::builders::{
@@ -205,7 +226,7 @@ fn multi_key_read_then_write() {
         old_hash_acc: [BabyBear::ZERO; 8],
         new_hash_acc: [BabyBear::ZERO; 8],
         read_mult: true,  // receives C13 (null base state)
-        write_mult: true,  // receives C14 (write)
+        write_mult: true, // receives C14 (write)
     };
     let sc_trace = generate_state_column_trace::<3>(&[sc_old, sc_new]);
     let sc_record = evaluate_chip("StateColumn", &StateColumnChip::<3>, &sc_trace).unwrap();
@@ -220,4 +241,232 @@ fn multi_key_read_then_write() {
     // C14: ITO sends 1 coalesced write (key=200, val=42) → SC receives 1
     check_bus_balance(&[ito_record, sc_record], InteractionKind::CoalescedWrite)
         .expect("C14 should balance for multi-key");
+}
+
+// ── SMT state root binding: ColumnMeta → SmtColPath → SmtTablePath ──
+
+/// Helper: compute leaf digest via Poseidon permutation (matches ColumnMeta trace gen).
+fn compute_leaf_digest(table: u32, col: u32, tag: u32, com: &NativeDigest) -> NativeDigest {
+    let mut perm_input = [BabyBear::ZERO; 16];
+    perm_input[0] = BabyBear::new(0x10); // DOMAIN_LEAF
+    perm_input[1] = BabyBear::new(table);
+    perm_input[2] = BabyBear::new(col);
+    perm_input[3] = BabyBear::new(tag);
+    perm_input[8..16].copy_from_slice(&com.0);
+    let (_rounds, out) = poseidon2_permutation(perm_input);
+    NativeDigest(core::array::from_fn(|j| out[j]))
+}
+
+/// Helper: compress two 8-FE digests via Poseidon permutation.
+fn poseidon_compress(left: &NativeDigest, right: &NativeDigest) -> NativeDigest {
+    let mut perm_input = [BabyBear::ZERO; 16];
+    perm_input[..8].copy_from_slice(&left.0);
+    perm_input[8..16].copy_from_slice(&right.0);
+    let (_rounds, out) = poseidon2_permutation(perm_input);
+    NativeDigest(core::array::from_fn(|j| out[j]))
+}
+
+/// End-to-end: ColumnMeta → SmtColPath → SmtTablePath with public input check.
+///
+/// Scenario: table 1 has 1 column (col 0) with different commitments
+/// before and after the batch. Verifies:
+/// - C15 balance (ColumnMeta → SmtColPath)
+/// - C16 balance (SmtColPath → SmtTablePath)
+/// - Public input binding (SmtTablePath root matches expected state root)
+/// - C5 balance (all Poseidon permutations across ColumnMeta + both SMT chips)
+#[test]
+fn smt_state_root_end_to_end() {
+    // ── Setup: single column (table 1, col 0) ──
+    let com_old = NativeDigest(core::array::from_fn(|i| BabyBear::new(100 + i as u32)));
+    let com_new = NativeDigest(core::array::from_fn(|i| BabyBear::new(200 + i as u32)));
+    let old_leaf = compute_leaf_digest(1, 0, 0, &com_old);
+    let new_leaf = compute_leaf_digest(1, 0, 0, &com_new);
+
+    fn chain_compress(leaf: &NativeDigest, depth: usize) -> NativeDigest {
+        let mut node = *leaf;
+        for _ in 0..depth {
+            node = poseidon_compress(&node, &NativeDigest::ZERO);
+        }
+        node
+    }
+
+    fn chain_compress_key1(leaf: &NativeDigest, depth: usize) -> NativeDigest {
+        let mut node = *leaf;
+        for level in 0..depth {
+            if level == 0 {
+                node = poseidon_compress(&NativeDigest::ZERO, &node);
+            } else {
+                node = poseidon_compress(&node, &NativeDigest::ZERO);
+            }
+        }
+        node
+    }
+
+    // ── 1. ColumnMeta ──
+    let metas = vec![ColumnMeta {
+        table: TableId(1),
+        col: ColId(0),
+        tag: CommitmentStrategy::Ssmc,
+        com_old,
+        com_new,
+        is_empty_old: false,
+        is_empty_new: false,
+        is_touched: true,
+    }];
+    let cm_trace = generate_column_meta_trace(&metas, &BTreeMap::new());
+    let cm_record = evaluate_chip("ColumnMeta", &ColumnMetaChip, &cm_trace).unwrap();
+
+    // ── 2. SmtColPath ──
+    let col_path_witness = SmtPathWitness {
+        table_id: 1,
+        key: 0,
+        old_leaf,
+        new_leaf,
+        siblings: zero_siblings(3),
+        path_bits: vec![false, false, false],
+    };
+    let col_path_trace = generate_smt_col_path_trace(&[col_path_witness]);
+    let col_path_record = evaluate_chip("SmtColPath", &SmtColPathChip, &col_path_trace).unwrap();
+
+    // C15 balance: ColumnMeta → SmtColPath
+    check_bus_balance(
+        &[cm_record.clone(), col_path_record.clone()],
+        InteractionKind::SmtLeafDigest,
+    )
+    .expect("C15 SmtLeafDigest should balance");
+
+    // ── 3. SmtTablePath ──
+    let old_table_root = chain_compress(&old_leaf, 3);
+    let new_table_root = chain_compress(&new_leaf, 3);
+
+    let table_path = SmtTablePathWitness {
+        path: SmtPathWitness {
+            table_id: 1,
+            key: 1, // table_id used as key
+            old_leaf: old_table_root,
+            new_leaf: new_table_root,
+            siblings: zero_siblings(3),
+            path_bits: vec![true, false, false],
+        },
+        root_mult: 1, // 1 column in this table
+    };
+    let table_path_trace = generate_smt_table_path_trace(&[table_path]);
+    let old_state_root = chain_compress_key1(&old_table_root, 3);
+    let new_state_root = chain_compress_key1(&new_table_root, 3);
+    let mut pvs = Vec::with_capacity(16);
+    pvs.extend_from_slice(&old_state_root.0);
+    pvs.extend_from_slice(&new_state_root.0);
+    let table_path_record = evaluate_chip_with_public_values(
+        "SmtTablePath",
+        &SmtTablePathChip,
+        &table_path_trace,
+        &pvs,
+    )
+    .unwrap();
+
+    // C16 bus balance: SmtColPath → SmtTablePath
+    check_bus_balance(
+        &[col_path_record.clone(), table_path_record.clone()],
+        InteractionKind::SmtTableRoot,
+    )
+    .expect("C16 SmtTableRoot should balance");
+
+    // ── 4. Public input binding ──
+    check_public_input_binding(
+        &table_path_trace,
+        SMT_TABLE_PATH_WIDTH,
+        &old_state_root.0,
+        &new_state_root.0,
+    )
+    .expect("Public input binding should match SmtTablePath root rows");
+
+    // ── 5. C5 PoseidonPerm balance ──
+    // ColumnMeta: 2 perms (leaf old+new), SmtColPath: 6 (3 levels × 2), SmtTablePath: 6 = 14
+
+    let mut all_perm_inputs = Vec::new();
+
+    // ColumnMeta leaf perm inputs
+    let mut leaf_input_old = [BabyBear::ZERO; 16];
+    leaf_input_old[0] = BabyBear::new(0x10);
+    leaf_input_old[1] = BabyBear::new(1);
+    leaf_input_old[8..16].copy_from_slice(&com_old.0);
+    all_perm_inputs.push(leaf_input_old);
+
+    let mut leaf_input_new = [BabyBear::ZERO; 16];
+    leaf_input_new[0] = BabyBear::new(0x10);
+    leaf_input_new[1] = BabyBear::new(1);
+    leaf_input_new[8..16].copy_from_slice(&com_new.0);
+    all_perm_inputs.push(leaf_input_new);
+
+    fn make_compress_input(node: &NativeDigest, sib: &NativeDigest, bit: bool) -> [BabyBear; 16] {
+        let mut input = [BabyBear::ZERO; 16];
+        let (left, right) = if bit { (sib, node) } else { (node, sib) };
+        input[..8].copy_from_slice(&left.0);
+        input[8..16].copy_from_slice(&right.0);
+        input
+    }
+
+    // SmtColPath: key=0, bits=[false,false,false], zero siblings
+    let zero = NativeDigest::ZERO;
+    let inp = make_compress_input(&old_leaf, &zero, false);
+    all_perm_inputs.push(inp);
+    let level0_old = poseidon_compress(&old_leaf, &zero);
+    let inp = make_compress_input(&new_leaf, &zero, false);
+    all_perm_inputs.push(inp);
+    let level0_new = poseidon_compress(&new_leaf, &zero);
+    // Level 1 old
+    let inp = make_compress_input(&level0_old, &zero, false);
+    all_perm_inputs.push(inp);
+    let level1_old = poseidon_compress(&level0_old, &zero);
+    // Level 1 new
+    let inp = make_compress_input(&level0_new, &zero, false);
+    all_perm_inputs.push(inp);
+    let level1_new = poseidon_compress(&level0_new, &zero);
+    // Level 2 old
+    let inp = make_compress_input(&level1_old, &zero, false);
+    all_perm_inputs.push(inp);
+    // Level 2 new
+    let inp = make_compress_input(&level1_new, &zero, false);
+    all_perm_inputs.push(inp);
+
+    // SmtTablePath: key=1, bits=[true,false,false], zero siblings
+    let inp = make_compress_input(&old_table_root, &zero, true);
+    all_perm_inputs.push(inp);
+    let tl0_old = poseidon_compress(&zero, &old_table_root);
+    // Level 0 new
+    let inp = make_compress_input(&new_table_root, &zero, true);
+    all_perm_inputs.push(inp);
+    let tl0_new = poseidon_compress(&zero, &new_table_root);
+    // Level 1 old: bit=0
+    let inp = make_compress_input(&tl0_old, &zero, false);
+    all_perm_inputs.push(inp);
+    let tl1_old = poseidon_compress(&tl0_old, &zero);
+    // Level 1 new
+    let inp = make_compress_input(&tl0_new, &zero, false);
+    all_perm_inputs.push(inp);
+    let tl1_new = poseidon_compress(&tl0_new, &zero);
+    // Level 2 old
+    let inp = make_compress_input(&tl1_old, &zero, false);
+    all_perm_inputs.push(inp);
+    // Level 2 new
+    let inp = make_compress_input(&tl1_new, &zero, false);
+    all_perm_inputs.push(inp);
+
+    // Generate Poseidon trace with all inputs
+    let pos_trace = generate_poseidon_trace(&all_perm_inputs);
+    let pos_pre = generate_poseidon_preprocessed(all_perm_inputs.len());
+    let pos_record =
+        evaluate_chip_with_preprocessed("Poseidon", &PoseidonChip, &pos_trace, Some(&pos_pre))
+            .unwrap();
+
+    // C5 bus balance: all chips vs Poseidon
+    check_bus_balance(
+        &[cm_record, col_path_record, table_path_record, pos_record],
+        InteractionKind::PoseidonPermutation,
+    )
+    .expect("C5 PoseidonPermutation should balance across all SMT chips");
+}
+
+fn zero_siblings(depth: usize) -> Vec<NativeDigest> {
+    vec![NativeDigest::ZERO; depth]
 }

@@ -3,7 +3,7 @@
 use tabula_core::mock::{
     InMemoryState, InMemoryStaticTables, MockHasher, MockSigVerifier, SequentialNonce,
 };
-use tabula_core::{Batch, TxOutcome};
+use tabula_core::{Batch, CellKey, TxOutcome, Value};
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency;
 
@@ -29,7 +29,7 @@ pub fn cmd_execute(
     // Build state
     let mut state = InMemoryState::new();
     for cell in &state_file.cells {
-        let (key, value) = cell.to_cell_pair();
+        let (key, value) = cell.to_cell_pair()?;
         state.set(key, value);
     }
 
@@ -65,24 +65,7 @@ pub fn cmd_execute(
 
     // Build output state if requested
     if let Some(out_path) = output_state_path {
-        let mut new_state = state_file.cells.clone();
-        // Apply write set
-        for (key, value) in &result.write_set_final {
-            let cell = StateCell::from_cell_pair(key, value);
-            if let Some(pos) = new_state
-                .iter()
-                .position(|c| c.table == cell.table && c.row == cell.row && c.col == cell.col)
-            {
-                if value.is_none() {
-                    // Deleted cell — remove from state
-                    new_state.remove(pos);
-                } else {
-                    new_state[pos].value = cell.value;
-                }
-            } else if value.is_some() {
-                new_state.push(cell);
-            }
-        }
+        let new_state = merge_output_state_cells(&state_file.cells, &result.write_set_final);
         let new_state_file = StateFile { cells: new_state };
         write_json(out_path, &new_state_file)?;
     }
@@ -174,4 +157,114 @@ pub fn cmd_execute(
     }
 
     Ok(())
+}
+
+fn merge_output_state_cells(
+    initial_cells: &[StateCell],
+    write_set_final: &[(CellKey, Option<Value>)],
+) -> Vec<StateCell> {
+    let mut merged: std::collections::BTreeMap<(u32, u64, u16), Value> =
+        std::collections::BTreeMap::new();
+
+    // Keep only one value per logical key (last one in input wins), mirroring
+    // the semantics of loading state into InMemoryState.
+    for cell in initial_cells {
+        if let Some(value) = cell.value {
+            merged.insert((cell.table, cell.row, cell.col), value);
+        }
+    }
+
+    for (key, value) in write_set_final {
+        let tuple_key = (key.table.0, key.row.0, key.col.0);
+        match value {
+            Some(v) => {
+                merged.insert(tuple_key, *v);
+            }
+            None => {
+                merged.remove(&tuple_key);
+            }
+        }
+    }
+
+    merged
+        .into_iter()
+        .map(|((table, row, col), value)| StateCell {
+            table,
+            row,
+            col,
+            value: Some(value),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tabula_core::{ColId, RowKey, TableId};
+
+    #[test]
+    fn merge_output_state_cells_deduplicates_initial_cells() {
+        let initial = vec![
+            StateCell {
+                table: 0,
+                row: 1,
+                col: 2,
+                value: Some(Value::U64(10)),
+            },
+            StateCell {
+                table: 0,
+                row: 1,
+                col: 2,
+                value: Some(Value::U64(20)),
+            },
+        ];
+
+        let merged = merge_output_state_cells(&initial, &[]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].value, Some(Value::U64(20)));
+    }
+
+    #[test]
+    fn merge_output_state_cells_applies_updates_and_deletes() {
+        let initial = vec![
+            StateCell {
+                table: 0,
+                row: 1,
+                col: 2,
+                value: Some(Value::U64(10)),
+            },
+            StateCell {
+                table: 0,
+                row: 2,
+                col: 2,
+                value: Some(Value::U64(99)),
+            },
+        ];
+
+        let writes = vec![
+            (
+                CellKey {
+                    table: TableId(0),
+                    row: RowKey(1),
+                    col: ColId(2),
+                },
+                Some(Value::U64(77)),
+            ),
+            (
+                CellKey {
+                    table: TableId(0),
+                    row: RowKey(2),
+                    col: ColId(2),
+                },
+                None,
+            ),
+        ];
+
+        let merged = merge_output_state_cells(&initial, &writes);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].table, 0);
+        assert_eq!(merged[0].row, 1);
+        assert_eq!(merged[0].col, 2);
+        assert_eq!(merged[0].value, Some(Value::U64(77)));
+    }
 }

@@ -11,7 +11,7 @@
 //!    balance across the entire system. Uses random challenges over the
 //!    quartic extension field `BabyBear⁴` for ~124-bit collision resistance.
 
-use p3_air::{Air, AirBuilder, PairBuilder};
+use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, PairBuilder};
 use p3_field::Field;
 use p3_matrix::Matrix;
 use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
@@ -20,6 +20,7 @@ use p3_matrix::stack::VerticalPair;
 use std::fmt;
 
 use super::builder::InteractionAirBuilder;
+use super::columns::borrow_cols;
 use super::interaction::{AirInteraction, InteractionDirection, InteractionKind};
 
 // ─── Error types ────────────────────────────────────────────────────────────
@@ -99,7 +100,20 @@ where
     F: Field,
     A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
 {
-    debug_check_with_preprocessed(air, trace, None)
+    debug_check_with_preprocessed_and_public_values(air, trace, None, &[])
+}
+
+/// Verify AIR constraints with explicit public values.
+pub fn debug_check_with_public_values<F, A>(
+    air: &A,
+    trace: &RowMajorMatrix<F>,
+    public_values: &[F],
+) -> Result<(), ConstraintError>
+where
+    F: Field,
+    A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
+{
+    debug_check_with_preprocessed_and_public_values(air, trace, None, public_values)
 }
 
 /// Verify AIR constraints with an optional preprocessed trace.
@@ -109,6 +123,20 @@ pub fn debug_check_with_preprocessed<F, A>(
     air: &A,
     trace: &RowMajorMatrix<F>,
     preprocessed: Option<&RowMajorMatrix<F>>,
+) -> Result<(), ConstraintError>
+where
+    F: Field,
+    A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
+{
+    debug_check_with_preprocessed_and_public_values(air, trace, preprocessed, &[])
+}
+
+/// Like [`debug_check_with_preprocessed`] but also binds public values.
+pub fn debug_check_with_preprocessed_and_public_values<F, A>(
+    air: &A,
+    trace: &RowMajorMatrix<F>,
+    preprocessed: Option<&RowMajorMatrix<F>>,
+    public_values: &[F],
 ) -> Result<(), ConstraintError>
 where
     F: Field,
@@ -154,6 +182,7 @@ where
             constraint_index: 0,
             first_failure: None,
             interactions: Vec::new(),
+            public_values,
         };
 
         air.eval(&mut builder);
@@ -202,6 +231,7 @@ where
             constraint_index: 0,
             first_failure: None,
             interactions: Vec::new(),
+            public_values: &[],
         };
 
         air.eval(&mut builder);
@@ -254,7 +284,21 @@ where
     F: Field,
     A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
 {
-    evaluate_chip_with_preprocessed(name, air, trace, None)
+    evaluate_chip_with_preprocessed_and_public_values(name, air, trace, None, &[])
+}
+
+/// Like [`evaluate_chip`] but with explicit public values.
+pub fn evaluate_chip_with_public_values<F, A>(
+    name: &str,
+    air: &A,
+    trace: &RowMajorMatrix<F>,
+    public_values: &[F],
+) -> Result<ChipRecord<F>, MultiChipError>
+where
+    F: Field,
+    A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
+{
+    evaluate_chip_with_preprocessed_and_public_values(name, air, trace, None, public_values)
 }
 
 /// Like [`evaluate_chip`] but with an optional preprocessed trace.
@@ -263,6 +307,21 @@ pub fn evaluate_chip_with_preprocessed<F, A>(
     air: &A,
     trace: &RowMajorMatrix<F>,
     preprocessed: Option<&RowMajorMatrix<F>>,
+) -> Result<ChipRecord<F>, MultiChipError>
+where
+    F: Field,
+    A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
+{
+    evaluate_chip_with_preprocessed_and_public_values(name, air, trace, preprocessed, &[])
+}
+
+/// Like [`evaluate_chip_with_preprocessed`] but also binds public values.
+pub fn evaluate_chip_with_preprocessed_and_public_values<F, A>(
+    name: &str,
+    air: &A,
+    trace: &RowMajorMatrix<F>,
+    preprocessed: Option<&RowMajorMatrix<F>>,
+    public_values: &[F],
 ) -> Result<ChipRecord<F>, MultiChipError>
 where
     F: Field,
@@ -306,6 +365,7 @@ where
             constraint_index: 0,
             first_failure: None,
             interactions: Vec::new(),
+            public_values,
         };
 
         air.eval(&mut builder);
@@ -456,6 +516,81 @@ pub struct ChipTrace<'a, F: Field, A> {
     pub trace: &'a RowMajorMatrix<F>,
 }
 
+/// Check that SmtTablePath root rows match the expected old/new state roots.
+///
+/// Scans the trace for `is_root=1` rows and extracts `old_parent[8]` / `new_parent[8]`.
+/// Verifies all table-level roots hash up to the expected state roots via compress.
+///
+/// `expected_old_root` and `expected_new_root` are the `ApplyBatchStatement` roots
+/// as NativeDigest-encoded BabyBear arrays.
+///
+/// This is a debug-time convenience helper.
+/// Root/public-value binding is enforced in AIR by `SmtTablePathChip`.
+pub fn check_public_input_binding<F: Field + core::fmt::Debug>(
+    smt_table_path_trace: &RowMajorMatrix<F>,
+    smt_table_path_width: usize,
+    expected_old_root: &[F; 8],
+    expected_new_root: &[F; 8],
+) -> Result<(), MultiChipError> {
+    use super::chips::smt_path::columns::SmtTablePathCols;
+
+    let height = smt_table_path_trace.height();
+    let mut found_root = false;
+
+    for i in 0..height {
+        let row = smt_table_path_trace.row_slice(i).expect("row exists");
+        assert_eq!(row.len(), smt_table_path_width, "width mismatch");
+        let cols: &SmtTablePathCols<F> = borrow_cols(&row);
+
+        let is_real = cols.base.is_real;
+        let is_root = cols.base.is_root;
+
+        if is_real == F::ONE && is_root == F::ONE {
+            found_root = true;
+            // Check old root
+            for (j, (actual, expected)) in cols
+                .base
+                .old_parent
+                .iter()
+                .zip(expected_old_root.iter())
+                .enumerate()
+            {
+                if *actual != *expected {
+                    return Err(MultiChipError::LogUpImbalance {
+                        description: format!(
+                            "SmtTablePath row {i}: old_parent[{j}] = {actual:?}, expected {expected:?}",
+                        ),
+                    });
+                }
+            }
+            // Check new root
+            for (j, (actual, expected)) in cols
+                .base
+                .new_parent
+                .iter()
+                .zip(expected_new_root.iter())
+                .enumerate()
+            {
+                if *actual != *expected {
+                    return Err(MultiChipError::LogUpImbalance {
+                        description: format!(
+                            "SmtTablePath row {i}: new_parent[{j}] = {actual:?}, expected {expected:?}",
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    if !found_root {
+        return Err(MultiChipError::LogUpImbalance {
+            description: "SmtTablePath trace has no is_root=1 rows".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
 /// Compute the RLC fingerprint for an interaction tuple.
 ///
 /// `f = α + β⁰ · kind_tag + β¹ · values[0] + β² · values[1] + …`
@@ -487,6 +622,8 @@ pub struct DebugConstraintBuilder<'a, F: Field> {
     first_failure: Option<ConstraintError>,
     /// Interactions recorded during this row's evaluation.
     interactions: Vec<RecordedInteraction<F>>,
+    /// Public values available to chips via `AirBuilderWithPublicValues`.
+    public_values: &'a [F],
 }
 
 impl<'a, F: Field> AirBuilder for DebugConstraintBuilder<'a, F> {
@@ -527,6 +664,14 @@ impl<'a, F: Field> AirBuilder for DebugConstraintBuilder<'a, F> {
 impl<'a, F: Field> PairBuilder for DebugConstraintBuilder<'a, F> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed
+    }
+}
+
+impl<'a, F: Field> AirBuilderWithPublicValues for DebugConstraintBuilder<'a, F> {
+    type PublicVar = F;
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.public_values
     }
 }
 

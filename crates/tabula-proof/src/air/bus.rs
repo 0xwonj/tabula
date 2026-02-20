@@ -496,6 +496,16 @@ pub trait StaticTableLookupAirBuilder: InteractionAirBuilder {
         value: &[Self::Var],
         mult: Self::Expr,
     );
+
+    /// Receive on the StaticTableLookup bus.
+    fn receive_static_table_lookup(
+        &mut self,
+        t: Self::Expr,
+        c: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        value: &[Self::Var],
+        mult: Self::Expr,
+    );
 }
 
 fn key_value_tuple<AB: InteractionAirBuilder>(
@@ -530,6 +540,169 @@ impl<AB: InteractionAirBuilder> StaticTableLookupAirBuilder for AB {
             values: key_value_tuple::<AB>(t, c, key, value),
             multiplicity: mult,
             kind: InteractionKind::StaticTableLookup,
+        });
+    }
+
+    fn receive_static_table_lookup(
+        &mut self,
+        t: Self::Expr,
+        c: Self::Expr,
+        key: &U64Limbs<Self::Var>,
+        value: &[Self::Var],
+        mult: Self::Expr,
+    ) {
+        self.receive(AirInteraction {
+            values: key_value_tuple::<AB>(t, c, key, value),
+            multiplicity: mult,
+            kind: InteractionKind::StaticTableLookup,
+        });
+    }
+}
+
+// ── C15 SmtLeafDigest ───────────────────────────────────────────────────
+
+/// Extension trait for send/receive on the SmtLeafDigest bus (C15).
+///
+/// Tuple (18 elements): `(table_id, col_id, old_leaf[8], new_leaf[8])`.
+pub trait SmtLeafDigestAirBuilder: InteractionAirBuilder {
+    /// Send on the SmtLeafDigest bus.
+    fn send_smt_leaf_digest(
+        &mut self,
+        table_id: Self::Expr,
+        col_id: Self::Expr,
+        old_leaf: &[Self::Var; 8],
+        new_leaf: &[Self::Var; 8],
+        mult: Self::Expr,
+    );
+
+    /// Receive on the SmtLeafDigest bus.
+    fn receive_smt_leaf_digest(
+        &mut self,
+        table_id: Self::Expr,
+        col_id: Self::Expr,
+        old_leaf: &[Self::Var; 8],
+        new_leaf: &[Self::Var; 8],
+        mult: Self::Expr,
+    );
+}
+
+fn smt_leaf_digest_values<AB: InteractionAirBuilder>(
+    table_id: AB::Expr,
+    col_id: AB::Expr,
+    old_leaf: &[AB::Var; 8],
+    new_leaf: &[AB::Var; 8],
+) -> Vec<AB::Expr> {
+    let mut values: Vec<AB::Expr> = Vec::with_capacity(18);
+    values.push(table_id);
+    values.push(col_id);
+    for v in old_leaf {
+        values.push(v.clone().into());
+    }
+    for v in new_leaf {
+        values.push(v.clone().into());
+    }
+    values
+}
+
+impl<AB: InteractionAirBuilder> SmtLeafDigestAirBuilder for AB {
+    fn send_smt_leaf_digest(
+        &mut self,
+        table_id: Self::Expr,
+        col_id: Self::Expr,
+        old_leaf: &[Self::Var; 8],
+        new_leaf: &[Self::Var; 8],
+        mult: Self::Expr,
+    ) {
+        self.send(AirInteraction {
+            values: smt_leaf_digest_values::<AB>(table_id, col_id, old_leaf, new_leaf),
+            multiplicity: mult,
+            kind: InteractionKind::SmtLeafDigest,
+        });
+    }
+
+    fn receive_smt_leaf_digest(
+        &mut self,
+        table_id: Self::Expr,
+        col_id: Self::Expr,
+        old_leaf: &[Self::Var; 8],
+        new_leaf: &[Self::Var; 8],
+        mult: Self::Expr,
+    ) {
+        self.receive(AirInteraction {
+            values: smt_leaf_digest_values::<AB>(table_id, col_id, old_leaf, new_leaf),
+            multiplicity: mult,
+            kind: InteractionKind::SmtLeafDigest,
+        });
+    }
+}
+
+// ── C16 SmtTableRoot ────────────────────────────────────────────────────
+
+/// Extension trait for send/receive on the SmtTableRoot bus (C16).
+///
+/// Tuple (17 elements): `(table_id, old_root[8], new_root[8])`.
+pub trait SmtTableRootAirBuilder: InteractionAirBuilder {
+    /// Send on the SmtTableRoot bus.
+    fn send_smt_table_root(
+        &mut self,
+        table_id: Self::Expr,
+        old_root: &[Self::Var; 8],
+        new_root: &[Self::Var; 8],
+        mult: Self::Expr,
+    );
+
+    /// Receive on the SmtTableRoot bus.
+    fn receive_smt_table_root(
+        &mut self,
+        table_id: Self::Expr,
+        old_root: &[Self::Var; 8],
+        new_root: &[Self::Var; 8],
+        mult: Self::Expr,
+    );
+}
+
+fn smt_table_root_values<AB: InteractionAirBuilder>(
+    table_id: AB::Expr,
+    old_root: &[AB::Var; 8],
+    new_root: &[AB::Var; 8],
+) -> Vec<AB::Expr> {
+    let mut values: Vec<AB::Expr> = Vec::with_capacity(17);
+    values.push(table_id);
+    for v in old_root {
+        values.push(v.clone().into());
+    }
+    for v in new_root {
+        values.push(v.clone().into());
+    }
+    values
+}
+
+impl<AB: InteractionAirBuilder> SmtTableRootAirBuilder for AB {
+    fn send_smt_table_root(
+        &mut self,
+        table_id: Self::Expr,
+        old_root: &[Self::Var; 8],
+        new_root: &[Self::Var; 8],
+        mult: Self::Expr,
+    ) {
+        self.send(AirInteraction {
+            values: smt_table_root_values::<AB>(table_id, old_root, new_root),
+            multiplicity: mult,
+            kind: InteractionKind::SmtTableRoot,
+        });
+    }
+
+    fn receive_smt_table_root(
+        &mut self,
+        table_id: Self::Expr,
+        old_root: &[Self::Var; 8],
+        new_root: &[Self::Var; 8],
+        mult: Self::Expr,
+    ) {
+        self.receive(AirInteraction {
+            values: smt_table_root_values::<AB>(table_id, old_root, new_root),
+            multiplicity: mult,
+            kind: InteractionKind::SmtTableRoot,
         });
     }
 }

@@ -2,15 +2,19 @@
 //!
 //! Runs after canonicalization and type-checking as a defensive final check.
 //! Rejects programs that violate NF-1 through NF-4.
+//!
+//! NF-4 refinement: read-read ambiguous pairs are safe under SSA (idempotent
+//! reads from base state) and permitted. Write-involved ambiguous pairs require
+//! a `Cmp(Ne)+Assert` guard (inserted by the canonicalize pass).
 
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId};
 
-use crate::Instruction;
+use crate::{CmpOp, Instruction, RowExpr, ValueExpr};
 
-use super::{RowRelation, row_relation};
+use super::{RowRelation, row_relation, row_to_value_expr};
 
 /// Validate all four normal-form rules on the instruction body.
 pub fn check_normal_form(body: &[Instruction]) -> Result<(), TabulaError> {
@@ -51,12 +55,19 @@ pub fn check_normal_form(body: &[Instruction]) -> Result<(), TabulaError> {
                 let b = group[j];
                 match row_relation(a.row, b.row) {
                     RowRelation::Ambiguous => {
-                        return Err(TabulaError::NfAmbiguousAlias {
-                            first: a.instr_idx,
-                            second: b.instr_idx,
-                            table,
-                            col,
-                        });
+                        // Read-read ambiguous pairs are safe under SSA.
+                        if a.kind == AccessKind::Read && b.kind == AccessKind::Read {
+                            continue;
+                        }
+                        // Write-involved: require a Cmp(Ne)+Assert guard.
+                        if !is_guarded(body, a.row, b.row) {
+                            return Err(TabulaError::NfAmbiguousAlias {
+                                first: a.instr_idx,
+                                second: b.instr_idx,
+                                table,
+                                col,
+                            });
+                        }
                     }
                     RowRelation::Equal => match (a.kind, b.kind) {
                         (AccessKind::Read, AccessKind::Read) => {
@@ -99,6 +110,33 @@ pub fn check_normal_form(body: &[Instruction]) -> Result<(), TabulaError> {
 }
 
 // ---------------------------------------------------------------------------
+// Guard detection
+// ---------------------------------------------------------------------------
+
+/// Check whether a `Cmp(Ne, row_a, row_b) + Assert` guard exists in the body.
+fn is_guarded(body: &[Instruction], row_a: &RowExpr, row_b: &RowExpr) -> bool {
+    let ve_a = row_to_value_expr(row_a);
+    let ve_b = row_to_value_expr(row_b);
+    for window in body.windows(2) {
+        if let Instruction::Cmp {
+            op: CmpOp::Ne,
+            lhs,
+            rhs,
+            dst,
+        } = &window[0]
+            && let Instruction::Assert {
+                cond: ValueExpr::Slot(s),
+            } = &window[1]
+            && s == dst
+            && ((lhs == &ve_a && rhs == &ve_b) || (lhs == &ve_b && rhs == &ve_a))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
 
@@ -111,7 +149,7 @@ enum AccessKind {
 struct StateAccess<'a> {
     table: TableId,
     col: ColId,
-    row: &'a crate::RowExpr,
+    row: &'a RowExpr,
     instr_idx: usize,
     kind: AccessKind,
 }

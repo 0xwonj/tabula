@@ -48,18 +48,6 @@ impl Program {
         Ok(())
     }
 
-    /// Register without NF validation (canonicalize + typecheck only).
-    ///
-    /// Use for compile/check where NF-4 (ambiguous alias) is too strict
-    /// for common patterns like transfers with `Param(a)` vs `Param(b)`.
-    pub fn register_lenient(&mut self, mut def: TxTypeDef) -> Result<(), TabulaError> {
-        def.body = canonicalize::canonicalize(def.body);
-        let info = typecheck::check(&def, &self.schemas)?;
-        self.type_info.insert(def.id, info);
-        self.types.insert(def.id, def);
-        Ok(())
-    }
-
     /// Resolve a `TxTypeId` to its definition.
     pub fn resolve(&self, id: TxTypeId) -> Result<&TxTypeDef, TabulaError> {
         self.types.get(&id).ok_or(TabulaError::TxTypeNotFound(id))

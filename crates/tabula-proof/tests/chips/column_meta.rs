@@ -527,5 +527,5 @@ fn valid_mixed_untouched_nonempty_and_touched_empty() {
 
 #[test]
 fn column_meta_width() {
-    assert_eq!(COLUMN_META_WIDTH, 56);
+    assert_eq!(COLUMN_META_WIDTH, 104);
 }

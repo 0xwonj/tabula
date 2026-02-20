@@ -21,9 +21,9 @@
 | M8: Execution + Hashing | ✅ DONE | ExecutionChip, PoseidonChip, GlobalSSMCChip, GlobalMergeChip, ColumnMeta finalization |
 | M9: LogUp Wiring | ✅ DONE | 8 LogUp buses, operand-slot linkage, Poseidon RC verification, multi-chip integration |
 | M10: Constraint Completeness | ✅ DONE | Range checks, lex ordering, opcodes (Cmp/Hash/Lookup/Mul/DivMod), Com_empty, Operation pattern |
-| M11: State Root + Gap Proofs | **Next** | SmtPathChip, SSMC next_key + gap witness, leaf digests, public inputs, StaticTableChip |
+| M11: State Root + Gap Proofs | ✅ DONE (core) | SmtPath chips, leaf digest buses, root public-value binding, StaticTable C9 receiver |
 
-**Current state**: 359 tests in tabula-proof, `cargo clippy` zero warnings.
+**Current state**: tabula-proof `--features stark` test suite green (316 integration tests), workspace tests/clippy green.
 
 **Design docs**: [m11-design.md](design/m11-design.md), [roadmap-m11-m13.md](design/roadmap-m11-m13.md)
 
@@ -226,7 +226,7 @@ The original task IDs (B1-B7, C1-C5) below are kept for traceability but their m
 
 ---
 
-## M11 — State Root + Gap Proofs (Next)
+## M11 — State Root + Gap Proofs (Core Done)
 
 > See [m11-design.md](design/m11-design.md) for detailed specification.
 > See [roadmap-m11-m13.md](design/roadmap-m11-m13.md) for M12-M13 overview.
@@ -237,7 +237,6 @@ Remaining steps for end-to-end proofs:
 
 | Task | Original ID | Description |
 |------|-------------|-------------|
-| SmtPathChip | B4 | In-circuit SMT Merkle path verification |
 | StarkProver | B5 | Wire constraints → Plonky3 STARK → proof generation |
 | StarkVerifier | B5 | Proof verification |
 | Proof chaining | B6 | `root0 → root1 → root2` via sequential proofs |
@@ -322,7 +321,7 @@ See [proof-optimization-architecture.md](./design/proof-optimization-architectur
 ✅ M10 — Constraint Completeness (range checks, opcodes, Com_empty, Operation pattern)
      │
      ▼
-► M11 — State Root + Gap Proofs (SmtPathChip, gap witness, public inputs)
+✅ M11 — State Root + Gap Proofs (core: SmtPath, leaf buses, root public values, StaticTable C9)
      │
      ├──► M12 — Trace Assembly
      │
