@@ -177,82 +177,89 @@ impl<AB: InteractionAirBuilder> CommitmentAirBuilder for AB {
 
 // ── C10 ReadAccess ───────────────────────────────────────────────────────
 
-/// Extension trait for send/receive on the ReadAccess bus (C10).
+/// Runtime/witness-level access tuple value.
 ///
-/// Tuple (7+W elements): `(t, c, key[3], val[W], is_null)`.
-pub trait ReadAccessAirBuilder: InteractionAirBuilder {
-    /// Send on the ReadAccess bus.
-    fn send_read_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        val: &[Self::Var],
-        is_null: Self::Expr,
-        mult: Self::Expr,
-    );
-
-    /// Receive on the ReadAccess bus.
-    fn receive_read_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        val: &[Self::Var],
-        is_null: Self::Expr,
-        mult: Self::Expr,
-    );
+/// Canonical tuple order:
+/// `(t, c, key[3], tx_index, val[W], is_null)`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccessTupleValue<V> {
+    /// Table identifier.
+    pub table_id: u32,
+    /// Column identifier.
+    pub col_id: u16,
+    /// Key limbs (`u64` decomposition).
+    pub key_limbs: [u32; 3],
+    /// Transaction index in batch.
+    pub tx_index: u32,
+    /// Encoded value limbs.
+    pub value: Vec<V>,
+    /// Null marker.
+    pub is_null: bool,
 }
 
-fn read_access_values<AB: InteractionAirBuilder>(
-    t: AB::Expr,
-    c: AB::Expr,
-    key: &U64Limbs<AB::Var>,
-    val: &[AB::Var],
-    is_null: AB::Expr,
-) -> Vec<AB::Expr> {
-    let mut values: Vec<AB::Expr> = vec![
-        t,
-        c,
-        key.limb0.clone().into(),
-        key.limb1.clone().into(),
-        key.limb2.clone().into(),
-    ];
-    for v in val {
-        values.push(v.clone().into());
+/// AIR-level access tuple expression.
+///
+/// This remains separate from [`AccessTupleValue`] to avoid forcing one
+/// generic type across runtime value and AIR expression domains.
+#[derive(Clone, Debug)]
+pub struct AccessTupleExpr<E> {
+    /// Table identifier.
+    pub table_id: E,
+    /// Column identifier.
+    pub col_id: E,
+    /// Key limb 0.
+    pub key_limb0: E,
+    /// Key limb 1.
+    pub key_limb1: E,
+    /// Key limb 2.
+    pub key_limb2: E,
+    /// Transaction index in batch.
+    pub tx_index: E,
+    /// Encoded value limbs.
+    pub value: Vec<E>,
+    /// Null marker.
+    pub is_null: E,
+}
+
+impl<E> AccessTupleExpr<E> {
+    /// Convert to canonical tuple vector.
+    pub fn into_values(self) -> Vec<E> {
+        let mut values = Vec::with_capacity(self.value.len() + 7);
+        values.push(self.table_id);
+        values.push(self.col_id);
+        values.push(self.key_limb0);
+        values.push(self.key_limb1);
+        values.push(self.key_limb2);
+        values.push(self.tx_index);
+        values.extend(self.value);
+        values.push(self.is_null);
+        values
     }
-    values.push(is_null);
-    values
+}
+
+/// Extension trait for send/receive on the ReadAccess bus (C10).
+///
+/// Tuple (7+W elements): `(t, c, key[3], tx_index, val[W], is_null)`.
+pub trait ReadAccessAirBuilder: InteractionAirBuilder {
+    /// Send on the ReadAccess bus.
+    fn send_read_access(&mut self, tuple: AccessTupleExpr<Self::Expr>, mult: Self::Expr);
+
+    /// Receive on the ReadAccess bus.
+    fn receive_read_access(&mut self, tuple: AccessTupleExpr<Self::Expr>, mult: Self::Expr);
 }
 
 impl<AB: InteractionAirBuilder> ReadAccessAirBuilder for AB {
-    fn send_read_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        val: &[Self::Var],
-        is_null: Self::Expr,
-        mult: Self::Expr,
-    ) {
+    fn send_read_access(&mut self, tuple: AccessTupleExpr<Self::Expr>, mult: Self::Expr) {
         self.send(AirInteraction {
-            values: read_access_values::<AB>(t, c, key, val, is_null),
+            values: tuple.into_values(),
             multiplicity: mult,
             kind: InteractionKind::ReadAccess,
         });
     }
 
-    fn receive_read_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        val: &[Self::Var],
-        is_null: Self::Expr,
-        mult: Self::Expr,
-    ) {
+    fn receive_read_access(&mut self, tuple: AccessTupleExpr<Self::Expr>, mult: Self::Expr) {
         self.receive(AirInteraction {
-            values: read_access_values::<AB>(t, c, key, val, is_null),
+            values: tuple.into_values(),
             multiplicity: mult,
             kind: InteractionKind::ReadAccess,
         });
@@ -263,59 +270,27 @@ impl<AB: InteractionAirBuilder> ReadAccessAirBuilder for AB {
 
 /// Extension trait for send/receive on the WriteAccess bus (C11).
 ///
-/// Tuple (7+W elements): `(t, c, key[3], val[W], is_null)`.
+/// Tuple (7+W elements): `(t, c, key[3], tx_index, val[W], is_null)`.
 pub trait WriteAccessAirBuilder: InteractionAirBuilder {
     /// Send on the WriteAccess bus.
-    fn send_write_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        val: &[Self::Var],
-        is_null: Self::Expr,
-        mult: Self::Expr,
-    );
+    fn send_write_access(&mut self, tuple: AccessTupleExpr<Self::Expr>, mult: Self::Expr);
 
     /// Receive on the WriteAccess bus.
-    fn receive_write_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        val: &[Self::Var],
-        is_null: Self::Expr,
-        mult: Self::Expr,
-    );
+    fn receive_write_access(&mut self, tuple: AccessTupleExpr<Self::Expr>, mult: Self::Expr);
 }
 
 impl<AB: InteractionAirBuilder> WriteAccessAirBuilder for AB {
-    fn send_write_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        val: &[Self::Var],
-        is_null: Self::Expr,
-        mult: Self::Expr,
-    ) {
+    fn send_write_access(&mut self, tuple: AccessTupleExpr<Self::Expr>, mult: Self::Expr) {
         self.send(AirInteraction {
-            values: read_access_values::<AB>(t, c, key, val, is_null),
+            values: tuple.into_values(),
             multiplicity: mult,
             kind: InteractionKind::WriteAccess,
         });
     }
 
-    fn receive_write_access(
-        &mut self,
-        t: Self::Expr,
-        c: Self::Expr,
-        key: &U64Limbs<Self::Var>,
-        val: &[Self::Var],
-        is_null: Self::Expr,
-        mult: Self::Expr,
-    ) {
+    fn receive_write_access(&mut self, tuple: AccessTupleExpr<Self::Expr>, mult: Self::Expr) {
         self.receive(AirInteraction {
-            values: read_access_values::<AB>(t, c, key, val, is_null),
+            values: tuple.into_values(),
             multiplicity: mult,
             kind: InteractionKind::WriteAccess,
         });
@@ -357,8 +332,8 @@ impl<AB: InteractionAirBuilder> EmptyColReadAirBuilder for AB {
 
 /// Extension trait for send/receive on the BaseStateEntry bus (C13).
 ///
-/// Tuple (7+W elements): `(t, c, key[3], val[W], is_null)`.
-/// Same schema as ReadAccess/WriteAccess — only the bus ID differs.
+/// Tuple (6+W elements): `(t, c, key[3], val[W], is_null)`.
+/// Same schema as CoalescedWrite — only the bus ID differs.
 pub trait BaseStateEntryAirBuilder: InteractionAirBuilder {
     /// Send on the BaseStateEntry bus.
     fn send_base_state_entry(
@@ -383,6 +358,27 @@ pub trait BaseStateEntryAirBuilder: InteractionAirBuilder {
     );
 }
 
+fn key_value_null_tuple<AB: InteractionAirBuilder>(
+    t: AB::Expr,
+    c: AB::Expr,
+    key: &U64Limbs<AB::Var>,
+    val: &[AB::Var],
+    is_null: AB::Expr,
+) -> Vec<AB::Expr> {
+    let mut values: Vec<AB::Expr> = vec![
+        t,
+        c,
+        key.limb0.clone().into(),
+        key.limb1.clone().into(),
+        key.limb2.clone().into(),
+    ];
+    for v in val {
+        values.push(v.clone().into());
+    }
+    values.push(is_null);
+    values
+}
+
 impl<AB: InteractionAirBuilder> BaseStateEntryAirBuilder for AB {
     fn send_base_state_entry(
         &mut self,
@@ -394,7 +390,7 @@ impl<AB: InteractionAirBuilder> BaseStateEntryAirBuilder for AB {
         mult: Self::Expr,
     ) {
         self.send(AirInteraction {
-            values: read_access_values::<AB>(t, c, key, val, is_null),
+            values: key_value_null_tuple::<AB>(t, c, key, val, is_null),
             multiplicity: mult,
             kind: InteractionKind::BaseStateEntry,
         });
@@ -410,7 +406,7 @@ impl<AB: InteractionAirBuilder> BaseStateEntryAirBuilder for AB {
         mult: Self::Expr,
     ) {
         self.receive(AirInteraction {
-            values: read_access_values::<AB>(t, c, key, val, is_null),
+            values: key_value_null_tuple::<AB>(t, c, key, val, is_null),
             multiplicity: mult,
             kind: InteractionKind::BaseStateEntry,
         });
@@ -421,8 +417,8 @@ impl<AB: InteractionAirBuilder> BaseStateEntryAirBuilder for AB {
 
 /// Extension trait for send/receive on the CoalescedWrite bus (C14).
 ///
-/// Tuple (7+W elements): `(t, c, key[3], val[W], is_null)`.
-/// Same schema as ReadAccess/WriteAccess — only the bus ID differs.
+/// Tuple (6+W elements): `(t, c, key[3], val[W], is_null)`.
+/// Same schema as BaseStateEntry — only the bus ID differs.
 pub trait CoalescedWriteAirBuilder: InteractionAirBuilder {
     /// Send on the CoalescedWrite bus.
     fn send_coalesced_write(
@@ -458,7 +454,7 @@ impl<AB: InteractionAirBuilder> CoalescedWriteAirBuilder for AB {
         mult: Self::Expr,
     ) {
         self.send(AirInteraction {
-            values: read_access_values::<AB>(t, c, key, val, is_null),
+            values: key_value_null_tuple::<AB>(t, c, key, val, is_null),
             multiplicity: mult,
             kind: InteractionKind::CoalescedWrite,
         });
@@ -474,7 +470,7 @@ impl<AB: InteractionAirBuilder> CoalescedWriteAirBuilder for AB {
         mult: Self::Expr,
     ) {
         self.receive(AirInteraction {
-            values: read_access_values::<AB>(t, c, key, val, is_null),
+            values: key_value_null_tuple::<AB>(t, c, key, val, is_null),
             multiplicity: mult,
             kind: InteractionKind::CoalescedWrite,
         });

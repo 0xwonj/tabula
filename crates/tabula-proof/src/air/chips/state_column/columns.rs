@@ -78,6 +78,9 @@ pub struct StateColumnCols<T, const W: usize> {
     pub has_prev_new_entry: T,
     /// 1 if this is the last `in_new=1` row of the segment.
     pub is_last_new_entry: T,
+    /// Running OR of `in_write` within the segment.
+    /// Used to enforce `segment_is_touched` <-> "has any write".
+    pub write_seen_prefix: T,
 
     // ── Key ordering (13) ──
     /// Proves `key < next_key` within same segment (StrictIneq + halves + bits).

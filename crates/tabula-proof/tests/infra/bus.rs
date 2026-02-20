@@ -166,6 +166,25 @@ fn c10_read_access_two_reads_same_key() {
         .expect("C10 ReadAccess bus should balance for two reads");
 }
 
+#[test]
+fn c10_read_access_tx_index_mismatch_fails() {
+    // Same key/value but different tx_index must not balance.
+    let mut r = make_read(0, 1, 0, 100, 42, false);
+    r.tx_index = 0;
+    let exec_trace = generate_execution_trace::<3>(&[r]);
+    let exec_record = evaluate_chip("Execution", &ExecutionChip::<3>, &exec_trace).unwrap();
+
+    let ito_rows = vec![
+        ito_init(1, 0, 100, [42, 0, 0], false),
+        ito_read(1, 0, 100, 1, [42, 0, 0], false), // tx_index mismatch
+    ];
+    let ito_trace = generate_inter_tx_order_trace::<3>(&ito_rows);
+    let ito_record = evaluate_chip("InterTxOrder", &InterTxOrderChip::<3>, &ito_trace).unwrap();
+
+    check_bus_balance(&[exec_record, ito_record], InteractionKind::ReadAccess)
+        .expect_err("C10 ReadAccess must include tx_index in tuple identity");
+}
+
 // ── C11 WriteAccess: Execution → InterTxOrder ──
 
 #[test]
@@ -189,6 +208,26 @@ fn c11_write_access_single_write() {
 
     check_bus_balance(&[exec_record, ito_record], InteractionKind::WriteAccess)
         .expect("C11 WriteAccess bus should balance for single write");
+}
+
+#[test]
+fn c11_write_access_tx_index_mismatch_fails() {
+    let mut r = make_read(0, 1, 0, 100, 75, false);
+    r.tx_index = 0;
+    let mut w = make_write(0, 1, 0, 100, 75, false);
+    w.tx_index = 0;
+    let exec_trace = generate_execution_trace::<3>(&[r, w]);
+    let exec_record = evaluate_chip("Execution", &ExecutionChip::<3>, &exec_trace).unwrap();
+
+    let ito_rows = vec![
+        ito_init(1, 0, 100, [75, 0, 0], false),
+        ito_read_write(1, 0, 100, 1, [75, 0, 0], false, [75, 0, 0], false), // mismatch
+    ];
+    let ito_trace = generate_inter_tx_order_trace::<3>(&ito_rows);
+    let ito_record = evaluate_chip("InterTxOrder", &InterTxOrderChip::<3>, &ito_trace).unwrap();
+
+    check_bus_balance(&[exec_record, ito_record], InteractionKind::WriteAccess)
+        .expect_err("C11 WriteAccess must include tx_index in tuple identity");
 }
 
 // ── C13 BaseStateEntry: InterTxOrder → StateColumn ──

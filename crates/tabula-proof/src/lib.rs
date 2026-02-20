@@ -3,6 +3,7 @@
 
 //! Proof generation and verification for the Tabula kernel.
 
+pub mod contract;
 pub mod statement;
 
 #[cfg(feature = "stark")]

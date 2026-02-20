@@ -28,7 +28,8 @@ use p3_matrix::Matrix;
 
 use crate::air::builder::InteractionAirBuilder;
 use crate::air::bus::{
-    BaseStateEntryAirBuilder, CoalescedWriteAirBuilder, ReadAccessAirBuilder, WriteAccessAirBuilder,
+    AccessTupleExpr, BaseStateEntryAirBuilder, CoalescedWriteAirBuilder, ReadAccessAirBuilder,
+    WriteAccessAirBuilder,
 };
 use crate::air::columns::borrow_cols;
 use crate::air::gadgets::{
@@ -198,11 +199,21 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for InterTxOrderChip<W> 
 
         // C10 ReadAccess receive: non-init rows with has_read
         builder.receive_read_access(
-            local.table_id.clone().into(),
-            local.col_id.clone().into(),
-            &local.key.limbs,
-            &local.input_val,
-            local.input_is_null.clone().into(),
+            AccessTupleExpr {
+                table_id: local.table_id.clone().into(),
+                col_id: local.col_id.clone().into(),
+                key_limb0: local.key.limbs.limb0.clone().into(),
+                key_limb1: local.key.limbs.limb1.clone().into(),
+                key_limb2: local.key.limbs.limb2.clone().into(),
+                tx_index: local.tx_index.clone().into(),
+                value: local
+                    .input_val
+                    .iter()
+                    .cloned()
+                    .map(Into::into)
+                    .collect::<Vec<AB::Expr>>(),
+                is_null: local.input_is_null.clone().into(),
+            },
             is_real.clone()
                 * local.has_read.clone().into()
                 * (AB::Expr::ONE - local.is_init.clone().into()),
@@ -210,11 +221,21 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for InterTxOrderChip<W> 
 
         // C11 WriteAccess receive: non-init rows with has_write
         builder.receive_write_access(
-            local.table_id.clone().into(),
-            local.col_id.clone().into(),
-            &local.key.limbs,
-            &local.output_val,
-            local.output_is_null.clone().into(),
+            AccessTupleExpr {
+                table_id: local.table_id.clone().into(),
+                col_id: local.col_id.clone().into(),
+                key_limb0: local.key.limbs.limb0.clone().into(),
+                key_limb1: local.key.limbs.limb1.clone().into(),
+                key_limb2: local.key.limbs.limb2.clone().into(),
+                tx_index: local.tx_index.clone().into(),
+                value: local
+                    .output_val
+                    .iter()
+                    .cloned()
+                    .map(Into::into)
+                    .collect::<Vec<AB::Expr>>(),
+                is_null: local.output_is_null.clone().into(),
+            },
             is_real.clone()
                 * local.has_write.clone().into()
                 * (AB::Expr::ONE - local.is_init.clone().into()),

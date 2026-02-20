@@ -65,8 +65,8 @@ pub use interaction::{AirInteraction, InteractionKind};
 
 // ── Bus builder traits ──
 pub use bus::{
-    BaseStateEntryAirBuilder, CoalescedWriteAirBuilder, CommitmentAirBuilder,
-    EmptyColReadAirBuilder, PoseidonAirBuilder, RangeCheckAirBuilder, ReadAccessAirBuilder,
-    SmtLeafDigestAirBuilder, SmtTableRootAirBuilder, StaticTableLookupAirBuilder,
-    WriteAccessAirBuilder,
+    AccessTupleExpr, AccessTupleValue, BaseStateEntryAirBuilder, CoalescedWriteAirBuilder,
+    CommitmentAirBuilder, EmptyColReadAirBuilder, PoseidonAirBuilder, RangeCheckAirBuilder,
+    ReadAccessAirBuilder, SmtLeafDigestAirBuilder, SmtTableRootAirBuilder,
+    StaticTableLookupAirBuilder, WriteAccessAirBuilder,
 };

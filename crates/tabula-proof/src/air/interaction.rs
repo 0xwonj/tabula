@@ -30,9 +30,9 @@ pub enum InteractionKind {
     RangeCheck = 8,
     /// ExecutionChip → StaticTableChip (static table lookups, receiver deferred to M11).
     StaticTableLookup = 9,
-    /// Execution → InterTxOrder (non-null read access entries + null gap rows).
+    /// Execution → InterTxOrder (read access tuple with `tx_index` anchor).
     ReadAccess = 10,
-    /// Execution → InterTxOrder (write entries).
+    /// Execution → InterTxOrder (write access tuple with `tx_index` anchor).
     WriteAccess = 11,
     /// Execution → ColumnMeta (read from empty column).
     EmptyColRead = 12,

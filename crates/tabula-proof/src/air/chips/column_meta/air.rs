@@ -183,13 +183,17 @@ impl<AB: InteractionAirBuilder> Air<AB> for ColumnMetaChip {
         // C6 CommitmentVerification receive: Com_new
         {
             let not_tag: AB::Expr = AB::Expr::ONE - local.tag.clone().into();
+            let non_empty_new: AB::Expr = AB::Expr::ONE - local.is_empty_new.clone().into();
             builder.receive_commitment(
                 local.table_id.clone().into(),
                 local.col_id.clone().into(),
                 AB::Expr::ONE, // comm_type = 1 (Com_new)
                 local.is_touched.clone().into(),
                 &local.com_new,
-                local.is_real.clone().into() * not_tag * local.is_touched.clone().into(),
+                local.is_real.clone().into()
+                    * not_tag
+                    * local.is_touched.clone().into()
+                    * non_empty_new,
             );
         }
 

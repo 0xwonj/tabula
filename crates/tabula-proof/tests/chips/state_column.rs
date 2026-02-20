@@ -18,7 +18,7 @@ type Cols = StateColumnCols<BabyBear, 3>;
 
 #[test]
 fn standard_width() {
-    assert_eq!(STATE_COLUMN_STANDARD_WIDTH, 100);
+    assert_eq!(STATE_COLUMN_STANDARD_WIDTH, 101);
 }
 
 // ── Valid traces: single source types ──
@@ -300,6 +300,24 @@ fn invalid_segment_is_touched_inconsistent() {
     let trace = generate_state_column_trace::<3>(&rows);
     debug_check(&StateColumnChip::<3>, &trace)
         .expect_err("inconsistent segment_is_touched should fail");
+}
+
+#[test]
+fn invalid_segment_touched_without_any_write() {
+    // No write-only/both/delete rows in this segment, so touched=1 must fail.
+    let rows = vec![
+        StateColumnRow {
+            segment_is_touched: true,
+            ..sc_old_only(0, 0, 10, [1, 0, 0])
+        },
+        StateColumnRow {
+            segment_is_touched: true,
+            ..sc_old_only(0, 0, 20, [2, 0, 0])
+        },
+    ];
+    let trace = generate_state_column_trace::<3>(&rows);
+    debug_check(&StateColumnChip::<3>, &trace)
+        .expect_err("segment_is_touched=true requires at least one write row");
 }
 
 // ── Soundness tests ──

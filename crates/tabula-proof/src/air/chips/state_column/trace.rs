@@ -104,6 +104,7 @@ pub fn generate_state_column_trace<const W: usize>(
     // Per-segment running state for old/new chains.
     let mut seen_old_in_segment = false;
     let mut seen_new_in_segment = false;
+    let mut seen_write_in_segment = false;
     let mut prev_old_hash_acc: Option<[BabyBear; 8]> = None;
     let mut prev_new_hash_acc: Option<[BabyBear; 8]> = None;
 
@@ -151,12 +152,16 @@ pub fn generate_state_column_trace<const W: usize>(
         if is_new_segment {
             seen_old_in_segment = false;
             seen_new_in_segment = false;
+            seen_write_in_segment = false;
             prev_old_hash_acc = None;
             prev_new_hash_acc = None;
         }
 
         let in_old = !row.is_gap && row.source.in_old();
         let in_new = !row.is_gap && row.source.in_new();
+        let in_write = !row.is_gap && row.source.in_write();
+        seen_write_in_segment |= in_write;
+        cols.write_seen_prefix = bool_fe(seen_write_in_segment);
 
         // ── Old chain tracking ──
         cols.has_prev_old_entry = bool_fe(seen_old_in_segment);

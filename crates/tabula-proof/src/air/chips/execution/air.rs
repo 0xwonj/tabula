@@ -19,6 +19,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
 use crate::air::builder::InteractionAirBuilder;
+use crate::air::bus::{AccessTupleExpr, ReadAccessAirBuilder, WriteAccessAirBuilder};
 use crate::air::columns::borrow_cols;
 use crate::air::gadgets::constrain_is_real_prefix;
 use crate::air::gadgets::integer::{constrain_limb2_bits, expr_from_u32};
@@ -449,7 +450,7 @@ fn constrain_range_check_halves<AB: AirBuilder, const W: usize>(
 
 /// C10 ReadAccess bus send: non-empty reads.
 ///
-/// Tuple: `(t, c, key[3], val[W], is_null)`.
+/// Tuple: `(t, c, key[3], tx_index, val[W], is_null)`.
 /// Multiplicity: `is_real * op_read * (1 - is_empty_col)`.
 fn send_read_access<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
@@ -459,28 +460,30 @@ fn send_read_access<AB: InteractionAirBuilder, const W: usize>(
         * local.op_read.clone().into()
         * (AB::Expr::ONE - local.is_empty_col.clone().into());
 
-    let mut values: Vec<AB::Expr> = vec![
-        local.access_t.clone().into(),
-        local.access_c.clone().into(),
-        local.access_r.limbs.limb0.clone().into(),
-        local.access_r.limbs.limb1.clone().into(),
-        local.access_r.limbs.limb2.clone().into(),
-    ];
-    for i in 0..W {
-        values.push(local.access_val[i].clone().into());
-    }
-    values.push(local.access_is_null.clone().into());
-
-    builder.send(AirInteraction {
-        values,
-        multiplicity: mult,
-        kind: InteractionKind::ReadAccess,
-    });
+    let value = local
+        .access_val
+        .iter()
+        .cloned()
+        .map(Into::into)
+        .collect::<Vec<AB::Expr>>();
+    builder.send_read_access(
+        AccessTupleExpr {
+            table_id: local.access_t.clone().into(),
+            col_id: local.access_c.clone().into(),
+            key_limb0: local.access_r.limbs.limb0.clone().into(),
+            key_limb1: local.access_r.limbs.limb1.clone().into(),
+            key_limb2: local.access_r.limbs.limb2.clone().into(),
+            tx_index: local.tx_index.clone().into(),
+            value,
+            is_null: local.access_is_null.clone().into(),
+        },
+        mult,
+    );
 }
 
 /// C11 WriteAccess bus send: writes.
 ///
-/// Tuple: `(t, c, key[3], val[W], is_null)`.
+/// Tuple: `(t, c, key[3], tx_index, val[W], is_null)`.
 /// Multiplicity: `is_real * op_write`.
 fn send_write_access<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
@@ -488,23 +491,25 @@ fn send_write_access<AB: InteractionAirBuilder, const W: usize>(
 ) {
     let mult: AB::Expr = local.is_real.clone().into() * local.op_write.clone().into();
 
-    let mut values: Vec<AB::Expr> = vec![
-        local.access_t.clone().into(),
-        local.access_c.clone().into(),
-        local.access_r.limbs.limb0.clone().into(),
-        local.access_r.limbs.limb1.clone().into(),
-        local.access_r.limbs.limb2.clone().into(),
-    ];
-    for i in 0..W {
-        values.push(local.access_val[i].clone().into());
-    }
-    values.push(local.access_is_null.clone().into());
-
-    builder.send(AirInteraction {
-        values,
-        multiplicity: mult,
-        kind: InteractionKind::WriteAccess,
-    });
+    let value = local
+        .access_val
+        .iter()
+        .cloned()
+        .map(Into::into)
+        .collect::<Vec<AB::Expr>>();
+    builder.send_write_access(
+        AccessTupleExpr {
+            table_id: local.access_t.clone().into(),
+            col_id: local.access_c.clone().into(),
+            key_limb0: local.access_r.limbs.limb0.clone().into(),
+            key_limb1: local.access_r.limbs.limb1.clone().into(),
+            key_limb2: local.access_r.limbs.limb2.clone().into(),
+            tx_index: local.tx_index.clone().into(),
+            value,
+            is_null: local.access_is_null.clone().into(),
+        },
+        mult,
+    );
 }
 
 /// C12 EmptyColRead bus send: reads from empty columns.

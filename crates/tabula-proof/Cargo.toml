@@ -19,6 +19,7 @@ stark = [
 
 [dependencies]
 tabula-core = { workspace = true }
+blake3 = { workspace = true }
 tabula-commitment = { workspace = true, optional = true }
 p3-field = { workspace = true, optional = true }
 p3-baby-bear = { workspace = true, optional = true }

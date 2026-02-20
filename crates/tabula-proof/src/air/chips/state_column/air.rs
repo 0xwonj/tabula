@@ -13,7 +13,7 @@
 //! 7. Key ordering (strict, within segment)
 //! 8. Segment detection + lex ordering
 //! 9. Chain tracking flags
-//! 10. segment_is_touched constancy
+//! 10. Touched-write closure (`segment_is_touched` <-> any write in segment)
 //!
 //! LogUp buses:
 //! - C13 BaseStateEntry receive: in_old + gap + write_only rows (from InterTxOrder)
@@ -91,8 +91,10 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for StateColumnChip<W> {
         // ── 9. Chain tracking flags ──
         constrain_chain_tracking(builder, local, next, is_real.clone(), both_real.clone());
 
-        // ── 10. segment_is_touched constancy ──
+        // ── 10. Touched-write closure ──
+        constrain_write_seen_prefix(builder, local, next, both_real.clone());
         constrain_segment_is_touched(builder, local, next, both_real.clone());
+        constrain_touched_write_closure(builder, local, next, both_real.clone());
 
         // ── 11. Range check half-decomposition ──
         constrain_key_halves(builder, &local.key);
@@ -254,6 +256,7 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder.assert_bool(local.past_last_old_entry.clone());
     builder.assert_bool(local.has_prev_new_entry.clone());
     builder.assert_bool(local.is_last_new_entry.clone());
+    builder.assert_bool(local.write_seen_prefix.clone());
     builder.assert_bool(local.read_mult_witness.clone());
     builder.assert_bool(local.write_mult_witness.clone());
 }
@@ -569,7 +572,44 @@ fn constrain_chain_tracking<AB: AirBuilder, const W: usize>(
         .assert_zero(real_to_padding * had_old * (AB::Expr::ONE - covered));
 }
 
-/// 10. segment_is_touched constancy within segment.
+/// 10a. Running write-seen prefix within segment.
+///
+/// `write_seen_prefix` is an OR accumulator of `in_write`:
+/// - first row of trace: `write_seen_prefix = in_write`
+/// - same segment: `next = local OR next.in_write`
+/// - new segment: `next = next.in_write`
+fn constrain_write_seen_prefix<AB: AirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &StateColumnCols<AB::Var, W>,
+    next: &StateColumnCols<AB::Var, W>,
+    both_real: AB::Expr,
+) {
+    let local_seen: AB::Expr = local.write_seen_prefix.clone().into();
+    let next_seen: AB::Expr = next.write_seen_prefix.clone().into();
+    let next_write: AB::Expr = derive_in_write::<AB, W>(next);
+    let tc_changed: AB::Expr = local.segment.tc_changed.clone().into();
+    let same_segment: AB::Expr = AB::Expr::ONE - tc_changed.clone();
+
+    // First row initializes the accumulator.
+    let local_write: AB::Expr = derive_in_write::<AB, W>(local);
+    builder
+        .when_first_row()
+        .assert_zero(local_seen.clone() - local_write);
+
+    // Same segment: next_seen = local_seen OR next_write.
+    let seen_or_next: AB::Expr =
+        local_seen.clone() + next_write.clone() - local_seen * next_write.clone();
+    builder
+        .when_transition()
+        .assert_zero(both_real.clone() * same_segment * (next_seen.clone() - seen_or_next));
+
+    // New segment: accumulator resets to next_write.
+    builder
+        .when_transition()
+        .assert_zero(both_real * tc_changed * (next_seen - next_write));
+}
+
+/// 10b. `segment_is_touched` constancy within segment.
 fn constrain_segment_is_touched<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &StateColumnCols<AB::Var, W>,
@@ -582,4 +622,31 @@ fn constrain_segment_is_touched<AB: AirBuilder, const W: usize>(
     builder
         .when_transition()
         .assert_zero(both_real * same_segment * diff);
+}
+
+/// 10c. Touched-write closure at segment end.
+///
+/// At each segment boundary, `segment_is_touched` must equal
+/// `write_seen_prefix` accumulated for that segment.
+fn constrain_touched_write_closure<AB: AirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &StateColumnCols<AB::Var, W>,
+    next: &StateColumnCols<AB::Var, W>,
+    both_real: AB::Expr,
+) {
+    let touched_diff: AB::Expr =
+        local.segment_is_touched.clone().into() - local.write_seen_prefix.clone().into();
+    let tc_changed: AB::Expr = local.segment.tc_changed.clone().into();
+
+    // Segment boundary between real rows.
+    builder
+        .when_transition()
+        .assert_zero(both_real.clone() * tc_changed * touched_diff.clone());
+
+    // Final real row before padding.
+    let real_to_padding: AB::Expr =
+        local.is_real.clone().into() * (AB::Expr::ONE - next.is_real.clone().into());
+    builder
+        .when_transition()
+        .assert_zero(real_to_padding * touched_diff);
 }
