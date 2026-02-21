@@ -1,24 +1,33 @@
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::Serialize;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 use tabula_contract::ContractMetadataEnvelope;
 use tabula_core::mock::{
     InMemoryState, InMemoryStaticTables, MockHasher, MockSigVerifier, SequentialNonce,
 };
-use tabula_core::{Batch, CellKey, Value};
+use tabula_core::{Batch, CellKey, ExecutionConsistencyStatus, Value};
 use tabula_driver::{RegisteredProgram, register_program};
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency_status;
 
 use crate::kernel::domain::{
     BatchFile, Capabilities, CapabilityClientKind, CapabilityInputMode, CheckCommand, CheckResult,
-    CompileCommand, CompileResult, ExecuteCommand, ExecuteResult, InputRef, ProgramFile,
-    ProgramInline, ProgramInputRef, StateCell, StateFile,
+    CompileCommand, CompileResult, ExecuteCommand, ExecuteResult, ExecutionReceipt, InputRef,
+    ProgramFile, ProgramInline, ProgramInputRef, ProveCommand, ProveResult, StateCell, StateFile,
+    VerifyCommand, VerifyExpectedCommand, VerifyResult,
 };
 use crate::kernel::io::FileAccessPolicy;
 use crate::protocol::error::{ApiError, ApiResult, ErrorCode};
+
+const RECEIPT_VERSION: u32 = 1;
+const RECEIPT_SCHEME: &str = "execution_receipt_v1";
+const JSON_HASH_DOMAIN: &[u8] = b"tabula.daemon.json_hash.v1";
+const STATEMENT_HASH_DOMAIN: &[u8] = b"tabula.daemon.statement_hash.v1";
 
 /// Abstract engine boundary so daemon remains extensible and testable.
 pub trait KernelEngine: Send + Sync {
@@ -26,20 +35,8 @@ pub trait KernelEngine: Send + Sync {
     fn check(&self, req: CheckCommand) -> ApiResult<CheckResult>;
     fn compile(&self, req: CompileCommand) -> ApiResult<CompileResult>;
     fn execute(&self, req: ExecuteCommand) -> ApiResult<ExecuteResult>;
-
-    fn prove_stub(&self) -> ApiResult<serde_json::Value> {
-        Err(ApiError::not_implemented(
-            ErrorCode::ProofNotAvailable,
-            "proof generation is not available yet",
-        ))
-    }
-
-    fn verify_stub(&self) -> ApiResult<serde_json::Value> {
-        Err(ApiError::not_implemented(
-            ErrorCode::ProofNotAvailable,
-            "proof verification is not available yet",
-        ))
-    }
+    fn prove(&self, req: ProveCommand) -> ApiResult<ProveResult>;
+    fn verify(&self, req: VerifyCommand) -> ApiResult<VerifyResult>;
 }
 
 /// Default engine implementation backed by existing Tabula crates.
@@ -66,8 +63,8 @@ impl KernelEngine for TabulaEngine {
             compile: true,
             check: true,
             execute: true,
-            prove: false,
-            verify: false,
+            prove: true,
+            verify: true,
             input_modes: vec![
                 CapabilityInputMode::Inline,
                 CapabilityInputMode::File,
@@ -102,19 +99,138 @@ impl KernelEngine for TabulaEngine {
     }
 
     fn execute(&self, req: ExecuteCommand) -> ApiResult<ExecuteResult> {
-        let loaded = self.load_program_sources(&req.program)?;
-        let artifact = register_loaded_program(&loaded)?;
-        let state_file = self.files.load_json_input(&req.state, "state")?;
-        let batch_file = self
-            .files
-            .load_json_input::<BatchFile>(&req.batch, "batch")?;
+        let executed = self.execute_internal(req.program, req.state, req.batch)?;
+        Ok(executed.into_execute_result(req.include_trace))
+    }
 
-        let mut state = InMemoryState::new();
+    fn prove(&self, req: ProveCommand) -> ApiResult<ProveResult> {
+        let executed = self.execute_internal(req.program, req.state, req.batch)?;
+        let execution = executed.clone().into_execute_result(req.include_trace);
+        let proof = build_receipt(&executed)?;
+        Ok(ProveResult { proof, execution })
+    }
+
+    fn verify(&self, req: VerifyCommand) -> ApiResult<VerifyResult> {
+        let proof: ExecutionReceipt = serde_json::from_value(req.proof).map_err(|e| {
+            ApiError::bad_request(ErrorCode::ParseError, format!("invalid proof payload: {e}"))
+        })?;
+
+        let mut verified = true;
+        let mut message = "receipt verified".to_string();
+
+        if proof.version != RECEIPT_VERSION || proof.scheme != RECEIPT_SCHEME {
+            verified = false;
+            message = format!(
+                "unsupported receipt format: expected version={}, scheme={}, got version={}, scheme={}",
+                RECEIPT_VERSION, RECEIPT_SCHEME, proof.version, proof.scheme
+            );
+        }
+
+        let recomputed_statement_hash = statement_hash(
+            &proof.program_hash,
+            &proof.state_hash,
+            &proof.batch_hash,
+            &proof.state_after_hash,
+            &proof.metadata_hash,
+        );
+        if verified && proof.statement_hash != recomputed_statement_hash {
+            verified = false;
+            message = "receipt statement hash mismatch".to_string();
+        }
+
+        let mut expected_statement_hash = None;
+        let mut matched_expected = None;
+        if let Some(expected) = req.expected {
+            let expected_hash = self.expected_statement_hash(expected)?;
+            expected_statement_hash = Some(expected_hash.clone());
+            let matched = proof.statement_hash == expected_hash;
+            matched_expected = Some(matched);
+            if verified && !matched {
+                verified = false;
+                message =
+                    "proof does not match expected program/state/batch/state_after".to_string();
+            }
+        }
+
+        Ok(VerifyResult {
+            verified,
+            message,
+            statement_hash: Some(proof.statement_hash.clone()),
+            expected_statement_hash,
+            matched_expected,
+            proof: Some(proof),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LoadedProgram {
+    schemas: Vec<tabula_core::TableSchema>,
+    tx_types: Vec<tabula_ir::TxTypeDef>,
+    contract_metadata: Option<ContractMetadataEnvelope>,
+}
+
+#[derive(Debug, Clone)]
+struct ExecutedBatch {
+    artifact: RegisteredProgram,
+    state_file: StateFile,
+    batch_file: BatchFile,
+    tx_outcomes: Vec<tabula_core::TxOutcome>,
+    read_set: Vec<(CellKey, Option<Value>)>,
+    write_set: Vec<(CellKey, Option<Value>)>,
+    emitted: Vec<tabula_core::EmittedEvent>,
+    events: Vec<tabula_core::ExecutionEvent>,
+    consistency: ExecutionConsistencyStatus,
+    state_after: StateFile,
+}
+
+impl ExecutedBatch {
+    fn into_execute_result(self, include_trace: bool) -> ExecuteResult {
+        let trace = if include_trace {
+            Some(self.events.clone())
+        } else {
+            None
+        };
+
+        ExecuteResult {
+            tx_outcomes: self.tx_outcomes,
+            read_set: self
+                .read_set
+                .iter()
+                .map(|(k, v)| StateCell::from_cell_pair(k, v))
+                .collect(),
+            write_set: self
+                .write_set
+                .iter()
+                .map(|(k, v)| StateCell::from_cell_pair(k, v))
+                .collect(),
+            emitted: self.emitted,
+            consistency: self.consistency,
+            trace,
+            state_after: self.state_after,
+        }
+    }
+}
+
+impl TabulaEngine {
+    fn execute_internal(
+        &self,
+        program: ProgramInputRef,
+        state: InputRef<StateFile>,
+        batch: InputRef<BatchFile>,
+    ) -> ApiResult<ExecutedBatch> {
+        let loaded = self.load_program_sources(&program)?;
+        let artifact = register_loaded_program(&loaded)?;
+
+        let state_file = self.files.load_json_input(&state, "state")?;
+        let batch_file = self.files.load_json_input::<BatchFile>(&batch, "batch")?;
+
+        let mut state_store = InMemoryState::new();
         for cell in &state_file.cells {
             let (key, value) = cell
                 .to_cell_pair()
                 .map_err(|e| ApiError::bad_request(ErrorCode::InvalidStateCell, e))?;
-            state.set(key, value);
+            state_store.set(key, value);
         }
 
         let transactions: Vec<_> = batch_file
@@ -125,7 +241,7 @@ impl KernelEngine for TabulaEngine {
                     .map_err(|e| ApiError::bad_request(ErrorCode::InvalidBatchTx, e))
             })
             .collect::<Result<_, _>>()?;
-        let batch = Batch { transactions };
+        let batch_value = Batch { transactions };
 
         let st = InMemoryStaticTables::new();
         let env = BatchEnv {
@@ -135,48 +251,57 @@ impl KernelEngine for TabulaEngine {
             static_tables: &st,
         };
 
-        let result = execute_batch(&batch, &artifact.program, &state, &env, &BTreeMap::new())
-            .map_err(|e| ApiError::unprocessable(ErrorCode::ExecutionError, e.to_string()))?;
+        let result = execute_batch(
+            &batch_value,
+            &artifact.program,
+            &state_store,
+            &env,
+            &BTreeMap::new(),
+        )
+        .map_err(|e| ApiError::unprocessable(ErrorCode::ExecutionError, e.to_string()))?;
 
         let consistency = check_consistency_status(&result.events, &result.read_set_old);
-
         let state_after = StateFile {
             cells: merge_output_state_cells(&state_file.cells, &result.write_set_final),
         };
 
-        let trace = if req.include_trace {
-            Some(result.events.clone())
-        } else {
-            None
-        };
-
-        Ok(ExecuteResult {
+        Ok(ExecutedBatch {
+            artifact,
+            state_file,
+            batch_file,
             tx_outcomes: result.tx_outcomes,
-            read_set: result
-                .read_set_old
-                .iter()
-                .map(|(k, v)| StateCell::from_cell_pair(k, v))
-                .collect(),
-            write_set: result
-                .write_set_final
-                .iter()
-                .map(|(k, v)| StateCell::from_cell_pair(k, v))
-                .collect(),
+            read_set: result.read_set_old,
+            write_set: result.write_set_final,
             emitted: result.emitted,
+            events: result.events,
             consistency,
-            trace,
             state_after,
         })
     }
-}
 
-struct LoadedProgram {
-    schemas: Vec<tabula_core::TableSchema>,
-    tx_types: Vec<tabula_ir::TxTypeDef>,
-    contract_metadata: Option<ContractMetadataEnvelope>,
-}
+    fn expected_statement_hash(&self, expected: VerifyExpectedCommand) -> ApiResult<String> {
+        let loaded = self.load_program_sources(&expected.program)?;
+        let artifact = register_loaded_program(&loaded)?;
+        let state = self
+            .files
+            .load_json_input::<StateFile>(&expected.state, "state")?;
+        let batch = self
+            .files
+            .load_json_input::<BatchFile>(&expected.batch, "batch")?;
+        let state_after = self
+            .files
+            .load_json_input::<StateFile>(&expected.state_after, "state_after")?;
 
-impl TabulaEngine {
+        let components = statement_components(&artifact, &state, &batch, &state_after)?;
+        Ok(statement_hash(
+            &components.program_hash,
+            &components.state_hash,
+            &components.batch_hash,
+            &components.state_after_hash,
+            &components.metadata_hash,
+        ))
+    }
+
     fn load_program_sources(&self, input: &ProgramInputRef) -> ApiResult<LoadedProgram> {
         match input {
             InputRef::Inline(inline) => match inline {
@@ -279,6 +404,128 @@ fn register_loaded_program(loaded: &LoadedProgram) -> ApiResult<RegisteredProgra
     Ok(artifact)
 }
 
+#[derive(Debug, Clone)]
+struct StatementComponents {
+    program_hash: String,
+    state_hash: String,
+    batch_hash: String,
+    state_after_hash: String,
+    metadata_hash: String,
+}
+
+fn build_receipt(executed: &ExecutedBatch) -> ApiResult<ExecutionReceipt> {
+    let components = statement_components(
+        &executed.artifact,
+        &executed.state_file,
+        &executed.batch_file,
+        &executed.state_after,
+    )?;
+
+    Ok(ExecutionReceipt {
+        version: RECEIPT_VERSION,
+        scheme: RECEIPT_SCHEME.to_string(),
+        statement_hash: statement_hash(
+            &components.program_hash,
+            &components.state_hash,
+            &components.batch_hash,
+            &components.state_after_hash,
+            &components.metadata_hash,
+        ),
+        program_hash: components.program_hash,
+        state_hash: components.state_hash,
+        batch_hash: components.batch_hash,
+        state_after_hash: components.state_after_hash,
+        metadata_hash: components.metadata_hash,
+        generated_at_ms: now_ms(),
+        tx_count: executed.tx_outcomes.len(),
+        emitted_count: executed.emitted.len(),
+        consistency: executed.consistency.clone(),
+    })
+}
+
+fn statement_components(
+    artifact: &RegisteredProgram,
+    state: &StateFile,
+    batch: &BatchFile,
+    state_after: &StateFile,
+) -> ApiResult<StatementComponents> {
+    let program_file = ProgramFile {
+        table_schemas: artifact.table_schemas.clone(),
+        tx_types: artifact.tx_types.clone(),
+        contract_metadata: Some(artifact.metadata_envelope.clone()),
+    };
+
+    let program_hash = hash_json("program", &program_file)?;
+    let state_hash = hash_json("state", state)?;
+    let batch_hash = hash_json("batch", batch)?;
+    let state_after_hash = hash_json("state_after", state_after)?;
+    let metadata_hash = bytes_to_hex(&artifact.metadata_envelope.canonical_hash());
+
+    Ok(StatementComponents {
+        program_hash,
+        state_hash,
+        batch_hash,
+        state_after_hash,
+        metadata_hash,
+    })
+}
+
+fn hash_json<T: Serialize>(label: &str, value: &T) -> ApiResult<String> {
+    let bytes = serde_json::to_vec(value).map_err(|e| {
+        ApiError::internal(
+            ErrorCode::InternalError,
+            format!("failed to serialize {label} for hashing: {e}"),
+        )
+    })?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(JSON_HASH_DOMAIN);
+    hasher.update(label.as_bytes());
+    hasher.update([0u8]);
+    hasher.update(&bytes);
+    Ok(bytes_to_hex(&hasher.finalize()))
+}
+
+fn statement_hash(
+    program_hash: &str,
+    state_hash: &str,
+    batch_hash: &str,
+    state_after_hash: &str,
+    metadata_hash: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(STATEMENT_HASH_DOMAIN);
+    hash_part(&mut hasher, b"program_hash", program_hash);
+    hash_part(&mut hasher, b"state_hash", state_hash);
+    hash_part(&mut hasher, b"batch_hash", batch_hash);
+    hash_part(&mut hasher, b"state_after_hash", state_after_hash);
+    hash_part(&mut hasher, b"metadata_hash", metadata_hash);
+    bytes_to_hex(&hasher.finalize())
+}
+
+fn hash_part(hasher: &mut Sha256, label: &[u8], value: &str) {
+    hasher.update(label);
+    hasher.update([0u8]);
+    hasher.update(value.as_bytes());
+    hasher.update([0xffu8]);
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{:02x}", b);
+    }
+    out
+}
+
 fn merge_output_state_cells(
     initial_cells: &[StateCell],
     write_set_final: &[(CellKey, Option<Value>)],
@@ -355,7 +602,15 @@ mod tests {
                 contract_metadata: None,
             })));
         assert!(result.is_err(), "missing metadata must fail closed");
-        let err = result.err().expect("error");
+        let err = result.expect_err("error");
         assert!(format!("{err:?}").contains("missing contract_metadata"));
+    }
+
+    #[test]
+    fn statement_hash_is_stable() {
+        let h1 = statement_hash("a", "b", "c", "d", "e");
+        let h2 = statement_hash("a", "b", "c", "d", "e");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, statement_hash("a", "b", "c", "d", "x"));
     }
 }

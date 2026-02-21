@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::web::models::{
     BatchFile, CapabilitiesResponse, CheckResponse, CompileResponse, DaemonErrorEnvelope,
-    ExecuteResponse, HealthResponse, StateFile,
+    ExecuteResponse, HealthResponse, ProveResponse, StateFile, VerifyResponse,
 };
 
 #[derive(Debug, Clone)]
@@ -89,12 +89,65 @@ impl ApiClient {
         self.send_post("/v1/execute", payload).await
     }
 
-    pub async fn prove_stub(&self) -> Result<Value, ApiClientError> {
-        self.send_post("/v1/jobs/prove", json!({})).await
+    pub async fn prove(
+        &self,
+        source: &str,
+        state: StateFile,
+        batch: BatchFile,
+        include_trace: bool,
+    ) -> Result<ProveResponse, ApiClientError> {
+        let payload = json!({
+            "program": {
+                "kind": "inline",
+                "inline": {
+                    "source": source
+                }
+            },
+            "state": {
+                "kind": "inline",
+                "inline": state
+            },
+            "batch": {
+                "kind": "inline",
+                "inline": batch
+            },
+            "include_trace": include_trace
+        });
+        self.send_post("/v1/jobs/prove", payload).await
     }
 
-    pub async fn verify_stub(&self) -> Result<Value, ApiClientError> {
-        self.send_post("/v1/jobs/verify", json!({})).await
+    pub async fn verify(
+        &self,
+        proof: Value,
+        source: &str,
+        state: StateFile,
+        batch: BatchFile,
+        state_after: StateFile,
+    ) -> Result<VerifyResponse, ApiClientError> {
+        let payload = json!({
+            "proof": proof,
+            "expected": {
+                "program": {
+                    "kind": "inline",
+                    "inline": {
+                        "source": source
+                    }
+                },
+                "state": {
+                    "kind": "inline",
+                    "inline": state
+                },
+                "batch": {
+                    "kind": "inline",
+                    "inline": batch
+                },
+                "state_after": {
+                    "kind": "inline",
+                    "inline": state_after
+                }
+            }
+        });
+        self.send_post("/v1/jobs/verify", payload).await
     }
 
     async fn send_get<T: DeserializeOwned>(&self, path: &str) -> Result<T, ApiClientError> {

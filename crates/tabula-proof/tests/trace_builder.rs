@@ -3,18 +3,36 @@
 use std::collections::BTreeMap;
 
 use p3_baby_bear::BabyBear;
+use p3_field::PrimeCharacteristicRing;
 
 use tabula_commitment::{
-    BabyBearCodec, ColumnMeta, CommitmentStrategy, HybridVC, MockFieldHasher, NativeDigest,
+    BabyBearCodec, ColumnMeta, CommitmentStrategy, DOMAIN_COL, DOMAIN_TABLE, HybridVC,
+    MockFieldHasher, NativeDigest, PoseidonHasher, SparseMerkleTree,
 };
+use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
 use tabula_core::traits::ValueCodec;
-use tabula_core::{CellKey, ColId, RowKey, TableId, TxOutcome, Value};
+use tabula_core::{
+    Batch, CellKey, ColId, RowKey, TableId, Transaction, TxOutcome, TxTypeId, Value,
+};
+use tabula_executor::batch::{BatchEnv, execute_batch};
+use tabula_ir::Program;
+use tabula_lang::compile;
+use tabula_proof::air::SmtPathWitness;
+use tabula_proof::air::SmtTablePathWitness;
 use tabula_proof::air::chips::column_meta::air::ColumnMetaChip;
+use tabula_proof::air::chips::execution::{InstructionRecord, Opcode};
 use tabula_proof::air::chips::inter_tx_order::air::InterTxOrderChip;
+use tabula_proof::air::chips::poseidon::constants::poseidon2_permutation;
 use tabula_proof::air::chips::state_column::air::StateColumnChip;
 use tabula_proof::air::debug_check;
-use tabula_proof::trace_builder::build_trace_bundle;
+use tabula_proof::trace_builder::{
+    build_all_trace_bundle, build_all_trace_bundle_from_execution_result, build_trace_bundle,
+    debug_validate_all_trace_bundle,
+};
+use tabula_proof::witness::WitnessGenerator;
 use tabula_proof::witness::{AccessRow, BatchWitness, ColumnWitness, InitRow, KeyRoute};
+
+type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<BabyBear>)>>;
 
 fn mk_codec() -> BabyBearCodec {
     BabyBearCodec
@@ -53,6 +71,183 @@ fn single_column_roots(
     )
 }
 
+fn chain_commit_single(table: u32, col: u16, key: u64, value: &[BabyBear]) -> NativeDigest {
+    const MASK_30: u64 = (1u64 << 30) - 1;
+    let mut input = [BabyBear::ZERO; 16];
+    input[1] = BabyBear::new(table);
+    input[2] = BabyBear::new(col as u32);
+    input[3] = BabyBear::new((key & MASK_30) as u32);
+    input[4] = BabyBear::new(((key >> 30) & MASK_30) as u32);
+    input[5] = BabyBear::new((key >> 60) as u32);
+    for (i, v) in value.iter().enumerate().take(3) {
+        input[6 + i] = *v;
+    }
+    let (_, out) = poseidon2_permutation(input);
+    NativeDigest(core::array::from_fn(|i| out[i]))
+}
+
+fn poseidon_compress(left: &NativeDigest, right: &NativeDigest) -> NativeDigest {
+    let mut perm_input = [BabyBear::ZERO; 16];
+    perm_input[..8].copy_from_slice(&left.0);
+    perm_input[8..16].copy_from_slice(&right.0);
+    let (_rounds, out) = poseidon2_permutation(perm_input);
+    NativeDigest(core::array::from_fn(|i| out[i]))
+}
+
+fn compute_leaf_digest(table: u32, col: u16, tag: u32, com: &NativeDigest) -> NativeDigest {
+    let mut perm_input = [BabyBear::ZERO; 16];
+    perm_input[0] = BabyBear::new(0x10);
+    perm_input[1] = BabyBear::new(table);
+    perm_input[2] = BabyBear::new(col as u32);
+    perm_input[3] = BabyBear::new(tag);
+    perm_input[8..16].copy_from_slice(&com.0);
+    let (_rounds, out) = poseidon2_permutation(perm_input);
+    NativeDigest(core::array::from_fn(|i| out[i]))
+}
+
+fn zero_siblings(depth: usize) -> Vec<NativeDigest> {
+    vec![NativeDigest::ZERO; depth]
+}
+
+fn path_bits_from_key(key: u64, depth: usize) -> Vec<bool> {
+    (0..depth).map(|i| ((key >> i) & 1) == 1).collect()
+}
+
+fn build_smt_paths_from_metas(
+    metas: &[ColumnMeta],
+    old_root: &NativeDigest,
+    new_root: &NativeDigest,
+) -> (Vec<SmtPathWitness>, Vec<SmtTablePathWitness>) {
+    const COL_DEPTH: usize = 16;
+    const TABLE_DEPTH: usize = 30;
+
+    let hasher = PoseidonHasher::new();
+
+    let mut by_table: BTreeMap<TableId, Vec<&ColumnMeta>> = BTreeMap::new();
+    for meta in metas {
+        by_table.entry(meta.table).or_default().push(meta);
+    }
+
+    let mut col_paths = Vec::new();
+    let mut old_table_roots = BTreeMap::new();
+    let mut new_table_roots = BTreeMap::new();
+    let mut root_mults = BTreeMap::new();
+
+    for (table, metas_for_table) in &by_table {
+        let mut old_tree = SparseMerkleTree::new(hasher.clone(), COL_DEPTH, DOMAIN_COL);
+        let mut new_tree = SparseMerkleTree::new(hasher.clone(), COL_DEPTH, DOMAIN_COL);
+
+        for meta in metas_for_table {
+            let old_leaf = compute_leaf_digest(
+                meta.table.0,
+                meta.col.0,
+                match meta.tag {
+                    CommitmentStrategy::Ssmc => 0,
+                    CommitmentStrategy::Smt => 1,
+                },
+                &meta.com_old,
+            );
+            let new_leaf = compute_leaf_digest(
+                meta.table.0,
+                meta.col.0,
+                match meta.tag {
+                    CommitmentStrategy::Ssmc => 0,
+                    CommitmentStrategy::Smt => 1,
+                },
+                &meta.com_new,
+            );
+
+            old_tree.insert(meta.col.0 as u64, old_leaf);
+            new_tree.insert(meta.col.0 as u64, new_leaf);
+        }
+
+        for meta in metas_for_table {
+            let old_leaf = compute_leaf_digest(
+                meta.table.0,
+                meta.col.0,
+                match meta.tag {
+                    CommitmentStrategy::Ssmc => 0,
+                    CommitmentStrategy::Smt => 1,
+                },
+                &meta.com_old,
+            );
+            let new_leaf = compute_leaf_digest(
+                meta.table.0,
+                meta.col.0,
+                match meta.tag {
+                    CommitmentStrategy::Ssmc => 0,
+                    CommitmentStrategy::Smt => 1,
+                },
+                &meta.com_new,
+            );
+
+            let old_proof = old_tree.prove(meta.col.0 as u64);
+            let new_proof = new_tree.prove(meta.col.0 as u64);
+            assert_eq!(
+                old_proof.siblings, new_proof.siblings,
+                "old/new sibling vectors must match for SmtColPath witness"
+            );
+            col_paths.push(SmtPathWitness {
+                table_id: table.0,
+                key: meta.col.0 as u32,
+                old_leaf,
+                new_leaf,
+                siblings: old_proof.siblings,
+                path_bits: path_bits_from_key(meta.col.0 as u64, COL_DEPTH),
+            });
+        }
+
+        old_table_roots.insert(*table, old_tree.root());
+        new_table_roots.insert(*table, new_tree.root());
+        root_mults.insert(*table, metas_for_table.len() as u32);
+    }
+
+    let mut old_state_tree = SparseMerkleTree::new(hasher.clone(), TABLE_DEPTH, DOMAIN_TABLE);
+    let mut new_state_tree = SparseMerkleTree::new(hasher, TABLE_DEPTH, DOMAIN_TABLE);
+    for (&table, &root) in &old_table_roots {
+        old_state_tree.insert(table.0 as u64, root);
+    }
+    for (&table, &root) in &new_table_roots {
+        new_state_tree.insert(table.0 as u64, root);
+    }
+
+    assert_eq!(
+        old_state_tree.root(),
+        *old_root,
+        "constructed old state root must match witness root"
+    );
+    assert_eq!(
+        new_state_tree.root(),
+        *new_root,
+        "constructed new state root must match witness root"
+    );
+
+    let mut table_paths = Vec::new();
+    for (&table, &root_mult) in &root_mults {
+        let old_leaf = old_table_roots[&table];
+        let new_leaf = new_table_roots[&table];
+        let old_proof = old_state_tree.prove(table.0 as u64);
+        let new_proof = new_state_tree.prove(table.0 as u64);
+        assert_eq!(
+            old_proof.siblings, new_proof.siblings,
+            "old/new sibling vectors must match for SmtTablePath witness"
+        );
+        table_paths.push(SmtTablePathWitness {
+            path: SmtPathWitness {
+                table_id: table.0,
+                key: table.0,
+                old_leaf,
+                new_leaf,
+                siblings: old_proof.siblings,
+                path_bits: path_bits_from_key(table.0 as u64, TABLE_DEPTH),
+            },
+            root_mult,
+        });
+    }
+
+    (col_paths, table_paths)
+}
+
 #[test]
 fn trace_builder_builds_valid_memory_traces() {
     let vc = HybridVC::new(MockFieldHasher, 1024);
@@ -60,10 +255,13 @@ fn trace_builder_builds_valid_memory_traces() {
     let col = ColId(0);
 
     let old_entries = vec![(RowKey(10), encode_u64(50))];
-    let (old_state, com_old) = vc.commit_column(table, col, old_entries);
+    let (old_state, _runtime_com_old) = vc.commit_column(table, col, old_entries);
 
-    let writes = vec![(RowKey(10), Some(encode_u64(75)))];
-    let (new_state, com_new, merge_trace) = vc.apply_column_writes(&old_state, table, col, &writes);
+    let writes = vec![(RowKey(10), Some(encode_u64(50)))];
+    let (new_state, _runtime_com_new, merge_trace) =
+        vc.apply_column_writes(&old_state, table, col, &writes);
+    let com_old = chain_commit_single(1, 0, 10, &encode_u64(50));
+    let com_new = chain_commit_single(1, 0, 10, &encode_u64(50));
 
     let meta = ColumnMeta {
         table,
@@ -111,7 +309,7 @@ fn trace_builder_builds_valid_memory_traces() {
                 },
                 time: 1,
                 is_write: true,
-                value_fes: encode_u64(75),
+                value_fes: encode_u64(50),
                 val_is_null: false,
                 tx_index: 0,
                 effect_ordinal_in_tx: 1,
@@ -142,4 +340,310 @@ fn trace_builder_builds_valid_memory_traces() {
 
     assert_eq!(bundle.inter_tx_rows.len(), 2); // init + tx row
     assert_eq!(bundle.state_rows.len(), 1); // one key in one column
+}
+
+#[test]
+fn trace_builder_builds_and_validates_all_chip_bundle() {
+    let vc = HybridVC::new(MockFieldHasher, 1024);
+    let table = TableId(1);
+    let col = ColId(0);
+
+    let old_entries = vec![(RowKey(10), encode_u64(50))];
+    let (old_state, _runtime_com_old) = vc.commit_column(table, col, old_entries);
+
+    let writes = vec![(RowKey(10), Some(encode_u64(50)))];
+    let (new_state, _runtime_com_new, merge_trace) =
+        vc.apply_column_writes(&old_state, table, col, &writes);
+    let com_old = chain_commit_single(1, 0, 10, &encode_u64(50));
+    let com_new = chain_commit_single(1, 0, 10, &encode_u64(50));
+
+    let meta = ColumnMeta {
+        table,
+        col,
+        tag: CommitmentStrategy::Ssmc,
+        com_old,
+        com_new,
+        is_empty_old: false,
+        is_empty_new: false,
+        is_touched: true,
+    };
+
+    let column_witness = ColumnWitness {
+        table,
+        col,
+        value_type: tabula_core::ValueType::U64,
+        init_rows: vec![InitRow {
+            key: CellKey {
+                table,
+                col,
+                row: RowKey(10),
+            },
+            value_fes: encode_u64(50),
+            val_is_null: false,
+        }],
+        access_rows: vec![
+            AccessRow {
+                key: CellKey {
+                    table,
+                    col,
+                    row: RowKey(10),
+                },
+                time: 0,
+                is_write: false,
+                value_fes: encode_u64(50),
+                val_is_null: false,
+                tx_index: 0,
+                effect_ordinal_in_tx: 0,
+            },
+            AccessRow {
+                key: CellKey {
+                    table,
+                    col,
+                    row: RowKey(10),
+                },
+                time: 1,
+                is_write: true,
+                value_fes: encode_u64(50),
+                val_is_null: false,
+                tx_index: 0,
+                effect_ordinal_in_tx: 1,
+            },
+        ],
+        old_state,
+        new_state,
+        merge_trace,
+        meta: meta.clone(),
+    };
+
+    let old_leaf = compute_leaf_digest(1, 0, 0, &com_old);
+    let new_leaf = compute_leaf_digest(1, 0, 0, &com_new);
+
+    fn chain_compress(leaf: &NativeDigest, depth: usize) -> NativeDigest {
+        let mut node = *leaf;
+        for _ in 0..depth {
+            node = poseidon_compress(&node, &NativeDigest::ZERO);
+        }
+        node
+    }
+
+    fn chain_compress_key1(leaf: &NativeDigest, depth: usize) -> NativeDigest {
+        let mut node = *leaf;
+        for level in 0..depth {
+            if level == 0 {
+                node = poseidon_compress(&NativeDigest::ZERO, &node);
+            } else {
+                node = poseidon_compress(&node, &NativeDigest::ZERO);
+            }
+        }
+        node
+    }
+
+    let old_table_root = chain_compress(&old_leaf, 3);
+    let new_table_root = chain_compress(&new_leaf, 3);
+    let old_state_root = chain_compress_key1(&old_table_root, 3);
+    let new_state_root = chain_compress_key1(&new_table_root, 3);
+
+    let witness = BatchWitness {
+        columns: vec![column_witness],
+        column_metas: vec![meta],
+        old_state_root,
+        new_state_root,
+        tx_outcomes: vec![TxOutcome::Success],
+        key_routes: BTreeMap::<CellKey, KeyRoute>::new(),
+    };
+
+    let memory_only = build_trace_bundle::<MockFieldHasher, 3>(&witness).expect("memory trace");
+    assert_eq!(memory_only.state_rows.len(), 1);
+    assert_eq!(memory_only.state_rows[0].old_hash_acc, com_old.0);
+    assert_eq!(memory_only.state_rows[0].new_hash_acc, com_new.0);
+
+    let execution_records = vec![
+        InstructionRecord {
+            opcode: Opcode::Read,
+            tx_index: 0,
+            written_slots: vec![0],
+            src1_val: vec![BabyBear::ZERO; 3],
+            src2_val: vec![BabyBear::ZERO; 3],
+            cond_val: false,
+            src1_slot_idx: None,
+            src2_slot_idx: None,
+            cond_slot_idx: None,
+            access_t: Some(1),
+            access_c: Some(0),
+            access_r: Some(10),
+            access_val: Some(encode_u64(50)),
+            access_is_null: Some(false),
+            dst_val: encode_u64(50),
+            dst_is_null: false,
+            dst2_val: vec![],
+            dst2_is_null: false,
+            hash_perm_input: None,
+            hash_perm_output: None,
+            is_empty_col: false,
+        },
+        InstructionRecord {
+            opcode: Opcode::Write,
+            tx_index: 0,
+            written_slots: vec![],
+            src1_val: encode_u64(50),
+            src2_val: vec![BabyBear::ZERO; 3],
+            cond_val: false,
+            src1_slot_idx: Some(0),
+            src2_slot_idx: None,
+            cond_slot_idx: None,
+            access_t: Some(1),
+            access_c: Some(0),
+            access_r: Some(10),
+            access_val: Some(encode_u64(50)),
+            access_is_null: Some(false),
+            dst_val: vec![],
+            dst_is_null: false,
+            dst2_val: vec![],
+            dst2_is_null: false,
+            hash_perm_input: None,
+            hash_perm_output: None,
+            is_empty_col: false,
+        },
+    ];
+
+    let smt_col_paths = vec![SmtPathWitness {
+        table_id: 1,
+        key: 0,
+        old_leaf,
+        new_leaf,
+        siblings: zero_siblings(3),
+        path_bits: vec![false, false, false],
+    }];
+    let smt_table_paths = vec![SmtTablePathWitness {
+        path: SmtPathWitness {
+            table_id: 1,
+            key: 1,
+            old_leaf: old_table_root,
+            new_leaf: new_table_root,
+            siblings: zero_siblings(3),
+            path_bits: vec![true, false, false],
+        },
+        root_mult: 1,
+    }];
+
+    let bundle = build_all_trace_bundle::<MockFieldHasher, 3>(
+        &witness,
+        &execution_records,
+        &[],
+        &smt_col_paths,
+        &smt_table_paths,
+    )
+    .expect("all-chip trace bundle");
+
+    debug_validate_all_trace_bundle::<3>(&bundle, &witness.old_state_root, &witness.new_state_root)
+        .expect("all-chip bundle must satisfy constraints and bus balances");
+}
+
+#[test]
+fn trace_builder_dsl_execute_witness_all_chip_e2e() {
+    let source = "\
+table accounts { balance: u64 }
+tx touch(id: u64) {
+    let bal = accounts[id].balance
+    accounts[id].balance = bal
+}";
+    let compiled = compile(source).expect("DSL source should compile for e2e test");
+
+    let mut program = Program::new();
+    for schema in &compiled.schemas {
+        program.add_schema(schema.clone());
+    }
+    for tx in &compiled.tx_types {
+        program
+            .register(tx.clone())
+            .expect("compiled tx must register");
+    }
+
+    let sender = [7u8; 32];
+    let batch = Batch {
+        transactions: vec![Transaction {
+            tx_type: TxTypeId(0),
+            params: vec![Value::U64(10)],
+            sender,
+            nonce: 0,
+            signature: vec![],
+        }],
+    };
+
+    let mut snapshot = InMemoryState::new();
+    let key = CellKey {
+        table: TableId(0),
+        col: ColId(0),
+        row: RowKey(10),
+    };
+    snapshot.set(key, Value::U64(50));
+
+    let hasher = PoseidonHasher::new();
+    let static_tables = InMemoryStaticTables::new();
+    let env = BatchEnv {
+        hasher: &hasher,
+        sig_verifier: &MockSigVerifier,
+        nonce_policy: &SequentialNonce,
+        static_tables: &static_tables,
+    };
+    let execution_result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
+        .expect("batch execution should succeed");
+    assert_eq!(execution_result.events.len(), 2);
+
+    let vc = HybridVC::new(PoseidonHasher::new(), 1024);
+    let codec = BabyBearCodec;
+
+    let mut entries_by_col: EncodedColumnEntries = BTreeMap::new();
+    entries_by_col
+        .entry((TableId(0), ColId(0)))
+        .or_default()
+        .push((RowKey(10), codec.encode(&Value::U64(50)).expect("encode")));
+
+    let mut old_column_states = BTreeMap::new();
+    for schema in &compiled.schemas {
+        for col in &schema.columns {
+            let mut entries = entries_by_col
+                .remove(&(schema.id, col.id))
+                .unwrap_or_default();
+            entries.sort_by_key(|(row, _)| *row);
+            let (state, _com) = vc.commit_column(schema.id, col.id, entries);
+            old_column_states.insert((schema.id, col.id), state);
+        }
+    }
+
+    let schemas_by_id: BTreeMap<TableId, tabula_core::TableSchema> = compiled
+        .schemas
+        .iter()
+        .cloned()
+        .map(|s| (s.id, s))
+        .collect();
+    let wg = WitnessGenerator::new(vc);
+    let witness = wg
+        .generate(&execution_result, &schemas_by_id, &old_column_states)
+        .expect("witness generation should succeed");
+    assert_eq!(witness.columns.len(), 1);
+    assert_eq!(witness.columns[0].access_rows.len(), 2);
+    assert_eq!(witness.columns[0].access_rows[0].tx_index, 0);
+    assert_eq!(witness.columns[0].access_rows[0].effect_ordinal_in_tx, 0);
+    assert_eq!(witness.columns[0].access_rows[1].tx_index, 0);
+    assert_eq!(witness.columns[0].access_rows[1].effect_ordinal_in_tx, 1);
+
+    let (smt_col_paths, smt_table_paths) = build_smt_paths_from_metas(
+        &witness.column_metas,
+        &witness.old_state_root,
+        &witness.new_state_root,
+    );
+
+    let bundle = build_all_trace_bundle_from_execution_result::<PoseidonHasher, 3>(
+        &witness,
+        &execution_result,
+        &schemas_by_id,
+        &[],
+        &smt_col_paths,
+        &smt_table_paths,
+    )
+    .expect("all-chip trace assembly from execution result should succeed");
+
+    debug_validate_all_trace_bundle::<3>(&bundle, &witness.old_state_root, &witness.new_state_root)
+        .expect("DSL->execute->witness->trace bundle must satisfy all chip checks");
 }

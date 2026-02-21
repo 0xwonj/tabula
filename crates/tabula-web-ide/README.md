@@ -10,7 +10,7 @@ Leptos(CSR) 기반 Tabula Web IDE.
 - Daemon integration: health/capabilities/check/compile/execute
 - Proof workflow:
   - daemon `/v1/jobs/prove` / `/v1/jobs/verify` 호출
-  - endpoint 미구현 시 로컬 demo proof fallback 생성/검증
+  - verify expected-context(program/state/batch/state_after)까지 서버에서 검증
 - Verify gate 기반 state apply
 - Run history, diagnostics, compiled IR, trace, RW diff
 - Workspace/proof import-export

@@ -8,15 +8,18 @@
 //! - C13 BaseStateEntry: InterTxOrder → StateColumn
 //! - C14 CoalescedWrite: InterTxOrder → StateColumn
 //! - C5  PoseidonPerm: ColumnMeta → Poseidon (tested below)
+//! - C6  CommitmentVerif: StateColumn → ColumnMeta (tested below)
+//! - C8  RangeCheck: sender chips → RangeCheck (tested below)
 //! - C9  StaticTableLookup: Execution → StaticTable (tested below)
-//! - C6  CommitmentVerif, C8 RangeCheck, C12 EmptyColRead: deferred
+//! - C12 EmptyColRead: deferred
 
 use std::collections::BTreeMap;
 
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_field::PrimeField32;
 
-use tabula_commitment::{ColumnMeta, CommitmentStrategy};
+use tabula_commitment::{ColumnMeta, CommitmentStrategy, NativeDigest};
 use tabula_core::{ColId, TableId};
 
 use tabula_proof::air::chips::column_meta::air::ColumnMetaChip;
@@ -29,12 +32,17 @@ use tabula_proof::air::chips::poseidon::air::PoseidonChip;
 use tabula_proof::air::chips::poseidon::trace::{
     generate_poseidon_preprocessed, generate_poseidon_trace,
 };
+use tabula_proof::air::chips::range_check::{
+    RANGE_CHECK_SIZE, RangeCheckChip, generate_range_check_trace,
+};
 use tabula_proof::air::chips::state_column::air::StateColumnChip;
 use tabula_proof::air::chips::state_column::trace::generate_state_column_trace;
 use tabula_proof::air::chips::static_table::air::StaticTableChip;
 use tabula_proof::air::chips::static_table::trace::{StaticTableRow, generate_static_table_trace};
-use tabula_proof::air::debug::{check_bus_balance, evaluate_chip, evaluate_chip_with_preprocessed};
-use tabula_proof::air::interaction::InteractionKind;
+use tabula_proof::air::debug::{
+    ChipRecord, check_bus_balance, evaluate_chip, evaluate_chip_with_preprocessed,
+};
+use tabula_proof::air::interaction::{InteractionDirection, InteractionKind};
 
 use crate::common::builders::{
     ito_init, ito_read, ito_read_write, ito_write, make_lookup, make_read, make_write, sc_both,
@@ -375,15 +383,148 @@ fn c14_coalesced_write_delete() {
 // ── C6 CommitmentVerification ──
 
 #[test]
-fn c6_commitment_verification_placeholder() {
-    // StateColumn sends Com_old/Com_new → ColumnMeta receives.
-    // Full integration test deferred (requires coordinated hash chains).
+fn c6_commitment_verification_balances() {
+    // StateColumn sends Com_old/Com_new at segment end.
+    // ColumnMeta receives the same tuple identities.
+    let com_old = digest_from_seed(100);
+    let com_new = digest_from_seed(200);
+
+    let mut sc_row = sc_both(1, 0, 100, [50, 0, 0], [75, 0, 0]);
+    sc_row.old_hash_acc = com_old.0;
+    sc_row.new_hash_acc = com_new.0;
+    let sc_trace = generate_state_column_trace::<3>(&[sc_row]);
+    let sc_record = evaluate_chip("StateColumn", &StateColumnChip::<3>, &sc_trace).unwrap();
+
+    let meta = ColumnMeta {
+        table: TableId(1),
+        col: ColId(0),
+        tag: CommitmentStrategy::Ssmc,
+        com_old,
+        com_new,
+        is_empty_old: false,
+        is_empty_new: false,
+        is_touched: true,
+    };
+    let cm_trace = generate_column_meta_trace(&[meta], &BTreeMap::new());
+    let cm_record = evaluate_chip("ColumnMeta", &ColumnMetaChip, &cm_trace).unwrap();
+
+    check_bus_balance(
+        &[sc_record, cm_record],
+        InteractionKind::CommitmentVerification,
+    )
+    .expect("C6 CommitmentVerification should balance");
+}
+
+#[test]
+fn c6_commitment_verification_detects_digest_mismatch() {
+    let com_old = digest_from_seed(100);
+    let com_new = digest_from_seed(200);
+    let wrong_com_new = digest_from_seed(201);
+
+    let mut sc_row = sc_both(1, 0, 100, [50, 0, 0], [75, 0, 0]);
+    sc_row.old_hash_acc = com_old.0;
+    sc_row.new_hash_acc = com_new.0;
+    let sc_trace = generate_state_column_trace::<3>(&[sc_row]);
+    let sc_record = evaluate_chip("StateColumn", &StateColumnChip::<3>, &sc_trace).unwrap();
+
+    let meta = ColumnMeta {
+        table: TableId(1),
+        col: ColId(0),
+        tag: CommitmentStrategy::Ssmc,
+        com_old,
+        com_new: wrong_com_new,
+        is_empty_old: false,
+        is_empty_new: false,
+        is_touched: true,
+    };
+    let cm_trace = generate_column_meta_trace(&[meta], &BTreeMap::new());
+    let cm_record = evaluate_chip("ColumnMeta", &ColumnMetaChip, &cm_trace).unwrap();
+
+    check_bus_balance(
+        &[sc_record, cm_record],
+        InteractionKind::CommitmentVerification,
+    )
+    .expect_err("C6 must fail when Com_new digest mismatches");
 }
 
 // ── C8 RangeCheck ──
 
 #[test]
-fn c8_range_check_placeholder() {
-    // Multiple chips send half-decomposition values → RangeCheck receives.
-    // Full integration test deferred (requires computing exact multiplicities).
+fn c8_range_check_balances_aggregated_senders() {
+    // Aggregate sends from multiple chips and synthesize RangeCheck multiplicities.
+    let ito_rows = vec![
+        ito_init(1, 0, 100, [50, 0, 0], false),
+        ito_read_write(1, 0, 100, 0, [50, 0, 0], false, [75, 0, 0], false),
+    ];
+    let ito_trace = generate_inter_tx_order_trace::<3>(&ito_rows);
+    let ito_record = evaluate_chip("InterTxOrder", &InterTxOrderChip::<3>, &ito_trace).unwrap();
+
+    let mut sc_row = sc_both(1, 0, 100, [50, 0, 0], [75, 0, 0]);
+    sc_row.old_hash_acc = digest_from_seed(300).0;
+    sc_row.new_hash_acc = digest_from_seed(400).0;
+    let sc_trace = generate_state_column_trace::<3>(&[sc_row]);
+    let sc_record = evaluate_chip("StateColumn", &StateColumnChip::<3>, &sc_trace).unwrap();
+
+    let senders = vec![ito_record.clone(), sc_record.clone()];
+    let range_mults = collect_range_check_multiplicities(&senders);
+
+    let rc_trace = generate_range_check_trace(&range_mults);
+    let rc_record = evaluate_chip("RangeCheck", &RangeCheckChip, &rc_trace).unwrap();
+
+    check_bus_balance(
+        &[ito_record, sc_record, rc_record],
+        InteractionKind::RangeCheck,
+    )
+    .expect("C8 RangeCheck should balance with synthesized multiplicities");
+}
+
+#[test]
+fn c8_range_check_detects_multiplicity_mismatch() {
+    let ito_rows = vec![
+        ito_init(1, 0, 100, [50, 0, 0], false),
+        ito_read(1, 0, 100, 0, [50, 0, 0], false),
+    ];
+    let ito_trace = generate_inter_tx_order_trace::<3>(&ito_rows);
+    let ito_record = evaluate_chip("InterTxOrder", &InterTxOrderChip::<3>, &ito_trace).unwrap();
+
+    let mut range_mults = collect_range_check_multiplicities(core::slice::from_ref(&ito_record));
+    // Introduce one-off mismatch on a known sent value (100).
+    range_mults[100] = range_mults[100].saturating_sub(1);
+
+    let rc_trace = generate_range_check_trace(&range_mults);
+    let rc_record = evaluate_chip("RangeCheck", &RangeCheckChip, &rc_trace).unwrap();
+
+    check_bus_balance(&[ito_record, rc_record], InteractionKind::RangeCheck)
+        .expect_err("C8 must fail when multiplicity map is wrong");
+}
+
+fn digest_from_seed(seed: u32) -> NativeDigest {
+    NativeDigest(core::array::from_fn(|i| BabyBear::new(seed + i as u32)))
+}
+
+fn collect_range_check_multiplicities(records: &[ChipRecord<BabyBear>]) -> [u32; RANGE_CHECK_SIZE] {
+    let mut mults = [0u32; RANGE_CHECK_SIZE];
+
+    for record in records {
+        for i in &record.interactions {
+            if i.kind != InteractionKind::RangeCheck || i.direction != InteractionDirection::Send {
+                continue;
+            }
+            if i.values.len() != 1 {
+                continue;
+            }
+            let mult = i.multiplicity.as_canonical_u32();
+            if mult == 0 {
+                continue;
+            }
+            let value = i.values[0].as_canonical_u32() as usize;
+            assert!(
+                value < RANGE_CHECK_SIZE,
+                "range-check send value out of domain: {value}"
+            );
+            mults[value] += mult;
+        }
+    }
+
+    mults
 }

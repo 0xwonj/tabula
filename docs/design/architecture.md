@@ -4,6 +4,7 @@
 > **Scope**: Design philosophy, crate structure, data flow, and architectural decisions for the Tabula Kernel.
 > **Prerequisites**: None
 > **Normative specs**: [semantics-spec.md](../spec/semantics-spec.md), [proof-spec.md](../spec/proof-spec.md)
+> **Target-state companion**: [final-target-architecture.md](./final-target-architecture.md)
 
 ---
 

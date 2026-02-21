@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use tabula_contract::ContractMetadataEnvelope;
 use tabula_core::{
@@ -71,6 +72,28 @@ pub struct ExecuteCommand {
 }
 
 #[derive(Debug, Clone)]
+pub struct ProveCommand {
+    pub program: ProgramInputRef,
+    pub state: StateInputRef,
+    pub batch: BatchInputRef,
+    pub include_trace: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct VerifyExpectedCommand {
+    pub program: ProgramInputRef,
+    pub state: StateInputRef,
+    pub batch: BatchInputRef,
+    pub state_after: StateInputRef,
+}
+
+#[derive(Debug, Clone)]
+pub struct VerifyCommand {
+    pub proof: JsonValue,
+    pub expected: Option<VerifyExpectedCommand>,
+}
+
+#[derive(Debug, Clone)]
 pub struct CheckResult {
     pub table_count: usize,
     pub tx_type_count: usize,
@@ -92,6 +115,39 @@ pub struct ExecuteResult {
     pub consistency: ExecutionConsistencyStatus,
     pub trace: Option<Vec<ExecutionEvent>>,
     pub state_after: StateFile,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProveResult {
+    pub proof: ExecutionReceipt,
+    pub execution: ExecuteResult,
+}
+
+#[derive(Debug, Clone)]
+pub struct VerifyResult {
+    pub verified: bool,
+    pub message: String,
+    pub statement_hash: Option<String>,
+    pub expected_statement_hash: Option<String>,
+    pub matched_expected: Option<bool>,
+    pub proof: Option<ExecutionReceipt>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionReceipt {
+    pub version: u32,
+    pub scheme: String,
+    pub statement_hash: String,
+    pub program_hash: String,
+    pub state_hash: String,
+    pub batch_hash: String,
+    pub state_after_hash: String,
+    pub metadata_hash: String,
+    pub generated_at_ms: u64,
+    pub tx_count: usize,
+    pub emitted_count: usize,
+    pub consistency: ExecutionConsistencyStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

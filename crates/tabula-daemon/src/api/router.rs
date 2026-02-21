@@ -26,8 +26,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/check", post(handlers::check))
         .route("/v1/compile", post(handlers::compile))
         .route("/v1/execute", post(handlers::execute))
-        .route("/v1/jobs/prove", post(handlers::prove_stub))
-        .route("/v1/jobs/verify", post(handlers::verify_stub))
+        .route("/v1/jobs/prove", post(handlers::prove))
+        .route("/v1/jobs/verify", post(handlers::verify))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::require_auth,

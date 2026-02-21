@@ -2351,6 +2351,7 @@ dependencies = [
  "http",
  "serde",
  "serde_json",
+ "sha2",
  "tabula-contract",
  "tabula-core",
  "tabula-driver",
@@ -2418,6 +2419,9 @@ dependencies = [
  "tabula-commitment",
  "tabula-contract",
  "tabula-core",
+ "tabula-executor",
+ "tabula-ir",
+ "tabula-lang",
 ]
 
 [[package]]

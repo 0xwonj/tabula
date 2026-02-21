@@ -7,7 +7,7 @@ Local HTTP daemon for Tabula clients (Web IDE, CLI helpers, automations).
 - Client-neutral local control plane over Tabula crates.
 - Exposes `check`, `compile`, `execute` over HTTP.
 - Supports `inline` and `file` input references (artifact mode planned).
-- Provides capability discovery and proof endpoint stubs.
+- Provides capability discovery plus receipt-based `prove` / `verify`.
 
 ## Run
 
@@ -48,5 +48,5 @@ TABULA_DAEMON_TOKEN=secret cargo run -p tabula-daemon
 - `POST /v1/check`
 - `POST /v1/compile`
 - `POST /v1/execute`
-- `POST /v1/jobs/prove` (501 stub)
-- `POST /v1/jobs/verify` (501 stub)
+- `POST /v1/jobs/prove`
+- `POST /v1/jobs/verify`

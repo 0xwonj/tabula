@@ -12,11 +12,14 @@ use serde_json::json;
 use tracing::warn;
 
 use crate::api::json::JsonBody;
-use crate::kernel::domain::{CheckCommand, CompileCommand, ExecuteCommand};
+use crate::kernel::domain::{
+    CheckCommand, CompileCommand, ExecuteCommand, ProveCommand, VerifyCommand,
+};
 use crate::protocol::error::{ApiError, ApiResult, ErrorCode};
 use crate::protocol::types::{
     CapabilitiesResponse, CheckRequest, CheckResponse, CompileRequest, CompileResponse,
-    ExecuteRequest, ExecuteResponse, HealthResponse,
+    ExecuteRequest, ExecuteResponse, HealthResponse, ProveRequest, ProveResponse, VerifyRequest,
+    VerifyResponse,
 };
 use crate::runtime::state::AppState;
 
@@ -58,16 +61,24 @@ pub async fn execute(
     Ok(Json(out.into()))
 }
 
-pub async fn prove_stub(State(state): State<Arc<AppState>>) -> ApiResult<Json<serde_json::Value>> {
+pub async fn prove(
+    State(state): State<Arc<AppState>>,
+    JsonBody(req): JsonBody<ProveRequest>,
+) -> ApiResult<Json<ProveResponse>> {
+    let cmd: ProveCommand = req.into();
     let engine = state.engine();
-    let out = run_blocking(&state, "prove_stub", move || engine.prove_stub()).await?;
-    Ok(Json(out))
+    let out = run_blocking(&state, "prove", move || engine.prove(cmd)).await?;
+    Ok(Json(out.into()))
 }
 
-pub async fn verify_stub(State(state): State<Arc<AppState>>) -> ApiResult<Json<serde_json::Value>> {
+pub async fn verify(
+    State(state): State<Arc<AppState>>,
+    JsonBody(req): JsonBody<VerifyRequest>,
+) -> ApiResult<Json<VerifyResponse>> {
+    let cmd: VerifyCommand = req.into();
     let engine = state.engine();
-    let out = run_blocking(&state, "verify_stub", move || engine.verify_stub()).await?;
-    Ok(Json(out))
+    let out = run_blocking(&state, "verify", move || engine.verify(cmd)).await?;
+    Ok(Json(out.into()))
 }
 
 pub async fn require_auth(
@@ -168,7 +179,7 @@ mod tests {
 
     use crate::kernel::domain::{
         Capabilities, CheckCommand, CheckResult, CompileCommand, CompileResult, ExecuteCommand,
-        ExecuteResult,
+        ExecuteResult, ProveCommand, ProveResult, VerifyCommand, VerifyResult,
     };
     use crate::kernel::engine::KernelEngine;
     use crate::runtime::config::ServerConfig;
@@ -207,6 +218,14 @@ mod tests {
             &self,
             _req: ExecuteCommand,
         ) -> crate::protocol::error::ApiResult<ExecuteResult> {
+            unreachable!("not used in this test")
+        }
+
+        fn prove(&self, _req: ProveCommand) -> crate::protocol::error::ApiResult<ProveResult> {
+            unreachable!("not used in this test")
+        }
+
+        fn verify(&self, _req: VerifyCommand) -> crate::protocol::error::ApiResult<VerifyResult> {
             unreachable!("not used in this test")
         }
     }

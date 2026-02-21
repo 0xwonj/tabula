@@ -4,15 +4,14 @@ use std::rc::Rc;
 use gloo_file::{File, callbacks::FileReader, callbacks::read_as_text};
 use leptos::{html, prelude::*};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 
 use crate::web::api::{ApiClient, ApiClientError};
 use crate::web::models::{
-    BatchFile, CheckResponse, CompileResponse, DemoProofEnvelope, ExecuteResponse, HealthResponse,
-    RunRecord, StateCell, StateFile, VerifyReport, WorkspaceDoc,
+    BatchFile, CheckResponse, CompileResponse, ExecuteResponse, HealthResponse, RunRecord,
+    StateCell, StateFile, VerifyReport, WorkspaceDoc,
 };
 use crate::web::storage;
 use crate::web::templates::{built_in_templates, default_workspace, template_workspace};
@@ -242,8 +241,6 @@ pub fn App() -> impl IntoView {
         let token = auth_token.get();
         let source = program_source.get();
         let include_trace_value = include_trace.get();
-        let state_text_before = state_json.get();
-        let batch_text_before = batch_json.get();
         let client = ApiClient::new(base, opt_token(token));
 
         set_busy_action.set(Some("execute".to_string()));
@@ -266,12 +263,6 @@ pub fn App() -> impl IntoView {
                     ..
                 }) => {
                     let state_after_str = pretty_json_value(&json!(state_after));
-                    let statement_hash = compute_statement_hash(
-                        &source,
-                        &state_text_before,
-                        &batch_text_before,
-                        Some(&state_after_str),
-                    );
 
                     let execution_blob = json!({
                         "tx_outcomes": tx_outcomes,
@@ -295,9 +286,8 @@ pub fn App() -> impl IntoView {
                     set_pending_state_after.set(Some(state_after_str));
                     set_status_line.set("Execute finished".to_string());
                     set_diagnostics_text.set(format!(
-                        "EXECUTE OK\n- consistency: {}\n- statement_hash: {}",
-                        execution_blob["consistency"].as_str().unwrap_or("unknown"),
-                        statement_hash
+                        "EXECUTE OK\n- consistency: {}",
+                        consistency_label(&execution_blob["consistency"])
                     ));
                     append_history("execute", true, "batch execution finished".to_string());
                 }
@@ -317,12 +307,28 @@ pub fn App() -> impl IntoView {
             return;
         }
 
+        let state = match parse_state(&state_json.get()) {
+            Ok(state) => state,
+            Err(e) => {
+                set_status_line.set(format!("Prove blocked: invalid state JSON ({e})"));
+                append_history("prove", false, format!("state parse failed: {e}"));
+                return;
+            }
+        };
+
+        let batch = match parse_batch(&batch_json.get()) {
+            Ok(batch) => batch,
+            Err(e) => {
+                set_status_line.set(format!("Prove blocked: invalid batch JSON ({e})"));
+                append_history("prove", false, format!("batch parse failed: {e}"));
+                return;
+            }
+        };
+
         let base = daemon_url.get();
         let token = auth_token.get();
         let source = program_source.get();
-        let state_text = state_json.get();
-        let batch_text = batch_json.get();
-        let state_after = pending_state_after.get();
+        let include_trace_value = include_trace.get();
         let client = ApiClient::new(base, opt_token(token));
 
         set_busy_action.set(Some("prove".to_string()));
@@ -330,47 +336,54 @@ pub fn App() -> impl IntoView {
         set_status_line.set("Generating proof ...".to_string());
 
         spawn_local(async move {
-            match client.prove_stub().await {
-                Ok(value) => {
-                    let rendered = pretty_json_value(&value);
-                    set_proof_json.set(rendered.clone());
-                    set_proof_log_json.set(rendered);
-                    set_status_line.set("Daemon proof completed".to_string());
-                    append_history("prove", true, "daemon prove endpoint returned".to_string());
-                    persist();
+            match client
+                .prove(&source, state, batch, include_trace_value)
+                .await
+            {
+                Ok(resp) => {
+                    let proof_json_text = pretty_json_value(&json!(resp.proof));
+                    let state_after_str = pretty_json_value(&json!(resp.execution.state_after));
+
+                    set_proof_json.set(proof_json_text.clone());
+                    set_proof_log_json.set(format!(
+                        "PROVE OK\n- scheme: {}\n- statement_hash: {}\n- tx_count: {}\n- emitted_count: {}",
+                        resp.proof.scheme,
+                        resp.proof.statement_hash,
+                        resp.proof.tx_count,
+                        resp.proof.emitted_count
+                    ));
+                    set_pending_state_after.set(Some(state_after_str));
+
+                    let execution_blob = json!({
+                        "tx_outcomes": resp.execution.tx_outcomes,
+                        "consistency": resp.execution.consistency,
+                        "emitted": resp.execution.emitted,
+                        "state_after": resp.execution.state_after,
+                    });
+                    set_execution_json.set(pretty_json_value(&execution_blob));
+                    set_rw_diff_json.set(pretty_json_value(&json!({
+                        "read_set": resp.execution.read_set,
+                        "write_set": resp.execution.write_set,
+                    })));
+                    set_trace_json.set(pretty_json_value(&json!({
+                        "trace": resp.execution.trace,
+                    })));
+
+                    set_status_line.set("Proof generated".to_string());
+                    append_history(
+                        "prove",
+                        true,
+                        format!("statement_hash={}", resp.proof.statement_hash),
+                    );
                 }
                 Err(err) => {
-                    let statement_hash = compute_statement_hash(
-                        &source,
-                        &state_text,
-                        &batch_text,
-                        state_after.as_deref(),
-                    );
-                    let proof = DemoProofEnvelope {
-                        version: 1,
-                        mode: "web_demo_fallback".to_string(),
-                        statement_hash: statement_hash.clone(),
-                        program_hash: sha256_hex(&source),
-                        state_hash: sha256_hex(&canonical_json_or_raw(&state_text)),
-                        batch_hash: sha256_hex(&canonical_json_or_raw(&batch_text)),
-                        state_after_hash: state_after
-                            .as_ref()
-                            .map(|s| sha256_hex(&canonical_json_or_raw(s))),
-                        generated_at_ms: storage::now_ms(),
-                    };
-
-                    let local_proof_json = pretty_json_value(&json!(proof));
-                    set_proof_json.set(local_proof_json.clone());
-                    set_proof_log_json.set(format!(
-                        "Daemon prove unavailable ({}).\nGenerated local demo proof artifact.\nstatement_hash={}.",
-                        err.message, statement_hash
-                    ));
-                    set_status_line.set("Generated local demo proof".to_string());
-                    append_history("prove", true, "local fallback proof generated".to_string());
-                    persist();
+                    set_status_line.set(format!("Prove failed: {}", err.message));
+                    set_diagnostics_text.set(format_api_err("prove", &err));
+                    append_history("prove", false, err.message);
                 }
             }
 
+            persist();
             set_busy_action.set(None);
         });
     };
@@ -387,11 +400,53 @@ pub fn App() -> impl IntoView {
             return;
         }
 
-        let source = program_source.get();
-        let state_text = state_json.get();
-        let batch_text = batch_json.get();
-        let pending = pending_state_after.get();
+        let proof_value = match serde_json::from_str::<Value>(&proof_text) {
+            Ok(value) => value,
+            Err(e) => {
+                set_status_line.set(format!("Invalid proof JSON: {e}"));
+                append_history("verify", false, format!("invalid proof JSON: {e}"));
+                return;
+            }
+        };
 
+        let state = match parse_state(&state_json.get()) {
+            Ok(state) => state,
+            Err(e) => {
+                set_status_line.set(format!("Verify blocked: invalid state JSON ({e})"));
+                append_history("verify", false, format!("state parse failed: {e}"));
+                return;
+            }
+        };
+
+        let batch = match parse_batch(&batch_json.get()) {
+            Ok(batch) => batch,
+            Err(e) => {
+                set_status_line.set(format!("Verify blocked: invalid batch JSON ({e})"));
+                append_history("verify", false, format!("batch parse failed: {e}"));
+                return;
+            }
+        };
+
+        let state_after = match pending_state_after.get() {
+            Some(raw) => match parse_state(&raw) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    set_status_line
+                        .set(format!("Verify blocked: invalid pending state_after ({e})"));
+                    append_history("verify", false, format!("state_after parse failed: {e}"));
+                    return;
+                }
+            },
+            None => {
+                set_status_line.set(
+                    "Verify blocked: no pending state_after. execute/prove first.".to_string(),
+                );
+                append_history("verify", false, "missing pending state_after".to_string());
+                return;
+            }
+        };
+
+        let source = program_source.get();
         let base = daemon_url.get();
         let token = auth_token.get();
         let client = ApiClient::new(base, opt_token(token));
@@ -401,46 +456,35 @@ pub fn App() -> impl IntoView {
         set_status_line.set("Verifying proof ...".to_string());
 
         spawn_local(async move {
-            match client.verify_stub().await {
-                Ok(value) => {
+            match client
+                .verify(proof_value, &source, state, batch, state_after)
+                .await
+            {
+                Ok(resp) => {
                     let report = VerifyReport {
-                        ok: value.get("ok").and_then(|v| v.as_bool()).unwrap_or(true),
-                        mode: "daemon".to_string(),
-                        message: "daemon verify endpoint returned".to_string(),
-                        statement_hash: None,
-                        expected_statement_hash: None,
+                        ok: resp.verified,
+                        mode: "daemon_receipt".to_string(),
+                        message: resp.message.clone(),
+                        statement_hash: resp.statement_hash.clone(),
+                        expected_statement_hash: resp.expected_statement_hash.clone(),
                         checked_at_ms: storage::now_ms(),
-                        raw: Some(value),
+                        raw: Some(json!(resp)),
                     };
 
                     let rendered = pretty_json_value(&json!(report));
                     set_verify_result_json.set(rendered);
                     set_verify_report.set(Some(report));
-                    set_status_line.set("Verify completed via daemon".to_string());
-                    append_history(
-                        "verify",
-                        true,
-                        "daemon verify endpoint returned".to_string(),
-                    );
-                }
-                Err(_) => {
-                    let expected_hash = compute_statement_hash(
-                        &source,
-                        &state_text,
-                        &batch_text,
-                        pending.as_deref(),
-                    );
-
-                    let local_report = verify_locally(&proof_text, &expected_hash);
-                    let rendered = pretty_json_value(&json!(local_report));
-                    set_verify_result_json.set(rendered);
-                    set_verify_report.set(Some(local_report.clone()));
-                    set_status_line.set(if local_report.ok {
-                        "Verify passed (local fallback)".to_string()
+                    set_status_line.set(if resp.verified {
+                        "Verify passed".to_string()
                     } else {
-                        "Verify failed (local fallback)".to_string()
+                        "Verify failed".to_string()
                     });
-                    append_history("verify", local_report.ok, local_report.message);
+                    append_history("verify", resp.verified, resp.message);
+                }
+                Err(err) => {
+                    set_status_line.set(format!("Verify failed: {}", err.message));
+                    set_diagnostics_text.set(format_api_err("verify", &err));
+                    append_history("verify", false, err.message);
                 }
             }
 
@@ -1297,67 +1341,16 @@ fn pretty_json_inline(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_string())
 }
 
-fn canonical_json_or_raw(raw: &str) -> String {
-    match serde_json::from_str::<Value>(raw) {
-        Ok(value) => serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string()),
-        Err(_) => raw.to_string(),
+fn consistency_label(value: &Value) -> String {
+    if let Some(s) = value.as_str() {
+        return s.to_string();
     }
-}
-
-fn sha256_hex(input: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    hex::encode(hasher.finalize())
-}
-
-fn compute_statement_hash(
-    program_source: &str,
-    state_json: &str,
-    batch_json: &str,
-    state_after_json: Option<&str>,
-) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(program_source.as_bytes());
-    hasher.update(b"\n--state--\n");
-    hasher.update(canonical_json_or_raw(state_json).as_bytes());
-    hasher.update(b"\n--batch--\n");
-    hasher.update(canonical_json_or_raw(batch_json).as_bytes());
-    if let Some(after) = state_after_json {
-        hasher.update(b"\n--state_after--\n");
-        hasher.update(canonical_json_or_raw(after).as_bytes());
+    if let Some(obj) = value.as_object()
+        && let Some((key, _)) = obj.iter().next()
+    {
+        return key.clone();
     }
-    hex::encode(hasher.finalize())
-}
-
-fn verify_locally(proof_json: &str, expected_hash: &str) -> VerifyReport {
-    match serde_json::from_str::<DemoProofEnvelope>(proof_json) {
-        Ok(proof) => {
-            let ok = proof.statement_hash == expected_hash;
-            let statement_hash = proof.statement_hash.clone();
-            VerifyReport {
-                ok,
-                mode: "local_demo".to_string(),
-                message: if ok {
-                    "statement hash matched".to_string()
-                } else {
-                    "statement hash mismatch".to_string()
-                },
-                statement_hash: Some(statement_hash),
-                expected_statement_hash: Some(expected_hash.to_string()),
-                checked_at_ms: storage::now_ms(),
-                raw: Some(json!(proof)),
-            }
-        }
-        Err(e) => VerifyReport {
-            ok: false,
-            mode: "local_demo".to_string(),
-            message: format!("invalid proof JSON: {e}"),
-            statement_hash: None,
-            expected_statement_hash: Some(expected_hash.to_string()),
-            checked_at_ms: storage::now_ms(),
-            raw: None,
-        },
-    }
+    "unknown".to_string()
 }
 
 fn opt_token(token: String) -> Option<String> {

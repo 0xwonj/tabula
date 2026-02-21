@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use crate::kernel::domain::{
     BatchFile, Capabilities, CapabilityClientKind, CapabilityInputMode, CheckCommand, CheckResult,
-    CompileCommand, CompileResult, ExecuteCommand, ExecuteResult, InputRef as DomainInputRef,
-    ProgramFile, ProgramInline as DomainProgramInline, ProgramInputRef as DomainProgramInputRef,
-    StateCell, StateFile,
+    CompileCommand, CompileResult, ExecuteCommand, ExecuteResult, ExecutionReceipt,
+    InputRef as DomainInputRef, ProgramFile, ProgramInline as DomainProgramInline,
+    ProgramInputRef as DomainProgramInputRef, ProveCommand, ProveResult, StateCell, StateFile,
+    VerifyCommand, VerifyExpectedCommand, VerifyResult,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,6 +62,33 @@ pub struct ExecuteRequest {
     pub batch: InputRef<BatchFile>,
     #[serde(default)]
     pub include_trace: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProveRequest {
+    pub program: InputRef<ProgramInline>,
+    pub state: InputRef<StateFile>,
+    pub batch: InputRef<BatchFile>,
+    #[serde(default)]
+    pub include_trace: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VerifyExpectedRequest {
+    pub program: InputRef<ProgramInline>,
+    pub state: InputRef<StateFile>,
+    pub batch: InputRef<BatchFile>,
+    pub state_after: InputRef<StateFile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VerifyRequest {
+    pub proof: JsonValue,
+    #[serde(default)]
+    pub expected: Option<VerifyExpectedRequest>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -122,6 +151,40 @@ pub struct ExecuteResponse {
     pub state_after: StateFile,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ExecutePayload {
+    pub tx_outcomes: Vec<tabula_core::TxOutcome>,
+    pub read_set: Vec<StateCell>,
+    pub write_set: Vec<StateCell>,
+    pub emitted: Vec<tabula_core::EmittedEvent>,
+    pub consistency: tabula_core::ExecutionConsistencyStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace: Option<Vec<tabula_core::ExecutionEvent>>,
+    pub state_after: StateFile,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProveResponse {
+    pub ok: bool,
+    pub proof: ExecutionReceipt,
+    pub execution: ExecutePayload,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VerifyResponse {
+    pub ok: bool,
+    pub verified: bool,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub statement_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_statement_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_expected: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proof: Option<ExecutionReceipt>,
+}
+
 impl From<CheckRequest> for CheckCommand {
     fn from(value: CheckRequest) -> Self {
         Self {
@@ -145,6 +208,37 @@ impl From<ExecuteRequest> for ExecuteCommand {
             state: map_input(value.state),
             batch: map_input(value.batch),
             include_trace: value.include_trace,
+        }
+    }
+}
+
+impl From<ProveRequest> for ProveCommand {
+    fn from(value: ProveRequest) -> Self {
+        Self {
+            program: map_program_input(value.program),
+            state: map_input(value.state),
+            batch: map_input(value.batch),
+            include_trace: value.include_trace,
+        }
+    }
+}
+
+impl From<VerifyExpectedRequest> for VerifyExpectedCommand {
+    fn from(value: VerifyExpectedRequest) -> Self {
+        Self {
+            program: map_program_input(value.program),
+            state: map_input(value.state),
+            batch: map_input(value.batch),
+            state_after: map_input(value.state_after),
+        }
+    }
+}
+
+impl From<VerifyRequest> for VerifyCommand {
+    fn from(value: VerifyRequest) -> Self {
+        Self {
+            proof: value.proof,
+            expected: value.expected.map(VerifyExpectedCommand::from),
         }
     }
 }
@@ -186,10 +280,9 @@ impl From<CompileResult> for CompileResponse {
     }
 }
 
-impl From<ExecuteResult> for ExecuteResponse {
+impl From<ExecuteResult> for ExecutePayload {
     fn from(value: ExecuteResult) -> Self {
         Self {
-            ok: true,
             tx_outcomes: value.tx_outcomes,
             read_set: value.read_set,
             write_set: value.write_set,
@@ -197,6 +290,46 @@ impl From<ExecuteResult> for ExecuteResponse {
             consistency: value.consistency,
             trace: value.trace,
             state_after: value.state_after,
+        }
+    }
+}
+
+impl From<ExecuteResult> for ExecuteResponse {
+    fn from(value: ExecuteResult) -> Self {
+        let payload = ExecutePayload::from(value);
+        Self {
+            ok: true,
+            tx_outcomes: payload.tx_outcomes,
+            read_set: payload.read_set,
+            write_set: payload.write_set,
+            emitted: payload.emitted,
+            consistency: payload.consistency,
+            trace: payload.trace,
+            state_after: payload.state_after,
+        }
+    }
+}
+
+impl From<ProveResult> for ProveResponse {
+    fn from(value: ProveResult) -> Self {
+        Self {
+            ok: true,
+            proof: value.proof,
+            execution: value.execution.into(),
+        }
+    }
+}
+
+impl From<VerifyResult> for VerifyResponse {
+    fn from(value: VerifyResult) -> Self {
+        Self {
+            ok: true,
+            verified: value.verified,
+            message: value.message,
+            statement_hash: value.statement_hash,
+            expected_statement_hash: value.expected_statement_hash,
+            matched_expected: value.matched_expected,
+            proof: value.proof,
         }
     }
 }

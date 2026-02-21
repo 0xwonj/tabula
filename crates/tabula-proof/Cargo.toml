@@ -31,6 +31,9 @@ p3-symmetric = { workspace = true, optional = true }
 [dev-dependencies]
 tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-core = { workspace = true, features = ["mock"] }
+tabula-executor = { workspace = true }
+tabula-ir = { workspace = true }
+tabula-lang = { workspace = true }
 p3-baby-bear = { workspace = true }
 p3-field = { workspace = true }
 p3-matrix = { workspace = true }

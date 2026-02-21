@@ -167,6 +167,7 @@ tabula-web-ide        Leptos browser IDE
 | [`semantics-spec.md`](docs/spec/semantics-spec.md) | Core IR contract, execution model, normal form |
 | [`proof-spec.md`](docs/spec/proof-spec.md) | AIR constraints, LogUp, trace layout, STARK |
 | [`architecture.md`](docs/design/architecture.md) | Crate structure, data flow, phasing |
+| [`final-target-architecture.md`](docs/design/final-target-architecture.md) | Final target architecture, crate boundaries, big-bang migration playbook |
 
 ## Getting Started
 

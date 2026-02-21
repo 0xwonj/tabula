@@ -84,9 +84,54 @@ pub struct ExecuteResponse {
     pub read_set: Vec<StateCell>,
     pub write_set: Vec<StateCell>,
     pub emitted: Vec<Value>,
-    pub consistency: String,
+    pub consistency: Value,
     pub trace: Option<Vec<Value>>,
     pub state_after: StateFile,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutePayload {
+    pub tx_outcomes: Vec<Value>,
+    pub read_set: Vec<StateCell>,
+    pub write_set: Vec<StateCell>,
+    pub emitted: Vec<Value>,
+    pub consistency: Value,
+    pub trace: Option<Vec<Value>>,
+    pub state_after: StateFile,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionReceipt {
+    pub version: u32,
+    pub scheme: String,
+    pub statement_hash: String,
+    pub program_hash: String,
+    pub state_hash: String,
+    pub batch_hash: String,
+    pub state_after_hash: String,
+    pub metadata_hash: String,
+    pub generated_at_ms: u64,
+    pub tx_count: usize,
+    pub emitted_count: usize,
+    pub consistency: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProveResponse {
+    pub ok: bool,
+    pub proof: ExecutionReceipt,
+    pub execution: ExecutePayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifyResponse {
+    pub ok: bool,
+    pub verified: bool,
+    pub message: String,
+    pub statement_hash: Option<String>,
+    pub expected_statement_hash: Option<String>,
+    pub matched_expected: Option<bool>,
+    pub proof: Option<ExecutionReceipt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,16 +181,4 @@ pub struct VerifyReport {
     pub expected_statement_hash: Option<String>,
     pub checked_at_ms: f64,
     pub raw: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DemoProofEnvelope {
-    pub version: u32,
-    pub mode: String,
-    pub statement_hash: String,
-    pub program_hash: String,
-    pub state_hash: String,
-    pub batch_hash: String,
-    pub state_after_hash: Option<String>,
-    pub generated_at_ms: f64,
 }
