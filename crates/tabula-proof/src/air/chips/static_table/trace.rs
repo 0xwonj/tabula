@@ -11,6 +11,7 @@ use crate::air::columns::borrow_cols_mut;
 use super::columns::{StaticTableCols, static_table_width};
 
 /// A single static table entry for trace generation.
+#[derive(Debug, Clone)]
 pub struct StaticTableRow {
     /// Table identifier.
     pub table_id: u32,

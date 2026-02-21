@@ -8,6 +8,7 @@
 > - [compiler-research-architecture.md](./compiler-research-architecture.md)
 > - [architecture.md](./architecture.md)
 > - [m12-completion-gate.md](./m12-completion-gate.md)
+> - [state-machine-centric-runtime-architecture.md](./state-machine-centric-runtime-architecture.md)
 
 ---
 
@@ -670,4 +671,3 @@ Architecture is complete only when all statements are true:
 5. Create `tabula-orchestrator` crate with one migrated use-case (`execute`) as pilot.
 
 These five actions materially reduce risk and establish the ideal architecture runway.
-

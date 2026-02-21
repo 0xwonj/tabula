@@ -31,7 +31,7 @@ use super::types::AllTraceBundle;
 ///
 /// This function also synthesizes Poseidon and RangeCheck traces by collecting
 /// C5/C8 sends from the non-preprocessed chips.
-pub fn build_all_trace_bundle<H, const W: usize>(
+pub(super) fn build_all_trace_bundle<H, const W: usize>(
     witness: &BatchWitness<H>,
     execution_records: &[InstructionRecord],
     static_table_rows: &[StaticTableRow],
@@ -104,7 +104,7 @@ where
 }
 
 /// Build all-chip traces directly from `ExecutionResult` via access-event lowering.
-pub fn build_all_trace_bundle_from_execution_result<H, const W: usize>(
+pub(super) fn build_all_trace_bundle_from_execution_result<H, const W: usize>(
     witness: &BatchWitness<H>,
     execution_result: &ExecutionResult,
     schemas: &BTreeMap<TableId, TableSchema>,

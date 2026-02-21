@@ -54,39 +54,44 @@ pub struct CapabilitiesResponse {
     pub ok: bool,
     pub service_role: String,
     pub clients: Vec<String>,
-    pub compile: bool,
-    pub check: bool,
-    pub execute: bool,
+    pub register_program: bool,
+    pub create_instance: bool,
+    pub submit_run: bool,
     pub prove: bool,
     pub verify: bool,
+    pub list_programs: bool,
+    pub list_instances: bool,
+    pub run_history: bool,
     pub input_modes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CheckResponse {
-    pub ok: bool,
-    pub table_count: usize,
-    pub tx_type_count: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompileResponse {
-    pub ok: bool,
+pub struct ProgramRecord {
+    pub program_id: String,
     pub table_count: usize,
     pub tx_type_count: usize,
     pub program: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecuteResponse {
+pub struct RegisterProgramResponse {
     pub ok: bool,
-    pub tx_outcomes: Vec<Value>,
-    pub read_set: Vec<StateCell>,
-    pub write_set: Vec<StateCell>,
-    pub emitted: Vec<Value>,
-    pub consistency: Value,
-    pub trace: Option<Vec<Value>>,
-    pub state_after: StateFile,
+    pub program: ProgramRecord,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateInstanceRecord {
+    pub instance_id: String,
+    pub program_id: String,
+    pub version: u64,
+    pub state_hash: String,
+    pub state: StateFile,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateInstanceResponse {
+    pub ok: bool,
+    pub instance: CreateInstanceRecord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,68 +106,37 @@ pub struct ExecutePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionReceipt {
-    pub version: u32,
-    pub scheme: String,
-    pub statement_hash: String,
-    pub program_hash: String,
-    pub state_hash: String,
-    pub batch_hash: String,
-    pub state_after_hash: String,
-    pub metadata_hash: String,
-    pub generated_at_ms: u64,
-    pub tx_count: usize,
-    pub emitted_count: usize,
-    pub consistency: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProveResponse {
-    pub ok: bool,
-    pub proof: ExecutionReceipt,
+pub struct RunRecordResponse {
+    pub run_id: String,
+    pub status: String,
     pub execution: ExecutePayload,
+    pub proof: Option<ExecutionReceipt>,
+    pub stark_proof: Option<StarkProofSummary>,
+    pub statement_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VerifyResponse {
+pub struct SubmitRunResponse {
     pub ok: bool,
+    pub run: RunRecordResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifyRunResponse {
+    pub ok: bool,
+    pub run: RunRecordResponse,
     pub verified: bool,
     pub message: String,
-    pub statement_hash: Option<String>,
-    pub expected_statement_hash: Option<String>,
-    pub matched_expected: Option<bool>,
-    pub proof: Option<ExecutionReceipt>,
+    pub statement_hash: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StateFile {
-    pub cells: Vec<StateCell>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StateCell {
-    pub table: u32,
-    pub row: u64,
-    pub col: u16,
-    pub value: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BatchFile {
-    pub transactions: Vec<TxInput>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TxInput {
-    pub tx_type: u32,
-    pub params: Vec<Value>,
-    pub sender: String,
-    pub nonce: u64,
-}
+pub type StateFile = tabula_artifact::StateFile;
+pub type StateCell = tabula_artifact::StateCell;
+pub type BatchFile = tabula_artifact::BatchFile;
+pub type TxInput = tabula_artifact::TxInput;
+pub type ExecutionReceipt = tabula_artifact::ExecutionReceipt;
+pub type StarkProofSummary = tabula_artifact::StarkProofSummary;
+pub type ProgramArtifact = tabula_artifact::ProgramArtifact;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunRecord {

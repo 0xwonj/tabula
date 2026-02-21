@@ -8,6 +8,7 @@ members = [
     "crates/tabula-commitment",
     "crates/tabula-proof",
     "crates/tabula-lang",
+    "crates/tabula-artifact",
     "crates/tabula-driver",
     "crates/tabula-cli",
     "crates/tabula-daemon",
@@ -29,8 +30,8 @@ tabula-executor = { path = "crates/tabula-executor" }
 tabula-commitment = { path = "crates/tabula-commitment" }
 tabula-proof = { path = "crates/tabula-proof" }
 tabula-lang = { path = "crates/tabula-lang" }
+tabula-artifact = { path = "crates/tabula-artifact" }
 tabula-driver = { path = "crates/tabula-driver" }
-
 # Serialization
 serde = { version = "1", features = ["derive"] }
 borsh = { version = "1", features = ["derive"] }
@@ -38,13 +39,19 @@ borsh = { version = "1", features = ["derive"] }
 # Crypto
 blake3 = "1"
 
-# Plonky3 (BabyBear + Poseidon2 + AIR)
+# Plonky3 (BabyBear + Poseidon2 + AIR + STARK)
 p3-field = "0.4"
 p3-baby-bear = "0.4"
 p3-poseidon2 = "0.4"
 p3-symmetric = "0.4"
 p3-air = "0.4"
 p3-matrix = "0.4"
+p3-uni-stark = "0.4"
+p3-commit = "0.4"
+p3-fri = "0.4"
+p3-challenger = "0.4"
+p3-dft = "0.4"
+p3-merkle-tree = "0.4"
 
 # Error handling
 thiserror = "2"

@@ -2,6 +2,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::service::FileAccessPolicy;
 use anyhow::{Context, bail};
 use clap::Parser;
 use http::HeaderValue;
@@ -81,33 +82,11 @@ impl Cli {
             bail!("request_timeout_ms must be greater than 0");
         }
 
-        let roots = if self.allow_paths.is_empty() {
-            let mut defaults = vec![
-                std::env::current_dir().context("failed to resolve current dir")?,
-                std::env::temp_dir(),
-            ];
-            #[cfg(unix)]
-            defaults.push(PathBuf::from("/tmp"));
-            defaults
+        let allowed_roots = if self.allow_paths.is_empty() {
+            FileAccessPolicy::local_default_roots()?
         } else {
-            self.allow_paths
+            FileAccessPolicy::canonicalize_roots(self.allow_paths)?
         };
-
-        let mut allowed_roots = Vec::new();
-        for root in roots {
-            let canon = root.canonicalize().with_context(|| {
-                format!(
-                    "allowed path does not exist or is invalid: {}",
-                    root.display()
-                )
-            })?;
-            if !canon.is_dir() {
-                bail!("allowed path is not a directory: {}", canon.display());
-            }
-            if !allowed_roots.iter().any(|r: &PathBuf| r == &canon) {
-                allowed_roots.push(canon);
-            }
-        }
 
         let default_origins = vec![
             "http://127.0.0.1:3000",

@@ -23,11 +23,24 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     let protected = Router::new()
-        .route("/v1/check", post(handlers::check))
-        .route("/v1/compile", post(handlers::compile))
-        .route("/v1/execute", post(handlers::execute))
-        .route("/v1/jobs/prove", post(handlers::prove))
-        .route("/v1/jobs/verify", post(handlers::verify))
+        .route(
+            "/v1/programs",
+            post(handlers::register_program).get(handlers::list_programs),
+        )
+        .route("/v1/programs/:program_id", get(handlers::get_program))
+        .route(
+            "/v1/instances",
+            post(handlers::create_instance).get(handlers::list_instances),
+        )
+        .route("/v1/instances/:instance_id", get(handlers::get_instance))
+        .route(
+            "/v1/runs",
+            post(handlers::submit_run).get(handlers::list_runs),
+        )
+        .route(
+            "/v1/runs/:run_id",
+            get(handlers::get_run).post(handlers::verify_run),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::require_auth,

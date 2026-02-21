@@ -5,19 +5,19 @@ use std::time::Duration;
 use http::HeaderValue;
 use tokio::sync::Semaphore;
 
-use crate::kernel::engine::KernelEngine;
 use crate::runtime::config::ServerConfig;
+use crate::service::LocalEngine;
 
 /// Shared app state used by handlers and middleware.
 #[derive(Clone)]
 pub struct AppState {
     config: ServerConfig,
-    engine: Arc<dyn KernelEngine>,
+    engine: Arc<LocalEngine>,
     limiter: Arc<Semaphore>,
 }
 
 impl AppState {
-    pub fn new(config: ServerConfig, engine: Arc<dyn KernelEngine>) -> Self {
+    pub fn new(config: ServerConfig, engine: Arc<LocalEngine>) -> Self {
         let limiter = Arc::new(Semaphore::new(config.max_concurrent_jobs));
         Self {
             config,
@@ -42,7 +42,7 @@ impl AppState {
         &self.config.allow_origins
     }
 
-    pub fn engine(&self) -> Arc<dyn KernelEngine> {
+    pub fn engine(&self) -> Arc<LocalEngine> {
         self.engine.clone()
     }
 

@@ -9,24 +9,38 @@ default = []
 stark = [
     "tabula-commitment/stark",
     "dep:tabula-commitment",
+    "dep:tabula-ir",
     "p3-field",
     "p3-baby-bear",
     "p3-air",
     "p3-matrix",
     "p3-poseidon2",
     "p3-symmetric",
+    "p3-uni-stark",
+    "p3-commit",
+    "p3-fri",
+    "p3-challenger",
+    "p3-dft",
+    "p3-merkle-tree",
 ]
 
 [dependencies]
 tabula-core = { workspace = true }
 tabula-contract = { workspace = true }
 tabula-commitment = { workspace = true, optional = true }
+tabula-ir = { workspace = true, optional = true }
 p3-field = { workspace = true, optional = true }
 p3-baby-bear = { workspace = true, optional = true }
 p3-air = { workspace = true, optional = true }
 p3-matrix = { workspace = true, optional = true }
 p3-poseidon2 = { workspace = true, optional = true }
 p3-symmetric = { workspace = true, optional = true }
+p3-uni-stark = { workspace = true, optional = true }
+p3-commit = { workspace = true, optional = true }
+p3-fri = { workspace = true, optional = true }
+p3-challenger = { workspace = true, optional = true }
+p3-dft = { workspace = true, optional = true }
+p3-merkle-tree = { workspace = true, optional = true }
 
 [dev-dependencies]
 tabula-commitment = { workspace = true, features = ["stark"] }
@@ -38,3 +52,6 @@ p3-baby-bear = { workspace = true }
 p3-field = { workspace = true }
 p3-matrix = { workspace = true }
 p3-symmetric = { workspace = true }
+p3-uni-stark = { workspace = true }
+p3-challenger = { workspace = true }
+p3-fri = { workspace = true }

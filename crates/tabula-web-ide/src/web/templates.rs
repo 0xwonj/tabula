@@ -1,4 +1,4 @@
-use serde_json::json;
+use tabula_core::Value as CoreValue;
 
 use crate::web::models::{BatchFile, StateCell, StateFile, TxInput, WorkspaceDoc};
 
@@ -24,19 +24,19 @@ pub fn built_in_templates() -> Vec<ScenarioTemplate> {
                         table: 0,
                         row: 0,
                         col: 0,
-                        value: Some(json!({ "U64": 1000 })),
+                        value: Some(CoreValue::U64(1000)),
                     },
                     StateCell {
                         table: 0,
                         row: 1,
                         col: 0,
-                        value: Some(json!({ "U64": 500 })),
+                        value: Some(CoreValue::U64(500)),
                     },
                     StateCell {
                         table: 0,
                         row: 2,
                         col: 0,
-                        value: Some(json!({ "U64": 200 })),
+                        value: Some(CoreValue::U64(200)),
                     },
                 ],
             },
@@ -44,31 +44,19 @@ pub fn built_in_templates() -> Vec<ScenarioTemplate> {
                 transactions: vec![
                     TxInput {
                         tx_type: 0,
-                        params: vec![
-                            json!({ "U64": 0 }),
-                            json!({ "U64": 1 }),
-                            json!({ "U64": 300 }),
-                        ],
+                        params: vec![CoreValue::U64(0), CoreValue::U64(1), CoreValue::U64(300)],
                         sender: "01".repeat(32),
                         nonce: 0,
                     },
                     TxInput {
                         tx_type: 0,
-                        params: vec![
-                            json!({ "U64": 1 }),
-                            json!({ "U64": 2 }),
-                            json!({ "U64": 200 }),
-                        ],
+                        params: vec![CoreValue::U64(1), CoreValue::U64(2), CoreValue::U64(200)],
                         sender: "01".repeat(32),
                         nonce: 1,
                     },
                     TxInput {
                         tx_type: 0,
-                        params: vec![
-                            json!({ "U64": 2 }),
-                            json!({ "U64": 0 }),
-                            json!({ "U64": 50 }),
-                        ],
+                        params: vec![CoreValue::U64(2), CoreValue::U64(0), CoreValue::U64(50)],
                         sender: "01".repeat(32),
                         nonce: 2,
                     },
@@ -85,13 +73,13 @@ pub fn built_in_templates() -> Vec<ScenarioTemplate> {
                     table: 0,
                     row: 0,
                     col: 0,
-                    value: Some(json!({ "U64": 10 })),
+                    value: Some(CoreValue::U64(10)),
                 }],
             },
             batch: BatchFile {
                 transactions: vec![TxInput {
                     tx_type: 0,
-                    params: vec![json!({ "U64": 0 }), json!({ "U64": 99 })],
+                    params: vec![CoreValue::U64(0), CoreValue::U64(99)],
                     sender: "01".repeat(32),
                     nonce: 0,
                 }],

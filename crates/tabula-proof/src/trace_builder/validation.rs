@@ -19,7 +19,7 @@ use super::smt::smt_table_public_values_from_roots;
 use super::types::AllTraceBundle;
 
 /// Validate an all-chip bundle with debug constraints and bus balance checks.
-pub fn debug_validate_all_trace_bundle<const W: usize>(
+pub(super) fn debug_validate_all_trace_bundle<const W: usize>(
     bundle: &AllTraceBundle<W>,
     old_state_root: &NativeDigest,
     new_state_root: &NativeDigest,

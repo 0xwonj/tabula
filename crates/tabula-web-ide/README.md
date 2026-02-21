@@ -7,10 +7,15 @@ Leptos(CSR) 기반 Tabula Web IDE.
 - Program IDE (`.tab` source)
 - State table editor + raw JSON editor
 - Transaction batch builder + raw JSON editor
-- Daemon integration: health/capabilities/check/compile/execute
+- Daemon integration: health/capabilities + stateful runtime API
+- Program/instance/run workflow:
+  - `POST /v1/programs` (register)
+  - `POST /v1/instances` (create)
+  - `POST /v1/runs` (submit execute/prove)
+  - `POST /v1/runs/{run_id}` (verify)
 - Proof workflow:
-  - daemon `/v1/jobs/prove` / `/v1/jobs/verify` 호출
-  - verify expected-context(program/state/batch/state_after)까지 서버에서 검증
+  - run submit 시 `prove=true`로 receipt 생성
+  - run verify 호출로 proof 검증 상태 전이
 - Verify gate 기반 state apply
 - Run history, diagnostics, compiled IR, trace, RW diff
 - Workspace/proof import-export
@@ -37,7 +42,8 @@ rustup target add wasm32-unknown-unknown
 3. web ide 실행
 
 ```bash
-trunk serve --manifest-path crates/tabula-web-ide/Cargo.toml --open
+cd crates/tabula-web-ide
+trunk serve --open
 ```
 
-브라우저에서 daemon URL/token을 입력 후 Connect -> Check/Compile/Execute 순서로 사용.
+브라우저에서 daemon URL/token을 입력 후 Connect -> Check/Compile -> Execute/Prove -> Verify 순서로 사용.

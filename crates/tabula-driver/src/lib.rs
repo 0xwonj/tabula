@@ -8,27 +8,132 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
+use tabula_artifact::{BatchFile, ProgramArtifact, StateCell, StateFile, TxInput};
 use tabula_contract::{
     CONTRACT_SCHEMA_VERSION_V1, ContractCompatibilityPolicy, ContractMetadataEnvelope,
     STATEMENT_BINDING_VERSION_V1, apply_batch_binding_registry_v1,
 };
-use tabula_core::{ColId, TableId, TableSchema};
+use tabula_core::{ColId, TableId, TableSchema, Value};
 use tabula_ir::{Program, TxTypeDef};
 
 const PROFILE_HASH_DOMAIN: &[u8] = b"tabula.driver.profile_hash.v1";
 
 /// Program file format used by compile/check/execute commands.
+pub type ProgramSourceFile = ProgramArtifact;
+
+/// Driver result type.
+pub type DriverResult<T> = Result<T, DriverError>;
+
+/// Program source format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramSourceFormat {
+    /// `.tab` source program.
+    TabSource,
+    /// JSON artifact program.
+    JsonArtifact,
+}
+
+/// Contract metadata validation policy for program sources.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetadataPolicy {
+    /// Metadata is optional (e.g., source program that will be freshly registered).
+    Optional,
+    /// Metadata is required and must validate (e.g., precompiled artifact input).
+    Required,
+}
+
+/// Structured compile diagnostic for adapters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProgramSourceFile {
-    /// Table schema definitions.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub table_schemas: Vec<TableSchema>,
-    /// Transaction type definitions.
-    pub tx_types: Vec<TxTypeDef>,
-    /// Optional metadata envelope (required for JSON artifact mode).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub contract_metadata: Option<ContractMetadataEnvelope>,
+pub struct CompileDiagnostic {
+    /// Compile error kind.
+    pub kind: String,
+    /// Human-readable diagnostic message.
+    pub message: String,
+    /// Byte span start.
+    pub span_start: usize,
+    /// Byte span end.
+    pub span_end: usize,
+    /// 1-based line.
+    pub line: usize,
+    /// 1-based column.
+    pub col: usize,
+}
+
+/// Driver-level error type shared across adapters/orchestration.
+#[derive(Debug, Error)]
+pub enum DriverError {
+    /// Program source read failed.
+    #[error("failed to read {path}: {source}")]
+    ReadFile {
+        /// File path.
+        path: String,
+        /// Source error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// Program JSON parse failed.
+    #[error("failed to parse {path}: {source}")]
+    ParseJson {
+        /// File path or logical label.
+        path: String,
+        /// Source error.
+        #[source]
+        source: serde_json::Error,
+    },
+    /// Program compile failed.
+    #[error("program compilation failed")]
+    Compile {
+        /// Structured diagnostics.
+        diagnostics: Vec<CompileDiagnostic>,
+    },
+    /// Program failed semantic registration.
+    #[error("invalid program: {message}")]
+    InvalidProgram {
+        /// Validation error text.
+        message: String,
+    },
+    /// Compiled artifact is missing contract metadata.
+    #[error(
+        "compiled program JSON is missing contract_metadata; regenerate with the current driver"
+    )]
+    MissingContractMetadata,
+    /// Compiled artifact metadata mismatched current semantic policy.
+    #[error("contract metadata mismatch: {message}")]
+    ContractMetadataMismatch {
+        /// Validation mismatch details.
+        message: String,
+    },
+}
+
+/// Built-in transfer example source used by adapter commands.
+pub const TRANSFER_EXAMPLE_TAB_SOURCE: &str = "\
+table balances {
+    balance: u64,
+}
+
+tx transfer(from: u64, to: u64, amount: u64) {
+    let sender_bal = balances[from].balance
+    let recv_bal = balances[to].balance
+    assert sender_bal >= amount
+    balances[from].balance = sender_bal - amount
+    balances[to].balance = recv_bal + amount
+    emit \"transfer\" (from, to, amount)
+}
+";
+
+/// Program/state/batch bundle for sample scenarios.
+#[derive(Debug, Clone)]
+pub struct ExampleBundle {
+    /// `.tab` source text.
+    pub program_tab_source: String,
+    /// Program artifact JSON payload.
+    pub program: ProgramSourceFile,
+    /// Initial state payload.
+    pub state: StateFile,
+    /// Batch payload.
+    pub batch: BatchFile,
 }
 
 /// Registered program artifact produced by the driver.
@@ -67,34 +172,139 @@ impl RegisteredProgram {
 
 /// Load program sources from `.tab` or `.json`.
 pub fn load_program_sources(path: &Path) -> anyhow::Result<ProgramSourceFile> {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if ext == "tab" {
-        let source = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        match tabula_lang::compile(&source) {
-            Ok(compiled) => Ok(ProgramSourceFile {
-                table_schemas: compiled.schemas,
-                tx_types: compiled.tx_types,
-                contract_metadata: None,
-            }),
-            Err(errors) => {
-                let mut msg = String::new();
-                for err in &errors {
-                    if !msg.is_empty() {
-                        msg.push_str("\n\n");
-                    }
-                    msg.push_str(&format!("{}", err.display_with_source(&source)));
-                }
-                bail!(msg)
-            }
-        }
+    load_program_sources_strict(path).map_err(anyhow::Error::new)
+}
+
+/// Strict variant of [`load_program_sources`] that returns typed driver errors.
+pub fn load_program_sources_strict(path: &Path) -> DriverResult<ProgramSourceFile> {
+    let source = std::fs::read_to_string(path).map_err(|source| DriverError::ReadFile {
+        path: path.display().to_string(),
+        source,
+    })?;
+
+    let format = if path.extension().and_then(|e| e.to_str()) == Some("tab") {
+        ProgramSourceFormat::TabSource
     } else {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        let parsed: ProgramSourceFile = serde_json::from_str(&content)
-            .with_context(|| format!("failed to parse {}", path.display()))?;
-        Ok(parsed)
+        ProgramSourceFormat::JsonArtifact
+    };
+    parse_program_sources(&source, format, &path.display().to_string())
+}
+
+/// Parse/compile program sources from in-memory text using the given source format.
+pub fn parse_program_sources(
+    content: &str,
+    format: ProgramSourceFormat,
+    source_label: &str,
+) -> DriverResult<ProgramSourceFile> {
+    match format {
+        ProgramSourceFormat::TabSource => compile_program_source(content),
+        ProgramSourceFormat::JsonArtifact => {
+            serde_json::from_str(content).map_err(|source| DriverError::ParseJson {
+                path: source_label.to_string(),
+                source,
+            })
+        }
     }
+}
+
+/// Compile a `.tab` source string into a program artifact source file.
+pub fn compile_program_source(source: &str) -> DriverResult<ProgramSourceFile> {
+    match tabula_lang::compile(source) {
+        Ok(compiled) => Ok(ProgramSourceFile {
+            table_schemas: compiled.schemas,
+            tx_types: compiled.tx_types,
+            contract_metadata: None,
+        }),
+        Err(errors) => Err(DriverError::Compile {
+            diagnostics: compile_diagnostics(source, &errors),
+        }),
+    }
+}
+
+/// Register program sources using explicit metadata policy.
+pub fn register_program_sources(
+    sources: &ProgramSourceFile,
+    metadata_policy: MetadataPolicy,
+) -> DriverResult<RegisteredProgram> {
+    let artifact = register_program(&sources.table_schemas, &sources.tx_types).map_err(|e| {
+        DriverError::InvalidProgram {
+            message: e.to_string(),
+        }
+    })?;
+
+    match (metadata_policy, sources.contract_metadata.as_ref()) {
+        (MetadataPolicy::Required, None) => Err(DriverError::MissingContractMetadata),
+        (_, Some(provided)) => artifact
+            .compatibility_policy()
+            .validate(provided)
+            .map_err(|e| DriverError::ContractMetadataMismatch {
+                message: e.to_string(),
+            })
+            .map(|_| artifact),
+        (_, None) => Ok(artifact),
+    }
+}
+
+/// Build the canonical transfer example bundle.
+pub fn transfer_example_bundle() -> anyhow::Result<ExampleBundle> {
+    let mut program =
+        compile_program_source(TRANSFER_EXAMPLE_TAB_SOURCE).map_err(anyhow::Error::new)?;
+    let artifact =
+        register_program_sources(&program, MetadataPolicy::Optional).map_err(anyhow::Error::new)?;
+    program.contract_metadata = Some(artifact.metadata_envelope);
+
+    let state = StateFile {
+        cells: vec![
+            StateCell {
+                table: 0,
+                row: 0,
+                col: 0,
+                value: Some(Value::U64(1000)),
+            },
+            StateCell {
+                table: 0,
+                row: 1,
+                col: 0,
+                value: Some(Value::U64(500)),
+            },
+            StateCell {
+                table: 0,
+                row: 2,
+                col: 0,
+                value: Some(Value::U64(200)),
+            },
+        ],
+    };
+
+    let batch = BatchFile {
+        transactions: vec![
+            TxInput {
+                tx_type: 0,
+                params: vec![Value::U64(0), Value::U64(1), Value::U64(300)],
+                sender: "01".repeat(32),
+                nonce: 0,
+            },
+            TxInput {
+                tx_type: 0,
+                params: vec![Value::U64(1), Value::U64(2), Value::U64(200)],
+                sender: "01".repeat(32),
+                nonce: 1,
+            },
+            TxInput {
+                tx_type: 0,
+                params: vec![Value::U64(2), Value::U64(0), Value::U64(50)],
+                sender: "01".repeat(32),
+                nonce: 2,
+            },
+        ],
+    };
+
+    Ok(ExampleBundle {
+        program_tab_source: TRANSFER_EXAMPLE_TAB_SOURCE.to_string(),
+        program,
+        state,
+        batch,
+    })
 }
 
 /// Register schemas and tx types into a semantic artifact.
@@ -136,23 +346,13 @@ pub fn register_program(
 
 /// Convenience helper: load sources from a path and register in one step.
 pub fn load_and_register_program(path: &Path) -> anyhow::Result<RegisteredProgram> {
-    let sources = load_program_sources(path)?;
-    let artifact = register_program(&sources.table_schemas, &sources.tx_types)?;
-
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if ext != "tab" {
-        let provided = sources.contract_metadata.as_ref().ok_or_else(|| {
-            anyhow::anyhow!(
-                "compiled program JSON is missing contract_metadata; regenerate with the current driver"
-            )
-        })?;
-        artifact
-            .compatibility_policy()
-            .validate(provided)
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    }
-
-    Ok(artifact)
+    let sources = load_program_sources_strict(path).map_err(anyhow::Error::new)?;
+    let metadata_policy = if path.extension().and_then(|e| e.to_str()) == Some("tab") {
+        MetadataPolicy::Optional
+    } else {
+        MetadataPolicy::Required
+    };
+    register_program_sources(&sources, metadata_policy).map_err(anyhow::Error::new)
 }
 
 /// Validate that every state/static-table access has a declared schema+column.
@@ -249,6 +449,26 @@ fn canonicalize_tx_types(tx_types: &[TxTypeDef]) -> Vec<TxTypeDef> {
     let mut out = tx_types.to_vec();
     out.sort_by_key(|tx| tx.id);
     out
+}
+
+fn compile_diagnostics(
+    source: &str,
+    errors: &[tabula_lang::error::CompileError],
+) -> Vec<CompileDiagnostic> {
+    errors
+        .iter()
+        .map(|err| {
+            let (line, col) = tabula_lang::span::line_col(source, err.span.start);
+            CompileDiagnostic {
+                kind: format!("{:?}", err.kind),
+                message: err.message.clone(),
+                span_start: err.span.start,
+                span_end: err.span.end,
+                line,
+                col,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -389,7 +609,10 @@ mod tests {
         let program = simple_valid_program_sources();
         let path = write_temp_program_file(&program);
         let err = load_and_register_program(&path).expect_err("metadata missing should fail");
-        assert!(err.to_string().contains("missing contract_metadata"));
+        let driver_err = err
+            .downcast_ref::<DriverError>()
+            .expect("expected DriverError for metadata-missing path");
+        assert!(matches!(driver_err, DriverError::MissingContractMetadata));
         let _ = std::fs::remove_file(path);
     }
 
@@ -404,7 +627,43 @@ mod tests {
         });
         let path = write_temp_program_file(&program);
         let err = load_and_register_program(&path).expect_err("metadata mismatch should fail");
-        assert!(err.to_string().contains("profile hash mismatch"));
+        let driver_err = err
+            .downcast_ref::<DriverError>()
+            .expect("expected DriverError for metadata-mismatch path");
+        match driver_err {
+            DriverError::ContractMetadataMismatch { message } => {
+                assert!(message.contains("profile hash mismatch"));
+            }
+            other => panic!("unexpected driver error: {other}"),
+        }
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn compile_program_source_returns_structured_diagnostics() {
+        let bad_source = "table t { v: u64 }\n tx x() { let a = unknown[0].v }";
+        let err = compile_program_source(bad_source).expect_err("compile should fail");
+        let DriverError::Compile { diagnostics } = err else {
+            panic!("expected compile diagnostics error");
+        };
+        assert!(!diagnostics.is_empty(), "diagnostics should be present");
+        assert!(diagnostics.iter().all(|d| d.line >= 1 && d.col >= 1));
+    }
+
+    #[test]
+    fn register_program_sources_required_metadata_rejects_missing() {
+        let program = simple_valid_program_sources();
+        let err = register_program_sources(&program, MetadataPolicy::Required)
+            .expect_err("required metadata should fail");
+        assert!(matches!(err, DriverError::MissingContractMetadata));
+    }
+
+    #[test]
+    fn transfer_example_bundle_contains_registered_metadata() {
+        let bundle = transfer_example_bundle().expect("example bundle");
+        assert_eq!(bundle.program.tx_types.len(), 1);
+        assert_eq!(bundle.state.cells.len(), 3);
+        assert_eq!(bundle.batch.transactions.len(), 3);
+        assert!(bundle.program.contract_metadata.is_some());
     }
 }

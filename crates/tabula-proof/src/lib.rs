@@ -9,6 +9,8 @@ pub mod statement;
 #[cfg(feature = "stark")]
 pub mod air;
 #[cfg(feature = "stark")]
+pub mod stark;
+#[cfg(feature = "stark")]
 pub mod trace_builder;
 #[cfg(feature = "stark")]
 pub mod witness;

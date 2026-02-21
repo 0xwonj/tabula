@@ -22,7 +22,7 @@ use inter_tx::{build_inter_tx_rows, sort_inter_tx_rows};
 use state::{build_state_rows, sort_state_rows};
 
 /// Build all memory/metadata traces from one `BatchWitness`.
-pub fn build_trace_bundle<H, const W: usize>(
+pub(super) fn build_trace_bundle<H, const W: usize>(
     witness: &BatchWitness<H>,
 ) -> Result<ProofTraceBundle<W>, TabulaError>
 where

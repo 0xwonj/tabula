@@ -154,6 +154,8 @@ tabula-web-ide        Leptos browser IDE
 | [`tabula-ir`](crates/tabula-ir/) | IR — instructions, tx type defs, SSA/NF validation |
 | [`tabula-executor`](crates/tabula-executor/) | Execution — interpreter, overlay, batch |
 | [`tabula-lang`](crates/tabula-lang/) | Compiler — `.tab` DSL to IR |
+| [`tabula-artifact`](crates/tabula-artifact/) | Artifacts — canonical program/state/batch/receipt models and helpers |
+| [`tabula-orchestrator`](crates/tabula-orchestrator/) | Orchestration — check/compile/execute/prove/verify workflows |
 | [`tabula-commitment`](crates/tabula-commitment/) | Crypto — Poseidon, SMT, SSMC (out-of-circuit) |
 | [`tabula-proof`](crates/tabula-proof/) | Proving — STARK proof generation via Plonky3 |
 | [`tabula-cli`](crates/tabula-cli/) | CLI — JSON-based batch execution and inspection |

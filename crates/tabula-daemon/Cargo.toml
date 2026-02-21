@@ -11,7 +11,6 @@ clap = { workspace = true, features = ["derive", "env"] }
 http = "1"
 serde = { workspace = true }
 serde_json = "1"
-sha2 = "0.10"
 tokio = { version = "1", features = [
     "macros",
     "net",
@@ -24,9 +23,18 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+tabula-artifact = { workspace = true }
 tabula-core = { workspace = true, features = ["mock"] }
-tabula-contract = { workspace = true }
 tabula-driver = { workspace = true }
 tabula-executor = { workspace = true }
 tabula-ir = { workspace = true }
-tabula-lang = { workspace = true }
+tabula-proof = { workspace = true, optional = true }
+tabula-commitment = { workspace = true, optional = true }
+tabula-lang = { workspace = true, optional = true }
+p3-baby-bear = { workspace = true, optional = true }
+p3-field = { workspace = true, optional = true }
+sha2 = "0.10"
+
+[features]
+default = []
+stark = ["dep:tabula-proof", "tabula-proof/stark", "dep:tabula-commitment", "tabula-commitment/stark", "dep:tabula-lang", "dep:p3-baby-bear", "dep:p3-field"]

@@ -1,129 +1,14 @@
 //! JSON input/output types for the CLI.
-//!
-//! Wraps core types with user-friendly JSON serialization
-//! (hex strings for byte arrays, flat cell format for state).
 
-use serde::{Deserialize, Serialize};
-
-use tabula_core::{
-    CellKey, ColId, EmittedEvent, ExecutionConsistencyStatus, ExecutionEvent, RowKey, TableId,
-    Transaction, TxOutcome, TxTypeId, Value,
-};
-
-// ---------------------------------------------------------------------------
-// Program input
-// ---------------------------------------------------------------------------
-
-/// JSON representation of a program file.
-///
-/// Semantic ownership lives in `tabula-driver`; CLI reuses the exact file type.
-pub type ProgramFile = tabula_driver::ProgramSourceFile;
-
-// ---------------------------------------------------------------------------
-// State input/output
-// ---------------------------------------------------------------------------
+use tabula_artifact::{StateCell as ArtifactStateCell, StateFile as ArtifactStateFile};
+use tabula_core::{EmittedEvent, ExecutionConsistencyStatus, ExecutionEvent, TxOutcome};
 
 /// JSON representation of a state file.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct StateFile {
-    /// All cell values in the state.
-    pub cells: Vec<StateCell>,
-}
-
-/// A single cell entry in the state file.
-///
-/// `value` is `None` when the cell is absent (deleted).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateCell {
-    /// Table ID.
-    pub table: u32,
-    /// Row key.
-    pub row: u64,
-    /// Column ID.
-    pub col: u16,
-    /// Cell value (`null` in JSON = absent).
-    pub value: Option<Value>,
-}
-
-impl StateCell {
-    /// Convert to a `(CellKey, Value)` pair.
-    ///
-    /// Returns an error if value is `None`.
-    pub fn to_cell_pair(&self) -> anyhow::Result<(CellKey, Value)> {
-        let key = CellKey {
-            table: TableId(self.table),
-            col: ColId(self.col),
-            row: RowKey(self.row),
-        };
-        let Some(value) = self.value else {
-            anyhow::bail!(
-                "state cell is missing value (table={}, row={}, col={})",
-                self.table,
-                self.row,
-                self.col
-            );
-        };
-        Ok((key, value))
-    }
-
-    /// Create from a `(CellKey, Option<Value>)` pair.
-    pub fn from_cell_pair(key: &CellKey, value: &Option<Value>) -> Self {
-        Self {
-            table: key.table.0,
-            row: key.row.0,
-            col: key.col.0,
-            value: *value,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Batch input
-// ---------------------------------------------------------------------------
-
-/// JSON representation of a batch file.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BatchFile {
-    /// Transactions to execute.
-    pub transactions: Vec<TxInput>,
-}
-
-/// A single transaction in the batch file.
-///
-/// Uses hex strings for sender (instead of `[u8; 32]` arrays).
-/// Signature is omitted (empty) since Phase 1 uses `MockSigVerifier`.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TxInput {
-    /// Transaction type ID.
-    pub tx_type: u32,
-    /// Parameter values.
-    pub params: Vec<Value>,
-    /// Sender public key as hex string (64 hex chars = 32 bytes).
-    pub sender: String,
-    /// Replay-protection nonce.
-    pub nonce: u64,
-}
-
-impl TxInput {
-    /// Convert to a core `Transaction`.
-    pub fn to_transaction(&self) -> anyhow::Result<Transaction> {
-        let sender = parse_hex_32(&self.sender)?;
-        Ok(Transaction {
-            tx_type: TxTypeId(self.tx_type),
-            params: self.params.clone(),
-            sender,
-            nonce: self.nonce,
-            signature: vec![],
-        })
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Execution output
-// ---------------------------------------------------------------------------
-
+pub type StateFile = ArtifactStateFile;
+/// JSON representation of a state cell.
+pub type StateCell = ArtifactStateCell;
 /// JSON representation of execution results.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionOutput {
     /// Per-transaction outcomes.
     pub tx_outcomes: Vec<TxOutcome>,
@@ -140,18 +25,11 @@ pub struct ExecutionOutput {
     pub trace: Option<Vec<ExecutionEvent>>,
 }
 
-// ---------------------------------------------------------------------------
-// JSON I/O helpers
-// ---------------------------------------------------------------------------
-
 /// Deserialize a JSON file from the given path.
 pub(crate) fn load_json<T: serde::de::DeserializeOwned>(
     path: &std::path::Path,
 ) -> anyhow::Result<T> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", path.display()))?;
-    serde_json::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("failed to parse {}: {e}", path.display()))
+    tabula_artifact::load_json(path).map_err(|e| anyhow::anyhow!(e.to_string()))
 }
 
 /// Serialize a value to a pretty-printed JSON file.
@@ -159,80 +37,5 @@ pub(crate) fn write_json<T: serde::Serialize>(
     path: &std::path::Path,
     value: &T,
 ) -> anyhow::Result<()> {
-    let content = serde_json::to_string_pretty(value)?;
-    std::fs::write(path, content)
-        .map_err(|e| anyhow::anyhow!("failed to write {}: {e}", path.display()))
-}
-
-// ---------------------------------------------------------------------------
-// Hex helpers
-// ---------------------------------------------------------------------------
-
-/// Parse a hex string into a `[u8; 32]` array.
-///
-/// Accepts with or without `0x` prefix. If the string is shorter than
-/// 64 hex chars, it is zero-padded on the left.
-fn parse_hex_32(s: &str) -> anyhow::Result<[u8; 32]> {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    if s.is_empty() {
-        return Ok([0u8; 32]);
-    }
-    // Pad to 64 hex chars
-    let padded = format!("{:0>64}", s);
-    if padded.len() != 64 {
-        anyhow::bail!(
-            "hex string too long: expected at most 64 hex chars, got {}",
-            s.len()
-        );
-    }
-    let mut out = [0u8; 32];
-    for (i, chunk) in padded.as_bytes().chunks(2).enumerate() {
-        let byte_str = std::str::from_utf8(chunk)?;
-        out[i] = u8::from_str_radix(byte_str, 16)?;
-    }
-    Ok(out)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_hex_32_full() {
-        let hex = "01".repeat(32);
-        let result = parse_hex_32(&hex).unwrap();
-        assert_eq!(result, [1u8; 32]);
-    }
-
-    #[test]
-    fn test_parse_hex_32_with_prefix() {
-        let hex = format!("0x{}", "ab".repeat(32));
-        let result = parse_hex_32(&hex).unwrap();
-        assert_eq!(result, [0xab; 32]);
-    }
-
-    #[test]
-    fn test_parse_hex_32_short_padded() {
-        let result = parse_hex_32("ff").unwrap();
-        let mut expected = [0u8; 32];
-        expected[31] = 0xff;
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_parse_hex_32_empty() {
-        let result = parse_hex_32("").unwrap();
-        assert_eq!(result, [0u8; 32]);
-    }
-
-    #[test]
-    fn test_state_cell_to_cell_pair_rejects_null() {
-        let cell = StateCell {
-            table: 1,
-            row: 2,
-            col: 3,
-            value: None,
-        };
-        assert!(cell.to_cell_pair().is_err());
-    }
+    tabula_artifact::write_json(path, value).map_err(|e| anyhow::anyhow!(e.to_string()))
 }

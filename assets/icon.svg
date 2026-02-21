@@ -1,0 +1,84 @@
+<svg width="1024" height="1024" viewBox="160 160 704 704" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="panelFill" x1="244" y1="244" x2="780" y2="780" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0A1A31" stop-opacity="0.86" />
+      <stop offset="1" stop-color="#08172C" stop-opacity="0.8" />
+    </linearGradient>
+
+    <linearGradient id="panelStroke" x1="244" y1="244" x2="780" y2="780" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#456188" />
+      <stop offset="1" stop-color="#2E4667" />
+    </linearGradient>
+
+    <linearGradient id="metal" x1="324" y1="308" x2="700" y2="712" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F2F7FD" />
+      <stop offset="1" stop-color="#CDD9E8" />
+    </linearGradient>
+
+    <linearGradient id="aqua" x1="356" y1="420" x2="668" y2="604" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#36E3D3" />
+      <stop offset="1" stop-color="#27C7DE" />
+    </linearGradient>
+
+    <linearGradient id="pin" x1="212" y1="360" x2="812" y2="648" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#A1B6CC" />
+      <stop offset="1" stop-color="#6F87A5" />
+    </linearGradient>
+
+    <filter id="panelShadow" x="196" y="200" width="632" height="632" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feOffset dy="8" />
+      <feGaussianBlur stdDeviation="10" />
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0156863 0 0 0 0 0.0666667 0 0 0 0 0.12549 0 0 0 0.5 0" />
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1" />
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape" />
+    </filter>
+
+    <filter id="lineGlow" x="332" y="400" width="360" height="224" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="5" />
+    </filter>
+
+    <clipPath id="panelClip">
+      <rect x="244" y="244" width="536" height="536" rx="84" />
+    </clipPath>
+  </defs>
+
+  <g filter="url(#panelShadow)">
+    <rect x="244" y="244" width="536" height="536" rx="84" fill="url(#panelFill)" />
+    <rect x="244" y="244" width="536" height="536" rx="84" stroke="url(#panelStroke)" stroke-width="10" />
+    <rect x="249" y="249" width="526" height="526" rx="80" stroke="#9EB2C8" stroke-opacity="0.13" stroke-width="2" />
+
+    <g clip-path="url(#panelClip)" opacity="0.28">
+      <path d="M244 370H780" stroke="#3B5475" stroke-width="2" />
+      <path d="M244 496H780" stroke="#3B5475" stroke-width="2" />
+      <path d="M244 622H780" stroke="#3B5475" stroke-width="2" />
+      <path d="M370 244V780" stroke="#385170" stroke-width="2" />
+      <path d="M512 244V780" stroke="#385170" stroke-width="2" />
+      <path d="M654 244V780" stroke="#385170" stroke-width="2" />
+    </g>
+  </g>
+
+  <rect x="324" y="308" width="376" height="32" fill="url(#metal)" />
+  <rect x="496" y="340" width="32" height="372" fill="url(#metal)" />
+
+  <g filter="url(#lineGlow)" opacity="0.5">
+    <rect x="356" y="420" width="312" height="16" fill="#2EDCD1" />
+    <rect x="356" y="504" width="312" height="16" fill="#2EDCD1" />
+    <rect x="356" y="588" width="312" height="16" fill="#2EDCD1" />
+  </g>
+
+  <rect x="356" y="422" width="312" height="12" fill="url(#aqua)" />
+  <rect x="356" y="506" width="312" height="12" fill="url(#aqua)" />
+  <rect x="356" y="590" width="312" height="12" fill="url(#aqua)" />
+
+  <rect x="212" y="360" width="26" height="14" rx="2" fill="url(#pin)" />
+  <rect x="212" y="432" width="26" height="14" rx="2" fill="url(#pin)" />
+  <rect x="212" y="504" width="26" height="14" rx="2" fill="url(#pin)" />
+  <rect x="212" y="576" width="26" height="14" rx="2" fill="url(#pin)" />
+  <rect x="212" y="648" width="26" height="14" rx="2" fill="url(#pin)" />
+
+  <rect x="786" y="360" width="26" height="14" rx="2" fill="url(#pin)" />
+  <rect x="786" y="432" width="26" height="14" rx="2" fill="url(#pin)" />
+  <rect x="786" y="504" width="26" height="14" rx="2" fill="url(#pin)" />
+  <rect x="786" y="576" width="26" height="14" rx="2" fill="url(#pin)" />
+  <rect x="786" y="648" width="26" height="14" rx="2" fill="url(#pin)" />
+</svg>
