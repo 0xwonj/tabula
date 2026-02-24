@@ -27,6 +27,21 @@ pub enum ErrorKind {
     Internal,
 }
 
+impl ErrorKind {
+    /// Map this error kind to an HTTP status code.
+    pub fn http_status(self) -> StatusCode {
+        match self {
+            Self::BadRequest => StatusCode::BAD_REQUEST,
+            Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::Unprocessable => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
+            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::Conflict => StatusCode::CONFLICT,
+            Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
 /// Typed service-layer error.
 #[derive(Debug, Clone)]
 pub struct ServiceError {
@@ -38,68 +53,18 @@ pub struct ServiceError {
 
 #[allow(missing_docs)]
 impl ServiceError {
-    pub fn bad_request(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            kind: ErrorKind::BadRequest,
-            code,
-            message: message.into(),
-            details: None,
-        }
+    /// Core constructor — all factory methods delegate here.
+    pub fn new(kind: ErrorKind, code: ErrorCode, message: impl Into<String>) -> Self {
+        Self { kind, code, message: message.into(), details: None }
     }
 
-    pub fn forbidden(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            kind: ErrorKind::Forbidden,
-            code,
-            message: message.into(),
-            details: None,
-        }
-    }
-
-    pub fn unprocessable(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            kind: ErrorKind::Unprocessable,
-            code,
-            message: message.into(),
-            details: None,
-        }
-    }
-
-    pub fn not_implemented(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            kind: ErrorKind::NotImplemented,
-            code,
-            message: message.into(),
-            details: None,
-        }
-    }
-
-    pub fn not_found(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            kind: ErrorKind::NotFound,
-            code,
-            message: message.into(),
-            details: None,
-        }
-    }
-
-    pub fn conflict(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            kind: ErrorKind::Conflict,
-            code,
-            message: message.into(),
-            details: None,
-        }
-    }
-
-    pub fn internal(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            kind: ErrorKind::Internal,
-            code,
-            message: message.into(),
-            details: None,
-        }
-    }
+    pub fn bad_request(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::BadRequest, code, msg) }
+    pub fn forbidden(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::Forbidden, code, msg) }
+    pub fn unprocessable(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::Unprocessable, code, msg) }
+    pub fn not_implemented(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::NotImplemented, code, msg) }
+    pub fn not_found(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::NotFound, code, msg) }
+    pub fn conflict(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::Conflict, code, msg) }
+    pub fn internal(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::Internal, code, msg) }
 
     pub fn with_details(mut self, details: Value) -> Self {
         self.details = Some(details);
@@ -107,15 +72,7 @@ impl ServiceError {
     }
 
     pub fn http_status(&self) -> StatusCode {
-        match self.kind {
-            ErrorKind::BadRequest => StatusCode::BAD_REQUEST,
-            ErrorKind::Forbidden => StatusCode::FORBIDDEN,
-            ErrorKind::Unprocessable => StatusCode::UNPROCESSABLE_ENTITY,
-            ErrorKind::NotImplemented => StatusCode::NOT_IMPLEMENTED,
-            ErrorKind::NotFound => StatusCode::NOT_FOUND,
-            ErrorKind::Conflict => StatusCode::CONFLICT,
-            ErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-        }
+        self.kind.http_status()
     }
 
     pub fn kind(&self) -> ErrorKind {
