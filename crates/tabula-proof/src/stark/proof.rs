@@ -13,13 +13,16 @@ use super::config::{EF4, TabulaStarkConfig};
 /// Contains one STARK proof per chip plus cross-chip LogUp metadata.
 /// Verification checks:
 /// 1. Each per-chip STARK proof is valid (main constraints hold).
-/// 2. The LogUp cumulative sums across all chips sum to zero in EF4.
+/// 2. The LogUp challenges match the Fiat-Shamir transcript.
+/// 3. The LogUp cumulative sums across all chips sum to zero in EF4.
 pub struct TabulaProof {
-    /// Per-chip STARK proofs, indexed by [`ChipIndex`].
+    /// Per-chip STARK proofs.
     pub chip_proofs: Vec<ChipProofEntry>,
-    /// Sum of all chips' final cumulative sums (should be zero for a valid proof).
-    /// Stored for diagnostic purposes; the verifier recomputes from chip data.
-    pub cumsum_total: [BabyBear; 4],
+    /// Fiat-Shamir-derived LogUp challenges [α, β] in EF4.
+    ///
+    /// Bound to the proof instance via a Poseidon2 duplex challenger that
+    /// observes chip trace heights and public values.
+    pub logup_challenges: [EF4; 2],
 }
 
 /// A per-chip STARK proof with metadata.
@@ -60,6 +63,13 @@ pub enum VerificationError {
         /// Description of the manifest error.
         detail: String,
     },
+    /// The proof's LogUp challenges do not match the Fiat-Shamir transcript.
+    ChallengesMismatch {
+        /// The challenges re-derived by the verifier.
+        expected: [EF4; 2],
+        /// The challenges found in the proof.
+        got: [EF4; 2],
+    },
 }
 
 impl std::fmt::Display for VerificationError {
@@ -76,6 +86,12 @@ impl std::fmt::Display for VerificationError {
             }
             Self::InvalidChipManifest { detail } => {
                 write!(f, "invalid chip manifest: {detail}")
+            }
+            Self::ChallengesMismatch { expected, got } => {
+                write!(
+                    f,
+                    "LogUp challenges mismatch: expected {expected:?}, got {got:?}"
+                )
             }
         }
     }

@@ -228,3 +228,23 @@ pub fn generate_smt_table_path_trace(
 
     RowMajorMatrix::new(values, width)
 }
+
+// ── TraceGenerator impls ────────────────────────────────────────────────────
+
+use crate::trace_builder::TraceGenerator;
+
+impl TraceGenerator for super::air::SmtColPathChip {
+    type Input = [SmtPathWitness];
+
+    fn generate_trace(&self, input: &[SmtPathWitness]) -> RowMajorMatrix<BabyBear> {
+        generate_smt_col_path_trace(input)
+    }
+}
+
+impl TraceGenerator for super::air::SmtTablePathChip {
+    type Input = [SmtTablePathWitness];
+
+    fn generate_trace(&self, input: &[SmtTablePathWitness]) -> RowMajorMatrix<BabyBear> {
+        generate_smt_table_path_trace(input)
+    }
+}

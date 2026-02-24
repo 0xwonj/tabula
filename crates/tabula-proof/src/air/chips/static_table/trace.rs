@@ -65,3 +65,15 @@ pub fn generate_static_table_trace<const W: usize>(
 
     RowMajorMatrix::new(values, width)
 }
+
+// ── TraceGenerator impl ─────────────────────────────────────────────────────
+
+use crate::trace_builder::TraceGenerator;
+
+impl<const W: usize> TraceGenerator for super::air::StaticTableChip<W> {
+    type Input = [StaticTableRow];
+
+    fn generate_trace(&self, input: &[StaticTableRow]) -> RowMajorMatrix<BabyBear> {
+        generate_static_table_trace::<W>(input)
+    }
+}

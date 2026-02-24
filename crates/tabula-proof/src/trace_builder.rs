@@ -5,18 +5,16 @@
 
 mod builder;
 mod collectors;
+mod generator;
 mod lowering;
 mod memory;
 mod orchestration;
 mod smt;
-mod types;
+pub mod trace_map;
 mod validation;
 
-pub use builder::{
-    AllTraceInputs, TraceBuilder, build_all_from_program, build_all_trace_bundle,
-    build_all_trace_bundle_from_execution_result, build_trace_bundle,
-    debug_validate_all_trace_bundle,
-};
+pub use builder::{AllTraceInputs, TraceBuilder, build_trace_map};
+pub use generator::TraceGenerator;
 pub use lowering::{LoweringOutput, lower_execution_records, lower_program_batch};
 pub use smt::build_smt_paths;
-pub use types::{AllTraceBundle, ProofTraceBundle};
+pub use trace_map::TraceMap;

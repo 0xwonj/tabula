@@ -84,3 +84,22 @@ pub fn generate_poseidon_preprocessed(num_perms: usize) -> RowMajorMatrix<BabyBe
 
     RowMajorMatrix::new(values, POSEIDON_PREPROCESSED_WIDTH)
 }
+
+// ── TraceGenerator impl ─────────────────────────────────────────────────────
+
+use crate::trace_builder::TraceGenerator;
+
+impl TraceGenerator for super::air::PoseidonChip {
+    type Input = [[BabyBear; WIDTH]];
+
+    fn generate_trace(&self, input: &[[BabyBear; WIDTH]]) -> RowMajorMatrix<BabyBear> {
+        generate_poseidon_trace(input)
+    }
+
+    fn generate_preprocessed(
+        &self,
+        input: &[[BabyBear; WIDTH]],
+    ) -> Option<RowMajorMatrix<BabyBear>> {
+        Some(generate_poseidon_preprocessed(input.len()))
+    }
+}

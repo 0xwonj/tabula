@@ -9,14 +9,23 @@
 //! - Chip implementations (`chips`) — per-chip `BaseAir` + `Air`
 
 pub mod builder;
+#[macro_use]
+pub mod bus_macro;
 pub mod bus;
+pub mod chip_instance;
+pub mod chip_set;
 pub mod chips;
 pub mod columns;
 pub mod debug;
+pub mod extractor;
 pub mod gadgets;
 pub mod interaction;
 
-pub use builder::InteractionAirBuilder;
+pub use crate::trace_builder::TraceGenerator;
+pub use builder::{EmptyMessageBuilder, InteractionAirBuilder};
+pub use chip_instance::ChipInstance;
+pub use chip_set::ChipSet;
+pub use chips::column_meta::trace::ColumnMetaInput;
 pub use chips::column_meta::{
     COLUMN_META_WIDTH, ColumnMetaChip, ColumnMetaCols, generate_column_meta_trace,
 };
@@ -46,7 +55,7 @@ pub use chips::static_table::{
     STATIC_TABLE_STANDARD_WIDTH, StaticTableChip, StaticTableCols, StaticTableRow,
     generate_static_table_trace, static_table_width,
 };
-pub use chips::{ChipMeta, TabulaAir};
+pub use chips::{ChipSpec, TabulaAir};
 pub use columns::{borrow_cols, borrow_cols_mut, num_cols};
 pub use debug::{
     ChipRecord, ChipTrace, check_bus_balance, check_logup_balance, check_public_input_binding,
@@ -55,6 +64,7 @@ pub use debug::{
     evaluate_chip_with_preprocessed, evaluate_chip_with_preprocessed_and_public_values,
     evaluate_chip_with_public_values,
 };
+pub use extractor::{count_interactions, extract_interactions};
 pub use gadgets::bool_fe;
 pub use gadgets::{
     IsZero, LimbHalves, StrictIneq, U64Limbs, constrain_is_real_prefix, constrain_is_zero,
@@ -62,11 +72,3 @@ pub use gadgets::{
     constrain_u64_decomposition,
 };
 pub use interaction::{AirInteraction, InteractionKind};
-
-// ── Bus builder traits ──
-pub use bus::{
-    AccessTupleExpr, AccessTupleValue, BaseStateEntryAirBuilder, CoalescedWriteAirBuilder,
-    CommitmentAirBuilder, EmptyColReadAirBuilder, PoseidonAirBuilder, RangeCheckAirBuilder,
-    ReadAccessAirBuilder, SmtLeafDigestAirBuilder, SmtTableRootAirBuilder,
-    StaticTableLookupAirBuilder, WriteAccessAirBuilder,
-};

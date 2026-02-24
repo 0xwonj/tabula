@@ -161,3 +161,23 @@ pub fn generate_column_meta_trace(
 
     RowMajorMatrix::new(values, width)
 }
+
+// ── TraceGenerator impl ─────────────────────────────────────────────────────
+
+use crate::trace_builder::TraceGenerator;
+
+/// Input struct for `ColumnMetaChip` trace generation.
+pub struct ColumnMetaInput {
+    /// Column metadata entries.
+    pub metas: Vec<ColumnMeta>,
+    /// Empty-column read counts: `(table, col) -> count`.
+    pub empty_read_counts: BTreeMap<(u32, u16), u32>,
+}
+
+impl TraceGenerator for super::air::ColumnMetaChip {
+    type Input = ColumnMetaInput;
+
+    fn generate_trace(&self, input: &ColumnMetaInput) -> RowMajorMatrix<BabyBear> {
+        generate_column_meta_trace(&input.metas, &input.empty_read_counts)
+    }
+}

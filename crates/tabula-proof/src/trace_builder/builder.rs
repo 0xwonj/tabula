@@ -14,10 +14,9 @@ use crate::air::chips::static_table::trace::StaticTableRow;
 use crate::witness::BatchWitness;
 
 use super::lowering::lower_program_batch;
-use super::memory;
 use super::orchestration;
 use super::smt::build_smt_paths;
-use super::types::{AllTraceBundle, ProofTraceBundle};
+use super::trace_map::TraceMap;
 use super::validation;
 
 /// Input bundle for all-chip trace construction.
@@ -51,14 +50,9 @@ where
         Self { witness }
     }
 
-    /// Build memory/metadata traces.
-    pub fn build_memory(&self) -> Result<ProofTraceBundle<W>, TabulaError> {
-        memory::build_trace_bundle::<H, W>(self.witness)
-    }
-
-    /// Build all chip traces from instruction records.
-    pub fn build_all(&self, inputs: AllTraceInputs<'_>) -> Result<AllTraceBundle<W>, TabulaError> {
-        orchestration::build_all_trace_bundle::<H, W>(
+    /// Build all chip traces into a [`TraceMap`].
+    pub fn build_all_traces(&self, inputs: AllTraceInputs<'_>) -> Result<TraceMap, TabulaError> {
+        orchestration::build_all_traces::<H, W>(
             self.witness,
             inputs.execution_records,
             inputs.static_table_rows,
@@ -67,41 +61,10 @@ where
         )
     }
 
-    /// Build all chip traces from access-level execution results.
-    pub fn build_all_from_execution_result(
-        &self,
-        execution_result: &ExecutionResult,
-        schemas: &BTreeMap<TableId, TableSchema>,
-        static_table_rows: &[StaticTableRow],
-        smt_col_paths: &[SmtPathWitness],
-        smt_table_paths: &[SmtTablePathWitness],
-    ) -> Result<AllTraceBundle<W>, TabulaError> {
-        orchestration::build_all_trace_bundle_from_execution_result::<H, W>(
-            self.witness,
-            execution_result,
-            schemas,
-            static_table_rows,
-            smt_col_paths,
-            smt_table_paths,
-        )
-    }
-
-    /// Validate all chip traces against this witness roots.
-    pub fn debug_validate_all(&self, bundle: &AllTraceBundle<W>) -> Result<(), TabulaError> {
-        validation::debug_validate_all_trace_bundle::<W>(
-            bundle,
-            &self.witness.old_state_root,
-            &self.witness.new_state_root,
-        )
-    }
-
-    /// Full pipeline: IR program + execution result → all chip traces.
+    /// Full pipeline: IR program + execution result → [`TraceMap`].
     ///
-    /// 1. Derives `empty_columns` from witness column metas
-    /// 2. Lowers program body into `InstructionRecord`s for all opcodes
-    /// 3. Builds SMT inclusion-proof paths
-    /// 4. Assembles all chip traces via the orchestrator
-    pub fn build_all_from_program(
+    /// Builds all chip traces and sets SmtTablePath public values automatically.
+    pub fn build_trace_map(
         &self,
         program: &Program,
         batch: &Batch,
@@ -109,7 +72,46 @@ where
         schemas: &BTreeMap<TableId, TableSchema>,
         static_tables: &dyn StaticTableProvider,
         hasher: H,
-    ) -> Result<AllTraceBundle<W>, TabulaError>
+    ) -> Result<TraceMap, TabulaError>
+    where
+        H: Clone,
+    {
+        let inputs = self.prepare_inputs(
+            program,
+            batch,
+            execution_result,
+            schemas,
+            static_tables,
+            hasher,
+        )?;
+        orchestration::build_all_traces::<H, W>(
+            self.witness,
+            &inputs.instruction_records,
+            &inputs.static_table_rows,
+            &inputs.smt_col_paths,
+            &inputs.smt_table_paths,
+        )
+    }
+
+    /// Validate all chip traces in a [`TraceMap`] against this witness's state roots.
+    pub fn debug_validate(&self, map: &TraceMap) -> Result<(), TabulaError> {
+        validation::debug_validate_trace_map::<W>(
+            map,
+            &self.witness.old_state_root,
+            &self.witness.new_state_root,
+        )
+    }
+
+    /// Shared input preparation for IR-based pipelines.
+    fn prepare_inputs(
+        &self,
+        program: &Program,
+        batch: &Batch,
+        execution_result: &ExecutionResult,
+        schemas: &BTreeMap<TableId, TableSchema>,
+        static_tables: &dyn StaticTableProvider,
+        hasher: H,
+    ) -> Result<PreparedInputs, TabulaError>
     where
         H: Clone,
     {
@@ -140,77 +142,27 @@ where
             hasher,
         )?;
 
-        // 4. Assemble all chip traces.
-        self.build_all(AllTraceInputs {
-            execution_records: &lowering.instruction_records,
-            static_table_rows: &lowering.static_table_rows,
-            smt_col_paths: &smt_col_paths,
-            smt_table_paths: &smt_table_paths,
+        Ok(PreparedInputs {
+            instruction_records: lowering.instruction_records,
+            static_table_rows: lowering.static_table_rows,
+            smt_col_paths,
+            smt_table_paths,
         })
     }
 }
 
-/// Build all memory/metadata traces from one `BatchWitness`.
-pub fn build_trace_bundle<H, const W: usize>(
-    witness: &BatchWitness<H>,
-) -> Result<ProofTraceBundle<W>, TabulaError>
-where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
-{
-    TraceBuilder::<H, W>::new(witness).build_memory()
+/// Internal bundle of prepared inputs for trace assembly.
+struct PreparedInputs {
+    instruction_records: Vec<InstructionRecord>,
+    static_table_rows: Vec<StaticTableRow>,
+    smt_col_paths: Vec<SmtPathWitness>,
+    smt_table_paths: Vec<SmtTablePathWitness>,
 }
 
-/// Build all-chip traces from a single orchestrator entrypoint.
-pub fn build_all_trace_bundle<H, const W: usize>(
-    witness: &BatchWitness<H>,
-    execution_records: &[InstructionRecord],
-    static_table_rows: &[StaticTableRow],
-    smt_col_paths: &[SmtPathWitness],
-    smt_table_paths: &[SmtTablePathWitness],
-) -> Result<AllTraceBundle<W>, TabulaError>
-where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
-{
-    TraceBuilder::<H, W>::new(witness).build_all(AllTraceInputs {
-        execution_records,
-        static_table_rows,
-        smt_col_paths,
-        smt_table_paths,
-    })
-}
-
-/// Build all-chip traces directly from `ExecutionResult` via access-event lowering.
-pub fn build_all_trace_bundle_from_execution_result<H, const W: usize>(
-    witness: &BatchWitness<H>,
-    execution_result: &ExecutionResult,
-    schemas: &BTreeMap<TableId, TableSchema>,
-    static_table_rows: &[StaticTableRow],
-    smt_col_paths: &[SmtPathWitness],
-    smt_table_paths: &[SmtTablePathWitness],
-) -> Result<AllTraceBundle<W>, TabulaError>
-where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
-{
-    TraceBuilder::<H, W>::new(witness).build_all_from_execution_result(
-        execution_result,
-        schemas,
-        static_table_rows,
-        smt_col_paths,
-        smt_table_paths,
-    )
-}
-
-/// Validate an all-chip bundle with debug constraints and bus balance checks.
-pub fn debug_validate_all_trace_bundle<const W: usize>(
-    bundle: &AllTraceBundle<W>,
-    old_state_root: &NativeDigest,
-    new_state_root: &NativeDigest,
-) -> Result<(), TabulaError> {
-    validation::debug_validate_all_trace_bundle::<W>(bundle, old_state_root, new_state_root)
-}
-
-/// Full pipeline: IR program + execution result → all chip traces.
-pub fn build_all_from_program<H, const W: usize>(
+/// Full pipeline: IR program + execution result → [`TraceMap`].
+///
+/// Convenience wrapper around [`TraceBuilder::build_trace_map`].
+pub fn build_trace_map<H, const W: usize>(
     witness: &BatchWitness<H>,
     program: &Program,
     batch: &Batch,
@@ -218,11 +170,11 @@ pub fn build_all_from_program<H, const W: usize>(
     schemas: &BTreeMap<TableId, TableSchema>,
     static_tables: &dyn StaticTableProvider,
     hasher: H,
-) -> Result<AllTraceBundle<W>, TabulaError>
+) -> Result<TraceMap, TabulaError>
 where
     H: FieldHasher<F = BabyBear, Digest = NativeDigest> + Clone,
 {
-    TraceBuilder::<H, W>::new(witness).build_all_from_program(
+    TraceBuilder::<H, W>::new(witness).build_trace_map(
         program,
         batch,
         execution_result,

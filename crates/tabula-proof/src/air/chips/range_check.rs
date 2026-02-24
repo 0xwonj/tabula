@@ -123,3 +123,15 @@ pub fn generate_range_check_trace(
 
     RowMajorMatrix::new(values, RANGE_CHECK_WIDTH)
 }
+
+// ── TraceGenerator impl ─────────────────────────────────────────────────────
+
+use crate::trace_builder::TraceGenerator;
+
+impl TraceGenerator for RangeCheckChip {
+    type Input = [u32; RANGE_CHECK_SIZE];
+
+    fn generate_trace(&self, input: &[u32; RANGE_CHECK_SIZE]) -> RowMajorMatrix<BabyBear> {
+        generate_range_check_trace(input)
+    }
+}

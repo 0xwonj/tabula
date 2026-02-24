@@ -1,8 +1,8 @@
 //! AIR chip implementations.
 //!
 //! Each chip is a small struct implementing `BaseAir` + `Air`.
-//! The `TabulaAir` enum dispatches to the appropriate chip.
-//! All chips also implement `ChipMeta` for introspection.
+//! The `TabulaAir` enum dispatches to the appropriate chip via [`define_chip_set!`].
+//! All chips also implement [`ChipSpec`] for introspection.
 
 pub mod column_meta;
 pub mod execution;
@@ -13,10 +13,6 @@ pub mod smt_path;
 pub mod state_column;
 pub mod static_table;
 
-use p3_air::{Air, AirBuilderWithPublicValues, BaseAir};
-
-use super::builder::InteractionAirBuilder;
-
 use column_meta::ColumnMetaChip;
 use execution::ExecutionChip;
 use inter_tx_order::InterTxOrderChip;
@@ -26,141 +22,172 @@ use smt_path::{SmtColPathChip, SmtTablePathChip};
 use state_column::StateColumnChip;
 use static_table::StaticTableChip;
 
-/// Metadata interface for AIR chips.
+/// Metadata and capability interface for AIR chips.
 ///
-/// Object-safe trait for introspection. Chip name is used by debug
-/// checking and error messages.
+/// Chip name is used by debug checking, error messages, and [`super::chip_set::ChipSet`]
+/// for name-based dispatch in the prover/verifier.
 ///
-/// LogUp interactions are declared via [`super::builder::InteractionAirBuilder`]
-/// during `eval()`, not via this trait.
-pub trait ChipMeta {
+/// The `Default` bound enables construction from ZSTs in `ChipSet::all_chips()`.
+/// `Send + Sync` enables parallel proving across chips.
+pub trait ChipSpec: Default + Send + Sync {
     /// Human-readable chip name (e.g. `"ColumnMeta"`).
     fn chip_name(&self) -> &'static str;
+
+    /// Number of public values consumed by this chip (default: 0).
+    fn num_public_values(&self) -> usize {
+        0
+    }
+
+    /// Width of preprocessed trace columns (default: 0 = no preprocessed).
+    ///
+    /// A nonzero value indicates this chip has a preprocessed trace.
+    /// Used by `InteractionExtractor` to construct symbolic variables.
+    fn preprocessed_width(&self) -> usize {
+        0
+    }
+
+    /// Whether this chip declares any LogUp interactions (default: true).
+    /// Chips with no interactions skip permutation trace generation.
+    fn has_interactions(&self) -> bool {
+        true
+    }
 }
 
-impl ChipMeta for ColumnMetaChip {
+// ── Default + ChipSpec for each chip ────────────────────────────────────────
+
+impl Default for ColumnMetaChip {
+    fn default() -> Self {
+        Self
+    }
+}
+impl ChipSpec for ColumnMetaChip {
     fn chip_name(&self) -> &'static str {
         "ColumnMeta"
     }
 }
 
-impl ChipMeta for RangeCheckChip {
+impl Default for RangeCheckChip {
+    fn default() -> Self {
+        Self
+    }
+}
+impl ChipSpec for RangeCheckChip {
     fn chip_name(&self) -> &'static str {
         "RangeCheck"
     }
-}
-
-impl ChipMeta for PoseidonChip {
-    fn chip_name(&self) -> &'static str {
-        "Poseidon"
+    fn has_interactions(&self) -> bool {
+        false
     }
 }
 
-impl<const W: usize> ChipMeta for ExecutionChip<W> {
+impl Default for PoseidonChip {
+    fn default() -> Self {
+        Self
+    }
+}
+impl ChipSpec for PoseidonChip {
+    fn chip_name(&self) -> &'static str {
+        "Poseidon"
+    }
+    fn preprocessed_width(&self) -> usize {
+        poseidon::POSEIDON_PREPROCESSED_WIDTH
+    }
+}
+
+impl<const W: usize> Default for ExecutionChip<W> {
+    fn default() -> Self {
+        Self
+    }
+}
+impl<const W: usize> ChipSpec for ExecutionChip<W> {
     fn chip_name(&self) -> &'static str {
         "Execution"
     }
 }
 
-impl<const W: usize> ChipMeta for StateColumnChip<W> {
+impl<const W: usize> Default for StateColumnChip<W> {
+    fn default() -> Self {
+        Self
+    }
+}
+impl<const W: usize> ChipSpec for StateColumnChip<W> {
     fn chip_name(&self) -> &'static str {
         "StateColumn"
     }
 }
 
-impl<const W: usize> ChipMeta for InterTxOrderChip<W> {
+impl<const W: usize> Default for InterTxOrderChip<W> {
+    fn default() -> Self {
+        Self
+    }
+}
+impl<const W: usize> ChipSpec for InterTxOrderChip<W> {
     fn chip_name(&self) -> &'static str {
         "InterTxOrder"
     }
 }
 
-impl<const W: usize> ChipMeta for StaticTableChip<W> {
+impl<const W: usize> Default for StaticTableChip<W> {
+    fn default() -> Self {
+        Self
+    }
+}
+impl<const W: usize> ChipSpec for StaticTableChip<W> {
     fn chip_name(&self) -> &'static str {
         "StaticTable"
     }
 }
 
-impl ChipMeta for SmtColPathChip {
+impl Default for SmtColPathChip {
+    fn default() -> Self {
+        Self
+    }
+}
+impl ChipSpec for SmtColPathChip {
     fn chip_name(&self) -> &'static str {
         "SmtColPath"
     }
 }
 
-impl ChipMeta for SmtTablePathChip {
+impl Default for SmtTablePathChip {
+    fn default() -> Self {
+        Self
+    }
+}
+impl ChipSpec for SmtTablePathChip {
     fn chip_name(&self) -> &'static str {
         "SmtTablePath"
     }
-}
-
-/// Top-level AIR enum for multi-chip proving.
-///
-/// Delegates `BaseAir`, `Air`, and `ChipMeta` to the contained chip variant.
-#[derive(Debug)]
-pub enum TabulaAir {
-    /// ColumnMeta global table.
-    ColumnMeta(ColumnMetaChip),
-    /// Range check preprocessed table.
-    RangeCheck(RangeCheckChip),
-    /// Poseidon2 permutation chip.
-    Poseidon(PoseidonChip),
-    /// Execution chip with Standard value width (W=3).
-    ExecutionStandard(ExecutionChip<3>),
-    /// StateColumn chip with Standard value width (W=3).
-    StateColumnStandard(StateColumnChip<3>),
-    /// InterTxOrder chip with Standard value width (W=3).
-    InterTxOrderStandard(InterTxOrderChip<3>),
-    /// StaticTable chip with Standard value width (W=3).
-    StaticTableStandard(StaticTableChip<3>),
-    /// SmtColPath chip (column-level SMT paths).
-    SmtColPath(SmtColPathChip),
-    /// SmtTablePath chip (table-level SMT paths).
-    SmtTablePath(SmtTablePathChip),
-}
-
-/// Dispatch macro: delegates a method call to all TabulaAir variants.
-macro_rules! dispatch_tabula_air {
-    ($self:ident, $method:ident $(, $arg:expr)*) => {
-        match $self {
-            Self::ColumnMeta(chip) => chip.$method($($arg),*),
-            Self::RangeCheck(chip) => chip.$method($($arg),*),
-            Self::Poseidon(chip) => chip.$method($($arg),*),
-            Self::ExecutionStandard(chip) => chip.$method($($arg),*),
-            Self::StateColumnStandard(chip) => chip.$method($($arg),*),
-            Self::InterTxOrderStandard(chip) => chip.$method($($arg),*),
-            Self::StaticTableStandard(chip) => chip.$method($($arg),*),
-            Self::SmtColPath(chip) => chip.$method($($arg),*),
-            Self::SmtTablePath(chip) => chip.$method($($arg),*),
-        }
-    };
-}
-
-impl ChipMeta for TabulaAir {
-    fn chip_name(&self) -> &'static str {
-        dispatch_tabula_air!(self, chip_name)
+    fn num_public_values(&self) -> usize {
+        smt_path::air::SMT_TABLE_PATH_NUM_PUBLIC_VALUES
     }
 }
 
-impl<F> BaseAir<F> for TabulaAir {
-    fn width(&self) -> usize {
-        match self {
-            Self::ColumnMeta(chip) => <ColumnMetaChip as BaseAir<F>>::width(chip),
-            Self::RangeCheck(chip) => <RangeCheckChip as BaseAir<F>>::width(chip),
-            Self::Poseidon(chip) => <PoseidonChip as BaseAir<F>>::width(chip),
-            Self::ExecutionStandard(chip) => <ExecutionChip<3> as BaseAir<F>>::width(chip),
-            Self::StateColumnStandard(chip) => <StateColumnChip<3> as BaseAir<F>>::width(chip),
-            Self::InterTxOrderStandard(chip) => <InterTxOrderChip<3> as BaseAir<F>>::width(chip),
-            Self::StaticTableStandard(chip) => <StaticTableChip<3> as BaseAir<F>>::width(chip),
-            Self::SmtColPath(chip) => <SmtColPathChip as BaseAir<F>>::width(chip),
-            Self::SmtTablePath(chip) => <SmtTablePathChip as BaseAir<F>>::width(chip),
-        }
-    }
-}
+// ── TabulaAir: the default chip set ─────────────────────────────────────────
 
-impl<AB> Air<AB> for TabulaAir
-where
-    AB: InteractionAirBuilder + AirBuilderWithPublicValues,
-{
-    fn eval(&self, builder: &mut AB) {
-        dispatch_tabula_air!(self, eval, builder)
+crate::define_chip_set! {
+    /// Top-level AIR enum for multi-chip proving.
+    ///
+    /// Generated by [`define_chip_set!`] — delegates `BaseAir`, `Air`, `ChipSpec`,
+    /// and `ChipSet` to the contained chip variant.
+    pub enum TabulaAir {
+        /// Execution chip with Standard value width (W=3).
+        Execution(ExecutionChip<3>),
+        /// InterTxOrder chip with Standard value width (W=3).
+        InterTxOrder(InterTxOrderChip<3>),
+        /// StateColumn chip with Standard value width (W=3).
+        StateColumn(StateColumnChip<3>),
+        /// ColumnMeta global table.
+        ColumnMeta(ColumnMetaChip),
+        /// Poseidon2 permutation chip.
+        Poseidon(PoseidonChip),
+        /// Range check preprocessed table.
+        RangeCheck(RangeCheckChip),
+        /// StaticTable chip with Standard value width (W=3).
+        StaticTable(StaticTableChip<3>),
+        /// SmtColPath chip (column-level SMT paths).
+        SmtColPath(SmtColPathChip),
+        /// SmtTablePath chip (table-level SMT paths).
+        SmtTablePath(SmtTablePathChip),
     }
 }

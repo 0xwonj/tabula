@@ -348,3 +348,15 @@ fn populate_ordering_witnesses<const W: usize>(
         }
     }
 }
+
+// ── TraceGenerator impl ─────────────────────────────────────────────────────
+
+use crate::trace_builder::TraceGenerator;
+
+impl<const W: usize> TraceGenerator for super::air::StateColumnChip<W> {
+    type Input = [StateColumnRow];
+
+    fn generate_trace(&self, input: &[StateColumnRow]) -> RowMajorMatrix<BabyBear> {
+        generate_state_column_trace::<W>(input)
+    }
+}

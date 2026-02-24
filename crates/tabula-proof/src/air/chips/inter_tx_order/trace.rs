@@ -225,3 +225,15 @@ fn populate_ordering_witnesses<const W: usize>(
         }
     }
 }
+
+// ── TraceGenerator impl ─────────────────────────────────────────────────────
+
+use crate::trace_builder::TraceGenerator;
+
+impl<const W: usize> TraceGenerator for super::air::InterTxOrderChip<W> {
+    type Input = [InterTxOrderRow];
+
+    fn generate_trace(&self, input: &[InterTxOrderRow]) -> RowMajorMatrix<BabyBear> {
+        generate_inter_tx_order_trace::<W>(input)
+    }
+}

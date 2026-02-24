@@ -13,8 +13,9 @@ use tabula_core::{Batch, CellKey, ColId, RowKey, TableId, Transaction, TxTypeId,
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_ir::Program;
 use tabula_lang::compile;
+use tabula_proof::air::TabulaAir;
 use tabula_proof::stark;
-use tabula_proof::trace_builder::build_all_from_program;
+use tabula_proof::trace_builder::build_trace_map;
 use tabula_proof::witness::WitnessGenerator;
 
 type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<p3_baby_bear::BabyBear>)>>;
@@ -88,8 +89,8 @@ fn stark_pipeline(
         .generate(&result, &schemas_by_id, &old_column_states)
         .expect("witness generation");
 
-    // 4. Build all chip traces via the unified pipeline.
-    let bundle = build_all_from_program::<PoseidonHasher, 3>(
+    // 4. Build trace map (all chip traces + public values).
+    let traces = build_trace_map::<PoseidonHasher, 3>(
         &witness,
         &program,
         &batch,
@@ -100,20 +101,15 @@ fn stark_pipeline(
     )
     .expect("trace assembly");
 
-    // 5. Build SmtTablePath public values: old_root[8] ++ new_root[8].
-    let mut smt_table_path_public_values = Vec::with_capacity(16);
-    smt_table_path_public_values.extend_from_slice(&witness.old_state_root.0);
-    smt_table_path_public_values.extend_from_slice(&witness.new_state_root.0);
-
-    // 6. Prove.
-    let proof = stark::prove(&bundle, &smt_table_path_public_values);
+    // 5. Prove.
+    let proof = stark::prove::<TabulaAir>(&stark::default_config(), &traces);
     assert!(
         !proof.chip_proofs.is_empty(),
         "proof should contain at least one chip proof"
     );
 
-    // 7. Verify.
-    stark::verify(&proof).expect("STARK verification should succeed");
+    // 6. Verify.
+    stark::verify::<TabulaAir>(&proof).expect("STARK verification should succeed");
 }
 
 fn make_tx(params: Vec<Value>) -> Transaction {

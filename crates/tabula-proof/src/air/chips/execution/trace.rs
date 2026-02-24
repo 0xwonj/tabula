@@ -520,3 +520,15 @@ pub fn u64_add_limbs(a: u64, b: u64) -> [BabyBear; 3] {
 pub fn u64_sub_limbs(a: u64, b: u64) -> [BabyBear; 3] {
     u64_to_limbs(a.wrapping_sub(b))
 }
+
+// ── TraceGenerator impl ─────────────────────────────────────────────────────
+
+use crate::trace_builder::TraceGenerator;
+
+impl<const W: usize> TraceGenerator for super::air::ExecutionChip<W> {
+    type Input = [InstructionRecord];
+
+    fn generate_trace(&self, input: &[InstructionRecord]) -> RowMajorMatrix<BabyBear> {
+        generate_execution_trace::<W>(input)
+    }
+}

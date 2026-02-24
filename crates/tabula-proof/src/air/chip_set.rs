@@ -1,0 +1,155 @@
+//! Declarative chip set composition via the [`define_chip_set!`] macro.
+//!
+//! External zkVM projects can define custom chip sets by invoking the macro
+//! with their own enum name and chip variants.
+
+use p3_air::BaseAir;
+use p3_baby_bear::BabyBear;
+
+use super::chips::ChipSpec;
+
+/// A chip set: compile-time composition of AIR chips.
+///
+/// Provides chip enumeration and name-based lookup for the prover/verifier.
+/// Includes `BaseAir<BabyBear>` so generic prover/verifier code can query widths.
+pub trait ChipSet: ChipSpec + BaseAir<BabyBear> + Sized + std::fmt::Debug {
+    /// Instantiate all chip variants (one per variant).
+    fn all_chips() -> Vec<Self>;
+    /// Reconstruct a chip from its name string (for the verifier).
+    fn from_name(name: &str) -> Option<Self>;
+    /// List all chip names in declaration order.
+    fn chip_names() -> Vec<&'static str>;
+}
+
+/// Define a chip set enum with automatic trait dispatch.
+///
+/// Generates:
+/// - The enum itself with `Debug` + `Default` (defaults to the first variant)
+/// - `ChipSpec` dispatch (`chip_name`, `num_public_values`, `preprocessed_width`, `has_interactions`)
+/// - `BaseAir<F>` dispatch (`width`)
+/// - `BaseAirWithPublicValues<F>` dispatch (`num_public_values`)
+/// - `Air<AB>` dispatch where `AB: InteractionAirBuilder + AirBuilderWithPublicValues`
+/// - `ChipSet` impl (`all_chips`, `from_name`, `chip_names`)
+///
+/// # Example
+///
+/// ```ignore
+/// define_chip_set! {
+///     pub enum TabulaAir {
+///         Execution(ExecutionChip<3>),
+///         ColumnMeta(ColumnMetaChip),
+///         Poseidon(PoseidonChip),
+///         RangeCheck(RangeCheckChip),
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! define_chip_set {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $(
+                $(#[$vmeta:meta])*
+                $variant:ident ( $chip:ty )
+            ),+ $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug)]
+        $vis enum $name {
+            $(
+                $(#[$vmeta])*
+                $variant($chip),
+            )+
+        }
+
+        // Default: first variant.
+        impl Default for $name {
+            fn default() -> Self {
+                $crate::define_chip_set!(@first_variant $name, $($variant($chip)),+)
+            }
+        }
+
+        impl $crate::air::chips::ChipSpec for $name {
+            fn chip_name(&self) -> &'static str {
+                match self {
+                    $(Self::$variant(chip) => $crate::air::chips::ChipSpec::chip_name(chip),)+
+                }
+            }
+            fn num_public_values(&self) -> usize {
+                match self {
+                    $(Self::$variant(chip) => $crate::air::chips::ChipSpec::num_public_values(chip),)+
+                }
+            }
+            fn preprocessed_width(&self) -> usize {
+                match self {
+                    $(Self::$variant(chip) => $crate::air::chips::ChipSpec::preprocessed_width(chip),)+
+                }
+            }
+            fn has_interactions(&self) -> bool {
+                match self {
+                    $(Self::$variant(chip) => $crate::air::chips::ChipSpec::has_interactions(chip),)+
+                }
+            }
+        }
+
+        impl<F> p3_air::BaseAir<F> for $name {
+            fn width(&self) -> usize {
+                match self {
+                    $(Self::$variant(chip) => <$chip as p3_air::BaseAir<F>>::width(chip),)+
+                }
+            }
+        }
+
+        impl<F> p3_air::BaseAirWithPublicValues<F> for $name {
+            fn num_public_values(&self) -> usize {
+                $crate::air::chips::ChipSpec::num_public_values(self)
+            }
+        }
+
+        impl<AB> p3_air::Air<AB> for $name
+        where
+            AB: $crate::air::builder::InteractionAirBuilder
+                + p3_air::AirBuilderWithPublicValues,
+        {
+            fn eval(&self, builder: &mut AB) {
+                match self {
+                    $(Self::$variant(chip) => <$chip as p3_air::Air<AB>>::eval(chip, builder),)+
+                }
+            }
+        }
+
+        impl $crate::air::chip_set::ChipSet for $name {
+            fn all_chips() -> Vec<Self> {
+                vec![
+                    $(Self::$variant(<$chip as Default>::default()),)+
+                ]
+            }
+
+            fn from_name(name: &str) -> Option<Self> {
+                // Use if-else chain (qualified paths can't appear in match patterns).
+                $(
+                    if name == $crate::air::chips::ChipSpec::chip_name(
+                        &<$chip as Default>::default()
+                    ) {
+                        return Some(Self::$variant(<$chip as Default>::default()));
+                    }
+                )+
+                None
+            }
+
+            fn chip_names() -> Vec<&'static str> {
+                vec![
+                    $($crate::air::chips::ChipSpec::chip_name(
+                        &<$chip as Default>::default()
+                    ),)+
+                ]
+            }
+        }
+    };
+
+    // Helper: extract the first variant from the list.
+    (@first_variant $name:ident, $first_variant:ident($first_chip:ty) $(, $rest:ident($rchip:ty))*) => {
+        $name::$first_variant(<$first_chip as Default>::default())
+    };
+}

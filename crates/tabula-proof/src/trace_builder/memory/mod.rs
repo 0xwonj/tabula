@@ -6,12 +6,15 @@ use tabula_commitment::{FieldHasher, NativeDigest};
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId};
 
-use crate::air::chips::column_meta::trace::generate_column_meta_trace;
-use crate::air::chips::inter_tx_order::trace::generate_inter_tx_order_trace;
-use crate::air::chips::state_column::trace::generate_state_column_trace;
+use crate::air::chips::ChipSpec;
+use crate::air::chips::column_meta::air::ColumnMetaChip;
+use crate::air::chips::column_meta::trace::ColumnMetaInput;
+use crate::air::chips::inter_tx_order::air::InterTxOrderChip;
+use crate::air::chips::state_column::air::StateColumnChip;
+use crate::trace_builder::TraceGenerator;
 use crate::witness::BatchWitness;
 
-use super::types::ProofTraceBundle;
+use super::trace_map::TraceMap;
 
 mod chain;
 mod inter_tx;
@@ -21,10 +24,14 @@ use chain::populate_state_chain_accumulators;
 use inter_tx::{build_inter_tx_rows, sort_inter_tx_rows};
 use state::{build_state_rows, sort_state_rows};
 
-/// Build all memory/metadata traces from one `BatchWitness`.
-pub(super) fn build_trace_bundle<H, const W: usize>(
+/// Build memory/metadata chip traces and insert them into a [`TraceMap`].
+///
+/// Generates InterTxOrder, StateColumn, and ColumnMeta traces from the
+/// witness data and inserts them directly into the provided map.
+pub(super) fn build_memory_traces<H, const W: usize>(
     witness: &BatchWitness<H>,
-) -> Result<ProofTraceBundle<W>, TabulaError>
+    map: &mut TraceMap,
+) -> Result<(), TabulaError>
 where
     H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
 {
@@ -48,19 +55,23 @@ where
         .map(|(&(table, col), &count)| ((table.0, col.0), count))
         .collect();
 
-    let inter_tx_trace = generate_inter_tx_order_trace::<W>(&inter_tx_rows);
-    let state_trace = generate_state_column_trace::<W>(&state_rows);
-    let column_meta_trace =
-        generate_column_meta_trace(&witness.column_metas, &empty_read_mults_for_trace);
+    let ito_chip = InterTxOrderChip::<W>;
+    let state_chip = StateColumnChip::<W>;
+    let col_meta_chip = ColumnMetaChip;
 
-    Ok(ProofTraceBundle {
-        inter_tx_rows,
-        state_rows,
-        empty_read_mults,
-        inter_tx_trace,
-        state_trace,
-        column_meta_trace,
-    })
+    let col_meta_input = ColumnMetaInput {
+        metas: witness.column_metas.clone(),
+        empty_read_counts: empty_read_mults_for_trace,
+    };
+
+    map.insert_entry(ito_chip.chip_name(), ito_chip.build_entry(&inter_tx_rows));
+    map.insert_entry(state_chip.chip_name(), state_chip.build_entry(&state_rows));
+    map.insert_entry(
+        col_meta_chip.chip_name(),
+        col_meta_chip.build_entry(&col_meta_input),
+    );
+
+    Ok(())
 }
 
 fn build_empty_read_mults<H>(witness: &BatchWitness<H>) -> BTreeMap<(TableId, ColId), u32>
