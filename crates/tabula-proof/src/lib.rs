@@ -3,7 +3,9 @@
 
 //! Proof generation and verification for the Tabula kernel.
 
-pub use tabula_contract as contract;
+// Curated re-exports from tabula-contract (proof's public API surface).
+pub use tabula_contract::{ApplyBatchField, ContractCompatibilityPolicy, ContractMetadataEnvelope};
+
 pub mod statement;
 
 #[cfg(feature = "stark")]
@@ -14,6 +16,9 @@ pub mod stark;
 pub mod trace_builder;
 #[cfg(feature = "stark")]
 pub mod witness;
+
+#[cfg(feature = "stark")]
+pub use stark::StarkAir;
 
 #[cfg(feature = "stark")]
 pub use witness::{

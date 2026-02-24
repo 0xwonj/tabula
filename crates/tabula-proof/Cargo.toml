@@ -43,6 +43,7 @@ p3-dft = { workspace = true, optional = true }
 p3-merkle-tree = { workspace = true, optional = true }
 
 [dev-dependencies]
+tabula-contract = { workspace = true }
 tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-core = { workspace = true, features = ["mock"] }
 tabula-executor = { workspace = true }

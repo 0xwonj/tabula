@@ -1,14 +1,8 @@
 //! Handler for the `execute` subcommand.
 
-use std::collections::BTreeMap;
-
-use tabula_artifact::{BatchFile, StateFile, merge_output_state_cells, normalize_state};
-use tabula_core::Batch;
-use tabula_core::mock::{
-    InMemoryState, InMemoryStaticTables, MockHasher, MockSigVerifier, SequentialNonce,
-};
-use tabula_executor::batch::{BatchEnv, execute_batch};
-use tabula_executor::consistency::check_consistency_status;
+use tabula_artifact::{BatchFile, StateFile};
+use tabula_core::mock::MockHasher;
+use tabula_driver::{BatchInput, run_batch};
 
 use crate::io::{ExecutionOutput, StateCell, load_json, write_json};
 
@@ -26,78 +20,43 @@ pub fn cmd_execute(
     // 2. Load state + batch
     let state_file: StateFile = load_json(state_path)?;
     let batch_file: BatchFile = load_json(batch_path)?;
-    let normalized =
-        normalize_state(&state_file).map_err(|e| anyhow::anyhow!("invalid state cell: {e}"))?;
 
-    // 3. Build InMemoryState
-    let mut state_store = InMemoryState::new();
-    for cell in &normalized.cells {
-        let (key, value) = cell
-            .to_cell_pair()
-            .map_err(|e| anyhow::anyhow!("invalid state cell: {e}"))?;
-        state_store.set(key, value);
-    }
-
-    // 4. Convert transactions + execute
-    let transactions: Vec<_> = batch_file
-        .transactions
-        .iter()
-        .map(|t| {
-            t.to_transaction()
-                .map_err(|e| anyhow::anyhow!("invalid batch tx: {e}"))
-        })
-        .collect::<Result<_, _>>()?;
-    let batch = Batch { transactions };
-
-    let st = InMemoryStaticTables::new();
-    let env = BatchEnv {
+    // 3. Execute via driver pipeline
+    let executed = run_batch(&BatchInput {
+        program: &registered.program,
+        state: &state_file,
+        batch: &batch_file,
         hasher: &MockHasher,
-        sig_verifier: &MockSigVerifier,
-        nonce_policy: &SequentialNonce,
-        static_tables: &st,
-    };
-
-    let result = execute_batch(
-        &batch,
-        &registered.program,
-        &state_store,
-        &env,
-        &BTreeMap::new(),
-    )?;
-
-    // 5. Post-process
-    let consistency = check_consistency_status(&result.events, &result.read_set_old);
-    let state_after = StateFile {
-        cells: merge_output_state_cells(&normalized.cells, &result.write_set_final),
-    };
+    })
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if let Some(out_path) = output_state_path {
-        write_json(out_path, &state_after)?;
+        write_json(out_path, &executed.state_after)?;
     }
 
-    let read_set: Vec<StateCell> = result
-        .read_set_old
+    let read_set: Vec<StateCell> = executed
+        .read_set
         .iter()
         .map(|(k, v)| StateCell::from_cell_pair(k, v))
         .collect();
-    let write_set: Vec<StateCell> = result
-        .write_set_final
+    let write_set: Vec<StateCell> = executed
+        .write_set
         .iter()
         .map(|(k, v)| StateCell::from_cell_pair(k, v))
         .collect();
     let trace = if include_trace {
-        Some(result.events.clone())
+        Some(executed.events.clone())
     } else {
         None
     };
 
     if json_output {
         let output = ExecutionOutput {
-            tx_outcomes: result.tx_outcomes.clone(),
+            tx_outcomes: executed.tx_outcomes.clone(),
             read_set,
             write_set,
-            emitted: result.emitted.clone(),
-            consistency: consistency.clone(),
+            emitted: executed.emitted.clone(),
+            consistency: executed.consistency.clone(),
             trace,
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
@@ -106,7 +65,7 @@ pub fn cmd_execute(
 
     println!("=== Execution Results ===\n");
 
-    for (i, outcome) in result.tx_outcomes.iter().enumerate() {
+    for (i, outcome) in executed.tx_outcomes.iter().enumerate() {
         match outcome {
             tabula_core::TxOutcome::Success => println!("  tx {i}: SUCCESS"),
             tabula_core::TxOutcome::Failed {
@@ -134,7 +93,7 @@ pub fn cmd_execute(
         "Events:    {} total",
         trace.as_ref().map(|t| t.len()).unwrap_or(0)
     );
-    println!("Emitted:   {} total", result.emitted.len());
+    println!("Emitted:   {} total", executed.emitted.len());
     println!();
 
     println!("Write set (final state changes):");
@@ -146,7 +105,7 @@ pub fn cmd_execute(
     }
     println!();
 
-    match &consistency {
+    match &executed.consistency {
         tabula_core::ExecutionConsistencyStatus::Passed => println!("Consistency check: PASSED"),
         tabula_core::ExecutionConsistencyStatus::Failed { reason } => {
             println!("Consistency check: FAILED ({reason})")

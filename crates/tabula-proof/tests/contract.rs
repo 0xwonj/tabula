@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use tabula_proof::contract::{
+use tabula_contract::{
     APPLY_BATCH_FIELDS, ApplyBatchField, C10_READ_ACCESS_SCHEMA_VERSION_V2,
     C11_WRITE_ACCESS_SCHEMA_VERSION_V2, CONTRACT_RULES_V1, CONTRACT_SCHEMA_VERSION_V1,
     ContractCompatibilityPolicy, ContractMetadataEnvelope, ContractRuleCode,

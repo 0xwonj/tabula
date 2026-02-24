@@ -15,8 +15,9 @@ use tabula_core::mock::InMemoryStaticTables;
 use tabula_core::traits::ValueCodec;
 use tabula_core::{Batch, ColId, RowKey, TableId, TableSchema};
 use tabula_driver::RegisteredProgram;
+use tabula_proof::air::TabulaAir;
 use tabula_proof::stark;
-use tabula_proof::trace_builder::build_all_from_program;
+use tabula_proof::trace_builder::build_trace_map;
 use tabula_proof::witness::WitnessGenerator;
 
 use super::error::{ServiceError, ServiceResult};
@@ -40,11 +41,11 @@ pub fn prove_batch(
         .collect();
 
     let execution_result = tabula_core::ExecutionResult {
-        read_set_old: executed.read_set.clone(),
-        write_set_final: executed.write_set.clone(),
-        events: executed.events.clone(),
-        emitted: executed.emitted.clone(),
-        tx_outcomes: executed.tx_outcomes.clone(),
+        read_set_old: executed.inner.read_set.clone(),
+        write_set_final: executed.inner.write_set.clone(),
+        events: executed.inner.events.clone(),
+        emitted: executed.inner.emitted.clone(),
+        tx_outcomes: executed.inner.tx_outcomes.clone(),
     };
 
     let batch = Batch {
@@ -60,10 +61,10 @@ pub fn prove_batch(
     };
 
     // 2. Build old_column_states from state file + schemas.
-    let old_column_states =
-        build_old_column_states(&schemas_by_id, &executed.state_file).map_err(|e| {
-            ServiceError::internal(ErrorCode::InternalError, format!("column state build: {e}"))
-        })?;
+    let old_column_states = build_old_column_states(&schemas_by_id, &executed.inner.state_before)
+        .map_err(|e| {
+        ServiceError::internal(ErrorCode::InternalError, format!("column state build: {e}"))
+    })?;
 
     // 3. Generate witness.
     let vc = HybridVC::new(PoseidonHasher::new(), VC_THRESHOLD);
@@ -74,8 +75,8 @@ pub fn prove_batch(
             ServiceError::internal(ErrorCode::InternalError, format!("witness gen: {e}"))
         })?;
 
-    // 4. Build all chip traces.
-    let bundle = build_all_from_program::<PoseidonHasher, 3>(
+    // 4. Build trace map (all chip traces + public values).
+    let traces = build_trace_map::<PoseidonHasher, 3>(
         &witness,
         &registered.program,
         &batch,
@@ -86,19 +87,14 @@ pub fn prove_batch(
     )
     .map_err(|e| ServiceError::internal(ErrorCode::InternalError, format!("trace build: {e}")))?;
 
-    // 5. Build SmtTablePath public values: old_root[8] ++ new_root[8].
-    let mut smt_public_values = Vec::with_capacity(16);
-    smt_public_values.extend_from_slice(&witness.old_state_root.0);
-    smt_public_values.extend_from_slice(&witness.new_state_root.0);
-
-    // 6. Prove (timed).
+    // 5. Prove (timed).
     let prove_start = std::time::Instant::now();
-    let proof = stark::prove(&bundle, &smt_public_values);
+    let proof = stark::prove::<TabulaAir>(&stark::default_config(), &traces);
     let prove_time_ms = prove_start.elapsed().as_millis() as u64;
 
-    // 7. Verify (timed).
+    // 6. Verify (timed).
     let verify_start = std::time::Instant::now();
-    let verified = stark::verify(&proof).is_ok();
+    let verified = stark::verify::<TabulaAir>(&proof).is_ok();
     let verify_time_ms = verify_start.elapsed().as_millis() as u64;
 
     // 8. Assemble summary.
