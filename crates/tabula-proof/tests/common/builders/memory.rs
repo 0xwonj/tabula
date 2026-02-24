@@ -1,3 +1,7 @@
+//! Factory functions and builders for memory-layer test data.
+//!
+//! Covers `InterTxOrderRow`, `StateColumnRow`, `ColumnMeta`, and Poseidon helpers.
+
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 use tabula_commitment::{ColumnMeta, CommitmentStrategy, NativeDigest};
@@ -5,27 +9,90 @@ use tabula_core::{ColId, TableId};
 use tabula_proof::air::chips::state_column::trace::EntrySource;
 use tabula_proof::air::{InterTxOrderRow, StateColumnRow};
 
-// ── InterTxOrder ──
+// ── Shared value helper ──
 
-fn ito_val(v: [u32; 3]) -> Vec<BabyBear> {
+/// Convert a `[u32; 3]` array to `Vec<BabyBear>`.
+fn fe_vals(v: [u32; 3]) -> Vec<BabyBear> {
     v.iter().map(|x| BabyBear::new(*x)).collect()
 }
 
+fn fe_zeros() -> Vec<BabyBear> {
+    vec![BabyBear::ZERO; 3]
+}
+
+// ── InterTxOrder builder ──
+
+/// Fluent builder for `InterTxOrderRow`.
+pub struct InterTxOrderRowBuilder {
+    inner: InterTxOrderRow,
+}
+
+impl InterTxOrderRowBuilder {
+    /// Start with defaults: table 0, col 0, key 0, tx_index 0, not init, no read/write, zero values.
+    pub fn new(t: u32, c: u16, key: u64) -> Self {
+        Self {
+            inner: InterTxOrderRow {
+                table_id: t,
+                col_id: c,
+                key,
+                tx_index: 0,
+                is_init: false,
+                has_read: false,
+                has_write: false,
+                input_val: fe_zeros(),
+                input_is_null: false,
+                output_val: fe_zeros(),
+                output_is_null: false,
+            },
+        }
+    }
+
+    pub fn tx_index(mut self, idx: u32) -> Self {
+        self.inner.tx_index = idx;
+        self
+    }
+
+    pub fn init(mut self) -> Self {
+        self.inner.is_init = true;
+        self
+    }
+
+    pub fn has_read(mut self) -> Self {
+        self.inner.has_read = true;
+        self
+    }
+
+    pub fn has_write(mut self) -> Self {
+        self.inner.has_write = true;
+        self
+    }
+
+    pub fn input(mut self, val: [u32; 3], is_null: bool) -> Self {
+        self.inner.input_val = fe_vals(val);
+        self.inner.input_is_null = is_null;
+        self
+    }
+
+    pub fn output(mut self, val: [u32; 3], is_null: bool) -> Self {
+        self.inner.output_val = fe_vals(val);
+        self.inner.output_is_null = is_null;
+        self
+    }
+
+    pub fn build(self) -> InterTxOrderRow {
+        self.inner
+    }
+}
+
+// ── InterTxOrder factory functions ──
+
 /// Init row: base state seed for a key.
 pub fn ito_init(t: u32, c: u16, key: u64, val: [u32; 3], is_null: bool) -> InterTxOrderRow {
-    InterTxOrderRow {
-        table_id: t,
-        col_id: c,
-        key,
-        tx_index: 0,
-        is_init: true,
-        has_read: false,
-        has_write: false,
-        input_val: ito_val(val),
-        input_is_null: is_null,
-        output_val: ito_val(val),
-        output_is_null: is_null,
-    }
+    InterTxOrderRowBuilder::new(t, c, key)
+        .init()
+        .input(val, is_null)
+        .output(val, is_null)
+        .build()
 }
 
 /// Read-only access row: tx reads input value, output = input.
@@ -37,23 +104,15 @@ pub fn ito_read(
     input: [u32; 3],
     input_is_null: bool,
 ) -> InterTxOrderRow {
-    InterTxOrderRow {
-        table_id: t,
-        col_id: c,
-        key,
-        tx_index,
-        is_init: false,
-        has_read: true,
-        has_write: false,
-        input_val: ito_val(input),
-        input_is_null,
-        output_val: ito_val(input), // read-only: output = input
-        output_is_null: input_is_null,
-    }
+    InterTxOrderRowBuilder::new(t, c, key)
+        .tx_index(tx_index)
+        .has_read()
+        .input(input, input_is_null)
+        .output(input, input_is_null)
+        .build()
 }
 
 /// Write-only access row: tx writes without reading.
-#[allow(clippy::too_many_arguments)]
 pub fn ito_write(
     t: u32,
     c: u16,
@@ -64,23 +123,15 @@ pub fn ito_write(
     output: [u32; 3],
     output_is_null: bool,
 ) -> InterTxOrderRow {
-    InterTxOrderRow {
-        table_id: t,
-        col_id: c,
-        key,
-        tx_index,
-        is_init: false,
-        has_read: false,
-        has_write: true,
-        input_val: ito_val(input),
-        input_is_null,
-        output_val: ito_val(output),
-        output_is_null,
-    }
+    InterTxOrderRowBuilder::new(t, c, key)
+        .tx_index(tx_index)
+        .has_write()
+        .input(input, input_is_null)
+        .output(output, output_is_null)
+        .build()
 }
 
 /// Read+write access row: tx reads and writes.
-#[allow(clippy::too_many_arguments)]
 pub fn ito_read_write(
     t: u32,
     c: u16,
@@ -91,119 +142,115 @@ pub fn ito_read_write(
     output: [u32; 3],
     output_is_null: bool,
 ) -> InterTxOrderRow {
-    InterTxOrderRow {
-        table_id: t,
-        col_id: c,
-        key,
-        tx_index,
-        is_init: false,
-        has_read: true,
-        has_write: true,
-        input_val: ito_val(input),
-        input_is_null,
-        output_val: ito_val(output),
-        output_is_null,
+    InterTxOrderRowBuilder::new(t, c, key)
+        .tx_index(tx_index)
+        .has_read()
+        .has_write()
+        .input(input, input_is_null)
+        .output(output, output_is_null)
+        .build()
+}
+
+// ── StateColumn builder ──
+
+/// Fluent builder for `StateColumnRow`.
+pub struct StateColumnRowBuilder {
+    inner: StateColumnRow,
+}
+
+impl StateColumnRowBuilder {
+    /// Start with defaults: not gap, OldOnly source, zero values, not touched, no multiplicities.
+    pub fn new(t: u32, c: u16, key: u64) -> Self {
+        Self {
+            inner: StateColumnRow {
+                table_id: t,
+                col_id: c,
+                key,
+                is_gap: false,
+                source: EntrySource::OldOnly,
+                old_val: fe_zeros(),
+                new_val: fe_zeros(),
+                segment_is_touched: false,
+                old_hash_acc: [BabyBear::ZERO; 8],
+                new_hash_acc: [BabyBear::ZERO; 8],
+                read_mult: false,
+                write_mult: false,
+            },
+        }
+    }
+
+    pub fn source(mut self, source: EntrySource) -> Self {
+        self.inner.source = source;
+        self
+    }
+
+    pub fn gap(mut self) -> Self {
+        self.inner.is_gap = true;
+        self
+    }
+
+    pub fn old_val(mut self, val: [u32; 3]) -> Self {
+        self.inner.old_val = fe_vals(val);
+        self
+    }
+
+    pub fn new_val(mut self, val: [u32; 3]) -> Self {
+        self.inner.new_val = fe_vals(val);
+        self
+    }
+
+    pub fn touched(mut self) -> Self {
+        self.inner.segment_is_touched = true;
+        self
+    }
+
+    pub fn build(self) -> StateColumnRow {
+        self.inner
     }
 }
 
-// ── StateColumn ──
+// ── StateColumn factory functions ──
 
-fn sc_val(v: [u32; 3]) -> Vec<BabyBear> {
-    v.iter().map(|x| BabyBear::new(*x)).collect()
-}
-
-fn sc_zeros() -> Vec<BabyBear> {
-    vec![BabyBear::ZERO; 3]
-}
-
-/// Entry: old_only — key in old, not written. old_val=new_val. Both chains.
+/// Entry: old_only -- key in old, not written. old_val=new_val. Both chains.
 pub fn sc_old_only(t: u32, c: u16, key: u64, val: [u32; 3]) -> StateColumnRow {
-    StateColumnRow {
-        table_id: t,
-        col_id: c,
-        key,
-        is_gap: false,
-        source: EntrySource::OldOnly,
-        old_val: sc_val(val),
-        new_val: sc_val(val),
-        segment_is_touched: false,
-        old_hash_acc: [BabyBear::ZERO; 8],
-        new_hash_acc: [BabyBear::ZERO; 8],
-        read_mult: false,
-        write_mult: false,
-    }
+    StateColumnRowBuilder::new(t, c, key)
+        .source(EntrySource::OldOnly)
+        .old_val(val)
+        .new_val(val)
+        .build()
 }
 
-/// Entry: write_only — key not in old, newly written. New chain only.
+/// Entry: write_only -- key not in old, newly written. New chain only.
 pub fn sc_write_only(t: u32, c: u16, key: u64, val: [u32; 3]) -> StateColumnRow {
-    StateColumnRow {
-        table_id: t,
-        col_id: c,
-        key,
-        is_gap: false,
-        source: EntrySource::WriteOnly,
-        old_val: sc_zeros(),
-        new_val: sc_val(val),
-        segment_is_touched: true,
-        old_hash_acc: [BabyBear::ZERO; 8],
-        new_hash_acc: [BabyBear::ZERO; 8],
-        read_mult: false,
-        write_mult: false,
-    }
+    StateColumnRowBuilder::new(t, c, key)
+        .source(EntrySource::WriteOnly)
+        .new_val(val)
+        .touched()
+        .build()
 }
 
-/// Entry: both — key in old AND written. Both chains with different values.
+/// Entry: both -- key in old AND written. Both chains with different values.
 pub fn sc_both(t: u32, c: u16, key: u64, old: [u32; 3], new: [u32; 3]) -> StateColumnRow {
-    StateColumnRow {
-        table_id: t,
-        col_id: c,
-        key,
-        is_gap: false,
-        source: EntrySource::Both,
-        old_val: sc_val(old),
-        new_val: sc_val(new),
-        segment_is_touched: true,
-        old_hash_acc: [BabyBear::ZERO; 8],
-        new_hash_acc: [BabyBear::ZERO; 8],
-        read_mult: false,
-        write_mult: false,
-    }
+    StateColumnRowBuilder::new(t, c, key)
+        .source(EntrySource::Both)
+        .old_val(old)
+        .new_val(new)
+        .touched()
+        .build()
 }
 
-/// Entry: delete — key in old, written as null. Old chain only.
+/// Entry: delete -- key in old, written as null. Old chain only.
 pub fn sc_delete(t: u32, c: u16, key: u64, old: [u32; 3]) -> StateColumnRow {
-    StateColumnRow {
-        table_id: t,
-        col_id: c,
-        key,
-        is_gap: false,
-        source: EntrySource::Delete,
-        old_val: sc_val(old),
-        new_val: sc_zeros(),
-        segment_is_touched: true,
-        old_hash_acc: [BabyBear::ZERO; 8],
-        new_hash_acc: [BabyBear::ZERO; 8],
-        read_mult: false,
-        write_mult: false,
-    }
+    StateColumnRowBuilder::new(t, c, key)
+        .source(EntrySource::Delete)
+        .old_val(old)
+        .touched()
+        .build()
 }
 
-/// Gap row — non-membership proof. No hash chains.
+/// Gap row -- non-membership proof. No hash chains.
 pub fn sc_gap(t: u32, c: u16, key: u64) -> StateColumnRow {
-    StateColumnRow {
-        table_id: t,
-        col_id: c,
-        key,
-        is_gap: true,
-        source: EntrySource::OldOnly, // ignored for gap
-        old_val: sc_zeros(),
-        new_val: sc_zeros(),
-        segment_is_touched: false,
-        old_hash_acc: [BabyBear::ZERO; 8],
-        new_hash_acc: [BabyBear::ZERO; 8],
-        read_mult: false,
-        write_mult: false,
-    }
+    StateColumnRowBuilder::new(t, c, key).gap().build()
 }
 
 // ── Column Meta ──

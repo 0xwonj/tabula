@@ -1,6 +1,12 @@
+//! Factory functions for `InstructionRecord` test data.
+//!
+//! Each function delegates to `InstructionBuilder` for a concise, readable body.
+
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
-use tabula_proof::air::{CmpOp, InstructionRecord, Opcode, bool_fe, u64_to_limbs};
+use tabula_proof::air::{CmpOp, InstructionRecord, Opcode};
+
+use super::instruction_builder::{InstructionBuilder, bool_val};
 
 pub fn make_add(
     dst_slot: usize,
@@ -9,30 +15,12 @@ pub fn make_add(
     src1: u64,
     src2: u64,
 ) -> InstructionRecord {
-    let result = src1.wrapping_add(src2);
-    InstructionRecord {
-        opcode: Opcode::Add,
-        tx_index: 0,
-        written_slots: vec![dst_slot],
-        src1_val: u64_to_limbs(src1).to_vec(),
-        src2_val: u64_to_limbs(src2).to_vec(),
-        cond_val: false,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: Some(src2_slot),
-        cond_slot_idx: None,
-        access_t: None,
-        access_c: None,
-        access_r: None,
-        access_val: None,
-        access_is_null: None,
-        dst_val: u64_to_limbs(result).to_vec(),
-        dst_is_null: false,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Add)
+        .written_slots(vec![dst_slot])
+        .src1(src1_slot, src1)
+        .src2(src2_slot, src2)
+        .dst_u64(src1.wrapping_add(src2))
+        .build()
 }
 
 pub fn make_sub(
@@ -42,56 +30,18 @@ pub fn make_sub(
     src1: u64,
     src2: u64,
 ) -> InstructionRecord {
-    let result = src1.wrapping_sub(src2);
-    InstructionRecord {
-        opcode: Opcode::Sub,
-        tx_index: 0,
-        written_slots: vec![dst_slot],
-        src1_val: u64_to_limbs(src1).to_vec(),
-        src2_val: u64_to_limbs(src2).to_vec(),
-        cond_val: false,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: Some(src2_slot),
-        cond_slot_idx: None,
-        access_t: None,
-        access_c: None,
-        access_r: None,
-        access_val: None,
-        access_is_null: None,
-        dst_val: u64_to_limbs(result).to_vec(),
-        dst_is_null: false,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Sub)
+        .written_slots(vec![dst_slot])
+        .src1(src1_slot, src1)
+        .src2(src2_slot, src2)
+        .dst_u64(src1.wrapping_sub(src2))
+        .build()
 }
 
 pub fn make_assert(src1_slot: usize, src_val: bool) -> InstructionRecord {
-    InstructionRecord {
-        opcode: Opcode::Assert,
-        tx_index: 0,
-        written_slots: vec![],
-        src1_val: vec![bool_fe(src_val), BabyBear::ZERO, BabyBear::ZERO],
-        src2_val: vec![BabyBear::ZERO; 3],
-        cond_val: false,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: None,
-        cond_slot_idx: None,
-        access_t: None,
-        access_c: None,
-        access_r: None,
-        access_val: None,
-        access_is_null: None,
-        dst_val: vec![],
-        dst_is_null: false,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Assert)
+        .src1_fe(src1_slot, bool_val(src_val))
+        .build()
 }
 
 pub fn make_select(
@@ -104,29 +54,13 @@ pub fn make_select(
     if_false: u64,
 ) -> InstructionRecord {
     let result = if cond { if_true } else { if_false };
-    InstructionRecord {
-        opcode: Opcode::Select,
-        tx_index: 0,
-        written_slots: vec![dst_slot],
-        src1_val: u64_to_limbs(if_true).to_vec(),
-        src2_val: u64_to_limbs(if_false).to_vec(),
-        cond_val: cond,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: Some(src2_slot),
-        cond_slot_idx: Some(cond_slot),
-        access_t: None,
-        access_c: None,
-        access_r: None,
-        access_val: None,
-        access_is_null: None,
-        dst_val: u64_to_limbs(result).to_vec(),
-        dst_is_null: false,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Select)
+        .written_slots(vec![dst_slot])
+        .src1(src1_slot, if_true)
+        .src2(src2_slot, if_false)
+        .cond(cond_slot, cond)
+        .dst_u64(result)
+        .build()
 }
 
 pub fn make_read(
@@ -137,29 +71,13 @@ pub fn make_read(
     val: u64,
     is_null: bool,
 ) -> InstructionRecord {
-    InstructionRecord {
-        opcode: Opcode::Read,
-        tx_index: 0,
-        written_slots: vec![dst_slot],
-        src1_val: vec![BabyBear::ZERO; 3],
-        src2_val: vec![BabyBear::ZERO; 3],
-        cond_val: false,
-        src1_slot_idx: None,
-        src2_slot_idx: None,
-        cond_slot_idx: None,
-        access_t: Some(table),
-        access_c: Some(col),
-        access_r: Some(row_key),
-        access_val: Some(u64_to_limbs(val).to_vec()),
-        access_is_null: Some(is_null),
-        dst_val: u64_to_limbs(val).to_vec(),
-        dst_is_null: is_null,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Read)
+        .written_slots(vec![dst_slot])
+        .access(table, col, row_key)
+        .access_val(val, is_null)
+        .dst_u64(val)
+        .dst_null(is_null)
+        .build()
 }
 
 pub fn make_write(
@@ -170,55 +88,20 @@ pub fn make_write(
     val: u64,
     is_null: bool,
 ) -> InstructionRecord {
-    InstructionRecord {
-        opcode: Opcode::Write,
-        tx_index: 0,
-        written_slots: vec![],
-        src1_val: u64_to_limbs(val).to_vec(),
-        src2_val: vec![BabyBear::ZERO; 3],
-        cond_val: false,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: None,
-        cond_slot_idx: None,
-        access_t: Some(table),
-        access_c: Some(col),
-        access_r: Some(row_key),
-        access_val: Some(u64_to_limbs(val).to_vec()),
-        access_is_null: Some(is_null),
-        dst_val: vec![],
-        dst_is_null: is_null,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Write)
+        .src1(src1_slot, val)
+        .access(table, col, row_key)
+        .access_val(val, is_null)
+        .dst_null(is_null)
+        .build()
 }
 
 pub fn make_not(dst_slot: usize, src1_slot: usize, src: bool) -> InstructionRecord {
-    InstructionRecord {
-        opcode: Opcode::Not,
-        tx_index: 0,
-        written_slots: vec![dst_slot],
-        src1_val: vec![bool_fe(src), BabyBear::ZERO, BabyBear::ZERO],
-        src2_val: vec![BabyBear::ZERO; 3],
-        cond_val: false,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: None,
-        cond_slot_idx: None,
-        access_t: None,
-        access_c: None,
-        access_r: None,
-        access_val: None,
-        access_is_null: None,
-        dst_val: vec![bool_fe(!src), BabyBear::ZERO, BabyBear::ZERO],
-        dst_is_null: false,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Not)
+        .written_slots(vec![dst_slot])
+        .src1_fe(src1_slot, bool_val(src))
+        .dst_fe(bool_val(!src))
+        .build()
 }
 
 pub fn make_and(
@@ -228,29 +111,12 @@ pub fn make_and(
     a: bool,
     b: bool,
 ) -> InstructionRecord {
-    InstructionRecord {
-        opcode: Opcode::And,
-        tx_index: 0,
-        written_slots: vec![dst_slot],
-        src1_val: vec![bool_fe(a), BabyBear::ZERO, BabyBear::ZERO],
-        src2_val: vec![bool_fe(b), BabyBear::ZERO, BabyBear::ZERO],
-        cond_val: false,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: Some(src2_slot),
-        cond_slot_idx: None,
-        access_t: None,
-        access_c: None,
-        access_r: None,
-        access_val: None,
-        access_is_null: None,
-        dst_val: vec![bool_fe(a && b), BabyBear::ZERO, BabyBear::ZERO],
-        dst_is_null: false,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::And)
+        .written_slots(vec![dst_slot])
+        .src1_fe(src1_slot, bool_val(a))
+        .src2_fe(src2_slot, bool_val(b))
+        .dst_fe(bool_val(a && b))
+        .build()
 }
 
 pub fn make_or(
@@ -260,29 +126,12 @@ pub fn make_or(
     a: bool,
     b: bool,
 ) -> InstructionRecord {
-    InstructionRecord {
-        opcode: Opcode::Or,
-        tx_index: 0,
-        written_slots: vec![dst_slot],
-        src1_val: vec![bool_fe(a), BabyBear::ZERO, BabyBear::ZERO],
-        src2_val: vec![bool_fe(b), BabyBear::ZERO, BabyBear::ZERO],
-        cond_val: false,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: Some(src2_slot),
-        cond_slot_idx: None,
-        access_t: None,
-        access_c: None,
-        access_r: None,
-        access_val: None,
-        access_is_null: None,
-        dst_val: vec![bool_fe(a || b), BabyBear::ZERO, BabyBear::ZERO],
-        dst_is_null: false,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Or)
+        .written_slots(vec![dst_slot])
+        .src1_fe(src1_slot, bool_val(a))
+        .src2_fe(src2_slot, bool_val(b))
+        .dst_fe(bool_val(a || b))
+        .build()
 }
 
 pub fn make_cmp(
@@ -301,29 +150,12 @@ pub fn make_cmp(
         CmpOp::Gt => src1 > src2,
         CmpOp::Gte => src1 >= src2,
     };
-    InstructionRecord {
-        opcode: Opcode::Cmp(cmp_op),
-        tx_index: 0,
-        written_slots: vec![dst_slot],
-        src1_val: u64_to_limbs(src1).to_vec(),
-        src2_val: u64_to_limbs(src2).to_vec(),
-        cond_val: false,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: Some(src2_slot),
-        cond_slot_idx: None,
-        access_t: None,
-        access_c: None,
-        access_r: None,
-        access_val: None,
-        access_is_null: None,
-        dst_val: vec![bool_fe(result), BabyBear::ZERO, BabyBear::ZERO],
-        dst_is_null: false,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Cmp(cmp_op))
+        .written_slots(vec![dst_slot])
+        .src1(src1_slot, src1)
+        .src2(src2_slot, src2)
+        .dst_fe(bool_val(result))
+        .build()
 }
 
 /// Composite helper: Read two values into slots, then Add.
@@ -371,37 +203,18 @@ pub fn make_hash(
     perm_input[5] = src2_fe[0];
     perm_input[6] = src2_fe[1];
     perm_input[7] = src2_fe[2];
-    // perm_input[8..16] = 0 (capacity)
 
     let (_rounds, perm_output_full) = poseidon2_permutation(perm_input);
     let perm_output: [BabyBear; 8] = core::array::from_fn(|i| perm_output_full[i]);
-
-    // dst_val = first W=3 elements of digest
     let dst_val = vec![perm_output[0], perm_output[1], perm_output[2]];
 
-    InstructionRecord {
-        opcode: Opcode::Hash,
-        tx_index: 0,
-        written_slots: vec![dst_slot],
-        src1_val: src1_fe,
-        src2_val: src2_fe,
-        cond_val: false,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: Some(src2_slot),
-        cond_slot_idx: None,
-        access_t: None,
-        access_c: None,
-        access_r: None,
-        access_val: None,
-        access_is_null: None,
-        dst_val,
-        dst_is_null: false,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: Some(perm_input),
-        hash_perm_output: Some(perm_output),
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Hash)
+        .written_slots(vec![dst_slot])
+        .src1_fe(src1_slot, src1_fe)
+        .src2_fe(src2_slot, src2_fe)
+        .dst_fe(dst_val)
+        .hash_perm(perm_input, perm_output)
+        .build()
 }
 
 pub fn make_mul(
@@ -411,30 +224,12 @@ pub fn make_mul(
     src1: u64,
     src2: u64,
 ) -> InstructionRecord {
-    let result = src1.wrapping_mul(src2);
-    InstructionRecord {
-        opcode: Opcode::Mul,
-        tx_index: 0,
-        written_slots: vec![dst_slot],
-        src1_val: u64_to_limbs(src1).to_vec(),
-        src2_val: u64_to_limbs(src2).to_vec(),
-        cond_val: false,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: Some(src2_slot),
-        cond_slot_idx: None,
-        access_t: None,
-        access_c: None,
-        access_r: None,
-        access_val: None,
-        access_is_null: None,
-        dst_val: u64_to_limbs(result).to_vec(),
-        dst_is_null: false,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Mul)
+        .written_slots(vec![dst_slot])
+        .src1(src1_slot, src1)
+        .src2(src2_slot, src2)
+        .dst_u64(src1.wrapping_mul(src2))
+        .build()
 }
 
 pub fn make_divmod(
@@ -445,31 +240,13 @@ pub fn make_divmod(
     lhs: u64,
     rhs: u64,
 ) -> InstructionRecord {
-    let q = lhs / rhs;
-    let rem = lhs % rhs;
-    InstructionRecord {
-        opcode: Opcode::DivMod,
-        tx_index: 0,
-        written_slots: vec![q_slot, r_slot],
-        src1_val: u64_to_limbs(lhs).to_vec(),
-        src2_val: u64_to_limbs(rhs).to_vec(),
-        cond_val: false,
-        src1_slot_idx: Some(src1_slot),
-        src2_slot_idx: Some(src2_slot),
-        cond_slot_idx: None,
-        access_t: None,
-        access_c: None,
-        access_r: None,
-        access_val: None,
-        access_is_null: None,
-        dst_val: u64_to_limbs(q).to_vec(),
-        dst_is_null: false,
-        dst2_val: u64_to_limbs(rem).to_vec(),
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::DivMod)
+        .written_slots(vec![q_slot, r_slot])
+        .src1(src1_slot, lhs)
+        .src2(src2_slot, rhs)
+        .dst_u64(lhs / rhs)
+        .dst2_u64(lhs % rhs)
+        .build()
 }
 
 /// Build a Lookup instruction record.
@@ -482,27 +259,10 @@ pub fn make_lookup(
     row_key: u64,
     val: u64,
 ) -> InstructionRecord {
-    InstructionRecord {
-        opcode: Opcode::Lookup,
-        tx_index: 0,
-        written_slots: vec![dst_slot],
-        src1_val: vec![BabyBear::ZERO; 3],
-        src2_val: vec![BabyBear::ZERO; 3],
-        cond_val: false,
-        src1_slot_idx: None,
-        src2_slot_idx: None,
-        cond_slot_idx: None,
-        access_t: Some(table),
-        access_c: Some(col),
-        access_r: Some(row_key),
-        access_val: Some(u64_to_limbs(val).to_vec()),
-        access_is_null: Some(false),
-        dst_val: u64_to_limbs(val).to_vec(),
-        dst_is_null: false,
-        dst2_val: vec![],
-        dst2_is_null: false,
-        hash_perm_input: None,
-        hash_perm_output: None,
-        is_empty_col: false,
-    }
+    InstructionBuilder::new(Opcode::Lookup)
+        .written_slots(vec![dst_slot])
+        .access(table, col, row_key)
+        .access_val(val, false)
+        .dst_u64(val)
+        .build()
 }
