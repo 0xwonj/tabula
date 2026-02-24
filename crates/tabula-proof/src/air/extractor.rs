@@ -18,8 +18,13 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::debug::{DebugConstraintBuilder, evaluate_chip_with_preprocessed_and_public_values};
+use super::debug::{
+    evaluate_chip_with_preprocessed_and_public_values, ChipRecord, RecordedInteraction,
+};
 use super::interaction::{ColumnRef, Interaction, InteractionDirection, VirtualPairCol};
+
+/// Minimum trace height for local + next row evaluation.
+const PROBE_HEIGHT: usize = 2;
 
 /// Extract static interaction descriptors from a chip by column-scanning.
 ///
@@ -41,234 +46,231 @@ pub fn extract_interactions<A>(
     num_public_values: usize,
 ) -> (Vec<Interaction<BabyBear>>, Vec<Interaction<BabyBear>>)
 where
-    A: for<'a> Air<DebugConstraintBuilder<'a, BabyBear>>,
+    A: for<'a> Air<super::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
-    // Phase 1: Evaluate with all-zero trace to establish baseline.
-    let height = 2; // Minimum for local + next row.
-    let zero_trace = RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * height], main_width);
     let pvs = vec![BabyBear::ZERO; num_public_values];
 
-    let baseline_record =
-        evaluate_chip_with_preprocessed_and_public_values("_extract", air, &zero_trace, preprocessed, &pvs)
-            .expect("zero-trace evaluation should not fail constraints (extraction ignores constraint failures)");
+    // Phase 1: Evaluate with all-zero trace to establish baseline.
+    let (baseline_sends, baseline_receives) = eval_baseline(air, main_width, preprocessed, &pvs);
 
-    // Partition baseline into sends and receives.
-    let mut baseline_sends = Vec::new();
-    let mut baseline_receives = Vec::new();
-    for interaction in &baseline_record.interactions {
-        // Only take row-0 interactions (skip row-1 duplicates).
-        // The debug evaluator runs over all rows, producing 2x interactions
-        // for a 2-row trace. We take the first half.
-        match interaction.direction {
-            InteractionDirection::Send => baseline_sends.push(interaction),
-            InteractionDirection::Receive => baseline_receives.push(interaction),
-        }
-    }
-    // For a 2-row trace, each row produces the same set of interactions.
-    // Take the first half (row 0).
-    let sends_per_row = baseline_sends.len() / height;
-    let receives_per_row = baseline_receives.len() / height;
-    let baseline_sends = &baseline_sends[..sends_per_row];
-    let baseline_receives = &baseline_receives[..receives_per_row];
+    // Phase 2: Build initial descriptors from baseline constants.
+    let mut send_descriptors = build_initial_descriptors(&baseline_sends, InteractionDirection::Send);
+    let mut recv_descriptors =
+        build_initial_descriptors(&baseline_receives, InteractionDirection::Receive);
 
-    // Phase 2: For each main column (local row), probe with column = 1.
-    let mut send_descriptors: Vec<Interaction<BabyBear>> = baseline_sends
-        .iter()
-        .map(|bi| Interaction {
-            values: bi
-                .values
-                .iter()
-                .map(|&v| VirtualPairCol {
-                    column_weights: Vec::new(),
-                    constant: v,
-                })
-                .collect(),
-            multiplicity: VirtualPairCol {
-                column_weights: Vec::new(),
-                constant: bi.multiplicity,
-            },
-            kind: bi.kind,
-            direction: InteractionDirection::Send,
-        })
-        .collect();
-
-    let mut recv_descriptors: Vec<Interaction<BabyBear>> = baseline_receives
-        .iter()
-        .map(|bi| Interaction {
-            values: bi
-                .values
-                .iter()
-                .map(|&v| VirtualPairCol {
-                    column_weights: Vec::new(),
-                    constant: v,
-                })
-                .collect(),
-            multiplicity: VirtualPairCol {
-                column_weights: Vec::new(),
-                constant: bi.multiplicity,
-            },
-            kind: bi.kind,
-            direction: InteractionDirection::Receive,
-        })
-        .collect();
-
-    // Scan local columns.
-    for col in 0..main_width {
-        let mut probe_data = vec![BabyBear::ZERO; main_width * height];
-        probe_data[col] = BabyBear::ONE; // Row 0, column `col`.
-        let probe_trace = RowMajorMatrix::new(probe_data, main_width);
-
-        let probe_record = match evaluate_chip_with_preprocessed_and_public_values(
-            "_extract",
-            air,
-            &probe_trace,
-            preprocessed,
-            &pvs,
-        ) {
-            Ok(r) => r,
-            Err(_) => continue, // Skip columns that cause constraint failures.
-        };
-
-        let mut probe_sends = Vec::new();
-        let mut probe_receives = Vec::new();
-        for interaction in &probe_record.interactions {
-            match interaction.direction {
-                InteractionDirection::Send => probe_sends.push(interaction),
-                InteractionDirection::Receive => probe_receives.push(interaction),
-            }
-        }
-        let probe_sends = &probe_sends[..sends_per_row.min(probe_sends.len())];
-        let probe_receives = &probe_receives[..receives_per_row.min(probe_receives.len())];
-
-        // Update send descriptors.
-        for (i, (probed, baseline)) in probe_sends.iter().zip(baseline_sends.iter()).enumerate() {
-            if i >= send_descriptors.len() {
-                break;
-            }
-            for (j, (&pval, &bval)) in probed.values.iter().zip(baseline.values.iter()).enumerate()
-            {
-                let weight = pval - bval;
-                if weight != BabyBear::ZERO && j < send_descriptors[i].values.len() {
-                    send_descriptors[i].values[j]
-                        .column_weights
-                        .push((ColumnRef::Local(col), weight));
-                }
-            }
-            let mult_weight = probed.multiplicity - baseline.multiplicity;
-            if mult_weight != BabyBear::ZERO {
-                send_descriptors[i]
-                    .multiplicity
-                    .column_weights
-                    .push((ColumnRef::Local(col), mult_weight));
-            }
-        }
-
-        // Update receive descriptors.
-        for (i, (probed, baseline)) in probe_receives
-            .iter()
-            .zip(baseline_receives.iter())
-            .enumerate()
-        {
-            if i >= recv_descriptors.len() {
-                break;
-            }
-            for (j, (&pval, &bval)) in probed.values.iter().zip(baseline.values.iter()).enumerate()
-            {
-                let weight = pval - bval;
-                if weight != BabyBear::ZERO && j < recv_descriptors[i].values.len() {
-                    recv_descriptors[i].values[j]
-                        .column_weights
-                        .push((ColumnRef::Local(col), weight));
-                }
-            }
-            let mult_weight = probed.multiplicity - baseline.multiplicity;
-            if mult_weight != BabyBear::ZERO {
-                recv_descriptors[i]
-                    .multiplicity
-                    .column_weights
-                    .push((ColumnRef::Local(col), mult_weight));
-            }
-        }
-    }
-
-    // Scan next-row columns.
-    for col in 0..main_width {
-        let mut probe_data = vec![BabyBear::ZERO; main_width * height];
-        probe_data[main_width + col] = BabyBear::ONE; // Row 1, column `col`.
-        let probe_trace = RowMajorMatrix::new(probe_data, main_width);
-
-        let probe_record = match evaluate_chip_with_preprocessed_and_public_values(
-            "_extract",
-            air,
-            &probe_trace,
-            preprocessed,
-            &pvs,
-        ) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
-        let mut probe_sends = Vec::new();
-        let mut probe_receives = Vec::new();
-        for interaction in &probe_record.interactions {
-            match interaction.direction {
-                InteractionDirection::Send => probe_sends.push(interaction),
-                InteractionDirection::Receive => probe_receives.push(interaction),
-            }
-        }
-        let probe_sends = &probe_sends[..sends_per_row.min(probe_sends.len())];
-        let probe_receives = &probe_receives[..receives_per_row.min(probe_receives.len())];
-
-        for (i, (probed, baseline)) in probe_sends.iter().zip(baseline_sends.iter()).enumerate() {
-            if i >= send_descriptors.len() {
-                break;
-            }
-            for (j, (&pval, &bval)) in probed.values.iter().zip(baseline.values.iter()).enumerate()
-            {
-                let weight = pval - bval;
-                if weight != BabyBear::ZERO && j < send_descriptors[i].values.len() {
-                    send_descriptors[i].values[j]
-                        .column_weights
-                        .push((ColumnRef::Next(col), weight));
-                }
-            }
-            let mult_weight = probed.multiplicity - baseline.multiplicity;
-            if mult_weight != BabyBear::ZERO {
-                send_descriptors[i]
-                    .multiplicity
-                    .column_weights
-                    .push((ColumnRef::Next(col), mult_weight));
-            }
-        }
-
-        for (i, (probed, baseline)) in probe_receives
-            .iter()
-            .zip(baseline_receives.iter())
-            .enumerate()
-        {
-            if i >= recv_descriptors.len() {
-                break;
-            }
-            for (j, (&pval, &bval)) in probed.values.iter().zip(baseline.values.iter()).enumerate()
-            {
-                let weight = pval - bval;
-                if weight != BabyBear::ZERO && j < recv_descriptors[i].values.len() {
-                    recv_descriptors[i].values[j]
-                        .column_weights
-                        .push((ColumnRef::Next(col), weight));
-                }
-            }
-            let mult_weight = probed.multiplicity - baseline.multiplicity;
-            if mult_weight != BabyBear::ZERO {
-                recv_descriptors[i]
-                    .multiplicity
-                    .column_weights
-                    .push((ColumnRef::Next(col), mult_weight));
-            }
-        }
-    }
+    // Phase 3: Probe each column to determine its linear contribution.
+    scan_column_contributions(
+        air,
+        main_width,
+        preprocessed,
+        &pvs,
+        &baseline_sends,
+        &baseline_receives,
+        &mut send_descriptors,
+        &mut recv_descriptors,
+    );
 
     (send_descriptors, recv_descriptors)
+}
+
+/// Phase 1: Evaluate chip on an all-zero trace to establish baseline interaction counts.
+///
+/// Returns the per-row baseline sends and receives (first half of the 2-row evaluation).
+fn eval_baseline<A>(
+    air: &A,
+    main_width: usize,
+    preprocessed: Option<&RowMajorMatrix<BabyBear>>,
+    pvs: &[BabyBear],
+) -> (Vec<RecordedInteraction<BabyBear>>, Vec<RecordedInteraction<BabyBear>>)
+where
+    A: for<'a> Air<super::debug::DebugConstraintBuilder<'a, BabyBear>>,
+{
+    let zero_trace =
+        RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * PROBE_HEIGHT], main_width);
+
+    let baseline_record =
+        evaluate_chip_with_preprocessed_and_public_values("_extract", air, &zero_trace, preprocessed, pvs)
+            .expect("zero-trace evaluation should not fail constraints (extraction ignores constraint failures)");
+
+    partition_per_row(&baseline_record)
+}
+
+/// Phase 2: Build initial [`Interaction`] descriptors from baseline constants.
+///
+/// Each baseline interaction becomes an `Interaction` with empty column weights
+/// and the baseline field values as constants.
+fn build_initial_descriptors(
+    baseline: &[RecordedInteraction<BabyBear>],
+    direction: InteractionDirection,
+) -> Vec<Interaction<BabyBear>> {
+    baseline
+        .iter()
+        .map(|bi| Interaction {
+            values: bi
+                .values
+                .iter()
+                .map(|&v| VirtualPairCol {
+                    column_weights: Vec::new(),
+                    constant: v,
+                })
+                .collect(),
+            multiplicity: VirtualPairCol {
+                column_weights: Vec::new(),
+                constant: bi.multiplicity,
+            },
+            kind: bi.kind,
+            direction,
+        })
+        .collect()
+}
+
+/// Phase 3: Probe each column to determine its linear contribution to each interaction.
+///
+/// For each main column (local row) and next-row column, sets it to `1`, re-evaluates,
+/// and records the delta from baseline as a column weight in the descriptors.
+fn scan_column_contributions<A>(
+    air: &A,
+    main_width: usize,
+    preprocessed: Option<&RowMajorMatrix<BabyBear>>,
+    pvs: &[BabyBear],
+    baseline_sends: &[RecordedInteraction<BabyBear>],
+    baseline_receives: &[RecordedInteraction<BabyBear>],
+    send_descriptors: &mut [Interaction<BabyBear>],
+    recv_descriptors: &mut [Interaction<BabyBear>],
+) where
+    A: for<'a> Air<super::debug::DebugConstraintBuilder<'a, BabyBear>>,
+{
+    // Scan local columns (row 0).
+    for col in 0..main_width {
+        let row_offset = 0;
+        let col_ref = ColumnRef::Local(col);
+        probe_single_column(
+            air,
+            main_width,
+            preprocessed,
+            pvs,
+            row_offset * main_width + col,
+            col_ref,
+            baseline_sends,
+            baseline_receives,
+            send_descriptors,
+            recv_descriptors,
+        );
+    }
+
+    // Scan next-row columns (row 1).
+    for col in 0..main_width {
+        let row_offset = 1;
+        let col_ref = ColumnRef::Next(col);
+        probe_single_column(
+            air,
+            main_width,
+            preprocessed,
+            pvs,
+            row_offset * main_width + col,
+            col_ref,
+            baseline_sends,
+            baseline_receives,
+            send_descriptors,
+            recv_descriptors,
+        );
+    }
+}
+
+/// Probe a single column: set it to `1` in the probe trace, evaluate, and update descriptors.
+fn probe_single_column<A>(
+    air: &A,
+    main_width: usize,
+    preprocessed: Option<&RowMajorMatrix<BabyBear>>,
+    pvs: &[BabyBear],
+    probe_index: usize,
+    col_ref: ColumnRef,
+    baseline_sends: &[RecordedInteraction<BabyBear>],
+    baseline_receives: &[RecordedInteraction<BabyBear>],
+    send_descriptors: &mut [Interaction<BabyBear>],
+    recv_descriptors: &mut [Interaction<BabyBear>],
+) where
+    A: for<'a> Air<super::debug::DebugConstraintBuilder<'a, BabyBear>>,
+{
+    let mut probe_data = vec![BabyBear::ZERO; main_width * PROBE_HEIGHT];
+    probe_data[probe_index] = BabyBear::ONE;
+    let probe_trace = RowMajorMatrix::new(probe_data, main_width);
+
+    let probe_record = match evaluate_chip_with_preprocessed_and_public_values(
+        "_extract",
+        air,
+        &probe_trace,
+        preprocessed,
+        pvs,
+    ) {
+        Ok(r) => r,
+        Err(_) => return, // Skip columns that cause constraint failures.
+    };
+
+    let (probe_sends, probe_receives) = partition_per_row(&probe_record);
+
+    update_descriptors(&probe_sends, baseline_sends, send_descriptors, col_ref);
+    update_descriptors(&probe_receives, baseline_receives, recv_descriptors, col_ref);
+}
+
+/// Update interaction descriptors by comparing probed values against baseline.
+///
+/// For each interaction field, if the probed value differs from the baseline,
+/// record the delta as a column weight for `col_ref`.
+fn update_descriptors(
+    probed: &[RecordedInteraction<BabyBear>],
+    baseline: &[RecordedInteraction<BabyBear>],
+    descriptors: &mut [Interaction<BabyBear>],
+    col_ref: ColumnRef,
+) {
+    for (i, (probed_int, baseline_int)) in probed.iter().zip(baseline.iter()).enumerate() {
+        if i >= descriptors.len() {
+            break;
+        }
+        for (j, (&pval, &bval)) in probed_int
+            .values
+            .iter()
+            .zip(baseline_int.values.iter())
+            .enumerate()
+        {
+            let weight = pval - bval;
+            if weight != BabyBear::ZERO && j < descriptors[i].values.len() {
+                descriptors[i].values[j]
+                    .column_weights
+                    .push((col_ref, weight));
+            }
+        }
+        let mult_weight = probed_int.multiplicity - baseline_int.multiplicity;
+        if mult_weight != BabyBear::ZERO {
+            descriptors[i]
+                .multiplicity
+                .column_weights
+                .push((col_ref, mult_weight));
+        }
+    }
+}
+
+/// Partition a chip record's interactions into per-row sends and receives.
+///
+/// For a 2-row probe trace, the debug evaluator produces interactions for both rows.
+/// This returns only the first half (row 0) for each direction.
+fn partition_per_row(
+    record: &ChipRecord<BabyBear>,
+) -> (Vec<RecordedInteraction<BabyBear>>, Vec<RecordedInteraction<BabyBear>>) {
+    let mut sends = Vec::new();
+    let mut receives = Vec::new();
+    for interaction in &record.interactions {
+        match interaction.direction {
+            InteractionDirection::Send => sends.push(interaction.clone()),
+            InteractionDirection::Receive => receives.push(interaction.clone()),
+        }
+    }
+    // Each row produces the same set of interactions. Take the first half (row 0).
+    let sends_per_row = sends.len() / PROBE_HEIGHT;
+    let receives_per_row = receives.len() / PROBE_HEIGHT;
+    sends.truncate(sends_per_row);
+    receives.truncate(receives_per_row);
+    (sends, receives)
 }
 
 /// Count the number of send and receive interactions per row for a chip.
@@ -281,10 +283,10 @@ pub fn count_interactions<A>(
     num_public_values: usize,
 ) -> (usize, usize)
 where
-    A: for<'a> Air<DebugConstraintBuilder<'a, BabyBear>>,
+    A: for<'a> Air<super::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
-    let height = 2;
-    let zero_trace = RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * height], main_width);
+    let zero_trace =
+        RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * PROBE_HEIGHT], main_width);
     let pvs = vec![BabyBear::ZERO; num_public_values];
 
     let record = match evaluate_chip_with_preprocessed_and_public_values(
@@ -308,7 +310,7 @@ where
     }
 
     // Divide by height since each row emits the same interactions.
-    (sends / height, receives / height)
+    (sends / PROBE_HEIGHT, receives / PROBE_HEIGHT)
 }
 
 #[cfg(test)]

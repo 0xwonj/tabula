@@ -3,20 +3,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use p3_baby_bear::BabyBear;
-use p3_field::PrimeCharacteristicRing;
 
 use tabula_commitment::{
-    BabyBearCodec, ColumnMeta, ColumnState, DOMAIN_SSMC, FieldHasher, HybridVC, NativeDigest,
-    encode_u64_limbs,
+    BabyBearCodec, ColumnMeta, ColumnState, FieldHasher, HybridVC, NativeDigest,
 };
 use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
 use tabula_core::{
-    ColId, ExecutionResult, OpKind, RowKey, TableId, TableSchema, Value, ValueType, zero_value,
+    ColId, ExecutionResult, OpKind, RowKey, TableId, TableSchema, ValueType,
 };
 
-use crate::air::chips::poseidon::constants::poseidon2_permutation;
-
+use super::encoding::{
+    compute_state_root, encode_value, encode_value_with_null_flag, proof_column_commitment,
+};
 use super::route::route_keys;
 use super::types::{AccessRow, BatchWitness, ColumnWitness, InitRow};
 
@@ -103,8 +102,8 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
         )?;
 
         // 7. Compute old and new state roots.
-        let old_state_root = self.compute_state_root(old_column_states)?;
-        let new_state_root = self.compute_state_root(&new_column_states)?;
+        let old_state_root = compute_state_root(&self.vc, old_column_states)?;
+        let new_state_root = compute_state_root(&self.vc, &new_column_states)?;
 
         Ok(BatchWitness {
             columns: column_witnesses,
@@ -137,7 +136,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
         // Process all columns present in old_column_states (touched + untouched).
         for (&(table, col), old_state) in old_column_states {
             let is_touched = touched.contains(&(table, col));
-            let com_old = self.proof_column_commitment(table, col, old_state)?;
+            let com_old = proof_column_commitment(table, col, old_state)?;
 
             let (new_state, _runtime_com_new, merge_trace) = if is_touched {
                 let writes = writes_by_col
@@ -148,7 +147,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
             } else {
                 (old_state.clone(), com_old, None)
             };
-            let com_new = self.proof_column_commitment(table, col, &new_state)?;
+            let com_new = proof_column_commitment(table, col, &new_state)?;
 
             // type_map covers all columns in old_column_states (built from all_columns).
             let value_type = type_map[&(table, col)];
@@ -223,44 +222,6 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
         Ok(type_map)
     }
 
-    /// Encode a value as Tier 1 ComEnc field elements, using canonical zero when null.
-    ///
-    /// Unified null-encoding logic: when `is_null` is true, encodes the canonical
-    /// zero for the given `value_type` regardless of the `value` argument.
-    fn encode_value_with_null_flag(
-        &self,
-        value: &Value,
-        is_null: bool,
-        value_type: ValueType,
-    ) -> Result<(Vec<BabyBear>, bool), TabulaError> {
-        if is_null {
-            let zero = zero_value(value_type);
-            let fes = self.codec.encode(&zero)?;
-            Ok((fes, true))
-        } else {
-            let fes = self.codec.encode(value)?;
-            Ok((fes, false))
-        }
-    }
-
-    /// Encode an `Option<Value>` as Tier 1 ComEnc field elements.
-    ///
-    /// `None` maps to canonical zero (null). Delegates to `encode_value_with_null_flag`.
-    fn encode_value(
-        &self,
-        value: &Option<Value>,
-        value_type: ValueType,
-    ) -> Result<(Vec<BabyBear>, bool), TabulaError> {
-        match value {
-            Some(v) => self.encode_value_with_null_flag(v, false, value_type),
-            None => {
-                // Value content is irrelevant when null — zero_value is used inside.
-                let placeholder = zero_value(value_type);
-                self.encode_value_with_null_flag(&placeholder, true, value_type)
-            }
-        }
-    }
-
     /// Build init rows from `read_set_old`, grouped by `(t,c)`, sorted by row key.
     fn build_init_rows(
         &self,
@@ -275,7 +236,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
                 phase: "witness",
                 detail: format!("no type for ({:?}, {:?}) in init row", key.table, key.col),
             })?;
-            let (fes, is_null) = self.encode_value(value, value_type)?;
+            let (fes, is_null) = encode_value(&self.codec, value, value_type)?;
             grouped.entry(tc).or_default().push(InitRow {
                 key: *key,
                 value_fes: fes,
@@ -309,8 +270,12 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
                 ),
             })?;
 
-            let (fes, is_null) =
-                self.encode_value_with_null_flag(&event.value, event.val_is_null, value_type)?;
+            let (fes, is_null) = encode_value_with_null_flag(
+                &self.codec,
+                &event.value,
+                event.val_is_null,
+                value_type,
+            )?;
 
             grouped.entry(tc).or_default().push(AccessRow {
                 key: event.key,
@@ -359,122 +324,4 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
 
         Ok(grouped)
     }
-
-    /// Compute the two-level state root from column states.
-    fn compute_state_root(
-        &self,
-        column_states: &BTreeMap<(TableId, ColId), ColumnState<H>>,
-    ) -> Result<NativeDigest, TabulaError> {
-        // Group by table → columns.
-        let mut tables: BTreeMap<TableId, BTreeMap<ColId, NativeDigest>> = BTreeMap::new();
-        for (&(table, col), state) in column_states {
-            let com = self.proof_column_commitment(table, col, state)?;
-            let leaf = self.vc.compute_leaf(table, col, state.strategy(), &com);
-            tables.entry(table).or_default().insert(col, leaf);
-        }
-
-        // table roots → state root.
-        let mut table_roots = BTreeMap::new();
-        for (table, col_leaves) in &tables {
-            table_roots.insert(*table, self.vc.compute_table_root(col_leaves));
-        }
-
-        Ok(self.vc.compute_state_root(&table_roots))
-    }
-
-    /// Compute a proof-compatible column commitment.
-    ///
-    /// For SSMC columns this follows the AIR hash-chain layout used by
-    /// `StateColumnChip`:
-    /// - empty: `Poseidon(0x00, t, c, 0, ..., 0)`
-    /// - first row: `Poseidon(0x00, t, c, key[3], value, 0, ..., 0)`
-    /// - continuation: `Poseidon(prev_hash[8], key[3], value, 0, ..., 0)`
-    ///
-    /// For SMT columns, the tree root is already the native commitment.
-    fn proof_column_commitment(
-        &self,
-        table: TableId,
-        col: ColId,
-        state: &ColumnState<H>,
-    ) -> Result<NativeDigest, TabulaError> {
-        match state {
-            ColumnState::Ssmc(list) => {
-                if list.table != table || list.col != col {
-                    return Err(TabulaError::ProofError {
-                        phase: "witness",
-                        detail: format!(
-                            "SSMC list identity mismatch: expected ({:?},{:?}), got ({:?},{:?})",
-                            table, col, list.table, list.col
-                        ),
-                    });
-                }
-
-                if list.entries().is_empty() {
-                    let input = build_ssmc_hash_input(table, col, &[], &[], None);
-                    let (_, out) = poseidon2_permutation(input);
-                    return Ok(NativeDigest(core::array::from_fn(|i| out[i])));
-                }
-
-                let mut prev: Option<NativeDigest> = None;
-                for entry in list.entries() {
-                    if entry.value.len() > 5 {
-                        return Err(TabulaError::ProofError {
-                            phase: "witness",
-                            detail: format!(
-                                "value width {} is unsupported by proof hash-chain layout (max 5)",
-                                entry.value.len()
-                            ),
-                        });
-                    }
-
-                    let key_limbs = encode_u64_limbs(entry.key.0);
-                    let input =
-                        build_ssmc_hash_input(table, col, &key_limbs, &entry.value, prev.as_ref());
-                    let (_, out) = poseidon2_permutation(input);
-                    prev = Some(NativeDigest(core::array::from_fn(|i| out[i])));
-                }
-
-                Ok(prev.expect("non-empty entries must produce a hash"))
-            }
-            ColumnState::Smt(tree) => Ok(tree.root()),
-        }
-    }
-}
-
-/// Build a Poseidon2 width-16 hash input for SSMC hash-chain computation.
-///
-/// Layout depends on whether this is the first row or a continuation:
-/// - First row / empty: `[domain, t, c, key[0..3], value[0..], 0...]`
-/// - Continuation: `[prev_hash[0..8], key[0..3], value[0..], 0...]`
-fn build_ssmc_hash_input(
-    table: TableId,
-    col: ColId,
-    key_limbs: &[BabyBear],
-    value: &[BabyBear],
-    prev: Option<&NativeDigest>,
-) -> [BabyBear; 16] {
-    let mut input = [BabyBear::ZERO; 16];
-    match prev {
-        None => {
-            input[0] = BabyBear::new(DOMAIN_SSMC);
-            input[1] = BabyBear::new(table.0);
-            input[2] = BabyBear::new(col.0 as u32);
-            for (i, &limb) in key_limbs.iter().enumerate() {
-                input[3 + i] = limb;
-            }
-            for (i, &v) in value.iter().enumerate() {
-                input[6 + i] = v;
-            }
-        }
-        Some(prev_digest) => {
-            input[..8].copy_from_slice(&prev_digest.0);
-            for (i, &limb) in key_limbs.iter().enumerate() {
-                input[8 + i] = limb;
-            }
-            for (i, &v) in value.iter().enumerate() {
-                input[11 + i] = v;
-            }
-        }
-    }
-    input
 }
