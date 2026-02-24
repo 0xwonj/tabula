@@ -1,7 +1,11 @@
+//! Common API response types.
+
 use crate::service::Capabilities;
 use serde::Serialize;
 
+/// Health check response.
 #[derive(Debug, Clone, Serialize)]
+#[allow(missing_docs)]
 pub struct HealthResponse {
     pub ok: bool,
     pub status: &'static str,
@@ -10,6 +14,7 @@ pub struct HealthResponse {
 }
 
 impl HealthResponse {
+    /// Build a healthy response with crate version.
     pub fn ok() -> Self {
         Self {
             ok: true,
@@ -20,7 +25,9 @@ impl HealthResponse {
     }
 }
 
+/// Capabilities response returned by the `/capabilities` endpoint.
 #[derive(Debug, Clone, Serialize)]
+#[allow(missing_docs)]
 pub struct CapabilitiesResponse {
     pub ok: bool,
     #[serde(flatten)]

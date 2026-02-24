@@ -56,7 +56,7 @@ pub fn decode_trace(
 ) -> Result<(Value, bool), TabulaError> {
     let expected = trace_width(codec, value_type);
     if fes.len() != expected {
-        return Err(TabulaError::EncodingError(format!(
+        return Err(TabulaError::FieldEncodingError(format!(
             "trace decode: expected {expected} FEs for {value_type:?}, got {}",
             fes.len()
         )));
@@ -68,7 +68,7 @@ pub fn decode_trace(
             let value = codec.decode(&fes[..expected - 1], value_type)?;
             Ok((value, false))
         }
-        _ => Err(TabulaError::EncodingError(format!(
+        _ => Err(TabulaError::FieldEncodingError(format!(
             "invalid val_is_null flag: {null_flag}"
         ))),
     }
@@ -94,7 +94,7 @@ impl ValueCodec for BabyBearCodec {
                 for (i, chunk) in b.chunks_exact(4).enumerate() {
                     let val = u32::from_le_bytes(chunk.try_into().unwrap());
                     if val >= BabyBear::ORDER_U32 {
-                        return Err(TabulaError::EncodingError(format!(
+                        return Err(TabulaError::FieldEncodingError(format!(
                             "Bytes32 chunk {i}: {val} >= BabyBear modulus {}",
                             BabyBear::ORDER_U32
                         )));
@@ -113,7 +113,7 @@ impl ValueCodec for BabyBearCodec {
     ) -> Result<Value, TabulaError> {
         let expected = self.field_elements_per(target_type);
         if field_elements.len() != expected {
-            return Err(TabulaError::EncodingError(format!(
+            return Err(TabulaError::FieldEncodingError(format!(
                 "expected {expected} FEs for {target_type:?}, got {}",
                 field_elements.len()
             )));
@@ -125,7 +125,7 @@ impl ValueCodec for BabyBearCodec {
                 match val {
                     0 => Ok(Value::Bool(false)),
                     1 => Ok(Value::Bool(true)),
-                    _ => Err(TabulaError::EncodingError(format!(
+                    _ => Err(TabulaError::FieldEncodingError(format!(
                         "invalid bool FE: {val}"
                     ))),
                 }
@@ -133,14 +133,14 @@ impl ValueCodec for BabyBearCodec {
             ValueType::U64 => {
                 let limbs: &[BabyBear; 3] = field_elements
                     .try_into()
-                    .map_err(|_| TabulaError::EncodingError("expected 3 FEs".into()))?;
+                    .map_err(|_| TabulaError::FieldEncodingError("expected 3 FEs".into()))?;
                 let val = decode_u64_limbs(limbs)?;
                 Ok(Value::U64(val))
             }
             ValueType::I64 => {
                 let limbs: &[BabyBear; 3] = field_elements
                     .try_into()
-                    .map_err(|_| TabulaError::EncodingError("expected 3 FEs".into()))?;
+                    .map_err(|_| TabulaError::FieldEncodingError("expected 3 FEs".into()))?;
                 let offset = decode_u64_limbs(limbs)?;
                 let val = (offset as i128 - (1i128 << 63)) as i64;
                 Ok(Value::I64(val))

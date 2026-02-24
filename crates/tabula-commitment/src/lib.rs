@@ -29,8 +29,9 @@ mod ssmc;
 pub use codec::{BabyBearCodec, decode_trace, encode_trace, trace_width};
 #[cfg(feature = "stark")]
 pub use field::{
-    DOMAIN_COL, DOMAIN_HASH_IR, DOMAIN_LEAF, DOMAIN_SMT, DOMAIN_SSMC, DOMAIN_TABLE, NativeDigest,
-    decode_u64_limbs, encode_u64_limbs,
+    COL_DATA_SMT_DEPTH, COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_HASH_IR, DOMAIN_LEAF, DOMAIN_SMT,
+    DOMAIN_SSMC, DOMAIN_TABLE, NativeDigest, TABLE_STATE_SMT_DEPTH, decode_u64_limbs,
+    encode_u64_limbs,
 };
 #[cfg(feature = "stark")]
 pub use hasher::{FieldHasher, MockFieldHasher};

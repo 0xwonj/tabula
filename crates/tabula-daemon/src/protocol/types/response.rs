@@ -4,6 +4,7 @@ use serde::Serialize;
 
 /// Unified API response envelope. T is flattened into the top-level JSON.
 #[derive(Debug, Clone, Serialize)]
+#[allow(missing_docs)]
 pub struct ApiResponse<T: Serialize> {
     pub ok: bool,
     #[serde(flatten)]

@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-mock = ["blake3"]
+test-utils = ["blake3"]
 
 [dependencies]
 serde = { workspace = true }

@@ -20,11 +20,14 @@ pub(super) fn collect_poseidon_inputs(
                 continue;
             }
             if interaction.values.len() != 24 {
-                return Err(TabulaError::ConsistencyError(format!(
-                    "poseidon interaction width mismatch in {}: expected 24, got {}",
-                    record.name,
-                    interaction.values.len()
-                )));
+                return Err(TabulaError::ProofError {
+                    phase: "collectors",
+                    detail: format!(
+                        "poseidon interaction width mismatch in {}: expected 24, got {}",
+                        record.name,
+                        interaction.values.len()
+                    ),
+                });
             }
             let mult = interaction.multiplicity.as_canonical_u32();
             if mult == 0 {
@@ -52,11 +55,14 @@ pub(super) fn collect_range_check_multiplicities(
                 continue;
             }
             if interaction.values.len() != 1 {
-                return Err(TabulaError::ConsistencyError(format!(
-                    "range_check interaction width mismatch in {}: expected 1, got {}",
-                    record.name,
-                    interaction.values.len()
-                )));
+                return Err(TabulaError::ProofError {
+                    phase: "collectors",
+                    detail: format!(
+                        "range_check interaction width mismatch in {}: expected 1, got {}",
+                        record.name,
+                        interaction.values.len()
+                    ),
+                });
             }
             let mult = interaction.multiplicity.as_canonical_u32();
             if mult == 0 {
@@ -64,17 +70,21 @@ pub(super) fn collect_range_check_multiplicities(
             }
             let value = interaction.values[0].as_canonical_u32() as usize;
             if value >= RANGE_CHECK_SIZE {
-                return Err(TabulaError::ConsistencyError(format!(
-                    "range_check value out of domain in {}: {}",
-                    record.name, value
-                )));
+                return Err(TabulaError::ProofError {
+                    phase: "collectors",
+                    detail: format!(
+                        "range_check value out of domain in {}: {}",
+                        record.name, value
+                    ),
+                });
             }
-            mults[value] = mults[value].checked_add(mult).ok_or_else(|| {
-                TabulaError::ConsistencyError(format!(
-                    "range_check multiplicity overflow at value {}",
-                    value
-                ))
-            })?;
+            mults[value] =
+                mults[value]
+                    .checked_add(mult)
+                    .ok_or_else(|| TabulaError::ProofError {
+                        phase: "collectors",
+                        detail: format!("range_check multiplicity overflow at value {}", value),
+                    })?;
         }
     }
     Ok(mults)

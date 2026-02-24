@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceDoc {
     pub daemon_url: String,
     pub auth_token: String,
@@ -29,12 +30,14 @@ impl WorkspaceDoc {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DaemonErrorEnvelope {
     pub ok: bool,
     pub error: DaemonErrorPayload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DaemonErrorPayload {
     pub code: String,
     pub message: String,
@@ -42,6 +45,7 @@ pub struct DaemonErrorPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HealthResponse {
     pub ok: bool,
     pub status: String,
@@ -50,6 +54,7 @@ pub struct HealthResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CapabilitiesResponse {
     pub ok: bool,
     pub service_role: String,
@@ -66,6 +71,7 @@ pub struct CapabilitiesResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProgramRecord {
     pub program_id: String,
     pub table_count: usize,
@@ -74,12 +80,14 @@ pub struct ProgramRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RegisterProgramResponse {
     pub ok: bool,
     pub program: ProgramRecord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateInstanceRecord {
     pub instance_id: String,
     pub program_id: String,
@@ -89,12 +97,14 @@ pub struct CreateInstanceRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateInstanceResponse {
     pub ok: bool,
     pub instance: CreateInstanceRecord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutePayload {
     pub tx_outcomes: Vec<Value>,
     pub read_set: Vec<StateCell>,
@@ -106,6 +116,7 @@ pub struct ExecutePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunRecordResponse {
     pub run_id: String,
     pub status: String,
@@ -116,12 +127,14 @@ pub struct RunRecordResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SubmitRunResponse {
     pub ok: bool,
     pub run: RunRecordResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VerifyRunResponse {
     pub ok: bool,
     pub run: RunRecordResponse,
@@ -139,6 +152,7 @@ pub type StarkProofSummary = tabula_artifact::StarkProofSummary;
 pub type ProgramArtifact = tabula_artifact::ProgramArtifact;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunRecord {
     pub ts_ms: f64,
     pub action: String,
@@ -147,6 +161,7 @@ pub struct RunRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VerifyReport {
     pub ok: bool,
     pub mode: String,

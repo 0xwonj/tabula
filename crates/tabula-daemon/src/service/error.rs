@@ -36,6 +36,7 @@ pub struct ServiceError {
     details: Option<Value>,
 }
 
+#[allow(missing_docs)]
 impl ServiceError {
     pub fn bad_request(code: ErrorCode, message: impl Into<String>) -> Self {
         Self {

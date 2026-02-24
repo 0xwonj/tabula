@@ -76,6 +76,10 @@ impl Hasher for PoseidonHasher {
         result.to_bytes()
     }
 
+    /// # Panics
+    ///
+    /// Panics if `left` or `right` contains a non-canonical BabyBear value
+    /// (any 4-byte LE chunk >= BabyBear modulus `p = 2013265921`).
     fn hash_pair(&self, left: &Digest, right: &Digest) -> Digest {
         let left_native =
             NativeDigest::from_bytes(left).expect("hash_pair: left digest non-canonical");
@@ -88,6 +92,11 @@ impl Hasher for PoseidonHasher {
     /// Override: uses native FE encoding per semantics-spec §1.5.5.
     ///
     /// `Poseidon(0x02 || n || ComEnc(v_0) || ... || ComEnc(v_{n-1}))`
+    ///
+    /// # Panics
+    ///
+    /// Panics if any `Value` in `inputs` fails field-element encoding via
+    /// `BabyBearCodec::encode` (e.g., `Bytes32` with a non-canonical chunk).
     fn hash_ir(&self, inputs: &[Value]) -> Digest {
         let codec = BabyBearCodec;
         let mut fes = Vec::new();

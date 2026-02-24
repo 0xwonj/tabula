@@ -105,6 +105,7 @@ pub enum RunStatus {
 
 /// Registered program record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProgramRecord {
     /// Program id.
     pub program_id: ProgramId,
@@ -129,6 +130,7 @@ pub struct ProgramRecord {
 
 /// Stateful instance record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InstanceRecord {
     /// Instance id.
     pub instance_id: InstanceId,
@@ -153,6 +155,7 @@ pub struct InstanceRecord {
 
 /// Execution result payload for one run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionResult {
     /// Per-tx outcomes.
     pub tx_outcomes: Vec<TxOutcome>,
@@ -173,6 +176,7 @@ pub struct ExecutionResult {
 
 /// Run record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunRecord {
     /// Run id.
     pub run_id: RunId,

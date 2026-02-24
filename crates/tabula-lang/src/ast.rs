@@ -1,4 +1,7 @@
 //! Abstract syntax tree for the Tabula DSL.
+//!
+//! AST types use self-documenting variant names; field-level docs are omitted
+//! where the name is unambiguous.
 
 use crate::span::Span;
 
@@ -38,6 +41,7 @@ pub struct ColumnDecl {
 }
 
 /// A type name as written in source.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeName {
     U64,
@@ -84,6 +88,7 @@ pub struct Stmt {
 }
 
 /// Statement variants.
+#[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub enum StmtKind {
     /// `let name = expr`
@@ -122,6 +127,7 @@ pub struct Expr {
 }
 
 /// Expression variants.
+#[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     /// Integer literal (non-negative).
@@ -167,6 +173,7 @@ pub enum ExprKind {
 }
 
 /// Binary operators.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     // Arithmetic

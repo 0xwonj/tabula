@@ -29,7 +29,7 @@ pub struct ExecutionOutput {
 pub(crate) fn load_json<T: serde::de::DeserializeOwned>(
     path: &std::path::Path,
 ) -> anyhow::Result<T> {
-    tabula_artifact::load_json(path).map_err(|e| anyhow::anyhow!(e.to_string()))
+    Ok(tabula_artifact::load_json(path)?)
 }
 
 /// Serialize a value to a pretty-printed JSON file.
@@ -37,5 +37,5 @@ pub(crate) fn write_json<T: serde::Serialize>(
     path: &std::path::Path,
     value: &T,
 ) -> anyhow::Result<()> {
-    tabula_artifact::write_json(path, value).map_err(|e| anyhow::anyhow!(e.to_string()))
+    Ok(tabula_artifact::write_json(path, value)?)
 }

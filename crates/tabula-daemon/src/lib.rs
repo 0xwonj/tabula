@@ -2,6 +2,8 @@
 //!
 //! Client-neutral local API control plane for Tabula engine operations.
 
+#![warn(missing_docs)]
+
 mod api;
 mod protocol;
 pub mod runtime;

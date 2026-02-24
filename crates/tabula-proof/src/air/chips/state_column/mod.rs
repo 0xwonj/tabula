@@ -7,7 +7,9 @@
 //! Row types: entry (old_only/write_only/both/delete) and gap (non-membership).
 
 pub mod air;
+mod buses;
 pub mod columns;
+mod derived;
 pub mod trace;
 
 pub use air::StateColumnChip;

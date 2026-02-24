@@ -62,16 +62,12 @@ pub struct ExecutedBatch {
 /// 6. Merge output state
 pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, DriverError> {
     // 1. Normalize state.
-    let normalized = normalize_state(input.state).map_err(|e| DriverError::InvalidState {
-        message: e.to_string(),
-    })?;
+    let normalized = normalize_state(input.state).map_err(DriverError::InvalidState)?;
 
     // 2. Build in-memory state snapshot.
     let mut state_store = InMemoryState::new();
     for cell in &normalized.cells {
-        let (key, value) = cell.to_cell_pair().map_err(|e| DriverError::InvalidState {
-            message: e.to_string(),
-        })?;
+        let (key, value) = cell.to_cell_pair().map_err(DriverError::InvalidState)?;
         state_store.set(key, value);
     }
 
@@ -80,11 +76,7 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, DriverError> {
         .batch
         .transactions
         .iter()
-        .map(|t| {
-            t.to_transaction().map_err(|e| DriverError::InvalidBatch {
-                message: e.to_string(),
-            })
-        })
+        .map(|t| t.to_transaction().map_err(DriverError::InvalidBatch))
         .collect::<Result<_, _>>()?;
     let batch = Batch { transactions };
 
@@ -99,7 +91,9 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, DriverError> {
 
     let result = execute_batch(&batch, input.program, &state_store, &env, &BTreeMap::new())
         .map_err(|e| DriverError::Execution {
-            message: e.to_string(),
+            source: e,
+            instruction_index: None,
+            tx_index: None,
         })?;
 
     // 5. Consistency check.
@@ -195,7 +189,7 @@ mod tests {
             hasher: &MockHasher,
         })
         .expect_err("invalid state should fail");
-        assert!(matches!(err, DriverError::InvalidState { .. }));
+        assert!(matches!(err, DriverError::InvalidState(_)));
     }
 
     #[test]

@@ -7,7 +7,7 @@ fn trace_builder_builds_valid_memory_traces() {
     let col = ColId(0);
 
     let old_entries = vec![(RowKey(10), encode_u64(50))];
-    let (old_state, _runtime_com_old) = vc.commit_column(table, col, old_entries);
+    let (old_state, _runtime_com_old) = vc.commit_column(table, col, old_entries).unwrap();
 
     let writes = vec![(RowKey(10), Some(encode_u64(50)))];
     let (new_state, _runtime_com_new, merge_trace) =
@@ -111,7 +111,7 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
     let col = ColId(0);
 
     let old_entries = vec![(RowKey(10), encode_u64(50))];
-    let (old_state, _runtime_com_old) = vc.commit_column(table, col, old_entries);
+    let (old_state, _runtime_com_old) = vc.commit_column(table, col, old_entries).unwrap();
 
     let writes = vec![(RowKey(10), Some(encode_u64(50)))];
     let (new_state, _runtime_com_new, merge_trace) =
@@ -364,7 +364,7 @@ tx touch(id: u64) {
                 .remove(&(schema.id, col.id))
                 .unwrap_or_default();
             entries.sort_by_key(|(row, _)| *row);
-            let (state, _com) = vc.commit_column(schema.id, col.id, entries);
+            let (state, _com) = vc.commit_column(schema.id, col.id, entries).unwrap();
             old_column_states.insert((schema.id, col.id), state);
         }
     }

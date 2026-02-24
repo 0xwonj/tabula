@@ -21,13 +21,16 @@ where
     let mut init_by_key: BTreeMap<RowKey, (Vec<BabyBear>, bool)> = BTreeMap::new();
     for init in &column.init_rows {
         if init.value_fes.len() != W {
-            return Err(TabulaError::ConsistencyError(format!(
-                "init row width mismatch for ({:?}, {:?}): expected {}, got {}",
-                column.table,
-                column.col,
-                W,
-                init.value_fes.len()
-            )));
+            return Err(TabulaError::ProofError {
+                phase: "memory",
+                detail: format!(
+                    "init row width mismatch for ({:?}, {:?}): expected {}, got {}",
+                    column.table,
+                    column.col,
+                    W,
+                    init.value_fes.len()
+                ),
+            });
         }
         keys.insert(init.key.row);
         init_by_key.insert(init.key.row, (init.value_fes.clone(), init.val_is_null));
@@ -37,13 +40,16 @@ where
         BTreeMap::new();
     for access in &column.access_rows {
         if access.value_fes.len() != W {
-            return Err(TabulaError::ConsistencyError(format!(
-                "access row width mismatch for ({:?}, {:?}): expected {}, got {}",
-                column.table,
-                column.col,
-                W,
-                access.value_fes.len()
-            )));
+            return Err(TabulaError::ProofError {
+                phase: "memory",
+                detail: format!(
+                    "access row width mismatch for ({:?}, {:?}): expected {}, got {}",
+                    column.table,
+                    column.col,
+                    W,
+                    access.value_fes.len()
+                ),
+            });
         }
         keys.insert(access.key.row);
         by_key_tx

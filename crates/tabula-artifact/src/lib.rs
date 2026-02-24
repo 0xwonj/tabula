@@ -21,8 +21,13 @@ use tabula_ir::TxTypeDef;
 #[derive(Debug, Error)]
 pub enum ArtifactError {
     /// Invalid hex sender format.
-    #[error("invalid sender hex: {0}")]
-    InvalidSenderHex(String),
+    #[error("invalid sender hex ({context}): {detail}")]
+    InvalidSenderHex {
+        /// What went wrong (e.g., "length", "encoding", "hex digit").
+        context: &'static str,
+        /// Human-readable detail.
+        detail: String,
+    },
     /// Missing state value for a required cell.
     #[error("state cell is missing value (table={table}, row={row}, col={col})")]
     MissingStateValue {
@@ -241,18 +246,22 @@ pub fn parse_hex_32(s: &str) -> Result<[u8; 32], ArtifactError> {
 
     let padded = format!("{:0>64}", s);
     if padded.len() != 64 {
-        return Err(ArtifactError::InvalidSenderHex(format!(
-            "expected at most 64 hex chars, got {}",
-            s.len()
-        )));
+        return Err(ArtifactError::InvalidSenderHex {
+            context: "length",
+            detail: format!("expected at most 64 hex chars, got {}", s.len()),
+        });
     }
 
     let mut out = [0u8; 32];
     for (i, chunk) in padded.as_bytes().chunks(2).enumerate() {
-        let byte_str = std::str::from_utf8(chunk)
-            .map_err(|e| ArtifactError::InvalidSenderHex(e.to_string()))?;
-        out[i] = u8::from_str_radix(byte_str, 16)
-            .map_err(|e| ArtifactError::InvalidSenderHex(e.to_string()))?;
+        let byte_str = std::str::from_utf8(chunk).map_err(|e| ArtifactError::InvalidSenderHex {
+            context: "encoding",
+            detail: e.to_string(),
+        })?;
+        out[i] = u8::from_str_radix(byte_str, 16).map_err(|e| ArtifactError::InvalidSenderHex {
+            context: "hex digit",
+            detail: e.to_string(),
+        })?;
     }
     Ok(out)
 }
@@ -362,6 +371,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_hex_32_with_prefix() {
+        let out = parse_hex_32("0xff").expect("hex with prefix");
+        let mut expected = [0u8; 32];
+        expected[31] = 0xff;
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn parse_hex_32_empty() {
+        let out = parse_hex_32("").expect("empty hex");
+        assert_eq!(out, [0u8; 32]);
+    }
+
+    #[test]
     fn merge_output_state_cells_deduplicates_initial_cells() {
         let initial = vec![
             StateCell {
@@ -381,5 +404,176 @@ mod tests {
         let merged = merge_output_state_cells(&initial, &[]);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].value, Some(Value::U64(20)));
+    }
+
+    #[test]
+    fn merge_output_state_cells_applies_write_set() {
+        let initial = vec![StateCell {
+            table: 0,
+            row: 0,
+            col: 0,
+            value: Some(Value::U64(100)),
+        }];
+        let write_set = vec![(
+            CellKey {
+                table: TableId(0),
+                col: ColId(0),
+                row: RowKey(0),
+            },
+            Some(Value::U64(200)),
+        )];
+
+        let merged = merge_output_state_cells(&initial, &write_set);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].value, Some(Value::U64(200)));
+    }
+
+    #[test]
+    fn merge_output_state_cells_delete_removes_cell() {
+        let initial = vec![StateCell {
+            table: 0,
+            row: 0,
+            col: 0,
+            value: Some(Value::U64(100)),
+        }];
+        let write_set = vec![(
+            CellKey {
+                table: TableId(0),
+                col: ColId(0),
+                row: RowKey(0),
+            },
+            None,
+        )];
+
+        let merged = merge_output_state_cells(&initial, &write_set);
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn state_file_serde_roundtrip() {
+        let state = StateFile {
+            cells: vec![
+                StateCell {
+                    table: 0,
+                    row: 0,
+                    col: 0,
+                    value: Some(Value::U64(42)),
+                },
+                StateCell {
+                    table: 1,
+                    row: 5,
+                    col: 2,
+                    value: Some(Value::Bool(true)),
+                },
+            ],
+        };
+
+        let json = serde_json::to_string(&state).expect("serialize");
+        let back: StateFile = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.cells.len(), 2);
+        assert_eq!(back.cells[0].value, Some(Value::U64(42)));
+        assert_eq!(back.cells[1].value, Some(Value::Bool(true)));
+    }
+
+    #[test]
+    fn batch_file_serde_roundtrip() {
+        let batch = BatchFile {
+            transactions: vec![TxInput {
+                tx_type: 0,
+                params: vec![Value::U64(100)],
+                sender: "01".repeat(32),
+                nonce: 0,
+            }],
+        };
+
+        let json = serde_json::to_string(&batch).expect("serialize");
+        let back: BatchFile = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.transactions.len(), 1);
+        assert_eq!(back.transactions[0].params[0], Value::U64(100));
+    }
+
+    #[test]
+    fn normalize_state_deduplicates_and_sorts() {
+        let state = StateFile {
+            cells: vec![
+                StateCell {
+                    table: 0,
+                    row: 1,
+                    col: 0,
+                    value: Some(Value::U64(10)),
+                },
+                StateCell {
+                    table: 0,
+                    row: 0,
+                    col: 0,
+                    value: Some(Value::U64(20)),
+                },
+                StateCell {
+                    table: 0,
+                    row: 1,
+                    col: 0,
+                    value: Some(Value::U64(30)),
+                },
+            ],
+        };
+
+        let normalized = normalize_state(&state).expect("normalize");
+        assert_eq!(normalized.cells.len(), 2);
+        // BTreeMap produces sorted output by (table, row, col).
+        assert_eq!(normalized.cells[0].row, 0);
+        assert_eq!(normalized.cells[0].value, Some(Value::U64(20)));
+        assert_eq!(normalized.cells[1].row, 1);
+        // Last write wins for row=1.
+        assert_eq!(normalized.cells[1].value, Some(Value::U64(30)));
+    }
+
+    #[test]
+    fn normalize_state_rejects_null_values() {
+        let state = StateFile {
+            cells: vec![StateCell {
+                table: 0,
+                row: 0,
+                col: 0,
+                value: None,
+            }],
+        };
+
+        let result = normalize_state(&state);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn tx_input_to_transaction_roundtrip() {
+        let tx = TxInput {
+            tx_type: 1,
+            params: vec![Value::U64(42), Value::Bool(true)],
+            sender: "ab".repeat(32),
+            nonce: 7,
+        };
+
+        let core_tx = tx.to_transaction().expect("convert");
+        assert_eq!(core_tx.tx_type, TxTypeId(1));
+        assert_eq!(core_tx.params.len(), 2);
+        assert_eq!(core_tx.nonce, 7);
+        assert_eq!(core_tx.sender[0], 0xab);
+    }
+
+    #[test]
+    fn state_cell_from_cell_pair_roundtrip() {
+        let key = CellKey {
+            table: TableId(1),
+            col: ColId(2),
+            row: RowKey(3),
+        };
+        let value = Some(Value::I64(-42));
+        let cell = StateCell::from_cell_pair(&key, &value);
+        assert_eq!(cell.table, 1);
+        assert_eq!(cell.row, 3);
+        assert_eq!(cell.col, 2);
+        assert_eq!(cell.value, Some(Value::I64(-42)));
+
+        let (back_key, back_val) = cell.to_cell_pair().expect("back");
+        assert_eq!(back_key, key);
+        assert_eq!(back_val, Value::I64(-42));
     }
 }

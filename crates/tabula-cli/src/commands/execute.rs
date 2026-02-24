@@ -27,8 +27,7 @@ pub fn cmd_execute(
         state: &state_file,
         batch: &batch_file,
         hasher: &MockHasher,
-    })
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    })?;
 
     if let Some(out_path) = output_state_path {
         write_json(out_path, &executed.state_after)?;

@@ -2,6 +2,8 @@
 //!
 //! This module is the M11 "Contract Spine V1" source of truth.
 
+#![warn(missing_docs)]
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -25,6 +27,7 @@ const METADATA_HASH_DOMAIN: &[u8] = b"tabula.contract_metadata_envelope.v1";
 /// [`ContractMetadataEnvelope::to_canonical_bytes`] and
 /// [`ContractMetadataEnvelope::canonical_hash`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContractMetadataEnvelope {
     /// Compiler/runtime profile fingerprint.
     pub profile_hash: [u8; 32],

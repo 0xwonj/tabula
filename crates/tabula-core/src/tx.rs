@@ -28,7 +28,7 @@ impl Transaction {
         // Serialize (tx_type, params, sender, nonce) — NOT signature
         let signable = (self.tx_type, &self.params, self.sender, self.nonce);
         borsh::to_vec(&signable)
-            .map_err(|e| crate::error::TabulaError::EncodingError(e.to_string()))
+            .map_err(|e| crate::error::TabulaError::BorshEncodingError(e.to_string()))
     }
 }
 

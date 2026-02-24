@@ -23,20 +23,26 @@ pub(super) fn validate_smt_path_shapes(
 ) -> Result<(), TabulaError> {
     for (idx, w) in smt_col_paths.iter().enumerate() {
         if w.path_bits.len() != w.siblings.len() {
-            return Err(TabulaError::ConsistencyError(format!(
-                "smt_col_paths[{idx}] shape mismatch: path_bits={}, siblings={}",
-                w.path_bits.len(),
-                w.siblings.len()
-            )));
+            return Err(TabulaError::ProofError {
+                phase: "smt",
+                detail: format!(
+                    "smt_col_paths[{idx}] shape mismatch: path_bits={}, siblings={}",
+                    w.path_bits.len(),
+                    w.siblings.len()
+                ),
+            });
         }
     }
     for (idx, w) in smt_table_paths.iter().enumerate() {
         if w.path.path_bits.len() != w.path.siblings.len() {
-            return Err(TabulaError::ConsistencyError(format!(
-                "smt_table_paths[{idx}] shape mismatch: path_bits={}, siblings={}",
-                w.path.path_bits.len(),
-                w.path.siblings.len()
-            )));
+            return Err(TabulaError::ProofError {
+                phase: "smt",
+                detail: format!(
+                    "smt_table_paths[{idx}] shape mismatch: path_bits={}, siblings={}",
+                    w.path.path_bits.len(),
+                    w.path.siblings.len()
+                ),
+            });
         }
     }
     Ok(())
@@ -116,10 +122,13 @@ where
             let new_proof = new_tree.prove(meta.col.0 as u64);
 
             if old_proof.siblings != new_proof.siblings {
-                return Err(TabulaError::ConsistencyError(format!(
-                    "old/new sibling vectors differ for column ({:?}, {:?})",
-                    meta.table, meta.col
-                )));
+                return Err(TabulaError::ProofError {
+                    phase: "smt",
+                    detail: format!(
+                        "old/new sibling vectors differ for column ({:?}, {:?})",
+                        meta.table, meta.col
+                    ),
+                });
             }
 
             col_paths.push(SmtPathWitness {
@@ -148,18 +157,24 @@ where
     }
 
     if old_state_tree.root() != *old_root {
-        return Err(TabulaError::ConsistencyError(format!(
-            "reconstructed old state root {:?} != witness root {:?}",
-            old_state_tree.root(),
-            old_root
-        )));
+        return Err(TabulaError::ProofError {
+            phase: "smt",
+            detail: format!(
+                "reconstructed old state root {:?} != witness root {:?}",
+                old_state_tree.root(),
+                old_root
+            ),
+        });
     }
     if new_state_tree.root() != *new_root {
-        return Err(TabulaError::ConsistencyError(format!(
-            "reconstructed new state root {:?} != witness root {:?}",
-            new_state_tree.root(),
-            new_root
-        )));
+        return Err(TabulaError::ProofError {
+            phase: "smt",
+            detail: format!(
+                "reconstructed new state root {:?} != witness root {:?}",
+                new_state_tree.root(),
+                new_root
+            ),
+        });
     }
 
     let mut table_paths = Vec::new();
@@ -170,10 +185,10 @@ where
         let new_proof = new_state_tree.prove(table.0 as u64);
 
         if old_proof.siblings != new_proof.siblings {
-            return Err(TabulaError::ConsistencyError(format!(
-                "old/new sibling vectors differ for table {:?}",
-                table
-            )));
+            return Err(TabulaError::ProofError {
+                phase: "smt",
+                detail: format!("old/new sibling vectors differ for table {:?}", table),
+            });
         }
 
         table_paths.push(SmtTablePathWitness {

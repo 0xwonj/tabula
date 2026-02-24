@@ -59,7 +59,7 @@ pub(super) fn compile_execute_witness(
                 .remove(&(schema.id, col_def.id))
                 .unwrap_or_default();
             entries.sort_by_key(|(row, _)| *row);
-            let (state, _com) = vc.commit_column(schema.id, col_def.id, entries);
+            let (state, _com) = vc.commit_column(schema.id, col_def.id, entries).unwrap();
             old_column_states.insert((schema.id, col_def.id), state);
         }
     }

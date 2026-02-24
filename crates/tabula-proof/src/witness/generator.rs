@@ -70,10 +70,13 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
         // 1b. Validate that all touched columns exist in old_column_states.
         for tc in &touched {
             if !old_column_states.contains_key(tc) {
-                return Err(TabulaError::ConsistencyError(format!(
-                    "touched column ({:?}, {:?}) not in old_column_states",
-                    tc.0, tc.1
-                )));
+                return Err(TabulaError::ProofError {
+                    phase: "witness",
+                    detail: format!(
+                        "touched column ({:?}, {:?}) not in old_column_states",
+                        tc.0, tc.1
+                    ),
+                });
             }
         }
 
@@ -205,11 +208,15 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
     ) -> Result<BTreeMap<(TableId, ColId), ValueType>, TabulaError> {
         let mut type_map = BTreeMap::new();
         for &(table, col) in all_columns {
-            let schema = schemas.get(&table).ok_or_else(|| {
-                TabulaError::ConsistencyError(format!("no schema for table {:?}", table))
+            let schema = schemas.get(&table).ok_or_else(|| TabulaError::ProofError {
+                phase: "witness",
+                detail: format!("no schema for table {:?}", table),
             })?;
             let col_def = schema.columns.iter().find(|c| c.id == col).ok_or_else(|| {
-                TabulaError::ConsistencyError(format!("no column {:?} in table {:?}", col, table))
+                TabulaError::ProofError {
+                    phase: "witness",
+                    detail: format!("no column {:?} in table {:?}", col, table),
+                }
             })?;
             type_map.insert((table, col), col_def.value_type);
         }
@@ -264,11 +271,9 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
 
         for (key, value) in &result.read_set_old {
             let tc = (key.table, key.col);
-            let value_type = *type_map.get(&tc).ok_or_else(|| {
-                TabulaError::ConsistencyError(format!(
-                    "no type for ({:?}, {:?}) in init row",
-                    key.table, key.col
-                ))
+            let value_type = *type_map.get(&tc).ok_or_else(|| TabulaError::ProofError {
+                phase: "witness",
+                detail: format!("no type for ({:?}, {:?}) in init row", key.table, key.col),
             })?;
             let (fes, is_null) = self.encode_value(value, value_type)?;
             grouped.entry(tc).or_default().push(InitRow {
@@ -296,11 +301,12 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
 
         for event in &result.events {
             let tc = (event.key.table, event.key.col);
-            let value_type = *type_map.get(&tc).ok_or_else(|| {
-                TabulaError::ConsistencyError(format!(
+            let value_type = *type_map.get(&tc).ok_or_else(|| TabulaError::ProofError {
+                phase: "witness",
+                detail: format!(
                     "no type for ({:?}, {:?}) in access row",
                     event.key.table, event.key.col
-                ))
+                ),
             })?;
 
             let (fes, is_null) =
@@ -333,11 +339,9 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
         for (key, value) in &result.write_set_final {
             let tc = (key.table, key.col);
             // Validate type exists for this column.
-            type_map.get(&tc).ok_or_else(|| {
-                TabulaError::ConsistencyError(format!(
-                    "no type for ({:?}, {:?}) in write set",
-                    key.table, key.col
-                ))
+            type_map.get(&tc).ok_or_else(|| TabulaError::ProofError {
+                phase: "witness",
+                detail: format!("no type for ({:?}, {:?}) in write set", key.table, key.col),
             })?;
 
             let encoded = match value {
@@ -396,17 +400,17 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
         match state {
             ColumnState::Ssmc(list) => {
                 if list.table != table || list.col != col {
-                    return Err(TabulaError::ConsistencyError(format!(
-                        "SSMC list identity mismatch: expected ({:?},{:?}), got ({:?},{:?})",
-                        table, col, list.table, list.col
-                    )));
+                    return Err(TabulaError::ProofError {
+                        phase: "witness",
+                        detail: format!(
+                            "SSMC list identity mismatch: expected ({:?},{:?}), got ({:?},{:?})",
+                            table, col, list.table, list.col
+                        ),
+                    });
                 }
 
                 if list.entries().is_empty() {
-                    let mut input = [BabyBear::ZERO; 16];
-                    input[0] = BabyBear::new(DOMAIN_SSMC);
-                    input[1] = BabyBear::new(table.0);
-                    input[2] = BabyBear::new(col.0 as u32);
+                    let input = build_ssmc_hash_input(table, col, &[], &[], None);
                     let (_, out) = poseidon2_permutation(input);
                     return Ok(NativeDigest(core::array::from_fn(|i| out[i])));
                 }
@@ -414,36 +418,18 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
                 let mut prev: Option<NativeDigest> = None;
                 for entry in list.entries() {
                     if entry.value.len() > 5 {
-                        return Err(TabulaError::ConsistencyError(format!(
-                            "value width {} is unsupported by proof hash-chain layout (max 5)",
-                            entry.value.len()
-                        )));
+                        return Err(TabulaError::ProofError {
+                            phase: "witness",
+                            detail: format!(
+                                "value width {} is unsupported by proof hash-chain layout (max 5)",
+                                entry.value.len()
+                            ),
+                        });
                     }
 
                     let key_limbs = encode_u64_limbs(entry.key.0);
-                    let mut input = [BabyBear::ZERO; 16];
-                    match prev {
-                        None => {
-                            input[0] = BabyBear::new(DOMAIN_SSMC);
-                            input[1] = BabyBear::new(table.0);
-                            input[2] = BabyBear::new(col.0 as u32);
-                            input[3] = key_limbs[0];
-                            input[4] = key_limbs[1];
-                            input[5] = key_limbs[2];
-                            for (idx, v) in entry.value.iter().enumerate() {
-                                input[6 + idx] = *v;
-                            }
-                        }
-                        Some(prev_digest) => {
-                            input[..8].copy_from_slice(&prev_digest.0);
-                            input[8] = key_limbs[0];
-                            input[9] = key_limbs[1];
-                            input[10] = key_limbs[2];
-                            for (idx, v) in entry.value.iter().enumerate() {
-                                input[11 + idx] = *v;
-                            }
-                        }
-                    }
+                    let input =
+                        build_ssmc_hash_input(table, col, &key_limbs, &entry.value, prev.as_ref());
                     let (_, out) = poseidon2_permutation(input);
                     prev = Some(NativeDigest(core::array::from_fn(|i| out[i])));
                 }
@@ -453,4 +439,42 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
             ColumnState::Smt(tree) => Ok(tree.root()),
         }
     }
+}
+
+/// Build a Poseidon2 width-16 hash input for SSMC hash-chain computation.
+///
+/// Layout depends on whether this is the first row or a continuation:
+/// - First row / empty: `[domain, t, c, key[0..3], value[0..], 0...]`
+/// - Continuation: `[prev_hash[0..8], key[0..3], value[0..], 0...]`
+fn build_ssmc_hash_input(
+    table: TableId,
+    col: ColId,
+    key_limbs: &[BabyBear],
+    value: &[BabyBear],
+    prev: Option<&NativeDigest>,
+) -> [BabyBear; 16] {
+    let mut input = [BabyBear::ZERO; 16];
+    match prev {
+        None => {
+            input[0] = BabyBear::new(DOMAIN_SSMC);
+            input[1] = BabyBear::new(table.0);
+            input[2] = BabyBear::new(col.0 as u32);
+            for (i, &limb) in key_limbs.iter().enumerate() {
+                input[3 + i] = limb;
+            }
+            for (i, &v) in value.iter().enumerate() {
+                input[6 + i] = v;
+            }
+        }
+        Some(prev_digest) => {
+            input[..8].copy_from_slice(&prev_digest.0);
+            for (i, &limb) in key_limbs.iter().enumerate() {
+                input[8 + i] = limb;
+            }
+            for (i, &v) in value.iter().enumerate() {
+                input[11 + i] = v;
+            }
+        }
+    }
+    input
 }

@@ -275,7 +275,7 @@ fn empty_column_state_poseidon(
     table: u32,
     col: u16,
 ) -> ((TableId, ColId), ColumnState<PoseidonHasher>) {
-    let (state, _) = vc.commit_column(t(table), c(col), vec![]);
+    let (state, _) = vc.commit_column(t(table), c(col), vec![]).unwrap();
     ((t(table), c(col)), state)
 }
 
@@ -290,7 +290,7 @@ fn column_state_with_poseidon(
         .iter()
         .map(|&(k, v)| (r(k), codec.encode(&Value::U64(v)).unwrap()))
         .collect();
-    let (state, _) = vc.commit_column(t(table), c(col), enc);
+    let (state, _) = vc.commit_column(t(table), c(col), enc).unwrap();
     ((t(table), c(col)), state)
 }
 

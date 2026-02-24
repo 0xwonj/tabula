@@ -16,11 +16,14 @@ pub(super) fn lower_hash<const W: usize>(
     inputs: &[ValueExpr],
 ) -> Result<(), TabulaError> {
     if inputs.len() != HASH_INSTRUCTION_INPUT_COUNT as usize {
-        return Err(TabulaError::ConsistencyError(format!(
-            "Hash instruction requires {} inputs, got {}",
-            HASH_INSTRUCTION_INPUT_COUNT,
-            inputs.len()
-        )));
+        return Err(TabulaError::ProofError {
+            phase: "trace_lowering",
+            detail: format!(
+                "Hash instruction requires {} inputs, got {}",
+                HASH_INSTRUCTION_INPUT_COUNT,
+                inputs.len()
+            ),
+        });
     }
 
     let v0 = ctx.resolve_val(&inputs[0])?;

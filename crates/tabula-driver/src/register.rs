@@ -63,20 +63,15 @@ pub fn register_program_sources(
     sources: &ProgramSourceFile,
     metadata_policy: MetadataPolicy,
 ) -> DriverResult<RegisteredProgram> {
-    let artifact = register_program(&sources.table_schemas, &sources.tx_types).map_err(|e| {
-        DriverError::InvalidProgram {
-            message: e.to_string(),
-        }
-    })?;
+    let artifact = register_program(&sources.table_schemas, &sources.tx_types)
+        .map_err(DriverError::InvalidProgram)?;
 
     match (metadata_policy, sources.contract_metadata.as_ref()) {
         (MetadataPolicy::Required, None) => Err(DriverError::MissingContractMetadata),
         (_, Some(provided)) => artifact
             .compatibility_policy()
             .validate(provided)
-            .map_err(|e| DriverError::ContractMetadataMismatch {
-                message: e.to_string(),
-            })
+            .map_err(DriverError::ContractMetadataMismatch)
             .map(|_| artifact),
         (_, None) => Ok(artifact),
     }
@@ -101,7 +96,7 @@ pub fn register_program(
     let registry = apply_batch_binding_registry_v1();
     registry
         .validate_completeness()
-        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     let profile_hash = compute_profile_hash(schemas, tx_types)?;
     let metadata_envelope = ContractMetadataEnvelope {

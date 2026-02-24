@@ -1,3 +1,5 @@
+//! CLI arguments and runtime server configuration.
+
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -53,6 +55,7 @@ pub struct Cli {
 
 /// Runtime server configuration.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct ServerConfig {
     pub bind_addr: SocketAddr,
     pub auth_token: Option<String>,

@@ -57,8 +57,13 @@ where
 
     let smt_table_pvs = smt_table_public_values(witness);
 
-    let exec_record = evaluate_chip(exec_chip.chip_name(), &exec_chip, &execution_trace)
-        .map_err(|e| TabulaError::ConsistencyError(format!("execution trace invalid: {e}")))?;
+    let exec_record =
+        evaluate_chip(exec_chip.chip_name(), &exec_chip, &execution_trace).map_err(|e| {
+            TabulaError::ProofError {
+                phase: "trace_build",
+                detail: format!("execution trace invalid: {e}"),
+            }
+        })?;
     let ito_record = evaluate_chip(
         "InterTxOrder",
         &InterTxOrderChip::<W>,
@@ -66,7 +71,10 @@ where
             .map(|e| &e.main)
             .expect("InterTxOrder trace must exist"),
     )
-    .map_err(|e| TabulaError::ConsistencyError(format!("inter_tx trace invalid: {e}")))?;
+    .map_err(|e| TabulaError::ProofError {
+        phase: "trace_build",
+        detail: format!("inter_tx trace invalid: {e}"),
+    })?;
     let state_record = evaluate_chip(
         "StateColumn",
         &StateColumnChip::<W>,
@@ -74,7 +82,10 @@ where
             .map(|e| &e.main)
             .expect("StateColumn trace must exist"),
     )
-    .map_err(|e| TabulaError::ConsistencyError(format!("state trace invalid: {e}")))?;
+    .map_err(|e| TabulaError::ProofError {
+        phase: "trace_build",
+        detail: format!("state trace invalid: {e}"),
+    })?;
     let col_meta_record = evaluate_chip(
         "ColumnMeta",
         &ColumnMetaChip,
@@ -82,10 +93,16 @@ where
             .map(|e| &e.main)
             .expect("ColumnMeta trace must exist"),
     )
-    .map_err(|e| TabulaError::ConsistencyError(format!("column_meta trace invalid: {e}")))?;
+    .map_err(|e| TabulaError::ProofError {
+        phase: "trace_build",
+        detail: format!("column_meta trace invalid: {e}"),
+    })?;
     let smt_col_record =
         evaluate_chip(smt_col_chip.chip_name(), &smt_col_chip, &smt_col_path_trace).map_err(
-            |e| TabulaError::ConsistencyError(format!("smt_col_path trace invalid: {e}")),
+            |e| TabulaError::ProofError {
+                phase: "trace_build",
+                detail: format!("smt_col_path trace invalid: {e}"),
+            },
         )?;
     let smt_table_record = evaluate_chip_with_public_values(
         smt_table_chip.chip_name(),
@@ -93,7 +110,10 @@ where
         &smt_table_path_trace,
         &smt_table_pvs,
     )
-    .map_err(|e| TabulaError::ConsistencyError(format!("smt_table_path trace invalid: {e}")))?;
+    .map_err(|e| TabulaError::ProofError {
+        phase: "trace_build",
+        detail: format!("smt_table_path trace invalid: {e}"),
+    })?;
 
     let c5_c8_records: [&ChipRecord<BabyBear>; 6] = [
         &exec_record,

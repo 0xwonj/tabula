@@ -70,14 +70,14 @@ pub fn execute_registered_batch(
 
 fn map_driver_execution_error(err: tabula_driver::DriverError) -> ServiceError {
     match &err {
-        tabula_driver::DriverError::InvalidState { .. } => {
-            ServiceError::bad_request(ErrorCode::InvalidStateCell, err.to_string())
+        tabula_driver::DriverError::InvalidState(source) => {
+            ServiceError::bad_request(ErrorCode::InvalidStateCell, source.to_string())
         }
-        tabula_driver::DriverError::InvalidBatch { .. } => {
-            ServiceError::bad_request(ErrorCode::InvalidBatchTx, err.to_string())
+        tabula_driver::DriverError::InvalidBatch(source) => {
+            ServiceError::bad_request(ErrorCode::InvalidBatchTx, source.to_string())
         }
-        tabula_driver::DriverError::Execution { .. } => {
-            ServiceError::unprocessable(ErrorCode::ExecutionError, err.to_string())
+        tabula_driver::DriverError::Execution { source, .. } => {
+            ServiceError::unprocessable(ErrorCode::ExecutionError, source.to_string())
         }
         _ => ServiceError::internal(ErrorCode::InternalError, err.to_string()),
     }

@@ -21,6 +21,11 @@ edition = "2024"
 authors = ["Wonjae Choi <wonjae@snu.ac.kr>"]
 license = "MIT OR Apache-2.0"
 
+# Feature matrix:
+#   default  — core types, IR, executor, lang, CLI (no crypto proofs)
+#   stark    — enables Plonky3 STARK prover/verifier + Poseidon2 + commitment layer
+#   test-utils — mock crypto impls for testing (tabula-core)
+
 [workspace.dependencies]
 # Internal
 tabula-core = { path = "crates/tabula-core" }
@@ -34,10 +39,12 @@ tabula-artifact = { path = "crates/tabula-artifact" }
 tabula-driver = { path = "crates/tabula-driver" }
 # Serialization
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 borsh = { version = "1", features = ["derive"] }
 
 # Crypto
 blake3 = "1"
+sha2 = "0.10"
 
 # Plonky3 (BabyBear + Poseidon2 + AIR + STARK)
 p3-field = "0.4"
@@ -66,3 +73,4 @@ clap = { version = "4", features = ["derive"] }
 
 # Testing
 proptest = "1"
+criterion = { version = "0.5", features = ["html_reports"] }

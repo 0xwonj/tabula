@@ -1,9 +1,8 @@
 //! Error types for debug constraint checking.
 
-use std::fmt;
-
 /// Error from a failed constraint check.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("constraint {constraint_index} failed on row {row}: value = {value}")]
 pub struct ConstraintError {
     /// Row index where the violation occurred.
     pub row: usize,
@@ -13,46 +12,22 @@ pub struct ConstraintError {
     pub value: String,
 }
 
-impl fmt::Display for ConstraintError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "constraint {} failed on row {}: value = {}",
-            self.constraint_index, self.row, self.value
-        )
-    }
-}
-
-impl std::error::Error for ConstraintError {}
-
 /// Error from a failed multi-chip LogUp check.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum MultiChipError {
     /// A local/transition constraint failed.
+    #[error("[{chip}] {error}")]
     Constraint {
         /// Which chip (by name).
         chip: String,
         /// The constraint error.
+        #[source]
         error: ConstraintError,
     },
     /// LogUp balance failed: global sum is nonzero.
+    #[error("LogUp imbalance: {description}")]
     LogUpImbalance {
         /// Human-readable description of the imbalance.
         description: String,
     },
 }
-
-impl fmt::Display for MultiChipError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Constraint { chip, error } => {
-                write!(f, "[{chip}] {error}")
-            }
-            Self::LogUpImbalance { description } => {
-                write!(f, "LogUp imbalance: {description}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for MultiChipError {}

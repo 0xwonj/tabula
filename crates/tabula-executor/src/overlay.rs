@@ -6,235 +6,18 @@
 //! - **Write coalescing**: only the last write per key survives
 //!
 //! Internally composed of two sub-components:
-//! - **ExecutionState** (private): state management (write buffer, read cache, undo log)
-//! - **TraceRecorder** (`pub(crate)`): event recording (execution trace, logical time)
+//! - [`ExecutionState`](crate::execution_state) — state management (write buffer, read cache, undo log)
+//! - [`TraceRecorder`](crate::trace_recorder) — event recording (execution trace, logical time)
 //!
 //! This separation prepares for Phase 4 (ok-gating), where failed-tx
 //! rollback will roll back state only while preserving the event trace.
 
-use std::collections::BTreeMap;
-
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateSnapshot;
-use tabula_core::{CellKey, ExecutionEvent, LogicalTime, OpKind, Value, ValueType, zero_value};
+use tabula_core::{CellKey, ExecutionEvent, LogicalTime, OpKind, Value, ValueType};
 
-// ── Undo log ────────────────────────────────────────────────────────────
-
-/// An undo-log entry for reverting a single mutation.
-enum UndoEntry {
-    /// A write_buffer mutation: key had `prev` value (None = key was absent in buffer).
-    Write {
-        key: CellKey,
-        prev: Option<Option<Value>>,
-    },
-    /// A read_cache fill: key was absent before this tx.
-    ReadCacheFill { key: CellKey },
-}
-
-// ── ExecutionState ──────────────────────────────────────────────────────
-
-/// Checkpoint for execution state (undo log position only).
-struct StateCheckpoint {
-    undo_len: usize,
-}
-
-/// State management sub-component of `Overlay`.
-///
-/// Handles the write buffer, read cache, and undo log for
-/// checkpoint/rollback. Does NOT record events.
-struct ExecutionState<'a, S: StateSnapshot> {
-    snapshot: &'a S,
-    write_buffer: BTreeMap<CellKey, Option<Value>>,
-    read_cache: BTreeMap<CellKey, Option<Value>>,
-    undo_log: Vec<UndoEntry>,
-    checkpoints: Vec<StateCheckpoint>,
-}
-
-type CellEntries = Vec<(CellKey, Option<Value>)>;
-
-impl<'a, S: StateSnapshot> ExecutionState<'a, S> {
-    fn new(snapshot: &'a S) -> Self {
-        Self {
-            snapshot,
-            write_buffer: BTreeMap::new(),
-            read_cache: BTreeMap::new(),
-            undo_log: Vec::new(),
-            checkpoints: Vec::new(),
-        }
-    }
-
-    /// Check the write buffer for a key. Returns `None` if not in buffer.
-    fn read_from_buffer(&self, key: &CellKey) -> Option<&Option<Value>> {
-        self.write_buffer.get(key)
-    }
-
-    /// Check the read cache for a key. Returns `None` if not cached.
-    fn read_from_cache(&self, key: &CellKey) -> Option<&Option<Value>> {
-        self.read_cache.get(key)
-    }
-
-    /// Read from the snapshot, filling the read cache and undo log.
-    fn read_from_snapshot(&mut self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
-        let opt = self.snapshot.read(key)?;
-        self.read_cache.insert(*key, opt);
-        if !self.checkpoints.is_empty() {
-            self.undo_log.push(UndoEntry::ReadCacheFill { key: *key });
-        }
-        Ok(opt)
-    }
-
-    /// Buffer a write, recording the previous value in the undo log.
-    fn write_buffered(&mut self, key: &CellKey, value: Option<Value>) {
-        if !self.checkpoints.is_empty() {
-            let prev = self.write_buffer.get(key).cloned();
-            self.undo_log.push(UndoEntry::Write { key: *key, prev });
-        }
-        self.write_buffer.insert(*key, value);
-    }
-
-    fn checkpoint(&mut self) {
-        self.checkpoints.push(StateCheckpoint {
-            undo_len: self.undo_log.len(),
-        });
-    }
-
-    fn rollback(&mut self) -> Option<()> {
-        let cp = self.checkpoints.pop()?;
-        while self.undo_log.len() > cp.undo_len {
-            match self.undo_log.pop().unwrap() {
-                UndoEntry::Write { key, prev } => match prev {
-                    Some(opt_v) => {
-                        self.write_buffer.insert(key, opt_v);
-                    }
-                    None => {
-                        self.write_buffer.remove(&key);
-                    }
-                },
-                UndoEntry::ReadCacheFill { key } => {
-                    self.read_cache.remove(&key);
-                }
-            }
-        }
-        Some(())
-    }
-
-    fn discard_checkpoint(&mut self) {
-        self.checkpoints.pop();
-        if self.checkpoints.is_empty() {
-            self.undo_log.clear();
-        }
-    }
-
-    /// Consume into (read_set_old, write_set_final).
-    fn into_sets(self) -> (CellEntries, CellEntries) {
-        let read_set_old: Vec<_> = self.read_cache.into_iter().collect();
-        let write_set_final: Vec<_> = self.write_buffer.into_iter().collect();
-        (read_set_old, write_set_final)
-    }
-}
-
-// ── TraceRecorder ───────────────────────────────────────────────────────
-
-/// Checkpoint for the trace recorder.
-struct RecorderCheckpoint {
-    events_len: usize,
-    time: LogicalTime,
-    tx_index: u32,
-    effect_ordinal_in_tx: u32,
-}
-
-/// Event recording sub-component of `Overlay`.
-///
-/// Handles the execution event trace, logical time, and tx index.
-/// Accessible as `pub(crate)` for future ok-gating support, where
-/// events must be preserved even when state is rolled back.
-pub(crate) struct TraceRecorder {
-    events: Vec<ExecutionEvent>,
-    time: LogicalTime,
-    current_tx_index: u32,
-    current_effect_ordinal_in_tx: u32,
-    checkpoints: Vec<RecorderCheckpoint>,
-}
-
-impl TraceRecorder {
-    fn new() -> Self {
-        Self {
-            events: Vec::new(),
-            time: 0,
-            current_tx_index: 0,
-            current_effect_ordinal_in_tx: 0,
-            checkpoints: Vec::new(),
-        }
-    }
-
-    /// Record an execution event and advance the logical clock.
-    fn record_event(
-        &mut self,
-        key: &CellKey,
-        op: OpKind,
-        opt_value: &Option<Value>,
-        col_type: ValueType,
-    ) {
-        let (value, val_is_null) = match opt_value {
-            Some(v) => (*v, false),
-            None => (zero_value(col_type), true),
-        };
-        self.events.push(ExecutionEvent {
-            key: *key,
-            op,
-            value,
-            val_is_null,
-            time: self.time,
-            tx_index: self.current_tx_index,
-            effect_ordinal_in_tx: self.current_effect_ordinal_in_tx,
-        });
-        self.current_effect_ordinal_in_tx += 1;
-        self.time += 1;
-    }
-
-    fn checkpoint(&mut self) {
-        self.checkpoints.push(RecorderCheckpoint {
-            events_len: self.events.len(),
-            time: self.time,
-            tx_index: self.current_tx_index,
-            effect_ordinal_in_tx: self.current_effect_ordinal_in_tx,
-        });
-    }
-
-    fn rollback(&mut self) -> Option<()> {
-        let cp = self.checkpoints.pop()?;
-        self.events.truncate(cp.events_len);
-        self.time = cp.time;
-        self.current_tx_index = cp.tx_index;
-        self.current_effect_ordinal_in_tx = cp.effect_ordinal_in_tx;
-        Some(())
-    }
-
-    fn discard_checkpoint(&mut self) {
-        self.checkpoints.pop();
-    }
-
-    fn time(&self) -> LogicalTime {
-        self.time
-    }
-
-    fn set_tx_index(&mut self, idx: u32) {
-        self.current_tx_index = idx;
-        self.current_effect_ordinal_in_tx = 0;
-    }
-
-    fn events_len(&self) -> usize {
-        self.events.len()
-    }
-
-    fn events_since(&self, since: usize) -> Vec<ExecutionEvent> {
-        self.events[since..].to_vec()
-    }
-
-    fn into_events(self) -> Vec<ExecutionEvent> {
-        self.events
-    }
-}
+use crate::execution_state::ExecutionState;
+use crate::trace_recorder::TraceRecorder;
 
 // ── OverlayResult ───────────────────────────────────────────────────────
 
@@ -372,10 +155,15 @@ impl<'a, S: StateSnapshot> Overlay<'a, S> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicU32, Ordering};
+
+    use tabula_core::error::TabulaError;
     use tabula_core::traits::StateSnapshot;
-    use tabula_core::{ColId, RowKey, TableId};
+    use tabula_core::{CellKey, ColId, OpKind, RowKey, TableId, Value, ValueType};
+
+    use crate::execution_state::ExecutionState;
+    use crate::trace_recorder::TraceRecorder;
 
     const TY: ValueType = ValueType::U64;
 

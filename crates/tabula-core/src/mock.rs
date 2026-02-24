@@ -199,7 +199,8 @@ impl ValueCodec for MockValueCodec {
     type FieldRepr = Vec<u8>;
 
     fn encode(&self, value: &Value) -> Result<Vec<Self::FieldRepr>, TabulaError> {
-        let bytes = borsh::to_vec(value).map_err(|e| TabulaError::EncodingError(e.to_string()))?;
+        let bytes =
+            borsh::to_vec(value).map_err(|e| TabulaError::BorshEncodingError(e.to_string()))?;
         Ok(vec![bytes])
     }
 
@@ -209,9 +210,12 @@ impl ValueCodec for MockValueCodec {
         _target_type: ValueType,
     ) -> Result<Value, TabulaError> {
         if field_elements.is_empty() {
-            return Err(TabulaError::EncodingError("empty field elements".into()));
+            return Err(TabulaError::BorshEncodingError(
+                "empty field elements".into(),
+            ));
         }
-        borsh::from_slice(&field_elements[0]).map_err(|e| TabulaError::EncodingError(e.to_string()))
+        borsh::from_slice(&field_elements[0])
+            .map_err(|e| TabulaError::BorshEncodingError(e.to_string()))
     }
 
     fn field_elements_per(&self, _value_type: ValueType) -> usize {
@@ -277,7 +281,8 @@ pub struct SimpleBatchDigester;
 
 impl BatchDigester for SimpleBatchDigester {
     fn digest(&self, batch: &Batch) -> Result<Digest, TabulaError> {
-        let bytes = borsh::to_vec(batch).map_err(|e| TabulaError::EncodingError(e.to_string()))?;
+        let bytes =
+            borsh::to_vec(batch).map_err(|e| TabulaError::BorshEncodingError(e.to_string()))?;
         Ok(*blake3::hash(&bytes).as_bytes())
     }
 }

@@ -31,28 +31,44 @@ pub(super) fn debug_validate_trace_map<const W: usize>(
     };
 
     // ── Debug constraint checks ───────────────────────────────────────────
-    debug_check(&ExecutionChip::<W>, get_main("Execution"))
-        .map_err(|e| TabulaError::ConsistencyError(format!("execution debug_check failed: {e}")))?;
+    debug_check(&ExecutionChip::<W>, get_main("Execution")).map_err(|e| {
+        TabulaError::ProofError {
+            phase: "trace_validation",
+            detail: format!("execution debug_check failed: {e}"),
+        }
+    })?;
     debug_check(&InterTxOrderChip::<W>, get_main("InterTxOrder")).map_err(|e| {
-        TabulaError::ConsistencyError(format!("inter_tx_order debug_check failed: {e}"))
+        TabulaError::ProofError {
+            phase: "trace_validation",
+            detail: format!("inter_tx_order debug_check failed: {e}"),
+        }
     })?;
     debug_check(&StateColumnChip::<W>, get_main("StateColumn")).map_err(|e| {
-        TabulaError::ConsistencyError(format!("state_column debug_check failed: {e}"))
+        TabulaError::ProofError {
+            phase: "trace_validation",
+            detail: format!("state_column debug_check failed: {e}"),
+        }
     })?;
-    debug_check(&ColumnMetaChip, get_main("ColumnMeta")).map_err(|e| {
-        TabulaError::ConsistencyError(format!("column_meta debug_check failed: {e}"))
+    debug_check(&ColumnMetaChip, get_main("ColumnMeta")).map_err(|e| TabulaError::ProofError {
+        phase: "trace_validation",
+        detail: format!("column_meta debug_check failed: {e}"),
     })?;
     debug_check(&StaticTableChip::<W>, get_main("StaticTable")).map_err(|e| {
-        TabulaError::ConsistencyError(format!("static_table debug_check failed: {e}"))
+        TabulaError::ProofError {
+            phase: "trace_validation",
+            detail: format!("static_table debug_check failed: {e}"),
+        }
     })?;
-    debug_check(&SmtColPathChip, get_main("SmtColPath")).map_err(|e| {
-        TabulaError::ConsistencyError(format!("smt_col_path debug_check failed: {e}"))
+    debug_check(&SmtColPathChip, get_main("SmtColPath")).map_err(|e| TabulaError::ProofError {
+        phase: "trace_validation",
+        detail: format!("smt_col_path debug_check failed: {e}"),
     })?;
 
     let smt_table_pvs = smt_table_public_values_from_roots(old_state_root, new_state_root);
     debug_check_with_public_values(&SmtTablePathChip, get_main("SmtTablePath"), &smt_table_pvs)
-        .map_err(|e| {
-            TabulaError::ConsistencyError(format!("smt_table_path debug_check failed: {e}"))
+        .map_err(|e| TabulaError::ProofError {
+            phase: "trace_validation",
+            detail: format!("smt_table_path debug_check failed: {e}"),
         })?;
 
     let poseidon_entry = map.get("Poseidon").expect("Poseidon trace must exist");
@@ -61,52 +77,87 @@ pub(super) fn debug_validate_trace_map<const W: usize>(
         &poseidon_entry.main,
         poseidon_entry.preprocessed.as_ref(),
     )
-    .map_err(|e| TabulaError::ConsistencyError(format!("poseidon debug_check failed: {e}")))?;
-    debug_check(&RangeCheckChip, get_main("RangeCheck")).map_err(|e| {
-        TabulaError::ConsistencyError(format!("range_check debug_check failed: {e}"))
+    .map_err(|e| TabulaError::ProofError {
+        phase: "trace_validation",
+        detail: format!("poseidon debug_check failed: {e}"),
+    })?;
+    debug_check(&RangeCheckChip, get_main("RangeCheck")).map_err(|e| TabulaError::ProofError {
+        phase: "trace_validation",
+        detail: format!("range_check debug_check failed: {e}"),
     })?;
 
     // ── Bus balance checks ────────────────────────────────────────────────
     let execution = evaluate_chip("Execution", &ExecutionChip::<W>, get_main("Execution"))
-        .map_err(|e| TabulaError::ConsistencyError(format!("execution evaluate failed: {e}")))?;
+        .map_err(|e| TabulaError::ProofError {
+            phase: "trace_validation",
+            detail: format!("execution evaluate failed: {e}"),
+        })?;
     let inter_tx = evaluate_chip(
         "InterTxOrder",
         &InterTxOrderChip::<W>,
         get_main("InterTxOrder"),
     )
-    .map_err(|e| TabulaError::ConsistencyError(format!("inter_tx evaluate failed: {e}")))?;
+    .map_err(|e| TabulaError::ProofError {
+        phase: "trace_validation",
+        detail: format!("inter_tx evaluate failed: {e}"),
+    })?;
     let state = evaluate_chip(
         "StateColumn",
         &StateColumnChip::<W>,
         get_main("StateColumn"),
     )
-    .map_err(|e| TabulaError::ConsistencyError(format!("state evaluate failed: {e}")))?;
-    let col_meta = evaluate_chip("ColumnMeta", &ColumnMetaChip, get_main("ColumnMeta"))
-        .map_err(|e| TabulaError::ConsistencyError(format!("column_meta evaluate failed: {e}")))?;
+    .map_err(|e| TabulaError::ProofError {
+        phase: "trace_validation",
+        detail: format!("state evaluate failed: {e}"),
+    })?;
+    let col_meta =
+        evaluate_chip("ColumnMeta", &ColumnMetaChip, get_main("ColumnMeta")).map_err(|e| {
+            TabulaError::ProofError {
+                phase: "trace_validation",
+                detail: format!("column_meta evaluate failed: {e}"),
+            }
+        })?;
     let static_table = evaluate_chip(
         "StaticTable",
         &StaticTableChip::<W>,
         get_main("StaticTable"),
     )
-    .map_err(|e| TabulaError::ConsistencyError(format!("static_table evaluate failed: {e}")))?;
-    let smt_col = evaluate_chip("SmtColPath", &SmtColPathChip, get_main("SmtColPath"))
-        .map_err(|e| TabulaError::ConsistencyError(format!("smt_col evaluate failed: {e}")))?;
+    .map_err(|e| TabulaError::ProofError {
+        phase: "trace_validation",
+        detail: format!("static_table evaluate failed: {e}"),
+    })?;
+    let smt_col =
+        evaluate_chip("SmtColPath", &SmtColPathChip, get_main("SmtColPath")).map_err(|e| {
+            TabulaError::ProofError {
+                phase: "trace_validation",
+                detail: format!("smt_col evaluate failed: {e}"),
+            }
+        })?;
     let smt_table = evaluate_chip_with_public_values(
         "SmtTablePath",
         &SmtTablePathChip,
         get_main("SmtTablePath"),
         &smt_table_pvs,
     )
-    .map_err(|e| TabulaError::ConsistencyError(format!("smt_table evaluate failed: {e}")))?;
+    .map_err(|e| TabulaError::ProofError {
+        phase: "trace_validation",
+        detail: format!("smt_table evaluate failed: {e}"),
+    })?;
     let poseidon = evaluate_chip_with_preprocessed(
         "Poseidon",
         &PoseidonChip,
         &poseidon_entry.main,
         poseidon_entry.preprocessed.as_ref(),
     )
-    .map_err(|e| TabulaError::ConsistencyError(format!("poseidon evaluate failed: {e}")))?;
+    .map_err(|e| TabulaError::ProofError {
+        phase: "trace_validation",
+        detail: format!("poseidon evaluate failed: {e}"),
+    })?;
     let range_check = evaluate_chip("RangeCheck", &RangeCheckChip, get_main("RangeCheck"))
-        .map_err(|e| TabulaError::ConsistencyError(format!("range_check evaluate failed: {e}")))?;
+        .map_err(|e| TabulaError::ProofError {
+            phase: "trace_validation",
+            detail: format!("range_check evaluate failed: {e}"),
+        })?;
 
     let records = [
         execution,
@@ -133,8 +184,10 @@ pub(super) fn debug_validate_trace_map<const W: usize>(
         InteractionKind::SmtLeafDigest,
         InteractionKind::SmtTableRoot,
     ] {
-        check_bus_balance(&records, bus)
-            .map_err(|e| TabulaError::ConsistencyError(format!("bus {bus:?} imbalance: {e}")))?;
+        check_bus_balance(&records, bus).map_err(|e| TabulaError::ProofError {
+            phase: "trace_validation",
+            detail: format!("bus {bus:?} imbalance: {e}"),
+        })?;
     }
 
     Ok(())

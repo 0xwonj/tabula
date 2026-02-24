@@ -259,10 +259,10 @@ fn accumulate_logup_sum<F: Field>(
 
     for record in records {
         for interaction in &record.interactions {
-            if let Some(bus) = bus_filter {
-                if interaction.kind != bus {
-                    continue;
-                }
+            if let Some(bus) = bus_filter
+                && interaction.kind != bus
+            {
+                continue;
             }
             if interaction.multiplicity == F::ZERO {
                 continue;

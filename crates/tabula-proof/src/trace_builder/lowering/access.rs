@@ -20,9 +20,13 @@ pub(super) fn lower_read<const W: usize>(
     let event = ctx.find_event(instr_idx)?;
     ctx.effect_ordinal += 1;
 
-    let vtype = *ctx.type_map.get(&(table, col)).ok_or_else(|| {
-        TabulaError::ConsistencyError(format!("missing schema type for ({:?}, {:?})", table, col))
-    })?;
+    let vtype = *ctx
+        .type_map
+        .get(&(table, col))
+        .ok_or_else(|| TabulaError::ProofError {
+            phase: "trace_lowering",
+            detail: format!("missing schema type for ({:?}, {:?})", table, col),
+        })?;
 
     let encoded = if event.val_is_null {
         ctx.encode_padded(&zero_value(vtype))?
@@ -32,10 +36,10 @@ pub(super) fn lower_read<const W: usize>(
 
     let slot = dst_val as usize;
     if slot >= MAX_SLOTS {
-        return Err(TabulaError::ConsistencyError(format!(
-            "slot {} >= MAX_SLOTS at instruction {}",
-            slot, instr_idx
-        )));
+        return Err(TabulaError::ProofError {
+            phase: "trace_lowering",
+            detail: format!("slot {} >= MAX_SLOTS at instruction {}", slot, instr_idx),
+        });
     }
 
     // Update slot state.

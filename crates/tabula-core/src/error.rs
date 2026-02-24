@@ -75,9 +75,13 @@ pub enum TabulaError {
     #[error("tx type not found: {0:?}")]
     TxTypeNotFound(crate::TxTypeId),
 
-    /// Encoding/decoding error.
-    #[error("encoding error: {0}")]
-    EncodingError(String),
+    /// Borsh serialization/deserialization error.
+    #[error("borsh encoding error: {0}")]
+    BorshEncodingError(String),
+
+    /// Field-element codec error (limb ranges, BabyBear canonical checks).
+    #[error("field encoding error: {0}")]
+    FieldEncodingError(String),
 
     /// Row key not found in table.
     #[error("row not found: {0:?} {1:?}")]
@@ -86,6 +90,15 @@ pub enum TabulaError {
     /// Consistency check failure.
     #[error("consistency error: {0}")]
     ConsistencyError(String),
+
+    /// Proof-layer trace construction or validation failure.
+    #[error("proof error: [{phase}] {detail}")]
+    ProofError {
+        /// Which proof phase failed.
+        phase: &'static str,
+        /// Human-readable detail.
+        detail: String,
+    },
 
     /// IR body validation / type inference failure.
     #[error("invalid IR: {0}")]

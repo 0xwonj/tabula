@@ -51,38 +51,31 @@ pub enum DriverError {
         diagnostics: Vec<CompileDiagnostic>,
     },
     /// Program failed semantic registration.
-    #[error("invalid program: {message}")]
-    InvalidProgram {
-        /// Validation error text.
-        message: String,
-    },
+    #[error("invalid program: {0}")]
+    InvalidProgram(#[source] anyhow::Error),
     /// Compiled artifact is missing contract metadata.
     #[error(
         "compiled program JSON is missing contract_metadata; regenerate with the current driver"
     )]
     MissingContractMetadata,
     /// Compiled artifact metadata mismatched current semantic policy.
-    #[error("contract metadata mismatch: {message}")]
-    ContractMetadataMismatch {
-        /// Validation mismatch details.
-        message: String,
-    },
+    #[error("contract metadata mismatch: {0}")]
+    ContractMetadataMismatch(#[source] tabula_contract::ContractValidationError),
     /// State input is invalid.
-    #[error("invalid state: {message}")]
-    InvalidState {
-        /// Validation error detail.
-        message: String,
-    },
+    #[error("invalid state: {0}")]
+    InvalidState(#[source] tabula_artifact::ArtifactError),
     /// Batch input is invalid.
-    #[error("invalid batch: {message}")]
-    InvalidBatch {
-        /// Validation error detail.
-        message: String,
-    },
+    #[error("invalid batch: {0}")]
+    InvalidBatch(#[source] tabula_artifact::ArtifactError),
     /// Execution failed.
-    #[error("execution failed: {message}")]
+    #[error("execution failed: {source}")]
     Execution {
-        /// Failure detail.
-        message: String,
+        /// Underlying execution error.
+        #[source]
+        source: tabula_core::error::TabulaError,
+        /// Index of the instruction that failed (if available).
+        instruction_index: Option<usize>,
+        /// Index of the transaction within the batch (if available).
+        tx_index: Option<u32>,
     },
 }

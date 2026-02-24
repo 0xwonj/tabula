@@ -27,18 +27,15 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
 use crate::air::builder::InteractionAirBuilder;
-use crate::air::bus::{
-    BaseStateEntryAirBuilder, CoalescedWriteAirBuilder, CommitmentAirBuilder, PoseidonAirBuilder,
-};
 use crate::air::columns::borrow_cols;
 use crate::air::gadgets::{
     constrain_hash_chain_input, constrain_hash_chain_transition, constrain_is_real_prefix,
     constrain_key_halves, constrain_lex_direction, constrain_ordering_halves,
-    constrain_same_key_detection, constrain_strict_ineq, send_key_range_checks,
-    send_lex_range_checks, send_ordering_range_checks,
+    constrain_same_key_detection, constrain_strict_ineq,
 };
 
 use super::columns::{StateColumnCols, state_column_width};
+use super::derived::{derive_in_new, derive_in_old, derive_in_write};
 
 /// The StateColumn AIR chip, generic over value width.
 #[derive(Debug)]
@@ -101,143 +98,8 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for StateColumnChip<W> {
         constrain_ordering_halves(builder, &local.key_ordering);
 
         // ── LogUp buses ──
-
-        // C13 BaseStateEntry receive: in_old entries + gap rows + write_only (from InterTxOrder)
-        {
-            let is_write_only = derive_is_write_only::<AB, W>(local);
-            // In-old entries (old_only, both, delete) → (t, c, key, old_val, 0)
-            builder.receive_base_state_entry(
-                local.table_id.clone().into(),
-                local.col_id.clone().into(),
-                &local.key.limbs,
-                &local.old_val,
-                AB::Expr::ZERO,
-                is_real.clone() * in_old.clone() * local.read_mult_witness.clone().into(),
-            );
-            // Gap rows → (t, c, key, zeros, 1)
-            builder.receive_base_state_entry(
-                local.table_id.clone().into(),
-                local.col_id.clone().into(),
-                &local.key.limbs,
-                &local.new_val, // zeros for gap rows (constrained)
-                AB::Expr::ONE,
-                is_real.clone()
-                    * local.is_gap.clone().into()
-                    * local.read_mult_witness.clone().into(),
-            );
-            // Write-only entries → (t, c, key, zeros=old_val, 1)
-            builder.receive_base_state_entry(
-                local.table_id.clone().into(),
-                local.col_id.clone().into(),
-                &local.key.limbs,
-                &local.old_val, // zeros for write_only (constrained by merge logic)
-                AB::Expr::ONE,
-                is_real.clone() * is_write_only * local.read_mult_witness.clone().into(),
-            );
-        }
-
-        // C14 CoalescedWrite receive: write entries (write_only, both, delete) (from InterTxOrder)
-        {
-            let in_write = derive_in_write::<AB, W>(local);
-            let is_delete: AB::Expr = local.s1.clone().into() * local.s0.clone().into();
-            builder.receive_coalesced_write(
-                local.table_id.clone().into(),
-                local.col_id.clone().into(),
-                &local.key.limbs,
-                &local.new_val,
-                is_delete,
-                is_real.clone() * in_write * local.write_mult_witness.clone().into(),
-            );
-        }
-
-        // C5 PoseidonPerm send: old chain
-        builder.send_poseidon_perm(
-            &local.old_hash_chain.perm_input,
-            &local.old_hash_acc,
-            is_real.clone() * in_old,
-        );
-
-        // C5 PoseidonPerm send: new chain
-        builder.send_poseidon_perm(
-            &local.new_hash_chain.perm_input,
-            &local.new_hash_acc,
-            is_real.clone() * in_new,
-        );
-
-        // C6 CommitmentVerification send: Com_old at segment end
-        builder.send_commitment(
-            local.table_id.clone().into(),
-            local.col_id.clone().into(),
-            AB::Expr::ZERO, // comm_type = 0 (Com_old)
-            local.segment_is_touched.clone().into(),
-            &local.old_hash_acc,
-            is_real.clone() * local.is_last_old_entry.clone().into(),
-        );
-
-        // C6 CommitmentVerification send: Com_new at segment end (only if touched)
-        builder.send_commitment(
-            local.table_id.clone().into(),
-            local.col_id.clone().into(),
-            AB::Expr::ONE, // comm_type = 1 (Com_new)
-            AB::Expr::ONE,
-            &local.new_hash_acc,
-            is_real.clone()
-                * local.is_last_new_entry.clone().into()
-                * local.segment_is_touched.clone().into(),
-        );
-
-        // C8 RangeCheck sends
-        send_key_range_checks(builder, &local.key, is_real.clone());
-        {
-            let same_segment: AB::Expr = AB::Expr::ONE - local.segment.tc_changed.clone().into();
-            send_ordering_range_checks(
-                builder,
-                &local.key_ordering,
-                is_real.clone() * same_segment,
-            );
-        }
-        {
-            let tc: AB::Expr = local.segment.tc_changed.clone().into();
-            send_lex_range_checks(builder, &local.lex, is_real * tc);
-        }
+        super::buses::send_receive_buses(builder, local, is_real, in_old, in_new);
     }
-}
-
-// ── Derived flag expressions ─────────────────────────────────────────────────
-
-/// `in_old = !is_gap * (1 - (1-s1)*s0)` — old_only, both, delete.
-fn derive_in_old<AB: AirBuilder, const W: usize>(local: &StateColumnCols<AB::Var, W>) -> AB::Expr {
-    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.clone().into();
-    // in_old = !is_gap * (1 - s0 + s1*s0)
-    let s0: AB::Expr = local.s0.clone().into();
-    let s1: AB::Expr = local.s1.clone().into();
-    not_gap * (AB::Expr::ONE - s0.clone() + s1 * s0)
-}
-
-/// `in_new = !is_gap * (1 - s1*s0)` — old_only, write_only, both.
-fn derive_in_new<AB: AirBuilder, const W: usize>(local: &StateColumnCols<AB::Var, W>) -> AB::Expr {
-    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.clone().into();
-    let s1_s0: AB::Expr = local.s1.clone().into() * local.s0.clone().into();
-    not_gap * (AB::Expr::ONE - s1_s0)
-}
-
-/// `is_write_only = !is_gap * !s1 * s0` — write_only only.
-fn derive_is_write_only<AB: AirBuilder, const W: usize>(
-    local: &StateColumnCols<AB::Var, W>,
-) -> AB::Expr {
-    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.clone().into();
-    let not_s1: AB::Expr = AB::Expr::ONE - local.s1.clone().into();
-    not_gap * not_s1 * local.s0.clone().into()
-}
-
-/// `in_write = !is_gap * (s0 + s1 - s0*s1)` — write_only, both, delete.
-fn derive_in_write<AB: AirBuilder, const W: usize>(
-    local: &StateColumnCols<AB::Var, W>,
-) -> AB::Expr {
-    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.clone().into();
-    let s0: AB::Expr = local.s0.clone().into();
-    let s1: AB::Expr = local.s1.clone().into();
-    not_gap * (s0.clone() + s1.clone() - s0 * s1)
 }
 
 // ── Constraint helpers ───────────────────────────────────────────────────────

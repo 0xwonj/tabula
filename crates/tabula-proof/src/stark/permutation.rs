@@ -65,7 +65,7 @@ fn new_challenger() -> TabChallenger {
 /// expose commitments directly. Observing trace heights + public values
 /// provides binding to the proof instance. Full PCS-binding will come
 /// when the custom two-round prover is implemented.
-pub fn derive_challenges(chip_proofs: &[ChipProofEntry]) -> [EF4; 2] {
+pub(crate) fn derive_challenges(chip_proofs: &[ChipProofEntry]) -> [EF4; 2] {
     let mut challenger = new_challenger();
 
     // Domain separator for LogUp challenges.
@@ -94,7 +94,7 @@ pub fn derive_challenges(chip_proofs: &[ChipProofEntry]) -> [EF4; 2] {
 ///
 /// Using EF4 (~124-bit) instead of BabyBear (~31-bit) provides
 /// negligible collision probability.
-pub fn compute_fingerprint_ef4(
+pub(crate) fn compute_fingerprint_ef4(
     values: &[BabyBear],
     kind: InteractionKind,
     alpha: EF4,
@@ -119,7 +119,10 @@ pub fn compute_fingerprint_ef4(
 /// - Send contributes `+m/f`, Receive contributes `-m/f`
 ///
 /// Returns one EF4 cumulative sum per chip record.
-pub fn compute_cumsums_ef4(records: &[ChipRecord<BabyBear>], challenges: [EF4; 2]) -> Vec<EF4> {
+pub(crate) fn compute_cumsums_ef4(
+    records: &[ChipRecord<BabyBear>],
+    challenges: [EF4; 2],
+) -> Vec<EF4> {
     let [alpha, beta] = challenges;
 
     records
@@ -163,7 +166,7 @@ fn compute_chip_cumsum(
 }
 
 /// Convert an EF4 element to its 4 BabyBear basis coefficients.
-pub fn ef4_to_babybear_array(ef: EF4) -> [BabyBear; 4] {
+pub(crate) fn ef4_to_babybear_array(ef: EF4) -> [BabyBear; 4] {
     let slice = ef.as_basis_coefficients_slice();
     [slice[0], slice[1], slice[2], slice[3]]
 }

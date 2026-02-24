@@ -44,9 +44,10 @@ pub struct ChipProofEntry {
 }
 
 /// Errors during proof verification.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
     /// A per-chip STARK proof failed verification.
+    #[error("chip '{chip_name}' verification failed: {detail}")]
     ChipVerificationFailed {
         /// Which chip failed.
         chip_name: &'static str,
@@ -54,16 +55,19 @@ pub enum VerificationError {
         detail: String,
     },
     /// The cross-chip LogUp cumulative sums do not sum to zero.
+    #[error("LogUp imbalance: cumsum total = {total:?} (expected zero)")]
     LogUpImbalance {
         /// The nonzero total cumsum.
         total: [BabyBear; 4],
     },
     /// The proof's chip manifest is invalid (missing, extra, or duplicate chips).
+    #[error("invalid chip manifest: {detail}")]
     InvalidChipManifest {
         /// Description of the manifest error.
         detail: String,
     },
     /// The proof's LogUp challenges do not match the Fiat-Shamir transcript.
+    #[error("LogUp challenges mismatch: expected {expected:?}, got {got:?}")]
     ChallengesMismatch {
         /// The challenges re-derived by the verifier.
         expected: [EF4; 2],
@@ -71,30 +75,3 @@ pub enum VerificationError {
         got: [EF4; 2],
     },
 }
-
-impl std::fmt::Display for VerificationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ChipVerificationFailed { chip_name, detail } => {
-                write!(f, "chip '{chip_name}' verification failed: {detail}")
-            }
-            Self::LogUpImbalance { total } => {
-                write!(
-                    f,
-                    "LogUp imbalance: cumsum total = {total:?} (expected zero)"
-                )
-            }
-            Self::InvalidChipManifest { detail } => {
-                write!(f, "invalid chip manifest: {detail}")
-            }
-            Self::ChallengesMismatch { expected, got } => {
-                write!(
-                    f,
-                    "LogUp challenges mismatch: expected {expected:?}, got {got:?}"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for VerificationError {}

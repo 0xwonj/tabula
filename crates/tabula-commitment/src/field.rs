@@ -21,6 +21,19 @@ pub const DOMAIN_COL: u32 = 0x12;
 /// Hash-IR (in-program hash instruction) domain tag.
 pub const DOMAIN_HASH_IR: u32 = 0x02;
 
+// ── SMT depth constants ─────────────────────────────────────────────────────
+
+/// Depth for per-column data SMTs (row-level key space, 2^32 keys).
+pub const COL_DATA_SMT_DEPTH: usize = 32;
+
+/// Depth for the column-level state SMT (`SMT_cols`).
+pub const COL_STATE_SMT_DEPTH: usize = 16;
+
+/// Depth for the table-level state SMT (`SMT_tables`).
+///
+/// 2^30 ≈ 1B tables, sufficient. 2^31 > BabyBear p, so depth 32 is unsafe.
+pub const TABLE_STATE_SMT_DEPTH: usize = 30;
+
 // ── NativeDigest ────────────────────────────────────────────────────────────
 
 /// 8 BabyBear field elements — canonical Poseidon2 output.
@@ -58,7 +71,7 @@ impl NativeDigest {
                 .expect("slice is exactly 4 bytes");
             let val = u32::from_le_bytes(chunk);
             if val >= BabyBear::ORDER_U32 {
-                return Err(TabulaError::EncodingError(format!(
+                return Err(TabulaError::FieldEncodingError(format!(
                     "non-canonical BabyBear at index {i}: {val} >= {}",
                     BabyBear::ORDER_U32
                 )));
@@ -98,17 +111,17 @@ pub fn decode_u64_limbs(limbs: &[BabyBear; 3]) -> Result<u64, TabulaError> {
     let x2 = limbs[2].as_canonical_u32();
 
     if x0 >= (1 << 30) {
-        return Err(TabulaError::EncodingError(format!(
+        return Err(TabulaError::FieldEncodingError(format!(
             "limb 0 out of range: {x0} >= 2^30"
         )));
     }
     if x1 >= (1 << 30) {
-        return Err(TabulaError::EncodingError(format!(
+        return Err(TabulaError::FieldEncodingError(format!(
             "limb 1 out of range: {x1} >= 2^30"
         )));
     }
     if x2 > 15 {
-        return Err(TabulaError::EncodingError(format!(
+        return Err(TabulaError::FieldEncodingError(format!(
             "limb 2 out of range: {x2} > 15"
         )));
     }

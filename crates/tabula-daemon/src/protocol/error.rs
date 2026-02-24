@@ -1,3 +1,5 @@
+//! API error types and HTTP error response conversion.
+
 use axum::{
     Json,
     http::StatusCode,
@@ -8,8 +10,11 @@ use serde_json::Value;
 
 use crate::service::error::{ErrorKind, ServiceError};
 
+/// Convenience alias for API handler results.
 pub type ApiResult<T> = Result<T, ApiError>;
 
+/// Machine-readable error codes returned in JSON error responses.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
@@ -40,6 +45,7 @@ pub enum ErrorCode {
     InternalError,
 }
 
+/// An HTTP API error with status code, error code, message, and optional details.
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
@@ -48,6 +54,7 @@ pub struct ApiError {
     details: Option<Value>,
 }
 
+#[allow(missing_docs)]
 impl ApiError {
     pub fn from_service(err: ServiceError) -> Self {
         let code = err.code();

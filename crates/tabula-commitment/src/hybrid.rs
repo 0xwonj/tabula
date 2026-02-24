@@ -13,23 +13,13 @@ use p3_field::PrimeCharacteristicRing;
 
 use tabula_core::{ColId, RowKey, TableId};
 
-use crate::field::{DOMAIN_COL, DOMAIN_LEAF, DOMAIN_SMT, DOMAIN_TABLE, NativeDigest};
+use crate::field::{
+    COL_DATA_SMT_DEPTH, COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_LEAF, DOMAIN_SMT, DOMAIN_TABLE,
+    NativeDigest, TABLE_STATE_SMT_DEPTH,
+};
 use crate::hasher::FieldHasher;
 use crate::smt::SparseMerkleTree;
 use crate::ssmc::{MergeTrace, SsmcEntry, SsmcList};
-
-// ── Constants ──────────────────────────────────────────────────────────────
-
-/// Depth for per-column data SMTs (row-level key space, 2^32 keys).
-const COL_DATA_SMT_DEPTH: usize = 32;
-
-/// Depth for the column-level state SMT (`SMT_cols`).
-const COL_STATE_SMT_DEPTH: usize = 16;
-
-/// Depth for the table-level state SMT (`SMT_tables`).
-///
-/// 2^30 ≈ 1B tables, sufficient. 2^31 > BabyBear p, so depth 32 is unsafe.
-const TABLE_STATE_SMT_DEPTH: usize = 30;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -131,21 +121,24 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
     /// Commit a column from pre-encoded entries (must be sorted by key).
     ///
     /// Returns the column state and its commitment digest.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TabulaError` if entries are not sorted by key (SSMC path).
     pub fn commit_column(
         &self,
         table: TableId,
         col: ColId,
         entries: Vec<(RowKey, Vec<BabyBear>)>,
-    ) -> (ColumnState<H>, NativeDigest) {
+    ) -> Result<(ColumnState<H>, NativeDigest), tabula_core::error::TabulaError> {
         if entries.len() <= self.threshold {
             let ssmc_entries: Vec<SsmcEntry> = entries
                 .into_iter()
                 .map(|(key, value)| SsmcEntry { key, value })
                 .collect();
-            let list = SsmcList::from_sorted(table, col, ssmc_entries)
-                .expect("entries must be sorted by key");
+            let list = SsmcList::from_sorted(table, col, ssmc_entries)?;
             let com = list.commit(&self.hasher).0;
-            (ColumnState::Ssmc(list), com)
+            Ok((ColumnState::Ssmc(list), com))
         } else {
             let mut tree =
                 SparseMerkleTree::new(self.hasher.clone(), COL_DATA_SMT_DEPTH, DOMAIN_SMT);
@@ -154,7 +147,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
                 tree.insert(key.0, leaf);
             }
             let root = tree.root();
-            (ColumnState::Smt(tree), root)
+            Ok((ColumnState::Smt(tree), root))
         }
     }
 
@@ -300,21 +293,27 @@ mod tests {
     #[test]
     fn strategy_dispatch_small_uses_ssmc() {
         let h = vc(5);
-        let (state, _) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]));
+        let (state, _) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]))
+            .unwrap();
         assert_eq!(state.strategy(), CommitmentStrategy::Ssmc);
     }
 
     #[test]
     fn strategy_dispatch_at_threshold_uses_ssmc() {
         let h = vc(3);
-        let (state, _) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2), (2, 3)]));
+        let (state, _) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2), (2, 3)]))
+            .unwrap();
         assert_eq!(state.strategy(), CommitmentStrategy::Ssmc);
     }
 
     #[test]
     fn strategy_dispatch_above_threshold_uses_smt() {
         let h = vc(2);
-        let (state, _) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2), (2, 3)]));
+        let (state, _) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2), (2, 3)]))
+            .unwrap();
         assert_eq!(state.strategy(), CommitmentStrategy::Smt);
     }
 
@@ -323,7 +322,9 @@ mod tests {
     #[test]
     fn leaf_digest_deterministic() {
         let h = vc(10);
-        let (_, com) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 42)]));
+        let (_, com) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 42)]))
+            .unwrap();
         let l1 = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Ssmc, &com);
         let l2 = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Ssmc, &com);
         assert_eq!(l1, l2);
@@ -343,7 +344,9 @@ mod tests {
     #[test]
     fn table_root_single_column() {
         let h = vc(10);
-        let (_, com) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 1)]));
+        let (_, com) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 1)]))
+            .unwrap();
         let leaf = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Ssmc, &com);
         let mut cols = BTreeMap::new();
         cols.insert(ColId(0), leaf);
@@ -356,8 +359,12 @@ mod tests {
     #[test]
     fn table_root_multiple_columns() {
         let h = vc(10);
-        let (_, com0) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 1)]));
-        let (_, com1) = h.commit_column(TableId(1), ColId(1), entries(&[(0, 2)]));
+        let (_, com0) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 1)]))
+            .unwrap();
+        let (_, com1) = h
+            .commit_column(TableId(1), ColId(1), entries(&[(0, 2)]))
+            .unwrap();
         let leaf0 = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Ssmc, &com0);
         let leaf1 = h.compute_leaf(TableId(1), ColId(1), CommitmentStrategy::Ssmc, &com1);
 
@@ -416,7 +423,9 @@ mod tests {
     #[test]
     fn apply_writes_ssmc_updates_commitment() {
         let h = vc(10);
-        let (state, com_old) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 1)]));
+        let (state, com_old) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 1)]))
+            .unwrap();
         let writes = vec![(RowKey(1), Some(val(2)))];
         let (new_state, com_new, trace) =
             h.apply_column_writes(&state, TableId(1), ColId(0), &writes);
@@ -429,7 +438,9 @@ mod tests {
     #[test]
     fn apply_writes_smt_updates_commitment() {
         let h = vc(1); // threshold=1 → 3 entries triggers SMT
-        let (state, com_old) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]));
+        let (state, com_old) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]))
+            .unwrap();
         assert_eq!(state.strategy(), CommitmentStrategy::Smt);
 
         let writes = vec![(RowKey(2), Some(val(3)))];
@@ -443,7 +454,9 @@ mod tests {
     #[test]
     fn apply_writes_delete_removes_entry() {
         let h = vc(10);
-        let (state, _) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]));
+        let (state, _) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]))
+            .unwrap();
         let writes = vec![(RowKey(0), None)]; // delete key 0
         let (new_state, _, trace) = h.apply_column_writes(&state, TableId(1), ColId(0), &writes);
         assert!(!new_state.is_empty());
@@ -458,7 +471,9 @@ mod tests {
     #[test]
     fn column_meta_fields_correct() {
         let h = vc(10);
-        let (state, com_old) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 1)]));
+        let (state, com_old) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 1)]))
+            .unwrap();
         let writes = vec![(RowKey(1), Some(val(2)))];
         let (new_state, com_new, _) = h.apply_column_writes(&state, TableId(1), ColId(0), &writes);
 
@@ -485,7 +500,7 @@ mod tests {
     #[test]
     fn empty_commitment_matches_empty_ssmc() {
         let h = vc(10);
-        let (state, com) = h.commit_column(TableId(1), ColId(0), entries(&[]));
+        let (state, com) = h.commit_column(TableId(1), ColId(0), entries(&[])).unwrap();
         assert!(state.is_empty());
         assert_eq!(com, h.empty_commitment(TableId(1), ColId(0)));
     }
@@ -504,7 +519,9 @@ mod tests {
     #[test]
     fn round_trip_ssmc_commit_then_apply_empty_writes() {
         let h = vc(10);
-        let (state, com) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]));
+        let (state, com) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]))
+            .unwrap();
         let (_, com_after, _) = h.apply_column_writes(&state, TableId(1), ColId(0), &[]);
         assert_eq!(com, com_after);
     }
@@ -512,7 +529,9 @@ mod tests {
     #[test]
     fn round_trip_smt_commit_then_apply_empty_writes() {
         let h = vc(1); // threshold=1 → 2 entries triggers SMT
-        let (state, com) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]));
+        let (state, com) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]))
+            .unwrap();
         assert_eq!(state.strategy(), CommitmentStrategy::Smt);
         let (_, com_after, _) = h.apply_column_writes(&state, TableId(1), ColId(0), &[]);
         assert_eq!(com, com_after);
@@ -525,8 +544,12 @@ mod tests {
         let h = vc(10);
 
         // Commit two columns in table 1.
-        let (_, com_t1c0) = h.commit_column(TableId(1), ColId(0), entries(&[(0, 10)]));
-        let (_, com_t1c1) = h.commit_column(TableId(1), ColId(1), entries(&[(0, 20)]));
+        let (_, com_t1c0) = h
+            .commit_column(TableId(1), ColId(0), entries(&[(0, 10)]))
+            .unwrap();
+        let (_, com_t1c1) = h
+            .commit_column(TableId(1), ColId(1), entries(&[(0, 20)]))
+            .unwrap();
 
         // Build ColumnMeta leaves.
         let leaf_t1c0 = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Ssmc, &com_t1c0);

@@ -24,9 +24,11 @@ pub struct TxExecutionOutput {
 
 /// Error produced by the interpreter, wrapping the underlying error with
 /// the instruction index at which execution failed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("instruction {instruction_index}: {error}")]
 pub struct InterpreterError {
     /// The underlying execution error.
+    #[source]
     pub error: TabulaError,
     /// Zero-based index of the instruction that failed.
     pub instruction_index: usize,

@@ -55,38 +55,46 @@ pub(super) fn register_resolved_program(
 }
 
 pub(super) fn map_driver_error(err: DriverError) -> ServiceError {
-    match err {
-        DriverError::ReadFile { path, source } => ServiceError::bad_request(
-            ErrorCode::FileIoError,
-            DriverError::ReadFile { path, source }.to_string(),
-        ),
-        DriverError::ParseJson { path, source } => ServiceError::bad_request(
-            ErrorCode::ParseError,
-            DriverError::ParseJson { path, source }.to_string(),
-        ),
+    match &err {
+        DriverError::ReadFile { .. } => {
+            ServiceError::bad_request(ErrorCode::FileIoError, err.to_string())
+        }
+        DriverError::ParseJson { .. } => {
+            ServiceError::bad_request(ErrorCode::ParseError, err.to_string())
+        }
         DriverError::Compile { diagnostics } => {
             ServiceError::unprocessable(ErrorCode::CompileError, "program compilation failed")
                 .with_details(json!({ "diagnostics": diagnostics }))
         }
-        DriverError::InvalidProgram { message } => {
-            ServiceError::unprocessable(ErrorCode::ProgramValidationError, message)
+        DriverError::InvalidProgram(source) => {
+            ServiceError::unprocessable(ErrorCode::ProgramValidationError, source.to_string())
         }
-        DriverError::MissingContractMetadata => ServiceError::unprocessable(
-            ErrorCode::ProgramSchemaError,
-            DriverError::MissingContractMetadata.to_string(),
-        ),
-        DriverError::ContractMetadataMismatch { message } => ServiceError::unprocessable(
-            ErrorCode::ProgramSchemaError,
-            DriverError::ContractMetadataMismatch { message }.to_string(),
-        ),
-        DriverError::InvalidState { message } => {
-            ServiceError::bad_request(ErrorCode::InvalidStateCell, message)
+        DriverError::MissingContractMetadata => {
+            ServiceError::unprocessable(ErrorCode::ProgramSchemaError, err.to_string())
         }
-        DriverError::InvalidBatch { message } => {
-            ServiceError::bad_request(ErrorCode::InvalidBatchTx, message)
+        DriverError::ContractMetadataMismatch(source) => {
+            ServiceError::unprocessable(ErrorCode::ProgramSchemaError, source.to_string())
         }
-        DriverError::Execution { message } => {
-            ServiceError::unprocessable(ErrorCode::ExecutionError, message)
+        DriverError::InvalidState(source) => {
+            ServiceError::bad_request(ErrorCode::InvalidStateCell, source.to_string())
+        }
+        DriverError::InvalidBatch(source) => {
+            ServiceError::bad_request(ErrorCode::InvalidBatchTx, source.to_string())
+        }
+        DriverError::Execution {
+            source,
+            instruction_index,
+            tx_index,
+        } => {
+            let mut svc_err =
+                ServiceError::unprocessable(ErrorCode::ExecutionError, source.to_string());
+            if instruction_index.is_some() || tx_index.is_some() {
+                svc_err = svc_err.with_details(json!({
+                    "instruction_index": instruction_index,
+                    "tx_index": tx_index,
+                }));
+            }
+            svc_err
         }
     }
 }
@@ -139,5 +147,44 @@ impl super::LocalEngine {
                 metadata_policy,
             })
             .map_err(map_driver_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_id_increments_sequentially() {
+        let counter = AtomicU64::new(0);
+        assert_eq!(next_id(&counter, "pfx"), "pfx_0000000000000001");
+        assert_eq!(next_id(&counter, "pfx"), "pfx_0000000000000002");
+        assert_eq!(next_id(&counter, "pfx"), "pfx_0000000000000003");
+    }
+
+    #[test]
+    fn next_id_uses_prefix() {
+        let counter = AtomicU64::new(0);
+        let id = next_id(&counter, "inst");
+        assert!(id.starts_with("inst_"));
+        let counter2 = AtomicU64::new(0);
+        let id2 = next_id(&counter2, "run");
+        assert!(id2.starts_with("run_"));
+    }
+
+    #[test]
+    fn read_guard_succeeds_on_clean_lock() {
+        let lock = RwLock::new(42u32);
+        let guard = read_guard(&lock, "test").expect("should succeed");
+        assert_eq!(*guard, 42);
+    }
+
+    #[test]
+    fn write_guard_succeeds_on_clean_lock() {
+        let lock = RwLock::new(42u32);
+        let mut guard = write_guard(&lock, "test").expect("should succeed");
+        *guard = 99;
+        drop(guard);
+        assert_eq!(*lock.read().unwrap(), 99);
     }
 }

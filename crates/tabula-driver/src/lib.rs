@@ -4,6 +4,8 @@
 //! CLI commands and daemon service should call this crate instead of
 //! duplicating semantic checks and execution pipeline assembly.
 
+#![warn(missing_docs)]
+
 mod compile;
 mod error;
 mod example;
@@ -190,8 +192,8 @@ mod tests {
             .downcast_ref::<DriverError>()
             .expect("expected DriverError for metadata-mismatch path");
         match driver_err {
-            DriverError::ContractMetadataMismatch { message } => {
-                assert!(message.contains("profile hash mismatch"));
+            DriverError::ContractMetadataMismatch(source) => {
+                assert!(source.to_string().contains("profile hash mismatch"));
             }
             other => panic!("unexpected driver error: {other}"),
         }

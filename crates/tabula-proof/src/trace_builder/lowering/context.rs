@@ -175,11 +175,12 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
                 if let Some(idx) = found {
                     return Ok(Some(idx));
                 }
-                Err(TabulaError::ConsistencyError(
-                    "no slot contains the required operand value (param/literal); \
+                Err(TabulaError::ProofError {
+                    phase: "trace_lowering",
+                    detail: "no slot contains the required operand value (param/literal); \
                      the current AIR requires all operands to come from slots"
                         .to_string(),
-                ))
+                })
             }
         }
     }
@@ -193,10 +194,10 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         is_null: bool,
     ) -> Result<(), TabulaError> {
         if slot >= MAX_SLOTS {
-            return Err(TabulaError::ConsistencyError(format!(
-                "slot {} >= MAX_SLOTS ({})",
-                slot, MAX_SLOTS
-            )));
+            return Err(TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!("slot {} >= MAX_SLOTS ({})", slot, MAX_SLOTS),
+            });
         }
         self.slots[slot] = Some(value);
         self.slot_fes[slot] = encoded;
@@ -250,11 +251,12 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
             .iter()
             .find(|e| e.tx_index == tx_index && e.effect_ordinal_in_tx == effect_ordinal)
             .copied()
-            .ok_or_else(|| {
-                TabulaError::ConsistencyError(format!(
+            .ok_or_else(|| TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!(
                     "no event found for tx={} effect_ordinal={} at instruction {}",
                     tx_index, effect_ordinal, instr_idx
-                ))
+                ),
             })
     }
 

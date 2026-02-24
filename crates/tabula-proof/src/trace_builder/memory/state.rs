@@ -49,10 +49,13 @@ where
         let new_val = new_opt.unwrap_or_else(|| vec![BabyBear::ZERO; W]);
 
         if old_val.len() != W || new_val.len() != W {
-            return Err(TabulaError::ConsistencyError(format!(
-                "state row width mismatch for ({:?}, {:?}) key {}",
-                column.table, column.col, key.0
-            )));
+            return Err(TabulaError::ProofError {
+                phase: "memory",
+                detail: format!(
+                    "state row width mismatch for ({:?}, {:?}) key {}",
+                    column.table, column.col, key.0
+                ),
+            });
         }
 
         rows.push(StateColumnRow {
@@ -88,8 +91,9 @@ where
             .iter()
             .map(|entry| (entry.key, entry.value.clone()))
             .collect()),
-        ColumnState::Smt(_) => Err(TabulaError::ConsistencyError(
-            "trace_builder currently supports SSMC-backed columns only".to_string(),
-        )),
+        ColumnState::Smt(_) => Err(TabulaError::ProofError {
+            phase: "memory",
+            detail: "trace_builder currently supports SSMC-backed columns only".to_string(),
+        }),
     }
 }

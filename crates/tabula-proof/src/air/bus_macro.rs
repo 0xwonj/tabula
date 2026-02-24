@@ -56,12 +56,8 @@ macro_rules! define_bus {
                     $( $field_name : $crate::define_bus!(@param_type $field_kind $( $field_param )? ), )+
                     mult: Self::Expr,
                 ) {
-                    #[allow(clippy::vec_init_then_push)]
-                    let values = {
-                        let mut v: Vec<<Self as p3_air::AirBuilder>::Expr> = Vec::new();
-                        $( $crate::define_bus!(@push v, $field_name, $field_kind $( $field_param )? ); )+
-                        v
-                    };
+                    let values: Vec<<Self as p3_air::AirBuilder>::Expr> =
+                        [$( $crate::define_bus!(@to_vec $field_name, $field_kind $( $field_param )? ) ),+].concat();
                     self.send($crate::air::interaction::AirInteraction {
                         values,
                         multiplicity: mult,
@@ -74,12 +70,8 @@ macro_rules! define_bus {
                     $( $field_name : $crate::define_bus!(@param_type $field_kind $( $field_param )? ), )+
                     mult: Self::Expr,
                 ) {
-                    #[allow(clippy::vec_init_then_push)]
-                    let values = {
-                        let mut v: Vec<<Self as p3_air::AirBuilder>::Expr> = Vec::new();
-                        $( $crate::define_bus!(@push v, $field_name, $field_kind $( $field_param )? ); )+
-                        v
-                    };
+                    let values: Vec<<Self as p3_air::AirBuilder>::Expr> =
+                        [$( $crate::define_bus!(@to_vec $field_name, $field_kind $( $field_param )? ) ),+].concat();
                     self.receive($crate::air::interaction::AirInteraction {
                         values,
                         multiplicity: mult,
@@ -119,12 +111,8 @@ macro_rules! define_bus {
                     $( $field_name : $crate::define_bus!(@param_type $field_kind $( $field_param )? ), )+
                     mult: Self::Expr,
                 ) {
-                    #[allow(clippy::vec_init_then_push)]
-                    let values = {
-                        let mut v: Vec<<Self as p3_air::AirBuilder>::Expr> = Vec::new();
-                        $( $crate::define_bus!(@push v, $field_name, $field_kind $( $field_param )? ); )+
-                        v
-                    };
+                    let values: Vec<<Self as p3_air::AirBuilder>::Expr> =
+                        [$( $crate::define_bus!(@to_vec $field_name, $field_kind $( $field_param )? ) ),+].concat();
                     self.send($crate::air::interaction::AirInteraction {
                         values,
                         multiplicity: mult,
@@ -143,21 +131,19 @@ macro_rules! define_bus {
     (@param_type u64limbs) => { &$crate::air::gadgets::U64Limbs<Self::Var> };
     (@param_type access_tuple) => { $crate::air::bus::AccessTupleExpr<Self::Expr> };
 
-    // ── @push: pack a field value into the Vec<Expr> ──
+    // ── @to_vec: convert a field value to Vec<Expr> ──
 
-    (@push $vec:ident, $f:ident, expr) => { $vec.push($f); };
-    (@push $vec:ident, $f:ident, var_arr $n:literal) => {
-        for _v in $f { $vec.push(_v.clone().into()); }
+    (@to_vec $f:ident, expr) => { vec![$f] };
+    (@to_vec $f:ident, var_arr $n:literal) => {
+        $f.iter().map(|_v| _v.clone().into()).collect::<Vec<_>>()
     };
-    (@push $vec:ident, $f:ident, var_slice) => {
-        for _v in $f { $vec.push(_v.clone().into()); }
+    (@to_vec $f:ident, var_slice) => {
+        $f.iter().map(|_v| _v.clone().into()).collect::<Vec<_>>()
     };
-    (@push $vec:ident, $f:ident, u64limbs) => {
-        $vec.push($f.limb0.clone().into());
-        $vec.push($f.limb1.clone().into());
-        $vec.push($f.limb2.clone().into());
+    (@to_vec $f:ident, u64limbs) => {
+        vec![$f.limb0.clone().into(), $f.limb1.clone().into(), $f.limb2.clone().into()]
     };
-    (@push $vec:ident, $f:ident, access_tuple) => {
-        $vec.extend($f.into_values());
+    (@to_vec $f:ident, access_tuple) => {
+        $f.into_values()
     };
 }

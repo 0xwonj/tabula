@@ -5,7 +5,7 @@
 
 pub mod error;
 mod event;
-#[cfg(any(feature = "mock", test))]
+#[cfg(any(feature = "test-utils", test))]
 pub mod mock;
 mod state;
 pub mod traits;

@@ -8,9 +8,11 @@
 //! - `linkage.rs`: operand-to-slot linkage constraints
 
 pub mod air;
+mod buses;
 pub mod columns;
 mod linkage;
 pub(crate) mod ops;
+mod range_checks;
 pub mod trace;
 
 pub use air::{ExecutionChip, HASH_INSTRUCTION_DOMAIN_TAG, HASH_INSTRUCTION_INPUT_COUNT};

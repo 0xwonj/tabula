@@ -177,7 +177,9 @@ fn build_old_column_states(
                 .remove(&(schema.id, col_def.id))
                 .unwrap_or_default();
             entries.sort_by_key(|(row, _)| *row);
-            let (state, _com) = vc.commit_column(schema.id, col_def.id, entries);
+            let (state, _com) = vc
+                .commit_column(schema.id, col_def.id, entries)
+                .map_err(|e| e.to_string())?;
             result.insert((schema.id, col_def.id), state);
         }
     }
