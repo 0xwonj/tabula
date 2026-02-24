@@ -13,6 +13,8 @@
 #[cfg(feature = "stark")]
 mod codec;
 #[cfg(feature = "stark")]
+mod column_meta;
+#[cfg(feature = "stark")]
 mod field;
 #[cfg(feature = "stark")]
 mod hasher;
@@ -24,9 +26,15 @@ mod poseidon;
 mod smt;
 #[cfg(feature = "stark")]
 mod ssmc;
+#[cfg(feature = "stark")]
+mod ssmc_merge;
+#[cfg(feature = "stark")]
+mod state_root;
 
 #[cfg(feature = "stark")]
 pub use codec::{BabyBearCodec, decode_trace, encode_trace, trace_width};
+#[cfg(feature = "stark")]
+pub use column_meta::{ColumnMeta, ColumnState, CommitmentStrategy};
 #[cfg(feature = "stark")]
 pub use field::{
     COL_DATA_SMT_DEPTH, COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_HASH_IR, DOMAIN_LEAF, DOMAIN_SMT,
@@ -36,10 +44,14 @@ pub use field::{
 #[cfg(feature = "stark")]
 pub use hasher::{FieldHasher, MockFieldHasher};
 #[cfg(feature = "stark")]
-pub use hybrid::{ColumnMeta, ColumnState, CommitmentStrategy, HybridVC};
+pub use hybrid::HybridVC;
 #[cfg(feature = "stark")]
 pub use poseidon::PoseidonHasher;
 #[cfg(feature = "stark")]
 pub use smt::{MerkleProof, SparseMerkleTree};
 #[cfg(feature = "stark")]
-pub use ssmc::{MergeSource, MergeStep, MergeTrace, SsmcCommitment, SsmcEntry, SsmcList};
+pub use ssmc::{SsmcCommitment, SsmcEntry, SsmcList};
+#[cfg(feature = "stark")]
+pub use ssmc_merge::{MergeSource, MergeStep, MergeTrace};
+#[cfg(feature = "stark")]
+pub use state_root::{compute_leaf, compute_state_root, compute_table_root};

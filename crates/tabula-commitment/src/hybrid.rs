@@ -3,84 +3,22 @@
 //! Dispatches between SSMC (hash chain, for small columns) and SMT (Merkle tree,
 //! for large columns) based on a configurable threshold. Provides primitives for:
 //! - Per-column commitment and update
-//! - Two-level state root computation (`SMT_cols` → `SMT_tables`)
+//! - Two-level state root computation (`SMT_cols` -> `SMT_tables`)
 //! - ColumnMeta leaf construction
 
 use std::collections::BTreeMap;
 
 use p3_baby_bear::BabyBear;
-use p3_field::PrimeCharacteristicRing;
 
 use tabula_core::{ColId, RowKey, TableId};
 
-use crate::field::{
-    COL_DATA_SMT_DEPTH, COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_LEAF, DOMAIN_SMT, DOMAIN_TABLE,
-    NativeDigest, TABLE_STATE_SMT_DEPTH,
-};
+use crate::column_meta::{ColumnState, CommitmentStrategy};
+use crate::field::{COL_DATA_SMT_DEPTH, DOMAIN_SMT, NativeDigest};
 use crate::hasher::FieldHasher;
 use crate::smt::SparseMerkleTree;
-use crate::ssmc::{MergeTrace, SsmcEntry, SsmcList};
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
-/// Strategy used for a column's commitment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CommitmentStrategy {
-    /// Small Sparse Map Commitment (hash chain). Used when entry count ≤ threshold.
-    Ssmc,
-    /// Sparse Merkle Tree. Used when entry count > threshold.
-    Smt,
-}
-
-/// Per-column state holding the underlying data structure.
-#[derive(Clone, Debug)]
-pub enum ColumnState<H: FieldHasher> {
-    /// SSMC-backed column (small).
-    Ssmc(SsmcList),
-    /// SMT-backed column (large).
-    Smt(SparseMerkleTree<H>),
-}
-
-impl<H: FieldHasher> ColumnState<H> {
-    /// Whether the column has zero entries.
-    pub fn is_empty(&self) -> bool {
-        match self {
-            ColumnState::Ssmc(list) => list.is_empty(),
-            ColumnState::Smt(tree) => tree.is_empty(),
-        }
-    }
-
-    /// Which strategy this column uses.
-    pub fn strategy(&self) -> CommitmentStrategy {
-        match self {
-            ColumnState::Ssmc(_) => CommitmentStrategy::Ssmc,
-            ColumnState::Smt(_) => CommitmentStrategy::Smt,
-        }
-    }
-}
-
-/// Metadata for a column's commitment transition during a batch.
-///
-/// Corresponds to the ColumnMeta table in the proof spec.
-#[derive(Clone, Debug)]
-pub struct ColumnMeta {
-    /// Table identifier.
-    pub table: TableId,
-    /// Column identifier.
-    pub col: ColId,
-    /// Commitment strategy used.
-    pub tag: CommitmentStrategy,
-    /// Commitment before the batch.
-    pub com_old: NativeDigest,
-    /// Commitment after the batch.
-    pub com_new: NativeDigest,
-    /// Column was empty before the batch.
-    pub is_empty_old: bool,
-    /// Column is empty after the batch.
-    pub is_empty_new: bool,
-    /// Column was modified in this batch.
-    pub is_touched: bool,
-}
+use crate::ssmc::{SsmcEntry, SsmcList};
+use crate::ssmc_merge::MergeTrace;
+use crate::state_root;
 
 // ── HybridVC ───────────────────────────────────────────────────────────────
 
@@ -97,7 +35,7 @@ pub struct HybridVC<H: FieldHasher> {
 impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
     /// Create a new hybrid VC.
     ///
-    /// Columns with ≤ `threshold` entries use SSMC; larger use SMT.
+    /// Columns with <= `threshold` entries use SSMC; larger use SMT.
     pub fn new(hasher: H, threshold: usize) -> Self {
         Self { hasher, threshold }
     }
@@ -204,10 +142,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
 
     /// Compute the ColumnMeta leaf digest.
     ///
-    /// Single-permutation compress:
-    /// `compress([0x10, t, c, tag, 0, 0, 0, 0], com[8])`
-    ///
-    /// The left half carries the domain tag + identity; the right half is the commitment.
+    /// Delegates to [`state_root::compute_leaf`].
     pub fn compute_leaf(
         &self,
         table: TableId,
@@ -215,56 +150,24 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
         tag: CommitmentStrategy,
         commitment: &NativeDigest,
     ) -> NativeDigest {
-        let tag_val: u32 = match tag {
-            CommitmentStrategy::Ssmc => 0,
-            CommitmentStrategy::Smt => 1,
-        };
-        let left = NativeDigest([
-            BabyBear::new(DOMAIN_LEAF),
-            BabyBear::new(table.0),
-            BabyBear::new(col.0 as u32),
-            BabyBear::new(tag_val),
-            BabyBear::ZERO,
-            BabyBear::ZERO,
-            BabyBear::ZERO,
-            BabyBear::ZERO,
-        ]);
-        self.hasher.compress(&left, commitment)
+        state_root::compute_leaf(&self.hasher, table, col, tag, commitment)
     }
 
     /// Build column-level SMT from column leaves.
     ///
-    /// `SMT_cols(depth=16, domain=DOMAIN_COL)`.
+    /// Delegates to [`state_root::compute_table_root`].
     pub fn compute_table_root(&self, col_leaves: &BTreeMap<ColId, NativeDigest>) -> NativeDigest {
-        let mut tree = SparseMerkleTree::new(self.hasher.clone(), COL_STATE_SMT_DEPTH, DOMAIN_COL);
-        for (&col, &leaf) in col_leaves {
-            tree.insert(col.0 as u64, leaf);
-        }
-        tree.root()
+        state_root::compute_table_root(&self.hasher, col_leaves)
     }
 
     /// Build table-level SMT from table roots.
     ///
-    /// `SMT_tables(depth=30, domain=DOMAIN_TABLE)`.
+    /// Delegates to [`state_root::compute_state_root`].
     pub fn compute_state_root(
         &self,
         table_roots: &BTreeMap<TableId, NativeDigest>,
     ) -> NativeDigest {
-        let mut tree =
-            SparseMerkleTree::new(self.hasher.clone(), TABLE_STATE_SMT_DEPTH, DOMAIN_TABLE);
-        let table_domain_size = 1u64 << TABLE_STATE_SMT_DEPTH;
-        for (&table, &root) in table_roots {
-            let table_key = table.0 as u64;
-            assert!(
-                table_key < table_domain_size,
-                "table id {} out of range for TABLE_STATE_SMT_DEPTH={} (max allowed: {})",
-                table.0,
-                TABLE_STATE_SMT_DEPTH,
-                table_domain_size - 1
-            );
-            tree.insert(table_key, root);
-        }
-        tree.root()
+        state_root::compute_state_root(&self.hasher, table_roots)
     }
 }
 
@@ -273,6 +176,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::column_meta::ColumnMeta;
     use crate::hasher::MockFieldHasher;
     use p3_baby_bear::BabyBear;
 
@@ -412,7 +316,7 @@ mod tests {
         let h = vc(10);
         let mut tables = BTreeMap::new();
         tables.insert(
-            TableId(1u32 << TABLE_STATE_SMT_DEPTH),
+            TableId(1u32 << crate::field::TABLE_STATE_SMT_DEPTH),
             NativeDigest([BabyBear::new(7); 8]),
         );
         let _ = h.compute_state_root(&tables);
@@ -437,7 +341,7 @@ mod tests {
 
     #[test]
     fn apply_writes_smt_updates_commitment() {
-        let h = vc(1); // threshold=1 → 3 entries triggers SMT
+        let h = vc(1); // threshold=1 -> 3 entries triggers SMT
         let (state, com_old) = h
             .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]))
             .unwrap();
@@ -528,7 +432,7 @@ mod tests {
 
     #[test]
     fn round_trip_smt_commit_then_apply_empty_writes() {
-        let h = vc(1); // threshold=1 → 2 entries triggers SMT
+        let h = vc(1); // threshold=1 -> 2 entries triggers SMT
         let (state, com) = h
             .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]))
             .unwrap();
