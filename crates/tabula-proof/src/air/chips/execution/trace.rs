@@ -18,8 +18,6 @@ use super::trace_witness::{
     set_opcode_selectors,
 };
 
-// Re-export limb utilities for backward compatibility — callers import from `trace::`.
-pub use super::trace_utils::{limbs_to_u64, u64_add_limbs, u64_sub_limbs, u64_to_limbs};
 
 /// Comparison sub-operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

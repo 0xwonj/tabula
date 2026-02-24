@@ -55,16 +55,35 @@ pub struct ServiceError {
 impl ServiceError {
     /// Core constructor — all factory methods delegate here.
     pub fn new(kind: ErrorKind, code: ErrorCode, message: impl Into<String>) -> Self {
-        Self { kind, code, message: message.into(), details: None }
+        Self {
+            kind,
+            code,
+            message: message.into(),
+            details: None,
+        }
     }
 
-    pub fn bad_request(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::BadRequest, code, msg) }
-    pub fn forbidden(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::Forbidden, code, msg) }
-    pub fn unprocessable(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::Unprocessable, code, msg) }
-    pub fn not_implemented(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::NotImplemented, code, msg) }
-    pub fn not_found(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::NotFound, code, msg) }
-    pub fn conflict(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::Conflict, code, msg) }
-    pub fn internal(code: ErrorCode, msg: impl Into<String>) -> Self { Self::new(ErrorKind::Internal, code, msg) }
+    pub fn bad_request(code: ErrorCode, msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::BadRequest, code, msg)
+    }
+    pub fn forbidden(code: ErrorCode, msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Forbidden, code, msg)
+    }
+    pub fn unprocessable(code: ErrorCode, msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Unprocessable, code, msg)
+    }
+    pub fn not_implemented(code: ErrorCode, msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::NotImplemented, code, msg)
+    }
+    pub fn not_found(code: ErrorCode, msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::NotFound, code, msg)
+    }
+    pub fn conflict(code: ErrorCode, msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Conflict, code, msg)
+    }
+    pub fn internal(code: ErrorCode, msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Internal, code, msg)
+    }
 
     pub fn with_details(mut self, details: Value) -> Self {
         self.details = Some(details);

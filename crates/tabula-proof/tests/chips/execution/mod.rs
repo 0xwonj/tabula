@@ -6,8 +6,9 @@ use tabula_proof::air::chips::execution::columns::{
     EXECUTION_STANDARD_WIDTH, ExecutionCols, execution_width,
 };
 use tabula_proof::air::chips::execution::trace::{
-    CmpOp, InstructionRecord, generate_execution_trace, limbs_to_u64, u64_to_limbs,
+    CmpOp, InstructionRecord, generate_execution_trace,
 };
+use tabula_proof::air::chips::execution::trace_utils::{limbs_to_u64, u64_to_limbs};
 use tabula_proof::air::{borrow_cols_mut, debug_check};
 
 use crate::common::builders::{

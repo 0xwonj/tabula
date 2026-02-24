@@ -111,7 +111,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
         match old_state {
             ColumnState::Ssmc(old_list) => {
                 let (new_list, com, trace) =
-                    SsmcList::merge(old_list, writes, table, col, &self.hasher);
+                    crate::ssmc_merge::merge(old_list, writes, table, col, &self.hasher);
                 (ColumnState::Ssmc(new_list), com.0, Some(trace))
             }
             ColumnState::Smt(old_tree) => {
@@ -140,9 +140,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
 
     // ── State root (two-level SMT) ────────────────────────────────────────
 
-    /// Compute the ColumnMeta leaf digest.
-    ///
-    /// Delegates to [`state_root::compute_leaf`].
+    /// Compute the ColumnMeta leaf digest for a single column commitment.
     pub fn compute_leaf(
         &self,
         table: TableId,
@@ -153,16 +151,12 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
         state_root::compute_leaf(&self.hasher, table, col, tag, commitment)
     }
 
-    /// Build column-level SMT from column leaves.
-    ///
-    /// Delegates to [`state_root::compute_table_root`].
+    /// Build a column-level SMT root from per-column leaf digests.
     pub fn compute_table_root(&self, col_leaves: &BTreeMap<ColId, NativeDigest>) -> NativeDigest {
         state_root::compute_table_root(&self.hasher, col_leaves)
     }
 
-    /// Build table-level SMT from table roots.
-    ///
-    /// Delegates to [`state_root::compute_state_root`].
+    /// Build the global state root from per-table SMT roots.
     pub fn compute_state_root(
         &self,
         table_roots: &BTreeMap<TableId, NativeDigest>,

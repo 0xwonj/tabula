@@ -12,7 +12,6 @@ pub struct InstructionBuilder {
     inner: InstructionRecord,
 }
 
-#[allow(dead_code)]
 impl InstructionBuilder {
     /// Start building a record with the given opcode; all other fields default.
     pub fn new(opcode: Opcode) -> Self {

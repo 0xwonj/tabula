@@ -35,9 +35,10 @@ pub use policy::{ContractCompatibilityPolicy, ContractValidationError};
 
 // Binding
 pub use binding::{
-    access_bus_field_names, apply_batch_binding_registry_v1, ApplyBatchField, DeferredBinding,
-    DeferredReasonCode, StatementBindingRegistry, StatementBindingStatus, APPLY_BATCH_FIELDS,
+    APPLY_BATCH_FIELDS, ApplyBatchField, DeferredBinding, DeferredReasonCode,
+    StatementBindingRegistry, StatementBindingStatus, access_bus_field_names,
+    apply_batch_binding_registry_v1,
 };
 
 // Rules
-pub use rules::{ContractRule, ContractRuleCode, CONTRACT_RULES_V1};
+pub use rules::{CONTRACT_RULES_V1, ContractRule, ContractRuleCode};

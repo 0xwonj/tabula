@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use crate::policy::ContractValidationError;
 use crate::STATEMENT_BINDING_VERSION_V1;
+use crate::policy::ContractValidationError;
 
 /// ApplyBatch statement fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

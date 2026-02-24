@@ -12,8 +12,7 @@ use tabula_core::{ColId, TableId};
 
 use crate::column_meta::CommitmentStrategy;
 use crate::field::{
-    COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_LEAF, DOMAIN_TABLE, NativeDigest,
-    TABLE_STATE_SMT_DEPTH,
+    COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_LEAF, DOMAIN_TABLE, NativeDigest, TABLE_STATE_SMT_DEPTH,
 };
 use crate::hasher::FieldHasher;
 use crate::smt::SparseMerkleTree;

@@ -127,8 +127,7 @@ pub(crate) fn run_deploy(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
         let state = match parse_state(&s.state_json.get()) {
             Ok(state) => state,
             Err(e) => {
-                s.set_diagnostics_text
-                    .set(format!("STATE JSON ERROR: {e}"));
+                s.set_diagnostics_text.set(format!("STATE JSON ERROR: {e}"));
                 s.append_history("deploy", false, format!("state parse failed: {e}"));
                 return;
             }
@@ -224,8 +223,7 @@ pub(crate) fn run_submit(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
         let batch = match parse_batch(&s.batch_json.get()) {
             Ok(batch) => batch,
             Err(e) => {
-                s.set_diagnostics_text
-                    .set(format!("BATCH JSON ERROR: {e}"));
+                s.set_diagnostics_text.set(format!("BATCH JSON ERROR: {e}"));
                 s.append_history("submit", false, format!("batch parse failed: {e}"));
                 return;
             }
@@ -259,8 +257,7 @@ pub(crate) fn run_submit(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                     s.set_last_run_id.set(Some(resp.run.run_id.clone()));
                     s.set_deployed_instance_version.set(version + 1);
 
-                    let state_after_str =
-                        pretty_json_value(&json!(resp.run.execution.state_after));
+                    let state_after_str = pretty_json_value(&json!(resp.run.execution.state_after));
 
                     let execution_blob = json!({
                         "tx_outcomes": resp.run.execution.tx_outcomes,
@@ -269,8 +266,7 @@ pub(crate) fn run_submit(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                         "read_set": resp.run.execution.read_set,
                         "write_set": resp.run.execution.write_set,
                     });
-                    s.set_execution_json
-                        .set(pretty_json_value(&execution_blob));
+                    s.set_execution_json.set(pretty_json_value(&execution_blob));
 
                     s.set_rw_diff_json.set(pretty_json_value(&json!({
                         "read_set": resp.run.execution.read_set,
@@ -352,9 +348,7 @@ pub(crate) fn run_submit(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
 
 // ── Load template ───────────────────────────────────────────────────
 
-pub(crate) fn load_template(
-    s: AppSignals,
-) -> impl Fn(&'static str) + Clone + 'static {
+pub(crate) fn load_template(s: AppSignals) -> impl Fn(&'static str) + Clone + 'static {
     move |id: &'static str| {
         if let Some(ws) = template_workspace(id) {
             s.set_program_source.set(ws.program_source);
@@ -433,24 +427,20 @@ pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                     .iter()
                     .map(|p| default_value_for_type(&format!("{:?}", p.value_type)))
                     .collect();
-                batch
-                    .transactions
-                    .push(crate::web::models::TxInput {
-                        tx_type: tx_def.id.0,
-                        params,
-                        sender: "01".repeat(32),
-                        nonce: next_nonce,
-                    });
-            }
-        } else {
-            batch
-                .transactions
-                .push(crate::web::models::TxInput {
-                    tx_type: 0,
-                    params: vec![CoreValue::U64(0)],
+                batch.transactions.push(crate::web::models::TxInput {
+                    tx_type: tx_def.id.0,
+                    params,
                     sender: "01".repeat(32),
                     nonce: next_nonce,
                 });
+            }
+        } else {
+            batch.transactions.push(crate::web::models::TxInput {
+                tx_type: 0,
+                params: vec![CoreValue::U64(0)],
+                sender: "01".repeat(32),
+                nonce: next_nonce,
+            });
         }
 
         s.set_batch_json.set(pretty_json_value(&json!(batch)));
@@ -460,9 +450,7 @@ pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
 
 // ── Export workspace ────────────────────────────────────────────────
 
-pub(crate) fn export_workspace(
-    s: AppSignals,
-) -> impl Fn(web_sys::MouseEvent) + Clone + 'static {
+pub(crate) fn export_workspace(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone + 'static {
     move |_| {
         let doc = crate::web::models::WorkspaceDoc {
             daemon_url: s.daemon_url.get(),

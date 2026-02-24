@@ -31,7 +31,7 @@ pub use chips::column_meta::{
 };
 pub use chips::execution::{
     CmpOp, HASH_INSTRUCTION_DOMAIN_TAG, HASH_INSTRUCTION_INPUT_COUNT, InstructionRecord, Opcode,
-    u64_to_limbs,
+    limbs_to_u64, u64_to_limbs,
 };
 pub use chips::inter_tx_order::{
     INTER_TX_ORDER_STANDARD_WIDTH, InterTxOrderChip, InterTxOrderCols, InterTxOrderRow,

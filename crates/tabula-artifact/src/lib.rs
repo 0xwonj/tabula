@@ -20,10 +20,10 @@ pub use error::ArtifactError;
 pub use program::ProgramArtifact;
 
 // State
-pub use state::{merge_output_state_cells, normalize_state, StateCell, StateFile};
+pub use state::{StateCell, StateFile, merge_output_state_cells, normalize_state};
 
 // Batch
-pub use batch::{parse_hex_32, BatchFile, TxInput};
+pub use batch::{BatchFile, TxInput, parse_hex_32};
 
 // Receipt
 pub use receipt::{ChipSummary, ExecutionReceipt, StarkProofSummary};

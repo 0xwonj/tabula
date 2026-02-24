@@ -7,7 +7,6 @@ use tabula_core::{ColId, RowKey, TableId};
 
 use crate::field::encode_u64_limbs;
 use crate::hasher::FieldHasher;
-use crate::ssmc_merge::MergeTrace;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -133,19 +132,6 @@ impl SsmcList {
         SsmcCommitment(hasher.hash_domain(domain, &input))
     }
 
-    /// 3-way merge: old list + write set -> new list + commitment + trace.
-    ///
-    /// Thin wrapper around [`crate::ssmc_merge::merge`].
-    /// `writes` is a sorted list of (key, Option<value>). `None` value = delete.
-    pub fn merge<H: FieldHasher<F = BabyBear>>(
-        old: &SsmcList,
-        writes: &[(RowKey, Option<Vec<BabyBear>>)],
-        table: TableId,
-        col: ColId,
-        hasher: &H,
-    ) -> (SsmcList, SsmcCommitment<H::Digest>, MergeTrace) {
-        crate::ssmc_merge::merge(old, writes, table, col, hasher)
-    }
 }
 
 #[cfg(test)]

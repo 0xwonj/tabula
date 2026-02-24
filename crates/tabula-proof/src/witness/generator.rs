@@ -9,9 +9,7 @@ use tabula_commitment::{
 };
 use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
-use tabula_core::{
-    ColId, ExecutionResult, OpKind, RowKey, TableId, TableSchema, ValueType,
-};
+use tabula_core::{ColId, ExecutionResult, OpKind, RowKey, TableId, TableSchema, ValueType};
 
 use super::encoding::{
     compute_state_root, encode_value, encode_value_with_null_flag, proof_column_commitment,

@@ -19,6 +19,5 @@ pub struct ContractRule {
 /// Rules required in schema v1.
 pub const CONTRACT_RULES_V1: [ContractRule; 1] = [ContractRule {
     code: ContractRuleCode::ComNewRequiresNonEmptyNewSet,
-    description:
-        "C6 Com_new multiplicity is gated by is_touched * (1 - is_empty_new) in ColumnMeta",
+    description: "C6 Com_new multiplicity is gated by is_touched * (1 - is_empty_new) in ColumnMeta",
 }];

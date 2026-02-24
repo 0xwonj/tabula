@@ -19,7 +19,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::debug::{
-    evaluate_chip_with_preprocessed_and_public_values, ChipRecord, RecordedInteraction,
+    ChipRecord, RecordedInteraction, evaluate_chip_with_preprocessed_and_public_values,
 };
 use super::interaction::{ColumnRef, Interaction, InteractionDirection, VirtualPairCol};
 
@@ -54,7 +54,8 @@ where
     let (baseline_sends, baseline_receives) = eval_baseline(air, main_width, preprocessed, &pvs);
 
     // Phase 2: Build initial descriptors from baseline constants.
-    let mut send_descriptors = build_initial_descriptors(&baseline_sends, InteractionDirection::Send);
+    let mut send_descriptors =
+        build_initial_descriptors(&baseline_sends, InteractionDirection::Send);
     let mut recv_descriptors =
         build_initial_descriptors(&baseline_receives, InteractionDirection::Receive);
 
@@ -81,7 +82,10 @@ fn eval_baseline<A>(
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
     pvs: &[BabyBear],
-) -> (Vec<RecordedInteraction<BabyBear>>, Vec<RecordedInteraction<BabyBear>>)
+) -> (
+    Vec<RecordedInteraction<BabyBear>>,
+    Vec<RecordedInteraction<BabyBear>>,
+)
 where
     A: for<'a> Air<super::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
@@ -210,7 +214,12 @@ fn probe_single_column<A>(
     let (probe_sends, probe_receives) = partition_per_row(&probe_record);
 
     update_descriptors(&probe_sends, baseline_sends, send_descriptors, col_ref);
-    update_descriptors(&probe_receives, baseline_receives, recv_descriptors, col_ref);
+    update_descriptors(
+        &probe_receives,
+        baseline_receives,
+        recv_descriptors,
+        col_ref,
+    );
 }
 
 /// Update interaction descriptors by comparing probed values against baseline.
@@ -256,7 +265,10 @@ fn update_descriptors(
 /// This returns only the first half (row 0) for each direction.
 fn partition_per_row(
     record: &ChipRecord<BabyBear>,
-) -> (Vec<RecordedInteraction<BabyBear>>, Vec<RecordedInteraction<BabyBear>>) {
+) -> (
+    Vec<RecordedInteraction<BabyBear>>,
+    Vec<RecordedInteraction<BabyBear>>,
+) {
     let mut sends = Vec::new();
     let mut receives = Vec::new();
     for interaction in &record.interactions {
