@@ -8,15 +8,18 @@ use std::collections::BTreeMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
 
-use tabula_artifact::{ProgramArtifact, StateFile, normalize_state};
+use tabula_artifact::{
+    InputRef, InstanceId, InstanceRecord, InstanceStatus, ListInstancesCommand, ListRunsCommand,
+    ProgramArtifact, ProgramId, ProgramInline, ProgramInputRef, ProgramRecord,
+    RegisterProgramCommand, RunId, RunRecord, StateFile, normalize_state,
+};
 
 use crate::protocol::error::ErrorCode;
+use crate::service::capabilities::{Capabilities, CapabilityClientKind, CapabilityInputMode};
 use crate::service::catalog::{CatalogEntry, ProgramCatalog, SINGLE_PROGRAM_ID};
-use crate::service::commands::*;
 use crate::service::error::{ServiceError, ServiceResult};
 use crate::service::io::FileAccessPolicy;
 use crate::service::receipt::{bytes_to_hex, hash_json, now_ms};
-use crate::service::types::*;
 
 use helpers::{next_id, read_guard, register_resolved_program, write_guard};
 
@@ -25,8 +28,8 @@ use helpers::{next_id, read_guard, register_resolved_program, write_guard};
 pub struct LocalEngine {
     pub(super) files: FileAccessPolicy,
     pub(super) catalog: Arc<RwLock<ProgramCatalog>>,
-    pub(super) instances: Arc<RwLock<BTreeMap<String, InstanceRecord>>>,
-    pub(super) runs: Arc<RwLock<BTreeMap<String, RunRecord>>>,
+    pub(super) instances: Arc<RwLock<BTreeMap<InstanceId, InstanceRecord>>>,
+    pub(super) runs: Arc<RwLock<BTreeMap<RunId, RunRecord>>>,
     instance_seq: Arc<AtomicU64>,
     run_seq: Arc<AtomicU64>,
 }
@@ -77,7 +80,7 @@ impl LocalEngine {
 
         let mut catalog = write_guard(&self.catalog, "catalog")?;
         let record = ProgramRecord {
-            program_id: SINGLE_PROGRAM_ID.to_string(),
+            program_id: ProgramId::new(SINGLE_PROGRAM_ID),
             label: req.label.filter(|label| !label.trim().is_empty()),
             created_at_ms: now_ms(),
             table_count: program.table_schemas.len(),
@@ -108,8 +111,11 @@ impl LocalEngine {
     }
 
     /// Create a stateful instance from a program and initial state.
-    pub fn create_instance(&self, req: CreateInstanceCommand) -> ServiceResult<InstanceRecord> {
-        let program = self.get_program_store(&req.program_id)?;
+    pub fn create_instance(
+        &self,
+        req: tabula_artifact::CreateInstanceCommand,
+    ) -> ServiceResult<InstanceRecord> {
+        let program = self.get_program_store(req.program_id.as_str())?;
         let initial_state = self
             .files
             .load_json_input::<StateFile>(&req.state, "state")?;
@@ -145,7 +151,7 @@ impl LocalEngine {
             .filter(|instance| {
                 req.program_id
                     .as_ref()
-                    .is_none_or(|program_id| &instance.program_id == program_id)
+                    .is_none_or(|program_id| instance.program_id == *program_id)
             })
             .cloned()
             .collect())
@@ -166,7 +172,7 @@ impl LocalEngine {
             .filter(|run| {
                 req.instance_id
                     .as_ref()
-                    .is_none_or(|instance_id| &run.instance_id == instance_id)
+                    .is_none_or(|instance_id| run.instance_id == *instance_id)
             })
             .cloned()
             .collect();
@@ -195,12 +201,12 @@ impl LocalEngine {
             })
     }
 
-    fn next_instance_id(&self) -> String {
-        next_id(&self.instance_seq, "inst")
+    fn next_instance_id(&self) -> InstanceId {
+        InstanceId::new(next_id(&self.instance_seq, "inst"))
     }
 
-    pub(super) fn next_run_id(&self) -> String {
-        next_id(&self.run_seq, "run")
+    pub(super) fn next_run_id(&self) -> RunId {
+        RunId::new(next_id(&self.run_seq, "run"))
     }
 }
 
@@ -214,7 +220,7 @@ mod tests {
     use std::env;
 
     use crate::service::ErrorKind;
-    use tabula_artifact::merge_output_state_cells;
+    use tabula_artifact::{RunStatus, SubmitRunCommand, merge_output_state_cells};
     use tabula_core::Value;
     use tabula_driver::transfer_example_bundle;
 
@@ -307,7 +313,7 @@ mod tests {
             .expect("register program");
 
         let created = engine
-            .create_instance(CreateInstanceCommand {
+            .create_instance(tabula_artifact::CreateInstanceCommand {
                 program_id: registered.program_id.clone(),
                 state: InputRef::inline(bundle.state.clone()),
                 label: Some("demo".to_string()),
@@ -342,7 +348,7 @@ mod tests {
         assert_eq!(submitted.instance_version_after, 1);
 
         let fetched = engine
-            .get_instance(&created.instance_id)
+            .get_instance(created.instance_id.as_str())
             .expect("fetch instance");
         assert_eq!(fetched.version, 1);
         assert_eq!(fetched.state_hash, submitted.state_hash_after);
@@ -354,7 +360,9 @@ mod tests {
         assert_eq!(value_at_row(&fetched.state, 1), Some(Value::U64(600)));
         assert_eq!(value_at_row(&fetched.state, 2), Some(Value::U64(350)));
 
-        let fetched_run = engine.get_run(&submitted.run_id).expect("fetch run");
+        let fetched_run = engine
+            .get_run(submitted.run_id.as_str())
+            .expect("fetch run");
         assert_eq!(fetched_run.run_id, submitted.run_id);
     }
 
@@ -371,7 +379,7 @@ mod tests {
             })
             .expect("register program");
         let created = engine
-            .create_instance(CreateInstanceCommand {
+            .create_instance(tabula_artifact::CreateInstanceCommand {
                 program_id: registered.program_id,
                 state: InputRef::inline(bundle.state),
                 label: None,
@@ -406,7 +414,7 @@ mod tests {
             })
             .expect("register program");
         let created = engine
-            .create_instance(CreateInstanceCommand {
+            .create_instance(tabula_artifact::CreateInstanceCommand {
                 program_id: registered.program_id,
                 state: InputRef::inline(bundle.state),
                 label: None,
@@ -424,7 +432,9 @@ mod tests {
             })
             .expect("submit run");
 
-        let verified = engine.verify_run(&submitted.run_id).expect("verify run");
+        let verified = engine
+            .verify_run(submitted.run_id.as_str())
+            .expect("verify run");
         assert!(verified.verified);
         assert!(matches!(verified.run.status, RunStatus::Verified));
         assert_eq!(verified.run.proof_verified, Some(true));

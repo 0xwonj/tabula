@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use serde::de::DeserializeOwned;
 
-use super::commands::InputRef;
+use tabula_artifact::InputRef;
+
 use super::error::{ServiceError, ServiceResult};
 use crate::protocol::error::ErrorCode;
 

@@ -1,11 +1,10 @@
 //! Batch execution pipeline — delegates to the driver's canonical pipeline.
 
-use tabula_artifact::{BatchFile, StateCell, StateFile};
+use tabula_artifact::{BatchFile, ExecutionSummary, StateCell, StateFile};
 use tabula_core::traits::Hasher;
 use tabula_driver::{BatchInput, RegisteredProgram};
 
 use super::error::{ServiceError, ServiceResult};
-use super::types::ExecutionResult;
 use crate::protocol::error::ErrorCode;
 
 /// Result of executing a registered batch.
@@ -17,14 +16,14 @@ pub struct ExecutedBatch {
 }
 
 impl ExecutedBatch {
-    pub fn into_execution_result(self, include_trace: bool) -> ExecutionResult {
+    pub fn into_execution_summary(self, include_trace: bool) -> ExecutionSummary {
         let trace = if include_trace {
             Some(self.inner.events.clone())
         } else {
             None
         };
 
-        ExecutionResult {
+        ExecutionSummary {
             tx_outcomes: self.inner.tx_outcomes,
             read_set: self
                 .inner

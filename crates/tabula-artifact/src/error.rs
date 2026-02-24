@@ -1,0 +1,56 @@
+//! Artifact-layer error types.
+
+use thiserror::Error;
+
+/// Artifact-layer error.
+#[derive(Debug, Error)]
+pub enum ArtifactError {
+    /// Invalid hex sender format.
+    #[error("invalid sender hex ({context}): {detail}")]
+    InvalidSenderHex {
+        /// What went wrong (e.g., "length", "encoding", "hex digit").
+        context: &'static str,
+        /// Human-readable detail.
+        detail: String,
+    },
+    /// Missing state value for a required cell.
+    #[error("state cell is missing value (table={table}, row={row}, col={col})")]
+    MissingStateValue {
+        /// Table id.
+        table: u32,
+        /// Row key.
+        row: u64,
+        /// Column id.
+        col: u16,
+    },
+    /// JSON file read error.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[error("failed to read {path}: {source}")]
+    ReadJson {
+        /// File path.
+        path: String,
+        /// Source error.
+        source: std::io::Error,
+    },
+    /// JSON file parse error.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[error("failed to parse {path}: {source}")]
+    ParseJson {
+        /// File path.
+        path: String,
+        /// Source error.
+        source: serde_json::Error,
+    },
+    /// JSON file write error.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[error("failed to write {path}: {source}")]
+    WriteJson {
+        /// File path.
+        path: String,
+        /// Source error.
+        source: std::io::Error,
+    },
+    /// JSON serialization error.
+    #[error("failed to encode JSON: {0}")]
+    EncodeJson(#[from] serde_json::Error),
+}

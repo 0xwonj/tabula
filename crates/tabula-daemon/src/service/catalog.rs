@@ -1,9 +1,9 @@
 //! Single-program registry.
 
+use tabula_artifact::{ProgramId, ProgramRecord};
 use tabula_driver::RegisteredProgram;
 
 use super::error::{ServiceError, ServiceResult};
-use super::types::{ProgramId, ProgramRecord};
 use crate::protocol::error::ErrorCode;
 
 pub const SINGLE_PROGRAM_ID: &str = "pgm_default";
@@ -26,7 +26,7 @@ impl ProgramCatalog {
     /// Allows re-registration for the deploy-once / re-deploy flow.
     pub fn replace_single(&mut self, entry: CatalogEntry) -> ProgramId {
         self.entry = Some(entry);
-        SINGLE_PROGRAM_ID.to_string()
+        ProgramId::new(SINGLE_PROGRAM_ID)
     }
 
     pub fn get(&self, program_id: &str) -> ServiceResult<CatalogEntry> {

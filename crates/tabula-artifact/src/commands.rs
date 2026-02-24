@@ -1,10 +1,10 @@
-//! Command types for service operations.
+//! Shared command types for service operations.
 
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use tabula_artifact::{BatchFile, ProgramArtifact, StateFile};
+use crate::{BatchFile, InstanceId, ProgramArtifact, ProgramId, RunId, StateFile};
 
 // ---------------------------------------------------------------------------
 // Input references
@@ -110,7 +110,7 @@ pub struct RegisterProgramCommand {
 #[serde(deny_unknown_fields)]
 pub struct GetProgramCommand {
     /// Program id.
-    pub program_id: String,
+    pub program_id: ProgramId,
 }
 
 /// List programs command.
@@ -123,7 +123,7 @@ pub struct ListProgramsCommand {}
 #[serde(deny_unknown_fields)]
 pub struct CreateInstanceCommand {
     /// Program id.
-    pub program_id: String,
+    pub program_id: ProgramId,
     /// Initial state.
     pub state: StateInputRef,
     /// Optional user label.
@@ -136,7 +136,7 @@ pub struct CreateInstanceCommand {
 #[serde(deny_unknown_fields)]
 pub struct GetInstanceCommand {
     /// Instance id.
-    pub instance_id: String,
+    pub instance_id: InstanceId,
 }
 
 /// List instances command.
@@ -145,7 +145,7 @@ pub struct GetInstanceCommand {
 pub struct ListInstancesCommand {
     /// Optional program filter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub program_id: Option<String>,
+    pub program_id: Option<ProgramId>,
 }
 
 /// Submit run command.
@@ -153,7 +153,7 @@ pub struct ListInstancesCommand {
 #[serde(deny_unknown_fields)]
 pub struct SubmitRunCommand {
     /// Target instance id.
-    pub instance_id: String,
+    pub instance_id: InstanceId,
     /// Batch input.
     pub batch: BatchInputRef,
     /// Include execution trace.
@@ -178,7 +178,7 @@ pub struct SubmitRunCommand {
 #[serde(deny_unknown_fields)]
 pub struct GetRunCommand {
     /// Run id.
-    pub run_id: String,
+    pub run_id: RunId,
 }
 
 /// List runs command.
@@ -187,7 +187,7 @@ pub struct GetRunCommand {
 pub struct ListRunsCommand {
     /// Optional instance filter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub instance_id: Option<String>,
+    pub instance_id: Option<InstanceId>,
     /// Optional result limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<usize>,
@@ -198,5 +198,5 @@ pub struct ListRunsCommand {
 #[serde(deny_unknown_fields)]
 pub struct VerifyRunCommand {
     /// Run id.
-    pub run_id: String,
+    pub run_id: RunId,
 }

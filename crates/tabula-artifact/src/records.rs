@@ -1,77 +1,81 @@
-//! Domain record types for the service layer.
+//! Shared domain record types for programs, instances, and runs.
+
+use std::borrow::Borrow;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use tabula_artifact::{ProgramArtifact, StarkProofSummary, StateCell, StateFile};
 use tabula_core::{EmittedEvent, ExecutionConsistencyStatus, ExecutionEvent, TxOutcome};
 
-// ---------------------------------------------------------------------------
-// Identifiers
-// ---------------------------------------------------------------------------
-
-/// Program identifier.
-pub type ProgramId = String;
-/// Stateful instance identifier.
-pub type InstanceId = String;
-/// Run identifier.
-pub type RunId = String;
-/// Execution receipt artifact type alias.
-pub type ExecutionReceipt = tabula_artifact::ExecutionReceipt;
+use crate::{ExecutionReceipt, ProgramArtifact, StarkProofSummary, StateCell, StateFile};
 
 // ---------------------------------------------------------------------------
-// Capabilities
+// Newtype identifiers
 // ---------------------------------------------------------------------------
 
-/// Capability input modes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CapabilityInputMode {
-    /// Inline mode.
-    Inline,
-    /// File mode.
-    File,
-    /// Artifact mode.
-    Artifact,
+macro_rules! define_id {
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        #[serde(transparent)]
+        pub struct $name(String);
+
+        impl $name {
+            /// Create a new identifier.
+            pub fn new(s: impl Into<String>) -> Self {
+                Self(s.into())
+            }
+
+            /// View as string slice.
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+
+        impl Borrow<str> for $name {
+            fn borrow(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl PartialEq<str> for $name {
+            fn eq(&self, other: &str) -> bool {
+                self.0 == other
+            }
+        }
+
+        impl PartialEq<&str> for $name {
+            fn eq(&self, other: &&str) -> bool {
+                self.0 == *other
+            }
+        }
+
+        impl PartialEq<String> for $name {
+            fn eq(&self, other: &String) -> bool {
+                self.0 == *other
+            }
+        }
+    };
 }
 
-/// Supported client kinds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CapabilityClientKind {
-    /// Web IDE client.
-    WebIde,
-    /// CLI client.
-    Cli,
-    /// Automation client.
-    Automation,
-}
-
-/// Service capabilities.
-#[derive(Debug, Clone, Serialize)]
-pub struct Capabilities {
-    /// Service role name.
-    pub service_role: &'static str,
-    /// Supported clients.
-    pub clients: Vec<CapabilityClientKind>,
-    /// Program registration support.
-    pub register_program: bool,
-    /// Stateful instance creation support.
-    pub create_instance: bool,
-    /// Run submission support.
-    pub submit_run: bool,
-    /// Proof generation support during run submission.
-    pub prove: bool,
-    /// Proof verification support for completed runs.
-    pub verify: bool,
-    /// Program listing/fetch support.
-    pub list_programs: bool,
-    /// Instance listing/fetch support.
-    pub list_instances: bool,
-    /// Run listing/fetch support.
-    pub run_history: bool,
-    /// Supported input modes.
-    pub input_modes: Vec<CapabilityInputMode>,
-}
+define_id!(
+    /// Program identifier.
+    ProgramId
+);
+define_id!(
+    /// Stateful instance identifier.
+    InstanceId
+);
+define_id!(
+    /// Run identifier.
+    RunId
+);
 
 // ---------------------------------------------------------------------------
 // Lifecycle enums
@@ -153,10 +157,10 @@ pub struct InstanceRecord {
     pub state: StateFile,
 }
 
-/// Execution result payload for one run.
+/// Execution summary payload for one run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExecutionResult {
+pub struct ExecutionSummary {
     /// Per-tx outcomes.
     pub tx_outcomes: Vec<TxOutcome>,
     /// Read set.
@@ -213,7 +217,7 @@ pub struct RunRecord {
     /// Statement hash for the run.
     pub statement_hash: String,
     /// Execution payload.
-    pub execution: ExecutionResult,
+    pub execution: ExecutionSummary,
     /// Optional proof payload (non-STARK receipt).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proof: Option<ExecutionReceipt>,

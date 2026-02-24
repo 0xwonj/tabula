@@ -5,13 +5,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use tabula_artifact::ProgramArtifact;
-use tabula_artifact::StateFile;
+use tabula_artifact::{ExecutionReceipt, ProgramArtifact, StateFile};
 use tabula_core::ExecutionConsistencyStatus;
 use tabula_driver::RegisteredProgram;
 
 use super::error::{ServiceError, ServiceResult};
-use super::types::ExecutionReceipt;
 use crate::protocol::error::ErrorCode;
 
 const RECEIPT_VERSION: u32 = 1;

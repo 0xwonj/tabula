@@ -5,24 +5,26 @@ use std::sync::RwLock;
 
 use serde_json::json;
 
-use tabula_artifact::{BatchFile, StateFile};
+use tabula_artifact::{
+    BatchFile, InstanceId, InstanceRecord, InstanceStatus, RunRecord, RunStatus, StateFile,
+    SubmitRunCommand,
+};
 use tabula_core::mock::MockHasher;
 
 use crate::protocol::error::ErrorCode;
 use crate::service::error::{ServiceError, ServiceResult};
 use crate::service::execute::execute_registered_batch;
 use crate::service::receipt::{build_receipt, now_ms, statement_components, verify_receipt};
-use crate::service::types::*;
 
 use super::helpers::write_guard;
 
 impl super::LocalEngine {
     /// Submit a batch run against an instance.
-    pub fn submit_run(&self, req: super::SubmitRunCommand) -> ServiceResult<RunRecord> {
-        let snapshot = self.get_instance_record(&req.instance_id)?;
+    pub fn submit_run(&self, req: SubmitRunCommand) -> ServiceResult<RunRecord> {
+        let snapshot = self.get_instance_record(req.instance_id.as_str())?;
         check_version(&snapshot, req.expected_instance_version)?;
 
-        let program = self.get_program_store(&snapshot.program_id)?;
+        let program = self.get_program_store(snapshot.program_id.as_str())?;
         let batch_file = self
             .files
             .load_json_input::<BatchFile>(&req.batch, "batch")?;
@@ -70,7 +72,7 @@ impl super::LocalEngine {
             }
         };
 
-        let execution = executed.clone().into_execution_result(req.include_trace);
+        let execution = executed.clone().into_execution_summary(req.include_trace);
 
         let components = statement_components(
             &executed.artifact,
@@ -211,7 +213,7 @@ fn check_version(instance: &InstanceRecord, expected: Option<u64>) -> ServiceRes
             ),
         )
         .with_details(json!({
-            "instance_id": instance.instance_id,
+            "instance_id": instance.instance_id.as_str(),
             "expected_version": expected,
             "actual_version": instance.version,
         })));
@@ -220,15 +222,15 @@ fn check_version(instance: &InstanceRecord, expected: Option<u64>) -> ServiceRes
 }
 
 fn commit_instance(
-    instances: &RwLock<BTreeMap<String, InstanceRecord>>,
-    instance_id: &str,
+    instances: &RwLock<BTreeMap<InstanceId, InstanceRecord>>,
+    instance_id: &InstanceId,
     version_before: u64,
     state_after: StateFile,
     state_hash_after: String,
     updated_at_ms: u64,
 ) -> ServiceResult<(u64, String)> {
     let mut guard = write_guard(instances, "instance")?;
-    let live = guard.get_mut(instance_id).ok_or_else(|| {
+    let live = guard.get_mut(instance_id.as_str()).ok_or_else(|| {
         ServiceError::not_found(
             ErrorCode::InstanceNotFound,
             format!("instance not found: {instance_id}"),
@@ -244,7 +246,7 @@ fn commit_instance(
             ),
         )
         .with_details(json!({
-            "instance_id": instance_id,
+            "instance_id": instance_id.as_str(),
             "expected_version": version_before,
             "actual_version": live.version,
         })));

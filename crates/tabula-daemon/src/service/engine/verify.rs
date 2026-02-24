@@ -1,10 +1,11 @@
 //! Run verification logic.
 
+use tabula_artifact::{RunRecord, RunStatus, VerifyOutcome};
+
 use crate::protocol::error::ErrorCode;
 use crate::service::error::{ServiceError, ServiceResult};
 use crate::service::receipt::verify_receipt;
 use crate::service::receipt::{self, now_ms};
-use crate::service::types::*;
 
 use super::helpers::write_guard;
 
