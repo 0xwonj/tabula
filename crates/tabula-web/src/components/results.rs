@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use crate::web::models::{StarkProofSummary, VerifyReport};
+use crate::models::{StarkProofSummary, VerifyReport};
 
 /// Tab button for the bottom result panel.
 pub(crate) fn tab_button(

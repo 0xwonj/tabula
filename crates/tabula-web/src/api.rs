@@ -2,7 +2,7 @@ use gloo_net::http::Request;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::web::models::{
+use crate::models::{
     BatchFile, CapabilitiesResponse, CreateInstanceResponse, DaemonErrorEnvelope, HealthResponse,
     RegisterProgramResponse, StateFile, SubmitRunResponse, VerifyRunResponse,
 };

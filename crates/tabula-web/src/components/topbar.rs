@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use crate::web::app_state::AppSignals;
+use crate::state::AppSignals;
 
 #[component]
 pub(crate) fn Topbar(
@@ -10,7 +10,7 @@ pub(crate) fn Topbar(
     connect_daemon: impl Fn(web_sys::MouseEvent) + Clone + 'static,
 ) -> impl IntoView {
     view! {
-        <header class="topbar glass">
+        <header class="topbar">
             <div class="brand">
                 <span class="kicker">"Tabula"</span>
                 <h1>"Playground"</h1>

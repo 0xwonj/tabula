@@ -14,11 +14,11 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 
-use crate::web::api::ApiClient;
-use crate::web::app_state::AppSignals;
-use crate::web::models::{BatchFile, ProgramArtifact, StateCell, StateFile, VerifyReport};
-use crate::web::templates::template_workspace;
-use crate::web::utils::{
+use crate::api::ApiClient;
+use crate::models::{BatchFile, ProgramArtifact, StateCell, StateFile, VerifyReport};
+use crate::state::AppSignals;
+use crate::templates::template_workspace;
+use crate::utils::{
     default_value_for_type, format_api_err, opt_token, parse_batch, parse_state, pretty_json_value,
 };
 
@@ -302,7 +302,7 @@ pub(crate) fn run_submit(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                             },
                             statement_hash: Some(stark.statement_hash.clone()),
                             expected_statement_hash: None,
-                            checked_at_ms: crate::web::storage::now_ms(),
+                            checked_at_ms: crate::storage::now_ms(),
                             raw: Some(json!(stark)),
                         };
                         s.set_verify_result_json
@@ -427,7 +427,7 @@ pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                     .iter()
                     .map(|p| default_value_for_type(&format!("{:?}", p.value_type)))
                     .collect();
-                batch.transactions.push(crate::web::models::TxInput {
+                batch.transactions.push(crate::models::TxInput {
                     tx_type: tx_def.id.0,
                     params,
                     sender: "01".repeat(32),
@@ -435,7 +435,7 @@ pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                 });
             }
         } else {
-            batch.transactions.push(crate::web::models::TxInput {
+            batch.transactions.push(crate::models::TxInput {
                 tx_type: 0,
                 params: vec![CoreValue::U64(0)],
                 sender: "01".repeat(32),
@@ -452,7 +452,7 @@ pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
 
 pub(crate) fn export_workspace(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone + 'static {
     move |_| {
-        let doc = crate::web::models::WorkspaceDoc {
+        let doc = crate::models::WorkspaceDoc {
             daemon_url: s.daemon_url.get(),
             auth_token: s.auth_token.get(),
             program_source: s.program_source.get(),
@@ -465,7 +465,7 @@ pub(crate) fn export_workspace(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + 
 
         match serde_json::to_string_pretty(&doc) {
             Ok(payload) => {
-                match crate::web::storage::export_text_file("tabula-workspace.json", &payload) {
+                match crate::storage::export_text_file("tabula-workspace.json", &payload) {
                     Ok(()) => s.set_status_line.set("Workspace exported".to_string()),
                     Err(e) => s.set_status_line.set(format!("Export failed: {e}")),
                 }
@@ -486,7 +486,7 @@ pub(crate) fn export_proof(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clon
             return;
         }
 
-        match crate::web::storage::export_text_file("tabula-proof.json", &data) {
+        match crate::storage::export_text_file("tabula-proof.json", &data) {
             Ok(()) => s.set_status_line.set("Proof artifact exported".to_string()),
             Err(e) => s.set_status_line.set(format!("Proof export failed: {e}")),
         }
@@ -500,7 +500,7 @@ pub(crate) fn import_workspace_text(
 ) -> impl Fn(web_sys::MouseEvent) + Clone + 'static {
     move |_| {
         let payload = s.workspace_import_json.get();
-        match serde_json::from_str::<crate::web::models::WorkspaceDoc>(&payload) {
+        match serde_json::from_str::<crate::models::WorkspaceDoc>(&payload) {
             Ok(ws) => {
                 s.set_daemon_url.set(ws.daemon_url);
                 s.set_auth_token.set(ws.auth_token);

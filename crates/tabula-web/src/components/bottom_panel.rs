@@ -2,13 +2,13 @@
 
 use leptos::prelude::*;
 
-use crate::web::app_state::AppSignals;
-use crate::web::components::results::{render_proof_display, tab_button};
+use crate::components::results::{render_proof_display, tab_button};
+use crate::state::AppSignals;
 
 #[component]
 pub(crate) fn BottomPanel(s: AppSignals) -> impl IntoView {
     view! {
-        <section class="panel glass bottom-panel reveal-delay-3">
+        <section class="panel bottom-panel reveal-delay-3">
             <div class="tab-row">
                 {tab_button(s.active_tab, s.set_active_tab, "diagnostics", "Diagnostics")}
                 {tab_button(s.active_tab, s.set_active_tab, "execution", "Execution")}

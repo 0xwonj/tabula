@@ -5,8 +5,8 @@
 use serde_json::Value as JsonValue;
 use tabula_core::Value as CoreValue;
 
-use crate::web::api::ApiClientError;
-use crate::web::models::{BatchFile, StateFile};
+use crate::api::ApiClientError;
+use crate::models::{BatchFile, StateFile};
 
 pub(crate) fn parse_state(raw: &str) -> Result<StateFile, String> {
     serde_json::from_str::<StateFile>(raw).map_err(|e| e.to_string())

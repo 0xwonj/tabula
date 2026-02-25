@@ -1,6 +1,6 @@
 use tabula_core::Value as CoreValue;
 
-use crate::web::models::{BatchFile, StateCell, StateFile, TxInput, WorkspaceDoc};
+use crate::models::{BatchFile, StateCell, StateFile, TxInput, WorkspaceDoc};
 
 pub struct ScenarioTemplate {
     pub id: &'static str,

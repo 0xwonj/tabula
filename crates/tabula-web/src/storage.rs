@@ -1,7 +1,7 @@
 use wasm_bindgen::JsCast;
 use web_sys::{Blob, BlobPropertyBag, HtmlAnchorElement, Url};
 
-use crate::web::models::WorkspaceDoc;
+use crate::models::WorkspaceDoc;
 
 const STORAGE_KEY: &str = "tabula.web_ide.workspace.v1";
 

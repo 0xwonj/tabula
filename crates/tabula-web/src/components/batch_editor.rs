@@ -6,8 +6,8 @@ use leptos::prelude::*;
 use serde_json::json;
 use tabula_core::Value as CoreValue;
 
-use crate::web::models::{BatchFile, ProgramArtifact};
-use crate::web::utils::{
+use crate::models::{BatchFile, ProgramArtifact};
+use crate::utils::{
     format_value, parse_batch, parse_value_input, pretty_json_inline, pretty_json_value,
 };
 

@@ -6,10 +6,10 @@
 
 use leptos::prelude::*;
 
-use crate::web::models::{
+use crate::models::{
     HealthResponse, ProgramArtifact, RunRecord, StarkProofSummary, VerifyReport, WorkspaceDoc,
 };
-use crate::web::storage;
+use crate::storage;
 
 /// All reactive signals used by the App component, grouped by concern.
 #[derive(Clone, Copy)]

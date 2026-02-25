@@ -4,24 +4,29 @@ use std::rc::Rc;
 use gloo_file::callbacks::FileReader;
 use leptos::{html, prelude::*};
 
-use crate::web::app_state::AppSignals;
-use crate::web::components::bottom_panel::BottomPanel;
-use crate::web::components::run_history::RunHistory;
-use crate::web::components::settings_drawer::SettingsDrawer;
-use crate::web::components::topbar::Topbar;
-use crate::web::components::workspace_panels::WorkspacePanels;
-use crate::web::handlers;
-use crate::web::storage;
-use crate::web::templates::default_workspace;
+use crate::components::bottom_panel::BottomPanel;
+use crate::components::run_history::RunHistory;
+use crate::components::settings_drawer::SettingsDrawer;
+use crate::components::topbar::Topbar;
+use crate::components::workspace_panels::WorkspacePanels;
+use crate::handlers;
+use crate::state::AppSignals;
+use crate::storage;
+use crate::templates::default_workspace;
 
+/// The interactive playground page (IDE).
+///
+/// All reactive signals are scoped to this page via `provide_context`.
+/// Child components access them through `use_context::<AppSignals>()`.
 #[component]
-pub fn App() -> impl IntoView {
+pub fn PlaygroundPage() -> impl IntoView {
     let mut initial = storage::load_workspace().unwrap_or_else(default_workspace);
     if initial.program_source.trim().is_empty() {
         initial = default_workspace();
     }
 
     let s = AppSignals::new(initial);
+    provide_context(s);
 
     // File reader holders for async file imports.
     let proof_reader: Rc<RefCell<Option<FileReader>>> = Rc::new(RefCell::new(None));

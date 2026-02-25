@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use crate::web::app_state::AppSignals;
+use crate::state::AppSignals;
 
 #[component]
 pub(crate) fn SettingsDrawer(
@@ -15,7 +15,7 @@ pub(crate) fn SettingsDrawer(
 ) -> impl IntoView {
     view! {
         <section
-            class="settings-drawer glass reveal-delay-1"
+            class="settings-drawer reveal-delay-1"
             style=move || if s.show_settings.get() { "" } else { "display:none" }
         >
             <div class="settings-grid">

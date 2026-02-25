@@ -2,10 +2,10 @@
 
 use leptos::prelude::*;
 
-use crate::web::app_state::AppSignals;
-use crate::web::components::batch_editor::render_batch_editor;
-use crate::web::components::state_editor::render_state_editor;
-use crate::web::templates::built_in_templates;
+use crate::components::batch_editor::render_batch_editor;
+use crate::components::state_editor::render_state_editor;
+use crate::state::AppSignals;
+use crate::templates::built_in_templates;
 
 #[component]
 pub(crate) fn WorkspacePanels(
@@ -20,7 +20,7 @@ pub(crate) fn WorkspacePanels(
     view! {
         <section class="workspace-grid">
             // Left panel: Program + Actions + Templates
-            <div class="panel glass left-panel reveal-delay-1">
+            <div class="panel left-panel reveal-delay-1">
                 <div class="panel-head">
                     <h2>"Program"</h2>
                     <small class="muted">"Tabula DSL"</small>
@@ -63,7 +63,7 @@ pub(crate) fn WorkspacePanels(
             </div>
 
             // Right panel: State + Tx Builder
-            <div class="panel glass right-panel reveal-delay-2">
+            <div class="panel right-panel reveal-delay-2">
                 // State Tables section.
                 <div class="panel-head inline">
                     <h2>"State"</h2>

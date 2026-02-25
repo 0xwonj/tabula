@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use crate::web::app_state::AppSignals;
+use crate::state::AppSignals;
 
 #[component]
 pub(crate) fn RunHistory(s: AppSignals) -> impl IntoView {

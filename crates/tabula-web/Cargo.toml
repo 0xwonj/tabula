@@ -1,5 +1,5 @@
 [package]
-name = "tabula-web-ide"
+name = "tabula-web"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -13,7 +13,8 @@ gloo-file = "0.3"
 gloo-net = "0.6"
 hex = "0.4"
 js-sys = "0.3"
-leptos = { version = "0.7", features = ["csr"] }
+leptos = { version = "0.8", features = ["csr"] }
+leptos_router = "0.8"
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -33,6 +34,7 @@ web-sys = { version = "0.3", features = [
     "HtmlInputElement",
     "HtmlTextAreaElement",
     "KeyboardEvent",
+    "MediaQueryList",
     "Storage",
     "Url",
     "Window",
