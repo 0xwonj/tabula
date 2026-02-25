@@ -2,14 +2,14 @@ use leptos::prelude::*;
 use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::path;
 
-use crate::layout::nav::SiteNav;
+use crate::layout::nav::{self, SiteNav};
 use crate::pages::home::HomePage;
 use crate::pages::playground::PlaygroundPage;
 
 /// Root application component with client-side routing.
 #[component]
 pub fn App() -> impl IntoView {
-    let base = option_env!("BASE_URL").unwrap_or_default();
+    let base = nav::base_url();
 
     view! {
         <Router base=base>

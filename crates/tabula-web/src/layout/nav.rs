@@ -32,9 +32,15 @@ fn apply_theme(dark: bool) {
     }
 }
 
-/// Base URL prefix (e.g. `/tabula` on GitHub Pages, empty for local dev).
-pub fn base_url() -> &'static str {
-    option_env!("BASE_URL").unwrap_or_default()
+/// Base URL prefix read from Trunk's injected `<base data-trunk-public-url>` tag.
+/// Returns e.g. `/tabula` on GitHub Pages, empty string for local dev.
+pub fn base_url() -> String {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.query_selector("base[data-trunk-public-url]").ok().flatten())
+        .and_then(|el| el.get_attribute("href"))
+        .map(|h| h.trim_end_matches('/').to_string())
+        .unwrap_or_default()
 }
 
 /// Resolve an asset path against the base URL.
