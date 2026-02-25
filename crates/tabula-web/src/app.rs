@@ -9,8 +9,10 @@ use crate::pages::playground::PlaygroundPage;
 /// Root application component with client-side routing.
 #[component]
 pub fn App() -> impl IntoView {
+    let base = option_env!("BASE_URL").unwrap_or_default();
+
     view! {
-        <Router>
+        <Router base=base>
             <SiteNav />
             <main class="site-main">
                 <Routes fallback=|| view! { <NotFound /> }>

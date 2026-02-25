@@ -32,6 +32,11 @@ fn apply_theme(dark: bool) {
     }
 }
 
+fn docs_href() -> String {
+    let base = option_env!("BASE_URL").unwrap_or_default();
+    format!("{base}/docs")
+}
+
 /// Minimal site-wide navigation bar.
 #[component]
 pub fn SiteNav() -> impl IntoView {
@@ -45,7 +50,7 @@ pub fn SiteNav() -> impl IntoView {
         <nav class="site-nav">
             <A href="/" attr:class="nav-brand">"tabula"</A>
             <div class="nav-links">
-                <a href="/docs" class="nav-link">"Docs"</a>
+                <a href=docs_href() class="nav-link">"Docs"</a>
                 <A href="/playground" attr:class="nav-link">"Playground"</A>
                 <button class="nav-theme-btn" on:click=toggle title="Toggle theme">
                     {move || if is_dark.get() { "\u{2600}" } else { "\u{263E}" }}

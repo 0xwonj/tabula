@@ -29,8 +29,10 @@ jobs:
         with:
           mdbook-version: 'latest'
       - name: Build web
-        run: trunk build --release
+        run: trunk build --release --public-url /${{ github.event.repository.name }}/
         working-directory: crates/tabula-web
+        env:
+          BASE_URL: /${{ github.event.repository.name }}
       - name: Build book
         run: mdbook build
         working-directory: book
