@@ -32,12 +32,12 @@ fn apply_theme(dark: bool) {
     }
 }
 
-/// Base URL prefix read from Trunk's injected `<base data-trunk-public-url>` tag.
+/// Base URL prefix read from Trunk's injected `<base href="...">` tag.
 /// Returns e.g. `/tabula` on GitHub Pages, empty string for local dev.
 pub fn base_url() -> String {
     web_sys::window()
         .and_then(|w| w.document())
-        .and_then(|d| d.query_selector("base[data-trunk-public-url]").ok().flatten())
+        .and_then(|d| d.query_selector("base[href]").ok().flatten())
         .and_then(|el| el.get_attribute("href"))
         .map(|h| h.trim_end_matches('/').to_string())
         .unwrap_or_default()
