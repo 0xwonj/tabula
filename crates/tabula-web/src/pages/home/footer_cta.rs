@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos_router::components::A;
 
-use crate::layout::nav::docs_href;
+use crate::layout::nav::{app_href, docs_href};
 
 /// Closing CTA section with centered heading, feature summary, and links.
 #[component]
@@ -17,7 +17,7 @@ pub fn FooterCta() -> impl IntoView {
                 <span class="feature">"O(accesses) memory consistency"</span>
             </div>
             <div class="cta-links">
-                <A href="/playground" attr:class="action filled">"Playground"</A>
+                <A href=app_href("/playground") attr:class="action filled">"Playground"</A>
                 <a href=docs_href() class="action ghost">"Documentation"</a>
             </div>
         </section>

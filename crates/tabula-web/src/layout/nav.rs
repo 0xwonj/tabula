@@ -32,27 +32,26 @@ fn apply_theme(dark: bool) {
     }
 }
 
-/// Base URL prefix read from Trunk's injected `<base href="...">` tag.
+/// Base URL prefix read from Trunk's `<base href="...">` tag at runtime.
 /// Returns e.g. `/tabula` on GitHub Pages, empty string for local dev.
 pub fn base_url() -> String {
     web_sys::window()
         .and_then(|w| w.document())
-        .and_then(|d| d.query_selector("base[href]").ok().flatten())
+        .and_then(|d| d.query_selector("base").ok().flatten())
         .and_then(|el| el.get_attribute("href"))
         .map(|h| h.trim_end_matches('/').to_string())
         .unwrap_or_default()
 }
 
-/// Resolve an asset path against the base URL.
-pub fn asset_href(path: &str) -> String {
-    let base = base_url();
-    format!("{base}/{path}")
+/// Internal SPA link — prepends the base so the Router's click handler
+/// recognises the path and performs client-side navigation.
+pub fn app_href(path: &str) -> String {
+    format!("{}{path}", base_url())
 }
 
-/// Link to the mdBook documentation (static, outside SPA).
+/// Link to the mdBook documentation (static site, not SPA).
 pub fn docs_href() -> String {
-    let base = base_url();
-    format!("{base}/docs")
+    format!("{}/docs", base_url())
 }
 
 /// Minimal site-wide navigation bar.
@@ -66,14 +65,14 @@ pub fn SiteNav() -> impl IntoView {
 
     view! {
         <nav class="site-nav">
-            <A href="/" attr:class="nav-brand">
-                <img class="nav-logo nav-logo-dark" src=asset_href("logo-dark.svg") alt="" width="16" height="16"/>
-                <img class="nav-logo nav-logo-light" src=asset_href("logo-light.svg") alt="" width="16" height="16"/>
+            <A href=app_href("/") attr:class="nav-brand">
+                <img class="nav-logo nav-logo-dark" src="/logo-dark.svg" alt="" width="16" height="16"/>
+                <img class="nav-logo nav-logo-light" src="/logo-light.svg" alt="" width="16" height="16"/>
                 "tabula"
             </A>
             <div class="nav-links">
                 <a href=docs_href() class="nav-link">"Docs"</a>
-                <A href="/playground" attr:class="nav-link">"Playground"</A>
+                <A href=app_href("/playground") attr:class="nav-link">"Playground"</A>
                 <button class="nav-theme-btn" on:click=toggle title="Toggle theme">
                     {move || if is_dark.get() { "\u{2600}" } else { "\u{263E}" }}
                 </button>

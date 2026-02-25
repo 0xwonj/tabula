@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos_router::components::A;
 
-use crate::layout::nav::docs_href;
+use crate::layout::nav::{app_href, docs_href};
 
 /// Hero: bold tagline, subtitle, and two CTA buttons.
 #[component]
@@ -15,7 +15,7 @@ pub fn HeroSection() -> impl IntoView {
                 "A co-designed IR, commitment, and constraint system for typed tabular state."
             </p>
             <div class="hero-cta">
-                <A href="/playground" attr:class="action filled">"Playground"</A>
+                <A href=app_href("/playground") attr:class="action filled">"Playground"</A>
                 <a href=docs_href() class="action ghost">"Documentation"</a>
             </div>
         </section>

@@ -2,14 +2,14 @@ use leptos::prelude::*;
 use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::path;
 
-use crate::layout::nav::{self, SiteNav};
+use crate::layout::nav::{SiteNav, app_href, base_url};
 use crate::pages::home::HomePage;
 use crate::pages::playground::PlaygroundPage;
 
 /// Root application component with client-side routing.
 #[component]
 pub fn App() -> impl IntoView {
-    let base = nav::base_url();
+    let base = base_url();
 
     view! {
         <Router base=base>
@@ -31,7 +31,7 @@ fn NotFound() -> impl IntoView {
         <div class="not-found">
             <h1>"404"</h1>
             <p>"page not found"</p>
-            <A href="/" attr:class="action ghost">"back to home"</A>
+            <A href=app_href("/") attr:class="action ghost">"back to home"</A>
         </div>
     }
 }
