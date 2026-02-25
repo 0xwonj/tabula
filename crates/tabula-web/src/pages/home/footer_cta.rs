@@ -18,7 +18,7 @@ pub fn FooterCta() -> impl IntoView {
             </div>
             <div class="cta-links">
                 <A href=app_href("/playground") attr:class="action filled">"Playground"</A>
-                <a href=docs_href() class="action ghost">"Documentation"</a>
+                <a href=docs_href() rel="external" class="action ghost">"Documentation"</a>
             </div>
         </section>
     }

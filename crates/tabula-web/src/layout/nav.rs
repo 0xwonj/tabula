@@ -71,7 +71,7 @@ pub fn SiteNav() -> impl IntoView {
                 "tabula"
             </A>
             <div class="nav-links">
-                <a href=docs_href() class="nav-link">"Docs"</a>
+                <a href=docs_href() rel="external" class="nav-link">"Docs"</a>
                 <A href=app_href("/playground") attr:class="nav-link">"Playground"</A>
                 <button class="nav-theme-btn" on:click=toggle title="Toggle theme">
                     {move || if is_dark.get() { "\u{2600}" } else { "\u{263E}" }}

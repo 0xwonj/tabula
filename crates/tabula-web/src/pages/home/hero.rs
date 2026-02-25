@@ -16,7 +16,7 @@ pub fn HeroSection() -> impl IntoView {
             </p>
             <div class="hero-cta">
                 <A href=app_href("/playground") attr:class="action filled">"Playground"</A>
-                <a href=docs_href() class="action ghost">"Documentation"</a>
+                <a href=docs_href() rel="external" class="action ghost">"Documentation"</a>
             </div>
         </section>
     }
