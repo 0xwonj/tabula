@@ -1,11 +1,217 @@
-/* Tabula docs — JetBrains Mono + minimal overrides */
+/* Tabula docs — unified theme matching the main site.
+ *
+ * Strategy: override ALL mdBook theme classes to use Tabula's design
+ * tokens, with `prefers-color-scheme` for automatic dark/light switching.
+ * The theme picker is hidden since all themes render identically.
+ */
 
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
 
+/* ── Font ─────────────────────────────────────────────────────────── */
+
 :root {
-  --mono: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', monospace;
+  --mono-font: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', monospace;
+}
+
+html, body, .sidebar, .content, .menu-title, input, textarea {
+  font-family: var(--mono-font);
 }
 
 code, pre, .hljs {
-  font-family: var(--mono);
+  font-family: var(--mono-font);
+}
+
+/* ── Hide theme picker ────────────────────────────────────────────── */
+
+#theme-toggle, .theme-popup {
+  display: none !important;
+}
+
+/* ── Dark palette (default) ───────────────────────────────────────── */
+
+.light, .rust, .coal, .navy, .ayu,
+html:not(.js) {
+  --bg: #0a0a0c;
+  --fg: #d4d4dc;
+  --sidebar-bg: #111114;
+  --sidebar-fg: #b0b0bc;
+  --sidebar-non-existant: #3a3a42;
+  --sidebar-active: #0088ff;
+  --sidebar-spacer: #2a2a30;
+  --sidebar-header-border-color: #0088ff;
+  --scrollbar: #3a3a42;
+  --icons: #6b6b78;
+  --icons-hover: #e8e8ec;
+  --links: #0088ff;
+  --inline-code-color: #c8c8d0;
+  --theme-popup-bg: #111114;
+  --theme-popup-border: #2a2a30;
+  --theme-hover: #1a1a1f;
+  --quote-bg: #111114;
+  --quote-border: #2a2a30;
+  --warning-border: #ff8e00;
+  --table-border-color: #2a2a30;
+  --table-header-bg: #1a1a1f;
+  --table-alternate-bg: #0e0e11;
+  --searchbar-border-color: #2a2a30;
+  --searchbar-bg: #1a1a1f;
+  --searchbar-fg: #e8e8ec;
+  --searchbar-shadow-color: transparent;
+  --searchresults-header-fg: #6b6b78;
+  --searchresults-border-color: #2a2a30;
+  --searchresults-li-bg: rgba(0, 136, 255, 0.08);
+  --search-mark-bg: rgba(0, 136, 255, 0.3);
+  --overlay-bg: rgba(10, 10, 12, 0.6);
+  --color-scheme: dark;
+}
+
+/* ── Light palette ────────────────────────────────────────────────── */
+
+@media (prefers-color-scheme: light) {
+  .light, .rust, .coal, .navy, .ayu,
+  html:not(.js) {
+    --bg: #fafafa;
+    --fg: #1a1a1e;
+    --sidebar-bg: #ffffff;
+    --sidebar-fg: #4a4a56;
+    --sidebar-non-existant: #a8a8b4;
+    --sidebar-active: #0066cc;
+    --sidebar-spacer: #e0e0e4;
+    --sidebar-header-border-color: #0066cc;
+    --scrollbar: #c8c8d0;
+    --icons: #6b6b78;
+    --icons-hover: #1a1a1e;
+    --links: #0066cc;
+    --inline-code-color: #2a2a30;
+    --theme-popup-bg: #ffffff;
+    --theme-popup-border: #e0e0e4;
+    --theme-hover: #f0f0f4;
+    --quote-bg: #f0f0f4;
+    --quote-border: #e0e0e4;
+    --warning-border: #ff8e00;
+    --table-border-color: #e0e0e4;
+    --table-header-bg: #f0f0f4;
+    --table-alternate-bg: #ffffff;
+    --searchbar-border-color: #e0e0e4;
+    --searchbar-bg: #f0f0f4;
+    --searchbar-fg: #1a1a1e;
+    --searchbar-shadow-color: transparent;
+    --searchresults-header-fg: #6b6b78;
+    --searchresults-border-color: #e0e0e4;
+    --searchresults-li-bg: rgba(0, 102, 204, 0.06);
+    --search-mark-bg: rgba(0, 102, 204, 0.2);
+    --overlay-bg: rgba(250, 250, 250, 0.6);
+    --color-scheme: light;
+  }
+}
+
+/* ── Color scheme for native elements ─────────────────────────────── */
+
+html { color-scheme: dark; }
+
+@media (prefers-color-scheme: light) {
+  html { color-scheme: light; }
+}
+
+/* ── Content refinements ──────────────────────────────────────────── */
+
+.content main {
+  max-width: 800px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.content p, .content li {
+  color: var(--fg);
+}
+
+.content h1, .content h2, .content h3, .content h4 {
+  color: #e8e8ec;
+  letter-spacing: -0.01em;
+}
+
+.content a {
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 150ms ease;
+}
+
+.content a:hover {
+  border-bottom-color: var(--links);
+}
+
+/* ── Inline code ──────────────────────────────────────────────────── */
+
+:not(pre) > code {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  background: var(--quote-bg);
+  color: var(--inline-code-color);
+}
+
+/* ── Code blocks ──────────────────────────────────────────────────── */
+
+pre {
+  border-radius: 6px;
+  border: 1px solid var(--table-border-color);
+}
+
+pre > code {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────── */
+
+.sidebar .sidebar-scrollbox {
+  font-size: 13px;
+}
+
+.chapter li a {
+  transition: color 120ms ease;
+}
+
+/* ── Menu bar ─────────────────────────────────────────────────────── */
+
+#mdbook-menu-bar {
+  border-bottom: 1px solid var(--table-border-color);
+}
+
+.menu-title {
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+
+/* ── Tables ───────────────────────────────────────────────────────── */
+
+table {
+  font-size: 13px;
+  border-collapse: collapse;
+}
+
+table th, table td {
+  padding: 8px 12px;
+}
+
+/* ── Blockquotes ──────────────────────────────────────────────────── */
+
+blockquote {
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+/* ── Search ───────────────────────────────────────────────────────── */
+
+#mdbook-searchbar {
+  border-radius: 6px;
+  font-size: 13px;
+  padding: 8px 12px;
+}
+
+/* ── Navigation arrows ────────────────────────────────────────────── */
+
+.nav-chapters:hover {
+  color: var(--links);
 }

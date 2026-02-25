@@ -10,4 +10,6 @@ build-dir = "build"
 [output.html]
 git-repository-url = "https://github.com/0xwonj/tabula"
 site-url = "/tabula/docs/"
+default-theme = "coal"
+preferred-dark-theme = "coal"
 additional-css = ["theme/custom.css"]
