@@ -38,7 +38,7 @@ mod tests {
     use tabula_core::{TableId, TableSchema, TxTypeId, Value, ValueType};
     use tabula_ir::{Instruction, ParamDef, RowExpr, ValueExpr};
 
-    use tabula_contract::{CONTRACT_SCHEMA_VERSION_V1, STATEMENT_BINDING_VERSION_V1};
+    use tabula_contract::{BINDING_VERSION_V1, CONTRACT_SCHEMA_VERSION_V1};
 
     fn tx_missing_schema() -> tabula_ir::TxTypeDef {
         tabula_ir::TxTypeDef {
@@ -183,7 +183,7 @@ mod tests {
         program.contract_metadata = Some(tabula_contract::ContractMetadataEnvelope {
             profile_hash: [0x99; 32],
             contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
-            statement_binding_version: STATEMENT_BINDING_VERSION_V1,
+            binding_version: BINDING_VERSION_V1,
             semantic_hash_stub: None,
         });
         let path = write_temp_program_file(&program);

@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::bail;
 
 use tabula_contract::{
-    CONTRACT_SCHEMA_VERSION_V1, ContractCompatibilityPolicy, ContractMetadataEnvelope,
-    STATEMENT_BINDING_VERSION_V1, apply_batch_binding_registry_v1,
+    BINDING_VERSION_V1, CONTRACT_SCHEMA_VERSION_V1, ContractCompatibilityPolicy,
+    ContractMetadataEnvelope, binding_registry_v1,
 };
 use tabula_core::{ColId, TableId, TableSchema};
 use tabula_ir::{Program, TxTypeDef};
@@ -43,7 +43,7 @@ impl RegisteredProgram {
         ContractCompatibilityPolicy {
             expected_profile_hash: self.metadata_envelope.profile_hash,
             expected_contract_schema_version: self.metadata_envelope.contract_schema_version,
-            expected_statement_binding_version: self.metadata_envelope.statement_binding_version,
+            expected_binding_version: self.metadata_envelope.binding_version,
             expected_semantic_hash_stub: self.metadata_envelope.semantic_hash_stub,
         }
     }
@@ -92,8 +92,8 @@ pub fn register_program(
         program.register(def.clone())?;
     }
 
-    // Gate: statement binding registry must remain complete.
-    let registry = apply_batch_binding_registry_v1();
+    // Gate: binding registry must remain complete.
+    let registry = binding_registry_v1();
     registry
         .validate_completeness()
         .map_err(|e| anyhow::anyhow!(e))?;
@@ -102,7 +102,7 @@ pub fn register_program(
     let metadata_envelope = ContractMetadataEnvelope {
         profile_hash,
         contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
-        statement_binding_version: STATEMENT_BINDING_VERSION_V1,
+        binding_version: BINDING_VERSION_V1,
         semantic_hash_stub: None,
     };
 

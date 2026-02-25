@@ -1,13 +1,32 @@
-//! Statement binding types and registry.
+//! Public input types and binding registry.
 
 use std::collections::BTreeMap;
 
-use crate::STATEMENT_BINDING_VERSION_V1;
+use tabula_core::{Digest, ProgramBudgets};
+
+use crate::BINDING_VERSION_V1;
 use crate::policy::ContractValidationError;
 
-/// ApplyBatch statement fields.
+/// Public inputs for the ApplyBatch proof.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicInputs {
+    /// The state root before batch execution.
+    pub old_state_root: Digest,
+    /// The state root after batch execution.
+    pub new_state_root: Digest,
+    /// Commitment to the program (set of tx type definitions).
+    pub program_root: Digest,
+    /// Commitment to the batch of applied transactions.
+    pub applied_tx_digest: Digest,
+    /// Commitment to the static lookup tables.
+    pub static_table_root: Digest,
+    /// Program resource budgets (DoS prevention).
+    pub budgets: ProgramBudgets,
+}
+
+/// Public input fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ApplyBatchField {
+pub enum PublicInputField {
     /// `old_state_root`.
     OldStateRoot,
     /// `new_state_root`.
@@ -23,13 +42,13 @@ pub enum ApplyBatchField {
 }
 
 /// Ordered list of fields required in the binding registry.
-pub const APPLY_BATCH_FIELDS: [ApplyBatchField; 6] = [
-    ApplyBatchField::OldStateRoot,
-    ApplyBatchField::NewStateRoot,
-    ApplyBatchField::ProgramRoot,
-    ApplyBatchField::AppliedTxDigest,
-    ApplyBatchField::StaticTableRoot,
-    ApplyBatchField::Budgets,
+pub const PUBLIC_INPUT_FIELDS: [PublicInputField; 6] = [
+    PublicInputField::OldStateRoot,
+    PublicInputField::NewStateRoot,
+    PublicInputField::ProgramRoot,
+    PublicInputField::AppliedTxDigest,
+    PublicInputField::StaticTableRoot,
+    PublicInputField::Budgets,
 ];
 
 /// Deferred reason codes (free-text is forbidden).
@@ -58,29 +77,29 @@ pub struct DeferredBinding {
     pub expiry: Option<&'static str>,
 }
 
-/// Statement binding state.
+/// Binding status for a public input field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StatementBindingStatus {
+pub enum BindingStatus {
     /// Public input is bound by AIR.
     BoundInAir,
     /// Public input is intentionally deferred with governance metadata.
     Deferred(DeferredBinding),
 }
 
-/// Registry of statement binding states.
+/// Registry of public input binding states.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatementBindingRegistry {
+pub struct BindingRegistry {
     /// Registry version.
     pub version: u32,
     /// Field binding map.
-    pub bindings: BTreeMap<ApplyBatchField, StatementBindingStatus>,
+    pub bindings: BTreeMap<PublicInputField, BindingStatus>,
 }
 
-impl StatementBindingRegistry {
+impl BindingRegistry {
     /// Build a registry from explicit entries.
     pub fn new<I>(version: u32, bindings: I) -> Self
     where
-        I: IntoIterator<Item = (ApplyBatchField, StatementBindingStatus)>,
+        I: IntoIterator<Item = (PublicInputField, BindingStatus)>,
     {
         Self {
             version,
@@ -88,9 +107,9 @@ impl StatementBindingRegistry {
         }
     }
 
-    /// Enforce completeness: every `ApplyBatchStatement` field must be bound or deferred.
+    /// Enforce completeness: every `PublicInputs` field must be bound or deferred.
     pub fn validate_completeness(&self) -> Result<(), ContractValidationError> {
-        let missing_fields = APPLY_BATCH_FIELDS
+        let missing_fields = PUBLIC_INPUT_FIELDS
             .iter()
             .copied()
             .filter(|field| !self.bindings.contains_key(field))
@@ -98,27 +117,21 @@ impl StatementBindingRegistry {
         if missing_fields.is_empty() {
             Ok(())
         } else {
-            Err(ContractValidationError::IncompleteStatementBinding { missing_fields })
+            Err(ContractValidationError::IncompleteBinding { missing_fields })
         }
     }
 }
 
-/// Default ApplyBatch binding registry for schema v1.
-pub fn apply_batch_binding_registry_v1() -> StatementBindingRegistry {
-    StatementBindingRegistry::new(
-        STATEMENT_BINDING_VERSION_V1,
+/// Default binding registry for schema v1.
+pub fn binding_registry_v1() -> BindingRegistry {
+    BindingRegistry::new(
+        BINDING_VERSION_V1,
         [
+            (PublicInputField::OldStateRoot, BindingStatus::BoundInAir),
+            (PublicInputField::NewStateRoot, BindingStatus::BoundInAir),
             (
-                ApplyBatchField::OldStateRoot,
-                StatementBindingStatus::BoundInAir,
-            ),
-            (
-                ApplyBatchField::NewStateRoot,
-                StatementBindingStatus::BoundInAir,
-            ),
-            (
-                ApplyBatchField::ProgramRoot,
-                StatementBindingStatus::Deferred(DeferredBinding {
+                PublicInputField::ProgramRoot,
+                BindingStatus::Deferred(DeferredBinding {
                     reason: DeferredReasonCode::ProgramRootDeferred,
                     owner: "proof",
                     milestone: "M12",
@@ -126,8 +139,8 @@ pub fn apply_batch_binding_registry_v1() -> StatementBindingRegistry {
                 }),
             ),
             (
-                ApplyBatchField::AppliedTxDigest,
-                StatementBindingStatus::Deferred(DeferredBinding {
+                PublicInputField::AppliedTxDigest,
+                BindingStatus::Deferred(DeferredBinding {
                     reason: DeferredReasonCode::AppliedTxDigestDeferred,
                     owner: "proof",
                     milestone: "M12",
@@ -135,8 +148,8 @@ pub fn apply_batch_binding_registry_v1() -> StatementBindingRegistry {
                 }),
             ),
             (
-                ApplyBatchField::StaticTableRoot,
-                StatementBindingStatus::Deferred(DeferredBinding {
+                PublicInputField::StaticTableRoot,
+                BindingStatus::Deferred(DeferredBinding {
                     reason: DeferredReasonCode::StaticTableRootDeferred,
                     owner: "proof",
                     milestone: "M12",
@@ -144,8 +157,8 @@ pub fn apply_batch_binding_registry_v1() -> StatementBindingRegistry {
                 }),
             ),
             (
-                ApplyBatchField::Budgets,
-                StatementBindingStatus::Deferred(DeferredBinding {
+                PublicInputField::Budgets,
+                BindingStatus::Deferred(DeferredBinding {
                     reason: DeferredReasonCode::BudgetsDeferred,
                     owner: "proof",
                     milestone: "M12",

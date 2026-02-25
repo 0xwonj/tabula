@@ -15,9 +15,9 @@ use tabula_core::mock::InMemoryStaticTables;
 use tabula_core::traits::ValueCodec;
 use tabula_core::{Batch, ColId, RowKey, TableId, TableSchema};
 use tabula_driver::RegisteredProgram;
-use tabula_proof::air::TabulaAir;
+use tabula_proof::chips::TabulaAir;
 use tabula_proof::stark;
-use tabula_proof::trace_builder::build_trace_map;
+use tabula_proof::trace::build_trace_map;
 use tabula_proof::witness::WitnessGenerator;
 
 use super::error::{ServiceError, ServiceResult};

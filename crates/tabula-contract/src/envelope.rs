@@ -18,8 +18,8 @@ pub struct ContractMetadataEnvelope {
     pub profile_hash: [u8; 32],
     /// Contract schema version.
     pub contract_schema_version: u32,
-    /// Statement binding registry version.
-    pub statement_binding_version: u32,
+    /// Binding registry version.
+    pub binding_version: u32,
     /// Optional semantic hash stub (reserved for staged rollout).
     pub semantic_hash_stub: Option<[u8; 32]>,
 }
@@ -32,7 +32,7 @@ impl ContractMetadataEnvelope {
     /// 2. serialization version (u8)
     /// 3. `profile_hash` (32 bytes)
     /// 4. `contract_schema_version` (u32 big-endian)
-    /// 5. `statement_binding_version` (u32 big-endian)
+    /// 5. `binding_version` (u32 big-endian)
     /// 6. semantic flag (u8; 0/1)
     /// 7. `semantic_hash_stub` (32 bytes, only if flag=1)
     pub fn to_canonical_bytes(&self) -> Vec<u8> {
@@ -41,7 +41,7 @@ impl ContractMetadataEnvelope {
         out.push(METADATA_SERIALIZATION_VERSION);
         out.extend_from_slice(&self.profile_hash);
         out.extend_from_slice(&self.contract_schema_version.to_be_bytes());
-        out.extend_from_slice(&self.statement_binding_version.to_be_bytes());
+        out.extend_from_slice(&self.binding_version.to_be_bytes());
         match self.semantic_hash_stub {
             Some(hash) => {
                 out.push(1);

@@ -12,7 +12,7 @@ members = [
     "crates/tabula-driver",
     "crates/tabula-cli",
     "crates/tabula-daemon",
-    "crates/tabula-web-ide",
+    "crates/tabula-web",
 ]
 
 [workspace.package]

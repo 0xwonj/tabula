@@ -131,7 +131,6 @@ impl SsmcList {
         }
         SsmcCommitment(hasher.hash_domain(domain, &input))
     }
-
 }
 
 #[cfg(test)]

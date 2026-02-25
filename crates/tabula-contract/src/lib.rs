@@ -12,8 +12,8 @@ mod rules;
 // Version constants
 /// Current contract schema version.
 pub const CONTRACT_SCHEMA_VERSION_V1: u32 = 1;
-/// Current statement binding registry version.
-pub const STATEMENT_BINDING_VERSION_V1: u32 = 1;
+/// Current binding registry version.
+pub const BINDING_VERSION_V1: u32 = 1;
 /// C10 ReadAccess bus schema version (v2 includes `tx_index`).
 pub const C10_READ_ACCESS_SCHEMA_VERSION_V2: u32 = 2;
 /// C11 WriteAccess bus schema version (v2 includes `tx_index`).
@@ -35,9 +35,8 @@ pub use policy::{ContractCompatibilityPolicy, ContractValidationError};
 
 // Binding
 pub use binding::{
-    APPLY_BATCH_FIELDS, ApplyBatchField, DeferredBinding, DeferredReasonCode,
-    StatementBindingRegistry, StatementBindingStatus, access_bus_field_names,
-    apply_batch_binding_registry_v1,
+    BindingRegistry, BindingStatus, DeferredBinding, DeferredReasonCode, PUBLIC_INPUT_FIELDS,
+    PublicInputField, PublicInputs, access_bus_field_names, binding_registry_v1,
 };
 
 // Rules
