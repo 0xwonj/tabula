@@ -51,7 +51,7 @@ pub fn app_href(path: &str) -> String {
 
 /// Link to the mdBook documentation (static site, not SPA).
 pub fn docs_href() -> String {
-    format!("{}/docs", base_url())
+    format!("{}/docs/", base_url())
 }
 
 /// Minimal site-wide navigation bar.
@@ -66,8 +66,8 @@ pub fn SiteNav() -> impl IntoView {
     view! {
         <nav class="site-nav">
             <A href=app_href("/") attr:class="nav-brand">
-                <img class="nav-logo nav-logo-dark" src="/logo-dark.svg" alt="" width="16" height="16"/>
-                <img class="nav-logo nav-logo-light" src="/logo-light.svg" alt="" width="16" height="16"/>
+                <img class="nav-logo nav-logo-dark" src="logo-dark.svg" alt="" width="16" height="16"/>
+                <img class="nav-logo nav-logo-light" src="logo-light.svg" alt="" width="16" height="16"/>
                 "tabula"
             </A>
             <div class="nav-links">
