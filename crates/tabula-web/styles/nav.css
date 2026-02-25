@@ -10,11 +10,29 @@
 }
 
 .nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   text-decoration: none;
   color: var(--ink);
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.06em;
+}
+
+.nav-logo {
+  width: 16px;
+  height: 16px;
+}
+
+/* theme-aware logo swap */
+[data-theme="dark"] .nav-logo-light,
+[data-theme="light"] .nav-logo-dark {
+  display: none;
+}
+[data-theme="dark"] .nav-logo-dark,
+[data-theme="light"] .nav-logo-light {
+  display: block;
 }
 
 .nav-links {

@@ -481,30 +481,21 @@ html:has(.paper) .site-main {
   color: var(--ink-disabled);
 }
 
-/* ── Card details ── */
+/* ── Card operations ── */
 
-.fig-commit-card-details {
-  padding: 12px 16px;
+.fig-commit-card-ops {
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   border-top: 1px solid var(--line);
   margin-top: auto;
 }
 
-.fig-commit-detail {
+.fig-commit-op-cost {
+  margin-top: 2px;
   font-size: 11px;
-  color: var(--ink-disabled);
-  line-height: 1.6;
-}
-
-.fig-commit-detail-op {
-  font-weight: 500;
   color: var(--ink-muted);
-}
-
-.fig-commit-detail-cost {
-  margin-top: 4px;
 }
 
 .fig-commit-detail-big {
@@ -522,6 +513,134 @@ html:has(.paper) .site-main {
   border-top: 1px solid var(--line);
   background: var(--bg-2);
 }
+
+/* ── Figure 2: Semantic animations ──────────────────────────────────
+ *
+ *  Phase 1 (0–500ms):     Schema table — header, columns, FE blocks, data rows
+ *  Phase 2 (570–730ms):   Independence arrows drop, label fades
+ *  Phase 3 (800–1100ms):  Card headers, SSMC chain (left→right), SMT tree (top→down)
+ *  Phase 4 (1200–1350ms): Cost summaries + footer
+ *
+ *  Build delays via --d (ms).
+ */
+
+/* Fade — headers, labels, rows, cost, footer */
+.fig-enc-fade {
+  opacity: 0;
+  animation: fig-enc-fade-in 250ms ease-out forwards;
+  animation-delay: calc(var(--d, 0) * 1ms);
+}
+
+@keyframes fig-enc-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* FE blocks — grow from zero width to show encoding width */
+.fig-enc-grow {
+  opacity: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation: fig-enc-grow-in 300ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  animation-delay: calc(var(--d, 0) * 1ms);
+}
+
+@keyframes fig-enc-grow-in {
+  from { opacity: 0; transform: scaleX(0); }
+  to   { opacity: 1; transform: scaleX(1); }
+}
+
+/* Independence arrows — drop from above */
+.fig-enc-drop {
+  opacity: 0;
+  transform: translateY(-8px);
+  animation: fig-enc-drop-in 250ms ease-out forwards;
+  animation-delay: calc(var(--d, 0) * 1ms);
+}
+
+@keyframes fig-enc-drop-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* SSMC chain nodes — slide in from left */
+.fig-enc-chain {
+  opacity: 0;
+  transform: translateX(-10px);
+  animation: fig-enc-chain-in 280ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  animation-delay: calc(var(--d, 0) * 1ms);
+}
+
+@keyframes fig-enc-chain-in {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* SMT tree nodes — scale in from center */
+.fig-enc-tree {
+  opacity: 0;
+  transform: scale(0);
+  animation: fig-enc-tree-in 250ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  animation-delay: calc(var(--d, 0) * 1ms);
+}
+
+@keyframes fig-enc-tree-in {
+  from { opacity: 0; transform: scale(0); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Tree stems — grow downward */
+.fig-enc-stem {
+  opacity: 0;
+  transform: scaleY(0);
+  transform-origin: top center;
+  animation: fig-enc-stem-in 200ms ease-out forwards;
+  animation-delay: calc(var(--d, 0) * 1ms);
+}
+
+@keyframes fig-enc-stem-in {
+  from { opacity: 0; transform: scaleY(0); }
+  to   { opacity: 1; transform: scaleY(1); }
+}
+
+/* Hover replay — duplicate keyframes restart all animations */
+.fig-enc-replay .fig-enc-fade  { animation-name: fig-enc-fade-in-r; }
+.fig-enc-replay .fig-enc-grow  { animation-name: fig-enc-grow-in-r; }
+.fig-enc-replay .fig-enc-drop  { animation-name: fig-enc-drop-in-r; }
+.fig-enc-replay .fig-enc-chain { animation-name: fig-enc-chain-in-r; }
+.fig-enc-replay .fig-enc-tree  { animation-name: fig-enc-tree-in-r; }
+.fig-enc-replay .fig-enc-stem  { animation-name: fig-enc-stem-in-r; }
+
+@keyframes fig-enc-fade-in-r {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fig-enc-grow-in-r {
+  from { opacity: 0; transform: scaleX(0); }
+  to   { opacity: 1; transform: scaleX(1); }
+}
+
+@keyframes fig-enc-drop-in-r {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fig-enc-chain-in-r {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fig-enc-tree-in-r {
+  from { opacity: 0; transform: scale(0); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes fig-enc-stem-in-r {
+  from { opacity: 0; transform: scaleY(0); }
+  to   { opacity: 1; transform: scaleY(1); }
+}
+
 
 /* ── Figure 3: Pipeline header ──────────────────────────────────── */
 
@@ -929,7 +1048,13 @@ html:has(.paper) .site-main {
   .fig-fade,
   .fig-exec-in,
   .fig-sort-slide,
-  .fig-rise {
+  .fig-rise,
+  .fig-enc-fade,
+  .fig-enc-grow,
+  .fig-enc-drop,
+  .fig-enc-chain,
+  .fig-enc-tree,
+  .fig-enc-stem {
     animation: none;
     opacity: 1;
     transform: none;

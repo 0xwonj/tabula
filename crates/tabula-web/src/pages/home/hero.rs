@@ -1,6 +1,8 @@
 use leptos::prelude::*;
 use leptos_router::components::A;
 
+use crate::layout::nav::docs_href;
+
 /// Hero: bold tagline, subtitle, and two CTA buttons.
 #[component]
 pub fn HeroSection() -> impl IntoView {
@@ -14,7 +16,7 @@ pub fn HeroSection() -> impl IntoView {
             </p>
             <div class="hero-cta">
                 <A href="/playground" attr:class="action filled">"Playground"</A>
-                <A href="/docs" attr:class="action ghost">"Documentation"</A>
+                <a href=docs_href() class="action ghost">"Documentation"</a>
             </div>
         </section>
     }

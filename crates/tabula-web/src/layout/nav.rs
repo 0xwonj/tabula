@@ -32,8 +32,20 @@ fn apply_theme(dark: bool) {
     }
 }
 
-fn docs_href() -> String {
-    let base = option_env!("BASE_URL").unwrap_or_default();
+/// Base URL prefix (e.g. `/tabula` on GitHub Pages, empty for local dev).
+pub fn base_url() -> &'static str {
+    option_env!("BASE_URL").unwrap_or_default()
+}
+
+/// Resolve an asset path against the base URL.
+pub fn asset_href(path: &str) -> String {
+    let base = base_url();
+    format!("{base}/{path}")
+}
+
+/// Link to the mdBook documentation (static, outside SPA).
+pub fn docs_href() -> String {
+    let base = base_url();
     format!("{base}/docs")
 }
 
@@ -48,7 +60,11 @@ pub fn SiteNav() -> impl IntoView {
 
     view! {
         <nav class="site-nav">
-            <A href="/" attr:class="nav-brand">"tabula"</A>
+            <A href="/" attr:class="nav-brand">
+                <img class="nav-logo nav-logo-dark" src=asset_href("logo-dark.svg") alt="" width="16" height="16"/>
+                <img class="nav-logo nav-logo-light" src=asset_href("logo-light.svg") alt="" width="16" height="16"/>
+                "tabula"
+            </A>
             <div class="nav-links">
                 <a href=docs_href() class="nav-link">"Docs"</a>
                 <A href="/playground" attr:class="nav-link">"Playground"</A>

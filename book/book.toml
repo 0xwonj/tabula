@@ -9,4 +9,5 @@ build-dir = "build"
 
 [output.html]
 git-repository-url = "https://github.com/0xwonj/tabula"
+site-url = "/tabula/docs/"
 additional-css = ["theme/custom.css"]

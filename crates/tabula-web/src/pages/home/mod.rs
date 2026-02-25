@@ -8,6 +8,7 @@ mod hero;
 use leptos::prelude::*;
 use leptos_router::components::A;
 
+use crate::layout::nav::docs_href;
 use demo::Demo;
 use fig_compiler::FigCompiler;
 use fig_encoding::FigEncoding;
@@ -70,12 +71,12 @@ pub fn HomePage() -> impl IntoView {
                         <span class="paper-toc-dots" />
                         <span class="paper-toc-desc">"Try the DSL and prover"</span>
                     </A>
-                    <A href="/docs" attr:class="paper-toc-entry">
+                    <a href=docs_href() class="paper-toc-entry">
                         <span class="paper-toc-num">"2."</span>
                         <span class="paper-toc-label">"Documentation"</span>
                         <span class="paper-toc-dots" />
                         <span class="paper-toc-desc">"Architecture and spec"</span>
-                    </A>
+                    </a>
                     <a href="#architecture" class="paper-toc-entry">
                         <span class="paper-toc-num">"3."</span>
                         <span class="paper-toc-label">"Architecture"</span>
