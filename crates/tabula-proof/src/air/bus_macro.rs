@@ -128,7 +128,7 @@ macro_rules! define_bus {
     (@param_type expr) => { Self::Expr };
     (@param_type var_arr $n:literal) => { &[Self::Var; $n] };
     (@param_type var_slice) => { &[Self::Var] };
-    (@param_type u64limbs) => { &$crate::air::gadgets::U64Limbs<Self::Var> };
+    (@param_type u64limbs) => { &$crate::gadgets::U64Limbs<Self::Var> };
     (@param_type access_tuple) => { $crate::air::bus::AccessTupleExpr<Self::Expr> };
 
     // ── @to_vec: convert a field value to Vec<Expr> ──

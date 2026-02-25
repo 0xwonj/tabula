@@ -13,9 +13,9 @@ use tabula_core::{Batch, CellKey, ColId, RowKey, TableId, Transaction, TxTypeId,
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_ir::Program;
 use tabula_lang::compile;
-use tabula_proof::air::TabulaAir;
+use tabula_proof::chips::TabulaAir;
 use tabula_proof::stark;
-use tabula_proof::trace_builder::build_trace_map;
+use tabula_proof::trace::build_trace_map;
 use tabula_proof::witness::WitnessGenerator;
 
 type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<p3_baby_bear::BabyBear>)>>;

@@ -3,10 +3,10 @@
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
-use tabula_proof::air::chips::static_table::air::StaticTableChip;
-use tabula_proof::air::chips::static_table::trace::{StaticTableRow, generate_static_table_trace};
-use tabula_proof::air::debug::{debug_check, evaluate_chip};
-use tabula_proof::air::{STATIC_TABLE_STANDARD_WIDTH, static_table_width};
+use tabula_proof::chips::static_table::air::StaticTableChip;
+use tabula_proof::chips::static_table::columns::{STATIC_TABLE_STANDARD_WIDTH, static_table_width};
+use tabula_proof::chips::static_table::trace::{StaticTableRow, generate_static_table_trace};
+use tabula_proof::debug::{debug_check, evaluate_chip};
 
 // ── Width ──
 

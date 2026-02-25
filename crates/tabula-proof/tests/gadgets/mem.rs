@@ -4,10 +4,10 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 
-use tabula_proof::air::gadgets::mem::constrain_mem_read;
-use tabula_proof::air::{
-    borrow_cols, borrow_cols_mut, constrain_null_canon, debug_check, num_cols,
-};
+use tabula_proof::air::{borrow_cols, borrow_cols_mut, num_cols};
+use tabula_proof::debug::debug_check;
+use tabula_proof::gadgets::constrain_null_canon;
+use tabula_proof::gadgets::mem::constrain_mem_read;
 
 // ── Null canonicality test chip ──
 

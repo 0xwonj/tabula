@@ -11,30 +11,30 @@ use p3_field::PrimeCharacteristicRing;
 use tabula_commitment::{ColumnMeta, CommitmentStrategy, NativeDigest};
 use tabula_core::{ColId, TableId};
 
-use tabula_proof::air::SMT_TABLE_PATH_WIDTH;
-use tabula_proof::air::chips::column_meta::air::ColumnMetaChip;
-use tabula_proof::air::chips::column_meta::trace::generate_column_meta_trace;
-use tabula_proof::air::chips::execution::air::ExecutionChip;
-use tabula_proof::air::chips::execution::trace::generate_execution_trace;
-use tabula_proof::air::chips::inter_tx_order::air::InterTxOrderChip;
-use tabula_proof::air::chips::inter_tx_order::trace::generate_inter_tx_order_trace;
-use tabula_proof::air::chips::poseidon::air::PoseidonChip;
-use tabula_proof::air::chips::poseidon::constants::poseidon2_permutation;
-use tabula_proof::air::chips::poseidon::trace::{
+use tabula_proof::air::interaction::InteractionKind;
+use tabula_proof::chips::column_meta::air::ColumnMetaChip;
+use tabula_proof::chips::column_meta::trace::generate_column_meta_trace;
+use tabula_proof::chips::execution::air::ExecutionChip;
+use tabula_proof::chips::execution::trace::generate_execution_trace;
+use tabula_proof::chips::inter_tx_order::air::InterTxOrderChip;
+use tabula_proof::chips::inter_tx_order::trace::generate_inter_tx_order_trace;
+use tabula_proof::chips::poseidon::air::PoseidonChip;
+use tabula_proof::chips::poseidon::constants::poseidon2_permutation;
+use tabula_proof::chips::poseidon::trace::{
     generate_poseidon_preprocessed, generate_poseidon_trace,
 };
-use tabula_proof::air::chips::smt_path::air::{SmtColPathChip, SmtTablePathChip};
-use tabula_proof::air::chips::smt_path::trace::{
+use tabula_proof::chips::smt_path::air::{SmtColPathChip, SmtTablePathChip};
+use tabula_proof::chips::smt_path::columns::SMT_TABLE_PATH_WIDTH;
+use tabula_proof::chips::smt_path::trace::{
     SmtPathWitness, SmtTablePathWitness, generate_smt_col_path_trace, generate_smt_table_path_trace,
 };
-use tabula_proof::air::chips::state_column::air::StateColumnChip;
-use tabula_proof::air::chips::state_column::trace::generate_state_column_trace;
-use tabula_proof::air::chips::state_column::trace::{EntrySource, StateColumnRow};
-use tabula_proof::air::debug::{
+use tabula_proof::chips::state_column::air::StateColumnChip;
+use tabula_proof::chips::state_column::trace::generate_state_column_trace;
+use tabula_proof::chips::state_column::trace::{EntrySource, StateColumnRow};
+use tabula_proof::debug::{
     check_bus_balance, check_public_input_binding, evaluate_chip, evaluate_chip_with_preprocessed,
     evaluate_chip_with_public_values,
 };
-use tabula_proof::air::interaction::InteractionKind;
 
 use crate::common::builders::{
     ito_init, ito_read, ito_read_write, ito_write, make_read, make_write, sc_old_only,

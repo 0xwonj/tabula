@@ -22,27 +22,27 @@ use p3_field::PrimeField32;
 use tabula_commitment::{ColumnMeta, CommitmentStrategy, NativeDigest};
 use tabula_core::{ColId, TableId};
 
-use tabula_proof::air::chips::column_meta::air::ColumnMetaChip;
-use tabula_proof::air::chips::column_meta::trace::generate_column_meta_trace;
-use tabula_proof::air::chips::execution::air::ExecutionChip;
-use tabula_proof::air::chips::execution::trace::generate_execution_trace;
-use tabula_proof::air::chips::inter_tx_order::air::InterTxOrderChip;
-use tabula_proof::air::chips::inter_tx_order::trace::generate_inter_tx_order_trace;
-use tabula_proof::air::chips::poseidon::air::PoseidonChip;
-use tabula_proof::air::chips::poseidon::trace::{
+use tabula_proof::air::interaction::{InteractionDirection, InteractionKind};
+use tabula_proof::chips::column_meta::air::ColumnMetaChip;
+use tabula_proof::chips::column_meta::trace::generate_column_meta_trace;
+use tabula_proof::chips::execution::air::ExecutionChip;
+use tabula_proof::chips::execution::trace::generate_execution_trace;
+use tabula_proof::chips::inter_tx_order::air::InterTxOrderChip;
+use tabula_proof::chips::inter_tx_order::trace::generate_inter_tx_order_trace;
+use tabula_proof::chips::poseidon::air::PoseidonChip;
+use tabula_proof::chips::poseidon::trace::{
     generate_poseidon_preprocessed, generate_poseidon_trace,
 };
-use tabula_proof::air::chips::range_check::{
+use tabula_proof::chips::range_check::{
     RANGE_CHECK_SIZE, RangeCheckChip, generate_range_check_trace,
 };
-use tabula_proof::air::chips::state_column::air::StateColumnChip;
-use tabula_proof::air::chips::state_column::trace::generate_state_column_trace;
-use tabula_proof::air::chips::static_table::air::StaticTableChip;
-use tabula_proof::air::chips::static_table::trace::{StaticTableRow, generate_static_table_trace};
-use tabula_proof::air::debug::{
+use tabula_proof::chips::state_column::air::StateColumnChip;
+use tabula_proof::chips::state_column::trace::generate_state_column_trace;
+use tabula_proof::chips::static_table::air::StaticTableChip;
+use tabula_proof::chips::static_table::trace::{StaticTableRow, generate_static_table_trace};
+use tabula_proof::debug::{
     ChipRecord, check_bus_balance, evaluate_chip, evaluate_chip_with_preprocessed,
 };
-use tabula_proof::air::interaction::{InteractionDirection, InteractionKind};
 
 use crate::common::builders::{
     ito_init, ito_read, ito_read_write, ito_write, make_lookup, make_read, make_write, sc_both,
@@ -357,8 +357,8 @@ fn c14_coalesced_write_delete() {
     // ITO sends (t, c, key, output_val=[0,0,0], output_is_null=true).
     // SC delete receive: (t, c, key, new_val=[0,0,0], is_delete=1).
     // These match because is_delete=1 maps to output_is_null=true.
-    use tabula_proof::air::chips::state_column::trace::EntrySource;
-    use tabula_proof::air::chips::state_column::trace::StateColumnRow;
+    use tabula_proof::chips::state_column::trace::EntrySource;
+    use tabula_proof::chips::state_column::trace::StateColumnRow;
     let sc_row = StateColumnRow {
         table_id: 1,
         col_id: 0,

@@ -18,10 +18,10 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::debug::{
+use super::interaction::{ColumnRef, Interaction, InteractionDirection, VirtualPairCol};
+use crate::debug::{
     ChipRecord, RecordedInteraction, evaluate_chip_with_preprocessed_and_public_values,
 };
-use super::interaction::{ColumnRef, Interaction, InteractionDirection, VirtualPairCol};
 
 /// Minimum trace height for local + next row evaluation.
 const PROBE_HEIGHT: usize = 2;
@@ -46,7 +46,7 @@ pub fn extract_interactions<A>(
     num_public_values: usize,
 ) -> (Vec<Interaction<BabyBear>>, Vec<Interaction<BabyBear>>)
 where
-    A: for<'a> Air<super::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     let pvs = vec![BabyBear::ZERO; num_public_values];
 
@@ -87,7 +87,7 @@ fn eval_baseline<A>(
     Vec<RecordedInteraction<BabyBear>>,
 )
 where
-    A: for<'a> Air<super::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     let zero_trace =
         RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * PROBE_HEIGHT], main_width);
@@ -142,7 +142,7 @@ fn scan_column_contributions<A>(
     send_descriptors: &mut [Interaction<BabyBear>],
     recv_descriptors: &mut [Interaction<BabyBear>],
 ) where
-    A: for<'a> Air<super::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     // Scan local columns (row 0).
     for col in 0..main_width {
@@ -194,7 +194,7 @@ fn probe_single_column<A>(
     send_descriptors: &mut [Interaction<BabyBear>],
     recv_descriptors: &mut [Interaction<BabyBear>],
 ) where
-    A: for<'a> Air<super::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     let mut probe_data = vec![BabyBear::ZERO; main_width * PROBE_HEIGHT];
     probe_data[probe_index] = BabyBear::ONE;
@@ -295,7 +295,7 @@ pub fn count_interactions<A>(
     num_public_values: usize,
 ) -> (usize, usize)
 where
-    A: for<'a> Air<super::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     let zero_trace =
         RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * PROBE_HEIGHT], main_width);
@@ -328,8 +328,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::air::chips::range_check::RangeCheckChip;
     use crate::air::interaction::InteractionKind;
+    use crate::chips::range_check::RangeCheckChip;
     use p3_air::BaseAir;
 
     #[test]

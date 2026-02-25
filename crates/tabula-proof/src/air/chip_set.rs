@@ -6,7 +6,7 @@
 use p3_air::BaseAir;
 use p3_baby_bear::BabyBear;
 
-use super::chips::ChipSpec;
+use crate::chips::ChipSpec;
 
 /// A chip set: compile-time composition of AIR chips.
 ///
@@ -70,25 +70,25 @@ macro_rules! define_chip_set {
             }
         }
 
-        impl $crate::air::chips::ChipSpec for $name {
+        impl $crate::chips::ChipSpec for $name {
             fn chip_name(&self) -> &'static str {
                 match self {
-                    $(Self::$variant(chip) => $crate::air::chips::ChipSpec::chip_name(chip),)+
+                    $(Self::$variant(chip) => $crate::chips::ChipSpec::chip_name(chip),)+
                 }
             }
             fn num_public_values(&self) -> usize {
                 match self {
-                    $(Self::$variant(chip) => $crate::air::chips::ChipSpec::num_public_values(chip),)+
+                    $(Self::$variant(chip) => $crate::chips::ChipSpec::num_public_values(chip),)+
                 }
             }
             fn preprocessed_width(&self) -> usize {
                 match self {
-                    $(Self::$variant(chip) => $crate::air::chips::ChipSpec::preprocessed_width(chip),)+
+                    $(Self::$variant(chip) => $crate::chips::ChipSpec::preprocessed_width(chip),)+
                 }
             }
             fn has_interactions(&self) -> bool {
                 match self {
-                    $(Self::$variant(chip) => $crate::air::chips::ChipSpec::has_interactions(chip),)+
+                    $(Self::$variant(chip) => $crate::chips::ChipSpec::has_interactions(chip),)+
                 }
             }
         }
@@ -103,7 +103,7 @@ macro_rules! define_chip_set {
 
         impl<F> p3_air::BaseAirWithPublicValues<F> for $name {
             fn num_public_values(&self) -> usize {
-                $crate::air::chips::ChipSpec::num_public_values(self)
+                $crate::chips::ChipSpec::num_public_values(self)
             }
         }
 
@@ -129,7 +129,7 @@ macro_rules! define_chip_set {
             fn from_name(name: &str) -> Option<Self> {
                 // Use if-else chain (qualified paths can't appear in match patterns).
                 $(
-                    if name == $crate::air::chips::ChipSpec::chip_name(
+                    if name == $crate::chips::ChipSpec::chip_name(
                         &<$chip as Default>::default()
                     ) {
                         return Some(Self::$variant(<$chip as Default>::default()));
@@ -140,7 +140,7 @@ macro_rules! define_chip_set {
 
             fn chip_names() -> Vec<&'static str> {
                 vec![
-                    $($crate::air::chips::ChipSpec::chip_name(
+                    $($crate::chips::ChipSpec::chip_name(
                         &<$chip as Default>::default()
                     ),)+
                 ]

@@ -2,19 +2,20 @@ use p3_baby_bear::{BabyBear, default_babybear_poseidon2_16};
 use p3_field::PrimeCharacteristicRing;
 use p3_symmetric::Permutation;
 
-use tabula_proof::air::chips::poseidon::air::PoseidonChip;
-use tabula_proof::air::chips::poseidon::columns::{
+use tabula_proof::air::borrow_cols_mut;
+use tabula_proof::chips::poseidon::air::PoseidonChip;
+use tabula_proof::chips::poseidon::columns::{
     POSEIDON_PREPROCESSED_WIDTH, POSEIDON_WIDTH, PoseidonCols, PoseidonPreprocessedCols,
     poseidon_width,
 };
-use tabula_proof::air::chips::poseidon::constants::{
+use tabula_proof::chips::poseidon::constants::{
     TOTAL_ROUNDS, WIDTH, internal_diag_minus_1, is_full_round, poseidon2_permutation,
     round_constants, sbox_with_intermediates,
 };
-use tabula_proof::air::chips::poseidon::trace::{
+use tabula_proof::chips::poseidon::trace::{
     generate_poseidon_preprocessed, generate_poseidon_trace,
 };
-use tabula_proof::air::{borrow_cols_mut, debug_check, debug_check_with_preprocessed};
+use tabula_proof::debug::{debug_check, debug_check_with_preprocessed};
 
 use crate::common::builders::poseidon_test_input;
 

@@ -5,7 +5,7 @@
 //!
 //! Generic over `CS: ChipSet` — callers specify their chip set via the type parameter:
 //! ```ignore
-//! use tabula_proof::air::chips::TabulaAir;
+//! use tabula_proof::chips::TabulaAir;
 //! let proof = stark::prove::<TabulaAir>(&config, &traces);
 //! stark::verify::<TabulaAir>(&config, &proof)?;
 //! ```

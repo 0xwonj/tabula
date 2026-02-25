@@ -6,17 +6,20 @@ use p3_matrix::Matrix;
 
 use tabula_commitment::NativeDigest;
 
-use tabula_proof::air::chips::smt_path::air::{SmtColPathChip, SmtTablePathChip};
-use tabula_proof::air::chips::smt_path::trace::{
+use tabula_proof::air::{borrow_cols, borrow_cols_mut};
+use tabula_proof::chips::smt_path::air::{
+    SMT_TABLE_PATH_NEW_ROOT_PV_OFFSET, SMT_TABLE_PATH_NUM_PUBLIC_VALUES,
+    SMT_TABLE_PATH_OLD_ROOT_PV_OFFSET,
+};
+use tabula_proof::chips::smt_path::air::{SmtColPathChip, SmtTablePathChip};
+use tabula_proof::chips::smt_path::columns::{
+    SMT_COL_PATH_WIDTH, SMT_TABLE_PATH_WIDTH, SmtPathCols, SmtTablePathCols,
+};
+use tabula_proof::chips::smt_path::trace::{
     SmtPathWitness, SmtTablePathWitness, generate_smt_col_path_trace, generate_smt_table_path_trace,
 };
-use tabula_proof::air::debug::{
+use tabula_proof::debug::{
     debug_check, debug_check_with_public_values, evaluate_chip, evaluate_chip_with_public_values,
-};
-use tabula_proof::air::{
-    SMT_COL_PATH_WIDTH, SMT_TABLE_PATH_NEW_ROOT_PV_OFFSET, SMT_TABLE_PATH_NUM_PUBLIC_VALUES,
-    SMT_TABLE_PATH_OLD_ROOT_PV_OFFSET, SMT_TABLE_PATH_WIDTH, SmtPathCols, SmtTablePathCols,
-    borrow_cols, borrow_cols_mut,
 };
 
 // ── Width ──

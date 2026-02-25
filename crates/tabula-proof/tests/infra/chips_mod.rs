@@ -1,9 +1,10 @@
-use tabula_proof::air::chips::column_meta::ColumnMetaChip;
-use tabula_proof::air::chips::execution::ExecutionChip;
-use tabula_proof::air::chips::poseidon::PoseidonChip;
-use tabula_proof::air::chips::range_check::RangeCheckChip;
-use tabula_proof::air::chips::state_column::StateColumnChip;
-use tabula_proof::air::{ChipSet, ChipSpec, TabulaAir};
+use tabula_proof::air::ChipSet;
+use tabula_proof::chips::column_meta::ColumnMetaChip;
+use tabula_proof::chips::execution::ExecutionChip;
+use tabula_proof::chips::poseidon::PoseidonChip;
+use tabula_proof::chips::range_check::RangeCheckChip;
+use tabula_proof::chips::state_column::StateColumnChip;
+use tabula_proof::chips::{ChipSpec, TabulaAir};
 
 #[test]
 fn chip_meta_name() {
@@ -65,7 +66,7 @@ fn chip_set_chip_names() {
 
 #[test]
 fn chip_meta_public_values() {
-    use tabula_proof::air::chips::smt_path::SmtTablePathChip;
+    use tabula_proof::chips::smt_path::SmtTablePathChip;
     let smt = SmtTablePathChip;
     assert_eq!(smt.num_public_values(), 16); // old_root[8] + new_root[8]
 

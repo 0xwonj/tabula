@@ -4,9 +4,11 @@ use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 
-use tabula_proof::air::{
-    IsZero, StrictIneq, U64Limbs, borrow_cols, borrow_cols_mut, constrain_is_zero,
-    constrain_strict_ineq, constrain_u64_decomposition, debug_check, num_cols,
+use tabula_proof::air::{borrow_cols, borrow_cols_mut, num_cols};
+use tabula_proof::debug::debug_check;
+use tabula_proof::gadgets::{
+    IsZero, StrictIneq, U64Limbs, constrain_is_zero, constrain_strict_ineq,
+    constrain_u64_decomposition,
 };
 
 // ── IsZero tests ──

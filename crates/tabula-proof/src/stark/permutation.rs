@@ -21,8 +21,8 @@ use p3_baby_bear::{BabyBear, default_babybear_poseidon2_16};
 use p3_challenger::{CanObserve, CanSample, DuplexChallenger};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 
-use crate::air::debug::{ChipRecord, RecordedInteraction};
 use crate::air::interaction::{InteractionDirection, InteractionKind};
+use crate::debug::{ChipRecord, RecordedInteraction};
 
 use super::config::EF4;
 use super::proof::ChipProofEntry;
@@ -174,7 +174,7 @@ pub(crate) fn ef4_to_babybear_array(ef: EF4) -> [BabyBear; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::air::debug::RecordedInteraction;
+    use crate::debug::RecordedInteraction;
 
     fn bb(x: u64) -> BabyBear {
         BabyBear::from_u64(x)
@@ -294,7 +294,7 @@ mod tests {
 
     /// Create a dummy proof for testing challenge derivation.
     /// We only need the metadata fields (trace_height, public_values), not the actual proof.
-    fn dummy_proof() -> p3_uni_stark::Proof<super::super::config::TabulaStarkConfig> {
+    fn dummy_proof() -> p3_uni_stark::Proof<crate::stark::config::TabulaStarkConfig> {
         // Build a minimal valid proof by running the STARK pipeline on a trivial chip.
         use p3_air::{Air, BaseAir};
         use p3_matrix::dense::RowMajorMatrix;
@@ -312,7 +312,7 @@ mod tests {
             fn eval(&self, _builder: &mut AB) {}
         }
 
-        let config = super::super::config::default_config();
+        let config = crate::stark::config::default_config();
         let trace = RowMajorMatrix::new(vec![BabyBear::ZERO; 2], 1);
         p3_uni_stark::prove(&config, &TrivialChip, trace, &[])
     }

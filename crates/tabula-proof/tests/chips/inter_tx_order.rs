@@ -4,14 +4,13 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
-use tabula_proof::air::chips::inter_tx_order::air::InterTxOrderChip;
-use tabula_proof::air::chips::inter_tx_order::columns::{
+use tabula_proof::air::borrow_cols_mut;
+use tabula_proof::chips::inter_tx_order::air::InterTxOrderChip;
+use tabula_proof::chips::inter_tx_order::columns::{
     INTER_TX_ORDER_STANDARD_WIDTH, InterTxOrderCols, inter_tx_order_width,
 };
-use tabula_proof::air::chips::inter_tx_order::trace::{
-    InterTxOrderRow, generate_inter_tx_order_trace,
-};
-use tabula_proof::air::{borrow_cols_mut, debug_check};
+use tabula_proof::chips::inter_tx_order::trace::{InterTxOrderRow, generate_inter_tx_order_trace};
+use tabula_proof::debug::debug_check;
 
 use crate::common::builders::{ito_init, ito_read, ito_read_write, ito_write};
 

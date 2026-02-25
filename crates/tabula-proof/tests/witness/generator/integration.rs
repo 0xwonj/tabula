@@ -7,9 +7,9 @@ use tabula_core::{
 };
 
 use tabula_commitment::BabyBearCodec;
-use tabula_proof::air::chips::column_meta::air::ColumnMetaChip;
-use tabula_proof::air::chips::column_meta::trace::generate_column_meta_trace;
-use tabula_proof::air::debug_check;
+use tabula_proof::chips::column_meta::air::ColumnMetaChip;
+use tabula_proof::chips::column_meta::trace::generate_column_meta_trace;
+use tabula_proof::debug::debug_check;
 use tabula_proof::witness::WitnessGenerator;
 use tabula_proof::witness::route::KeyRoute;
 

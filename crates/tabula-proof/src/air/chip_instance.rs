@@ -68,7 +68,7 @@ impl<CS: ChipSet> ChipInstance<CS> {
     }
 
     /// Build chip instances from `CS::all_chips()` with trace data from a `TraceMap`.
-    pub fn build_all(traces: &crate::trace_builder::TraceMap) -> Vec<Self> {
+    pub fn build_all(traces: &crate::trace::TraceMap) -> Vec<Self> {
         CS::all_chips()
             .into_iter()
             .filter_map(|chip| {

@@ -4,7 +4,7 @@
 //! method to declare cross-chip LogUp interactions alongside local constraints.
 //!
 //! Different builder implementations handle these declarations differently:
-//! - [`super::debug::DebugConstraintBuilder`]: records concrete values for LogUp balance checking
+//! - [`crate::debug::DebugConstraintBuilder`]: records concrete values for LogUp balance checking
 //! - `InteractionExtractor`: extracts symbolic descriptors for permutation trace generation
 //! - [`EmptyMessageBuilder`] impls (p3 builders): discard interactions (no-op)
 

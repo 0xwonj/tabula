@@ -108,7 +108,7 @@ fn divmod_wrong_q_sel_fails() {
 /// `assert_zero(gate * rhs_iz.is_zero)` must then fire.
 #[test]
 fn divmod_div_by_zero_rejected() {
-    use tabula_proof::air::chips::execution::columns::ExecutionCols;
+    use tabula_proof::chips::execution::columns::ExecutionCols;
 
     // Start with a valid 7/3 trace so trace generation doesn't panic.
     let records = vec![

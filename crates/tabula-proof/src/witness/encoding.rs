@@ -17,7 +17,7 @@ use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
 use tabula_core::{ColId, TableId, Value, ValueType, zero_value};
 
-use crate::air::chips::poseidon::constants::poseidon2_permutation;
+use crate::chips::poseidon::constants::poseidon2_permutation;
 
 /// Encode a value as Tier 1 ComEnc field elements, using canonical zero when null.
 ///

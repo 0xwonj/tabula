@@ -4,7 +4,7 @@
 
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
-use tabula_proof::air::{CmpOp, InstructionRecord, Opcode};
+use tabula_proof::chips::execution::{CmpOp, InstructionRecord, Opcode};
 
 use super::instruction_builder::{InstructionBuilder, bool_val};
 
@@ -188,7 +188,7 @@ pub fn make_hash(
     src1: [u32; 3],
     src2: [u32; 3],
 ) -> InstructionRecord {
-    use tabula_proof::air::chips::poseidon::constants::poseidon2_permutation;
+    use tabula_proof::chips::poseidon::constants::poseidon2_permutation;
 
     let src1_fe: Vec<BabyBear> = src1.iter().map(|v| BabyBear::new(*v)).collect();
     let src2_fe: Vec<BabyBear> = src2.iter().map(|v| BabyBear::new(*v)).collect();

@@ -17,8 +17,8 @@ use p3_uni_stark::{self, setup_preprocessed};
 
 use crate::air::chip_instance::ChipInstance;
 use crate::air::chip_set::ChipSet;
-use crate::air::debug::evaluate_chip_with_preprocessed_and_public_values;
-use crate::trace_builder::TraceMap;
+use crate::debug::evaluate_chip_with_preprocessed_and_public_values;
+use crate::trace::TraceMap;
 
 use super::config::{EF4, TabulaStarkConfig, default_config};
 use super::permutation;
@@ -42,7 +42,7 @@ pub trait StarkAir:
     + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, TabulaStarkConfig>>
     + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, BabyBear>>
     + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, TabulaStarkConfig>>
-    + for<'a> Air<crate::air::debug::DebugConstraintBuilder<'a, BabyBear>>
+    + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>
 {
 }
 
@@ -52,7 +52,7 @@ impl<T> StarkAir for T where
         + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, TabulaStarkConfig>>
         + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, BabyBear>>
         + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, TabulaStarkConfig>>
-        + for<'a> Air<crate::air::debug::DebugConstraintBuilder<'a, BabyBear>>
+        + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>
 {
 }
 
@@ -161,7 +161,7 @@ fn compute_chip_records<CS: StarkAir>(
     instances: &[ChipInstance<CS>],
     active_chips: &[(usize, RowMajorMatrix<BabyBear>, Vec<BabyBear>)],
     traces: &TraceMap,
-) -> Vec<crate::air::debug::ChipRecord<BabyBear>> {
+) -> Vec<crate::debug::ChipRecord<BabyBear>> {
     let mut records = Vec::new();
     for &(idx, ref main_trace, ref pvs) in active_chips {
         let instance = &instances[idx];

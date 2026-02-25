@@ -1,14 +1,14 @@
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
-use tabula_proof::air::chips::state_column::air::StateColumnChip;
-use tabula_proof::air::chips::state_column::columns::{
-    STATE_COLUMN_STANDARD_WIDTH, state_column_width,
-};
-use tabula_proof::air::chips::state_column::trace::{
+use tabula_proof::air::{borrow_cols, borrow_cols_mut};
+use tabula_proof::chips::state_column::StateColumnCols;
+use tabula_proof::chips::state_column::air::StateColumnChip;
+use tabula_proof::chips::state_column::columns::{STATE_COLUMN_STANDARD_WIDTH, state_column_width};
+use tabula_proof::chips::state_column::trace::{
     EntrySource, StateColumnRow, generate_state_column_trace,
 };
-use tabula_proof::air::{StateColumnCols, borrow_cols, borrow_cols_mut, debug_check};
+use tabula_proof::debug::debug_check;
 
 use crate::common::builders::{sc_both, sc_delete, sc_gap, sc_old_only, sc_write_only};
 

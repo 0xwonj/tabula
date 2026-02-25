@@ -2,11 +2,12 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
-use tabula_proof::air::chips::range_check::{
+use tabula_proof::air::borrow_cols;
+use tabula_proof::chips::range_check::{
     RANGE_CHECK_SIZE, RANGE_CHECK_WIDTH, RangeCheckChip, RangeCheckCols,
     generate_range_check_preprocessed,
 };
-use tabula_proof::air::{borrow_cols, debug_check};
+use tabula_proof::debug::debug_check;
 
 #[test]
 fn range_check_width_is_two() {

@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use tabula_contract::{
-    APPLY_BATCH_FIELDS, ApplyBatchField, C10_READ_ACCESS_SCHEMA_VERSION_V2,
+    BINDING_VERSION_V1, BindingRegistry, BindingStatus, C10_READ_ACCESS_SCHEMA_VERSION_V2,
     C11_WRITE_ACCESS_SCHEMA_VERSION_V2, CONTRACT_RULES_V1, CONTRACT_SCHEMA_VERSION_V1,
     ContractCompatibilityPolicy, ContractMetadataEnvelope, ContractRuleCode,
-    ContractValidationError, STATEMENT_BINDING_VERSION_V1, StatementBindingRegistry,
-    StatementBindingStatus, access_bus_field_names, apply_batch_binding_registry_v1,
+    ContractValidationError, PUBLIC_INPUT_FIELDS, PublicInputField, access_bus_field_names,
+    binding_registry_v1,
 };
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -22,7 +22,7 @@ fn metadata_envelope_canonical_snapshot() {
     let envelope = ContractMetadataEnvelope {
         profile_hash: [0x11; 32],
         contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
-        statement_binding_version: STATEMENT_BINDING_VERSION_V1,
+        binding_version: BINDING_VERSION_V1,
         semantic_hash_stub: Some([0x22; 32]),
     };
 
@@ -44,13 +44,13 @@ fn metadata_validation_is_fail_closed_for_unknown_schema_version() {
     let policy = ContractCompatibilityPolicy {
         expected_profile_hash: [0x11; 32],
         expected_contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
-        expected_statement_binding_version: STATEMENT_BINDING_VERSION_V1,
+        expected_binding_version: BINDING_VERSION_V1,
         expected_semantic_hash_stub: None,
     };
     let envelope = ContractMetadataEnvelope {
         profile_hash: [0x11; 32],
         contract_schema_version: CONTRACT_SCHEMA_VERSION_V1 + 1,
-        statement_binding_version: STATEMENT_BINDING_VERSION_V1,
+        binding_version: BINDING_VERSION_V1,
         semantic_hash_stub: None,
     };
 
@@ -71,13 +71,13 @@ fn metadata_validation_is_fail_closed_for_profile_mismatch() {
     let policy = ContractCompatibilityPolicy {
         expected_profile_hash: [0x11; 32],
         expected_contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
-        expected_statement_binding_version: STATEMENT_BINDING_VERSION_V1,
+        expected_binding_version: BINDING_VERSION_V1,
         expected_semantic_hash_stub: Some([0x33; 32]),
     };
     let envelope = ContractMetadataEnvelope {
         profile_hash: [0x22; 32],
         contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
-        statement_binding_version: STATEMENT_BINDING_VERSION_V1,
+        binding_version: BINDING_VERSION_V1,
         semantic_hash_stub: Some([0x33; 32]),
     };
 
@@ -89,13 +89,13 @@ fn metadata_validation_is_fail_closed_for_profile_mismatch() {
 }
 
 #[test]
-fn statement_binding_registry_is_complete() {
-    let registry = apply_batch_binding_registry_v1();
+fn binding_registry_is_complete() {
+    let registry = binding_registry_v1();
     registry
         .validate_completeness()
         .expect("default v1 binding registry must be complete");
 
-    for field in APPLY_BATCH_FIELDS {
+    for field in PUBLIC_INPUT_FIELDS {
         assert!(
             registry.bindings.contains_key(&field),
             "missing field in default binding registry: {:?}",
@@ -105,15 +105,15 @@ fn statement_binding_registry_is_complete() {
 }
 
 #[test]
-fn statement_binding_registry_detects_missing_field() {
+fn binding_registry_detects_missing_field() {
     let mut bindings = BTreeMap::new();
-    for field in APPLY_BATCH_FIELDS {
-        if field != ApplyBatchField::Budgets {
-            bindings.insert(field, StatementBindingStatus::BoundInAir);
+    for field in PUBLIC_INPUT_FIELDS {
+        if field != PublicInputField::Budgets {
+            bindings.insert(field, BindingStatus::BoundInAir);
         }
     }
-    let registry = StatementBindingRegistry {
-        version: STATEMENT_BINDING_VERSION_V1,
+    let registry = BindingRegistry {
+        version: BINDING_VERSION_V1,
         bindings,
     };
 
@@ -121,8 +121,8 @@ fn statement_binding_registry_detects_missing_field() {
         .validate_completeness()
         .expect_err("missing field must fail completeness check");
     match err {
-        ContractValidationError::IncompleteStatementBinding { missing_fields } => {
-            assert_eq!(missing_fields, vec![ApplyBatchField::Budgets]);
+        ContractValidationError::IncompleteBinding { missing_fields } => {
+            assert_eq!(missing_fields, vec![PublicInputField::Budgets]);
         }
         other => panic!("unexpected error: {other:?}"),
     }

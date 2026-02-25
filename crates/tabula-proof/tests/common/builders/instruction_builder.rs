@@ -5,7 +5,8 @@
 
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
-use tabula_proof::air::{InstructionRecord, Opcode, bool_fe, u64_to_limbs};
+use tabula_proof::chips::execution::{InstructionRecord, Opcode, u64_to_limbs};
+use tabula_proof::gadgets::bool_fe;
 
 /// Fluent builder for constructing `InstructionRecord` instances.
 pub struct InstructionBuilder {

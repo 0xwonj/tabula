@@ -4,10 +4,10 @@ use p3_field::PrimeCharacteristicRing;
 use tabula_commitment::{ColumnMeta, CommitmentStrategy};
 use tabula_core::{ColId, TableId};
 
-use tabula_proof::air::chips::column_meta::air::ColumnMetaChip;
-use tabula_proof::air::chips::column_meta::columns::COLUMN_META_WIDTH;
-use tabula_proof::air::chips::column_meta::trace::generate_column_meta_trace;
-use tabula_proof::air::debug_check;
+use tabula_proof::chips::column_meta::air::ColumnMetaChip;
+use tabula_proof::chips::column_meta::columns::COLUMN_META_WIDTH;
+use tabula_proof::chips::column_meta::trace::generate_column_meta_trace;
+use tabula_proof::debug::debug_check;
 
 use crate::common::builders::meta_entry;
 use crate::common::values::{com_empty, distinct_digest};

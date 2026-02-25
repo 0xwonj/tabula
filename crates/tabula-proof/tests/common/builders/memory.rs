@@ -6,8 +6,9 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 use tabula_commitment::{ColumnMeta, CommitmentStrategy, NativeDigest};
 use tabula_core::{ColId, TableId};
-use tabula_proof::air::chips::state_column::trace::EntrySource;
-use tabula_proof::air::{InterTxOrderRow, StateColumnRow};
+use tabula_proof::chips::inter_tx_order::InterTxOrderRow;
+use tabula_proof::chips::state_column::StateColumnRow;
+use tabula_proof::chips::state_column::trace::EntrySource;
 
 // ── Shared value helper ──
 
