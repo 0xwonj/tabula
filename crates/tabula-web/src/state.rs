@@ -7,7 +7,7 @@
 use leptos::prelude::*;
 
 use crate::models::{
-    HealthResponse, ProgramArtifact, RunRecord, StarkProofSummary, VerifyReport, WorkspaceDoc,
+    HealthResponse, ProgramArtifact, RunHistoryEntry, StarkProofSummary, VerifyReport, WorkspaceDoc,
 };
 use crate::storage;
 
@@ -68,8 +68,8 @@ pub(crate) struct AppSignals {
     pub set_status_line: WriteSignal<String>,
     pub active_tab: ReadSignal<String>,
     pub set_active_tab: WriteSignal<String>,
-    pub run_history: ReadSignal<Vec<RunRecord>>,
-    pub set_run_history: WriteSignal<Vec<RunRecord>>,
+    pub run_history: ReadSignal<Vec<RunHistoryEntry>>,
+    pub set_run_history: WriteSignal<Vec<RunHistoryEntry>>,
     pub set_pending_state_after: WriteSignal<Option<String>>,
     pub verify_report: ReadSignal<Option<VerifyReport>>,
     pub set_verify_report: WriteSignal<Option<VerifyReport>>,
@@ -104,7 +104,7 @@ impl AppSignals {
         let (busy_action, set_busy_action) = signal::<Option<String>>(None);
         let (status_line, set_status_line) = signal("Idle".to_string());
         let (active_tab, set_active_tab) = signal("diagnostics".to_string());
-        let (run_history, set_run_history) = signal(Vec::<RunRecord>::new());
+        let (run_history, set_run_history) = signal(Vec::<RunHistoryEntry>::new());
         let (_pending_state_after, set_pending_state_after) = signal::<Option<String>>(None);
         let (verify_report, set_verify_report) = signal::<Option<VerifyReport>>(None);
         let (_last_run_id, set_last_run_id) = signal::<Option<String>>(None);
@@ -195,7 +195,7 @@ impl AppSignals {
     /// Append a record to the run history (capped at 40 entries).
     pub fn append_history(&self, action: &str, ok: bool, summary: String) {
         self.set_run_history.update(|history| {
-            history.push(RunRecord {
+            history.push(RunHistoryEntry {
                 ts_ms: storage::now_ms(),
                 action: action.to_string(),
                 ok,

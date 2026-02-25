@@ -29,20 +29,31 @@ impl WorkspaceDoc {
     }
 }
 
+// ── Daemon error envelope ────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DaemonErrorEnvelope {
     pub ok: bool,
     pub error: DaemonErrorPayload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DaemonErrorPayload {
     pub code: String,
     pub message: String,
     pub details: Option<Value>,
 }
 
+// ── Daemon response envelopes ────────────────────────────────────────
+//
+// The daemon wraps every response in `{ ok: true, ...T }` where T is
+// flattened.  The inner record types come from `tabula-artifact`
+// (canonical, single source of truth).
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HealthResponse {
     pub ok: bool,
     pub status: String,
@@ -51,6 +62,7 @@ pub struct HealthResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CapabilitiesResponse {
     pub ok: bool,
     pub service_role: String,
@@ -67,81 +79,53 @@ pub struct CapabilitiesResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProgramRecord {
-    pub program_id: String,
-    pub table_count: usize,
-    pub tx_type_count: usize,
-    pub program: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RegisterProgramResponse {
     pub ok: bool,
     pub program: ProgramRecord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateInstanceRecord {
-    pub instance_id: String,
-    pub program_id: String,
-    pub version: u64,
-    pub state_hash: String,
-    pub state: StateFile,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateInstanceResponse {
     pub ok: bool,
-    pub instance: CreateInstanceRecord,
+    pub instance: InstanceRecord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutePayload {
-    pub tx_outcomes: Vec<Value>,
-    pub read_set: Vec<StateCell>,
-    pub write_set: Vec<StateCell>,
-    pub emitted: Vec<Value>,
-    pub consistency: Value,
-    pub trace: Option<Vec<Value>>,
-    pub state_after: StateFile,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunRecordResponse {
-    pub run_id: String,
-    pub status: String,
-    pub execution: ExecutePayload,
-    pub proof: Option<ExecutionReceipt>,
-    pub stark_proof: Option<StarkProofSummary>,
-    pub statement_hash: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SubmitRunResponse {
     pub ok: bool,
-    pub run: RunRecordResponse,
+    pub run: RunRecord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VerifyRunResponse {
     pub ok: bool,
-    pub run: RunRecordResponse,
+    pub run: RunRecord,
     pub verified: bool,
     pub message: String,
     pub statement_hash: String,
 }
 
+// ── Re-exports from tabula-artifact (canonical record types) ─────────
+
+pub type ProgramRecord = tabula_artifact::ProgramRecord;
+pub type InstanceRecord = tabula_artifact::InstanceRecord;
+pub type RunRecord = tabula_artifact::RunRecord;
 pub type StateFile = tabula_artifact::StateFile;
 pub type StateCell = tabula_artifact::StateCell;
 pub type BatchFile = tabula_artifact::BatchFile;
 pub type TxInput = tabula_artifact::TxInput;
-pub type ExecutionReceipt = tabula_artifact::ExecutionReceipt;
 pub type StarkProofSummary = tabula_artifact::StarkProofSummary;
 pub type ProgramArtifact = tabula_artifact::ProgramArtifact;
 
+// ── Client-local types ───────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RunRecord {
+pub struct RunHistoryEntry {
     pub ts_ms: f64,
     pub action: String,
     pub ok: bool,

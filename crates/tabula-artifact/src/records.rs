@@ -103,6 +103,16 @@ pub enum RunStatus {
     VerificationFailed,
 }
 
+impl fmt::Display for RunStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Succeeded => f.write_str("succeeded"),
+            Self::Verified => f.write_str("verified"),
+            Self::VerificationFailed => f.write_str("verification_failed"),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Record types
 // ---------------------------------------------------------------------------

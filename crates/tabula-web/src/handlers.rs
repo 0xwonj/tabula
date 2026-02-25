@@ -15,7 +15,7 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 
 use crate::api::ApiClient;
-use crate::models::{BatchFile, ProgramArtifact, StateCell, StateFile, VerifyReport};
+use crate::models::{BatchFile, StateCell, StateFile, VerifyReport};
 use crate::state::AppSignals;
 use crate::templates::template_workspace;
 use crate::utils::{
@@ -147,22 +147,21 @@ pub(crate) fn run_deploy(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
             match client.register_program(&source).await {
                 Ok(program_resp) => {
                     s.set_compiled_ir_json
-                        .set(pretty_json_value(&program_resp.program.program));
+                        .set(pretty_json_value(&json!(program_resp.program.program)));
                     match client
-                        .create_instance(&program_resp.program.program_id, state)
+                        .create_instance(program_resp.program.program_id.as_str(), state)
                         .await
                     {
                         Ok(instance_resp) => {
                             s.set_deployed_program_id
-                                .set(Some(program_resp.program.program_id.clone()));
+                                .set(Some(program_resp.program.program_id.to_string()));
                             s.set_deployed_instance_id
-                                .set(Some(instance_resp.instance.instance_id.clone()));
+                                .set(Some(instance_resp.instance.instance_id.to_string()));
                             s.set_deployed_instance_version
                                 .set(instance_resp.instance.version);
 
-                            let artifact: Option<ProgramArtifact> =
-                                serde_json::from_value(program_resp.program.program.clone()).ok();
-                            s.set_program_artifact.set(artifact);
+                            s.set_program_artifact
+                                .set(Some(program_resp.program.program.clone()));
 
                             s.set_diagnostics_text.set(format!(
                                 "DEPLOY OK\n- program_id: {}\n- instance_id: {}\n- version: {}\n- table_count: {}\n- tx_type_count: {}",
@@ -254,7 +253,7 @@ pub(crate) fn run_submit(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                 .await
             {
                 Ok(resp) => {
-                    s.set_last_run_id.set(Some(resp.run.run_id.clone()));
+                    s.set_last_run_id.set(Some(resp.run.run_id.to_string()));
                     s.set_deployed_instance_version.set(version + 1);
 
                     let state_after_str = pretty_json_value(&json!(resp.run.execution.state_after));
@@ -330,7 +329,7 @@ pub(crate) fn run_submit(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                         "SUBMIT OK\n- run_id: {}\n- status: {}\n- statement_hash: {}",
                         resp.run.run_id, resp.run.status, resp.run.statement_hash
                     ));
-                    s.append_history("submit", true, format!("run_id={}", resp.run.run_id));
+                    s.append_history("submit", true, format!("run_id={}", &resp.run.run_id));
                 }
                 Err(e) => {
                     s.set_diagnostics_text.set(format_api_err("submit", &e));
