@@ -1,0 +1,58 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Trunk
+        uses: jetli/trunk-action@v0.5.1
+      - name: Install mdBook
+        uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: 'latest'
+      - name: Build web
+        run: trunk build --release
+        working-directory: crates/tabula-web
+      - name: Build book
+        run: mdbook build
+        working-directory: book
+      - name: Merge outputs
+        run: |
+          cp -r book/build crates/tabula-web/dist/docs
+          cp crates/tabula-web/dist/index.html crates/tabula-web/dist/404.html
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: crates/tabula-web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

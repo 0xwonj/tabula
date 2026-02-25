@@ -1,0 +1,12 @@
+[book]
+title = "Tabula Book"
+authors = ["Wonjae Choi <wonjae@snu.ac.kr>"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "build"
+
+[output.html]
+git-repository-url = "https://github.com/0xwonj/tabula"
+additional-css = ["theme/custom.css"]
