@@ -741,38 +741,38 @@ This document is intentionally not a replacement for those specs; it is the unif
 The following files are the operational anchors for each architectural plane:
 
 1. Semantics core:
-   1. `crates/tabula-core/src/state/mod.rs`
-   2. `crates/tabula-core/src/event.rs`
-   3. `crates/tabula-ir/src/instruction.rs`
-   4. `crates/tabula-ir/src/program.rs`
-   5. `crates/tabula-ir/src/pass/validate.rs`
+   1. `crates/core/src/state/mod.rs`
+   2. `crates/core/src/event.rs`
+   3. `crates/ir/src/instruction.rs`
+   4. `crates/ir/src/program.rs`
+   5. `crates/ir/src/pass/validate.rs`
 2. Language and lowering:
-   1. `crates/tabula-lang/src/parser/mod.rs`
-   2. `crates/tabula-lang/src/lower/mod.rs`
+   1. `crates/lang/src/parser/mod.rs`
+   2. `crates/lang/src/lower/mod.rs`
 3. Execution:
-   1. `crates/tabula-executor/src/interpreter.rs`
-   2. `crates/tabula-executor/src/overlay.rs`
-   3. `crates/tabula-executor/src/batch.rs`
-   4. `crates/tabula-executor/src/consistency.rs`
+   1. `crates/executor/src/interpreter.rs`
+   2. `crates/executor/src/overlay.rs`
+   3. `crates/executor/src/batch.rs`
+   4. `crates/executor/src/consistency.rs`
 4. Commitment:
-   1. `crates/tabula-commitment/src/poseidon.rs`
-   2. `crates/tabula-commitment/src/codec.rs`
-   3. `crates/tabula-commitment/src/ssmc.rs`
-   4. `crates/tabula-commitment/src/smt.rs`
-   5. `crates/tabula-commitment/src/hybrid.rs`
+   1. `crates/commitment/src/poseidon.rs`
+   2. `crates/commitment/src/codec.rs`
+   3. `crates/commitment/src/ssmc.rs`
+   4. `crates/commitment/src/smt.rs`
+   5. `crates/commitment/src/hybrid.rs`
 5. Proof system:
-   1. `crates/tabula-proof/src/witness/generator.rs`
-   2. `crates/tabula-proof/src/trace_builder/builder.rs`
-   3. `crates/tabula-proof/src/air/chips/mod.rs`
-   4. `crates/tabula-proof/src/air/interaction.rs`
-   5. `crates/tabula-proof/src/air/bus.rs`
-   6. `crates/tabula-proof/src/stark/prover.rs`
-   7. `crates/tabula-proof/src/stark/verifier.rs`
+   1. `crates/proof/src/witness/generator.rs`
+   2. `crates/proof/src/trace_builder/builder.rs`
+   3. `crates/proof/src/air/chips/mod.rs`
+   4. `crates/proof/src/air/interaction.rs`
+   5. `crates/proof/src/air/bus.rs`
+   6. `crates/proof/src/stark/prover.rs`
+   7. `crates/proof/src/stark/verifier.rs`
 6. Compatibility spine:
-   1. `crates/tabula-contract/src/lib.rs`
-   2. `crates/tabula-driver/src/lib.rs`
-   3. `crates/tabula-artifact/src/lib.rs`
+   1. `crates/contract/src/lib.rs`
+   2. `crates/driver/src/lib.rs`
+   3. `crates/artifact/src/lib.rs`
 7. Product adapters:
-   1. `crates/tabula-cli/src/main.rs`
-   2. `crates/tabula-daemon/src/service/engine.rs`
-   3. `crates/tabula-web-ide/src/main.rs`
+   1. `crates/cli/src/main.rs`
+   2. `crates/daemon/src/service/engine.rs`
+   3. `crates/web-ide/src/main.rs`

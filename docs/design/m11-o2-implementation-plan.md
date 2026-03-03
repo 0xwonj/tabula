@@ -91,10 +91,10 @@ flowchart LR
 
 ### 신규 모듈 제안
 
-- `crates/tabula-proof/src/contract/mod.rs`
-- `crates/tabula-proof/src/contract/public_values.rs`
-- `crates/tabula-proof/src/contract/bus_schema.rs`
-- `crates/tabula-proof/src/contract/statement_binding.rs`
+- `crates/proof/src/contract/mod.rs`
+- `crates/proof/src/contract/public_values.rs`
+- `crates/proof/src/contract/bus_schema.rs`
+- `crates/proof/src/contract/statement_binding.rs`
 
 ### 핵심 타입 제안
 
@@ -134,11 +134,11 @@ Execution의 access 이벤트와 InterTxOrder의 tx ordering witness를 같은 f
 
 ### 변경 파일
 
-- `crates/tabula-proof/src/air/bus.rs`
-- `crates/tabula-proof/src/air/chips/execution/air.rs`
-- `crates/tabula-proof/src/air/chips/inter_tx_order/air.rs`
-- `crates/tabula-proof/tests/infra/bus.rs`
-- `crates/tabula-proof/tests/infra/integration.rs`
+- `crates/proof/src/air/bus.rs`
+- `crates/proof/src/air/chips/execution/air.rs`
+- `crates/proof/src/air/chips/inter_tx_order/air.rs`
+- `crates/proof/tests/infra/bus.rs`
+- `crates/proof/tests/infra/integration.rs`
 
 ### 구현 원칙
 
@@ -166,10 +166,10 @@ Execution의 access 이벤트와 InterTxOrder의 tx ordering witness를 같은 f
 
 ### 변경 파일
 
-- `crates/tabula-proof/src/air/chips/state_column/columns.rs`
-- `crates/tabula-proof/src/air/chips/state_column/air.rs`
-- `crates/tabula-proof/src/air/chips/state_column/trace.rs`
-- `crates/tabula-proof/tests/chips/state_column.rs`
+- `crates/proof/src/air/chips/state_column/columns.rs`
+- `crates/proof/src/air/chips/state_column/air.rs`
+- `crates/proof/src/air/chips/state_column/trace.rs`
+- `crates/proof/tests/chips/state_column.rs`
 
 ### 추가 권장 (동일 PR 내)
 
@@ -204,9 +204,9 @@ delete-all: 해당 `(t,c)` segment에 write는 있었지만 new-list에 남는 e
 
 ### 변경 파일
 
-- `crates/tabula-proof/src/air/chips/column_meta/air.rs`
-- `crates/tabula-proof/tests/chips/column_meta.rs`
-- `crates/tabula-proof/tests/infra/integration.rs`
+- `crates/proof/src/air/chips/column_meta/air.rs`
+- `crates/proof/tests/chips/column_meta.rs`
+- `crates/proof/tests/infra/integration.rs`
 
 ---
 

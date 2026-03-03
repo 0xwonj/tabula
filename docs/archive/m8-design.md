@@ -667,35 +667,35 @@ Sequential path: M8-1 → M8-2 → M8-3 → M8-4 → M8-5.
 
 ### New files:
 ```
-crates/tabula-proof/src/air/chips/ssmc/mod.rs
-crates/tabula-proof/src/air/chips/ssmc/columns.rs
-crates/tabula-proof/src/air/chips/ssmc/air.rs
-crates/tabula-proof/src/air/chips/ssmc/trace.rs
+crates/proof/src/air/chips/ssmc/mod.rs
+crates/proof/src/air/chips/ssmc/columns.rs
+crates/proof/src/air/chips/ssmc/air.rs
+crates/proof/src/air/chips/ssmc/trace.rs
 
-crates/tabula-proof/src/air/chips/merge/mod.rs
-crates/tabula-proof/src/air/chips/merge/columns.rs
-crates/tabula-proof/src/air/chips/merge/air.rs
-crates/tabula-proof/src/air/chips/merge/trace.rs
+crates/proof/src/air/chips/merge/mod.rs
+crates/proof/src/air/chips/merge/columns.rs
+crates/proof/src/air/chips/merge/air.rs
+crates/proof/src/air/chips/merge/trace.rs
 
-crates/tabula-proof/src/air/chips/poseidon/mod.rs
-crates/tabula-proof/src/air/chips/poseidon/columns.rs
-crates/tabula-proof/src/air/chips/poseidon/air.rs
-crates/tabula-proof/src/air/chips/poseidon/trace.rs
-crates/tabula-proof/src/air/chips/poseidon/constants.rs  (round constants)
+crates/proof/src/air/chips/poseidon/mod.rs
+crates/proof/src/air/chips/poseidon/columns.rs
+crates/proof/src/air/chips/poseidon/air.rs
+crates/proof/src/air/chips/poseidon/trace.rs
+crates/proof/src/air/chips/poseidon/constants.rs  (round constants)
 
-crates/tabula-proof/src/air/chips/execution/mod.rs
-crates/tabula-proof/src/air/chips/execution/columns.rs
-crates/tabula-proof/src/air/chips/execution/air.rs
-crates/tabula-proof/src/air/chips/execution/trace.rs
+crates/proof/src/air/chips/execution/mod.rs
+crates/proof/src/air/chips/execution/columns.rs
+crates/proof/src/air/chips/execution/air.rs
+crates/proof/src/air/chips/execution/trace.rs
 ```
 
 ### Modified files:
 ```
-crates/tabula-proof/src/air/chips/mod.rs       — TabulaAir enum + dispatch
-crates/tabula-proof/src/air/mod.rs             — re-exports
-crates/tabula-proof/src/air/chips/column_meta/air.rs  — new constraints
-crates/tabula-proof/src/air/chips/column_meta/trace.rs — updated tests
-crates/tabula-core/src/event.rs                — InstructionRecord type (M8-4)
+crates/proof/src/air/chips/mod.rs       — TabulaAir enum + dispatch
+crates/proof/src/air/mod.rs             — re-exports
+crates/proof/src/air/chips/column_meta/air.rs  — new constraints
+crates/proof/src/air/chips/column_meta/trace.rs — updated tests
+crates/core/src/event.rs                — InstructionRecord type (M8-4)
 ```
 
 ---

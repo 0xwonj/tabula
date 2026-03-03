@@ -145,22 +145,22 @@ tabula-proof          STARK proof system (in-circuit): AIR, constraints, Plonky3
 
 tabula-cli            Command-line interface
 tabula-daemon         Local HTTP control plane
-tabula-web-ide        Leptos browser IDE
+tabula-web            Leptos browser IDE
 ```
 
 | Crate | Role |
 |-------|------|
-| [`tabula-core`](crates/tabula-core/) | Interfaces — types, traits, errors |
-| [`tabula-ir`](crates/tabula-ir/) | IR — instructions, tx type defs, SSA/NF validation |
-| [`tabula-executor`](crates/tabula-executor/) | Execution — interpreter, overlay, batch |
-| [`tabula-lang`](crates/tabula-lang/) | Compiler — `.tab` DSL to IR |
-| [`tabula-artifact`](crates/tabula-artifact/) | Artifacts — canonical program/state/batch/receipt models and helpers |
-| [`tabula-orchestrator`](crates/tabula-orchestrator/) | Orchestration — check/compile/execute/prove/verify workflows |
-| [`tabula-commitment`](crates/tabula-commitment/) | Crypto — Poseidon, SMT, SSMC (out-of-circuit) |
-| [`tabula-proof`](crates/tabula-proof/) | Proving — STARK proof generation via Plonky3 |
-| [`tabula-cli`](crates/tabula-cli/) | CLI — JSON-based batch execution and inspection |
-| [`tabula-daemon`](crates/tabula-daemon/) | Local API — check/compile/execute/prove/verify endpoints |
-| [`tabula-web-ide`](crates/tabula-web-ide/) | Web IDE — browser UI for program/state/tx/proof workflows |
+| [`tabula-core`](crates/core/) | Interfaces — types, traits, errors |
+| [`tabula-ir`](crates/ir/) | IR — instructions, tx type defs, SSA/NF validation |
+| [`tabula-executor`](crates/executor/) | Execution — interpreter, overlay, batch |
+| [`tabula-lang`](crates/lang/) | Compiler — `.tab` DSL to IR |
+| [`tabula-artifact`](crates/artifact/) | Artifacts — canonical program/state/batch/receipt models and helpers |
+| [`tabula-driver`](crates/driver/) | Orchestration — check/compile/execute/prove/verify workflows |
+| [`tabula-commitment`](crates/commitment/) | Crypto — Poseidon, SMT, SSMC (out-of-circuit) |
+| [`tabula-proof`](crates/proof/) | Proving — STARK proof generation via Plonky3 |
+| [`tabula-cli`](crates/cli/) | CLI — JSON-based batch execution and inspection |
+| [`tabula-daemon`](crates/daemon/) | Local API — check/compile/execute/prove/verify endpoints |
+| [`tabula-web`](crates/web/) | Web IDE — browser UI for program/state/tx/proof workflows |
 
 ## Specs
 
@@ -190,7 +190,7 @@ TABULA_DAEMON_TOKEN=secret cargo run -p tabula-daemon -- \
     --host 127.0.0.1 --port 4317 \
     --allow-path /tmp \
     --allow-origin http://127.0.0.1:8080
-trunk serve --manifest-path crates/tabula-web-ide/Cargo.toml
+trunk serve --manifest-path crates/web/Cargo.toml
 ```
 
 ## License

@@ -142,9 +142,9 @@ flowchart LR
 
 ## 6) 코드 매핑 (현재 구현 기준)
 
-- Instance machine: `/Users/wonj/Projects/tabula/crates/tabula-orchestrator/src/machine/instance.rs`
-- Run machine: `/Users/wonj/Projects/tabula/crates/tabula-orchestrator/src/machine/run.rs`
-- Engine adapter: `/Users/wonj/Projects/tabula/crates/tabula-orchestrator/src/orchestrator/engine.rs`
+- Instance machine: `/Users/wonj/Projects/tabula/crates/orchestrator/src/machine/instance.rs`
+- Run machine: `/Users/wonj/Projects/tabula/crates/orchestrator/src/machine/run.rs`
+- Engine adapter: `/Users/wonj/Projects/tabula/crates/orchestrator/src/orchestrator/engine.rs`
 
 ## 7) 금지 규칙
 

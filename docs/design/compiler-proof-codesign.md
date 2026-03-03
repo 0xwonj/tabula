@@ -32,26 +32,26 @@ This creates repeated drift risk.
 Concrete evidence from current tree:
 
 1. CLI still owns semantic checks
-- `crates/tabula-cli/src/io.rs`
-- `crates/tabula-cli/src/commands/compile.rs`
-- `crates/tabula-cli/src/commands/check.rs`
+- `crates/cli/src/io.rs`
+- `crates/cli/src/commands/compile.rs`
+- `crates/cli/src/commands/check.rs`
 
 2. IR canonicalization still mutates semantics
-- `crates/tabula-ir/src/pass/canonicalize/nf4_alias_guard.rs`
-- `crates/tabula-ir/src/program.rs`
+- `crates/ir/src/pass/canonicalize/nf4_alias_guard.rs`
+- `crates/ir/src/program.rs`
 
 3. Proof contract ownership is fragmented
-- `crates/tabula-proof/src/statement.rs`
-- `crates/tabula-proof/src/air/bus.rs`
+- `crates/proof/src/statement.rs`
+- `crates/proof/src/air/bus.rs`
 
 4. Runtime/proof trace identity is not fully frozen at a shared boundary
-- `crates/tabula-proof/src/witness/types.rs`
-- `crates/tabula-proof/src/air/chips/execution/air.rs`
-- `crates/tabula-proof/src/air/chips/inter_tx_order/air.rs`
+- `crates/proof/src/witness/types.rs`
+- `crates/proof/src/air/chips/execution/air.rs`
+- `crates/proof/src/air/chips/inter_tx_order/air.rs`
 
 5. Hash semantics can diverge by backend/policy placement
-- `crates/tabula-core/src/traits/crypto.rs`
-- `crates/tabula-commitment/src/poseidon.rs`
+- `crates/core/src/traits/crypto.rs`
+- `crates/commitment/src/poseidon.rs`
 
 If these evolve independently, O2 fixes will not remain stable.
 

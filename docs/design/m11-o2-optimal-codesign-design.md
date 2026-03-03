@@ -40,9 +40,9 @@
 ## 2.3 `compiler-proof-codesign.md` 장점
 
 1. 현재 코드 증거를 명확히 짚는다:
-   - CLI semantic ownership (`crates/tabula-cli/src/io.rs`)
-   - IR semantic mutation (`crates/tabula-ir/src/pass/canonicalize/nf4_alias_guard.rs`)
-   - proof 계약 분산 (`crates/tabula-proof/src/statement.rs`, `crates/tabula-proof/src/air/bus.rs`)
+   - CLI semantic ownership (`crates/cli/src/io.rs`)
+   - IR semantic mutation (`crates/ir/src/pass/canonicalize/nf4_alias_guard.rs`)
+   - proof 계약 분산 (`crates/proof/src/statement.rs`, `crates/proof/src/air/bus.rs`)
 2. “지금/다음/그다음” 단계가 단순하고 실행 가능성이 높다.
 3. anti-pattern을 분명히 제시해 회귀를 막기 쉽다.
 
@@ -71,7 +71,7 @@
 ## 4.1 Contract Schema V1
 
 소유 위치:
-- 단기: `crates/tabula-proof/src/contract/`
+- 단기: `crates/proof/src/contract/`
 - 중기: `tabula-contract`로 extraction
 
 필수 항목:

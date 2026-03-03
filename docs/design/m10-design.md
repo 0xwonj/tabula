@@ -150,7 +150,7 @@ executed instructions. Abort semantics are handled at the executor level, not in
 
 #### A1-1. SSMC range checks
 
-**File**: `crates/tabula-proof/src/air/chips/ssmc/columns.rs`
+**File**: `crates/proof/src/air/chips/ssmc/columns.rs`
 
 Add after `segment_is_touched` (line 67):
 ```rust
@@ -163,7 +163,7 @@ pub ordering_diff1_halves: LimbHalves<T>, // 2 FE
 
 **Width impact**: 45 → 53 (+8)
 
-**File**: `crates/tabula-proof/src/air/chips/ssmc/air.rs`
+**File**: `crates/proof/src/air/chips/ssmc/air.rs`
 
 Add `constrain_range_check_halves()`:
 - `key.limb0 = key_l0_halves.lo + key_l0_halves.hi * 2^15`
@@ -176,14 +176,14 @@ Add `send_range_checks()`:
   `ordering_diff0_halves.lo/hi`, `ordering_diff1_halves.lo/hi`, `key_ordering.diff2`
 - All with multiplicity `is_real`
 
-**File**: `crates/tabula-proof/src/air/chips/ssmc/trace.rs`
+**File**: `crates/proof/src/air/chips/ssmc/trace.rs`
 
 Populate `key_l0_halves`, `key_l1_halves`, `ordering_diff0_halves`, `ordering_diff1_halves`
 from limb values: `lo = val & 0x7FFF`, `hi = val >> 15`.
 
 #### A1-2. Merge range checks
 
-**File**: `crates/tabula-proof/src/air/chips/merge/columns.rs`
+**File**: `crates/proof/src/air/chips/merge/columns.rs`
 
 Add after `tc_changed` (line 77):
 ```rust
@@ -199,7 +199,7 @@ Same constraint and trace pattern as SSMC (A1-1).
 
 #### A1-3. Execution range checks
 
-**File**: `crates/tabula-proof/src/air/chips/execution/columns.rs`
+**File**: `crates/proof/src/air/chips/execution/columns.rs`
 
 Add after `slot_written` (line 125):
 ```rust
@@ -223,7 +223,7 @@ Add `send_range_checks()`:
 
 #### A1-4. SortedMem ordering diff range checks
 
-**File**: `crates/tabula-proof/src/air/chips/sorted_mem/columns.rs`
+**File**: `crates/proof/src/air/chips/sorted_mem/columns.rs`
 
 Add after existing `tau_l1_halves` (around line 110):
 ```rust
@@ -323,7 +323,7 @@ Per chip:
 
 #### B1-1. New columns
 
-**File**: `crates/tabula-proof/src/air/chips/execution/columns.rs`
+**File**: `crates/proof/src/air/chips/execution/columns.rs`
 
 Add after range-check columns:
 ```rust
@@ -423,7 +423,7 @@ In `generate_execution_trace`, for `Opcode::Cmp(sub_op)`:
 
 #### B2-1. New columns
 
-**File**: `crates/tabula-proof/src/air/chips/execution/columns.rs`
+**File**: `crates/proof/src/air/chips/execution/columns.rs`
 
 ```rust
 // ── Hash opcode (M10-B2) ──
@@ -495,7 +495,7 @@ This is architecturally cleaner but more complex. Deferred unless needed.
 
 #### B3-1. New InteractionKind
 
-**File**: `crates/tabula-proof/src/air/interaction.rs`
+**File**: `crates/proof/src/air/interaction.rs`
 
 ```rust
 StaticTableLookup = 9,  // ExecutionChip → StaticTableChip (M11)
@@ -503,7 +503,7 @@ StaticTableLookup = 9,  // ExecutionChip → StaticTableChip (M11)
 
 #### B3-2. Constraints
 
-**File**: `crates/tabula-proof/src/air/chips/execution/air.rs`
+**File**: `crates/proof/src/air/chips/execution/air.rs`
 
 New `constrain_lookup()`:
 
@@ -551,7 +551,7 @@ Or: rename/extend trace generation to populate access columns for Lookup too.
 
 #### B4-1. New columns
 
-**File**: `crates/tabula-proof/src/air/chips/column_meta/columns.rs`
+**File**: `crates/proof/src/air/chips/column_meta/columns.rs`
 
 ```rust
 // ── Com_empty verification (M10-B4) ──
@@ -747,7 +747,7 @@ with multiplicity `is_real * op_arith * arith_is_mul`.
 
 #### C2-1. Operand selector fix
 
-**File**: `crates/tabula-proof/src/air/chips/execution/air.rs`
+**File**: `crates/proof/src/air/chips/execution/air.rs`
 
 Add `op_divmod` to `needs_src1` and `needs_src2`:
 

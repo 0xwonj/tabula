@@ -42,7 +42,7 @@ rustup target add wasm32-unknown-unknown
 3. web ide 실행
 
 ```bash
-cd crates/tabula-web-ide
+cd crates/web
 trunk serve --open
 ```
 

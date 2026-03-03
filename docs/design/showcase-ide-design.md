@@ -94,7 +94,7 @@ Fallback 규칙:
 
 ### 4.2 Daemon Runtime Stack
 
-1. `crates/tabula-daemon` (신규)
+1. `crates/daemon` (신규)
 2. HTTP + WebSocket/SSE API
 3. Job manager (queued/running/cancelled/succeeded/failed)
 4. Core engine bridge (`tabula-lang`, `tabula-ir`, `tabula-executor`, `tabula-proof`)
@@ -334,7 +334,7 @@ Job 상태:
 
 ### Phase A (2주): Daemon Foundation
 
-1. `crates/tabula-daemon` scaffold
+1. `crates/daemon` scaffold
 2. health/capabilities/check/compile/execute API
 3. artifact store 기본 구조
 

@@ -60,13 +60,13 @@ This proposal is grounded in concrete code locations where drift currently appea
 
 | Class | Current location(s) | Architectural issue |
 |---|---|---|
-| R1 | `crates/tabula-ir/src/pass/typecheck.rs`, `crates/tabula-lang/src/lower/expr.rs`, `crates/tabula-executor/src/interpreter.rs` | Operator legality/typing enforced with different completeness at each layer |
-| R2 | `crates/tabula-cli/src/commands/compile.rs`, `crates/tabula-ir/src/program.rs`, `crates/tabula-ir/src/pass/canonicalize/mod.rs` | Artifact emission path is not guaranteed to reflect canonicalized semantics |
-| R3 | `crates/tabula-ir/src/pass/validate.rs`, `crates/tabula-ir/src/pass/canonicalize/nf4_alias_guard.rs`, `docs/spec/semantics-spec.md` | NF policy behavior is split across prose and transformation heuristics |
-| R4 | `crates/tabula-core/src/traits/crypto.rs`, `crates/tabula-commitment/src/poseidon.rs` | Hash semantics change by backend implementation details |
-| R5 | `crates/tabula-cli/src/io.rs` | CLI performs semantic checks that should belong to compiler core |
-| R6 | `crates/tabula-lang/src/lower/mod.rs`, `crates/tabula-lang/src/lower/expr.rs` | Lowering stage mixes syntax elaboration and implicit type decisions |
-| R7 | `crates/tabula-cli/src/commands/execute.rs`, `crates/tabula-executor/src/batch.rs` | Command status contract is weaker than required for strict operational correctness |
+| R1 | `crates/ir/src/pass/typecheck.rs`, `crates/lang/src/lower/expr.rs`, `crates/executor/src/interpreter.rs` | Operator legality/typing enforced with different completeness at each layer |
+| R2 | `crates/cli/src/commands/compile.rs`, `crates/ir/src/program.rs`, `crates/ir/src/pass/canonicalize/mod.rs` | Artifact emission path is not guaranteed to reflect canonicalized semantics |
+| R3 | `crates/ir/src/pass/validate.rs`, `crates/ir/src/pass/canonicalize/nf4_alias_guard.rs`, `docs/spec/semantics-spec.md` | NF policy behavior is split across prose and transformation heuristics |
+| R4 | `crates/core/src/traits/crypto.rs`, `crates/commitment/src/poseidon.rs` | Hash semantics change by backend implementation details |
+| R5 | `crates/cli/src/io.rs` | CLI performs semantic checks that should belong to compiler core |
+| R6 | `crates/lang/src/lower/mod.rs`, `crates/lang/src/lower/expr.rs` | Lowering stage mixes syntax elaboration and implicit type decisions |
+| R7 | `crates/cli/src/commands/execute.rs`, `crates/executor/src/batch.rs` | Command status contract is weaker than required for strict operational correctness |
 
 ---
 
@@ -1335,25 +1335,25 @@ This appendix maps concrete current files to target ownership and action type.
 
 | Current file/module | Action | Target ownership |
 |---|---|---|
-| `crates/tabula-lang/src/lower/mod.rs` | Split into HIR elaboration and MIR lowering boundaries | `tabula-front` + `tabula-hir` |
-| `crates/tabula-lang/src/lower/expr.rs` | Remove implicit fallback typing; emit typed expression terms only | `tabula-hir` |
-| `crates/tabula-ir/src/program.rs` | Replace in-place mutation pipeline with pass manager invocation and artifact staging | `tabula-driver` + `tabula-mir` |
-| `crates/tabula-ir/src/pass/typecheck.rs` | Replace with profile-bound operator legality engine | `tabula-hir` / `tabula-mir` |
-| `crates/tabula-ir/src/pass/validate.rs` | Convert NF checks into obligation verification framework | `tabula-mir` |
-| `crates/tabula-ir/src/pass/canonicalize/mod.rs` | Limit to deterministic normalization only; no semantic mutation | `tabula-mir` |
-| `crates/tabula-ir/src/pass/canonicalize/nf4_alias_guard.rs` | Replace with obligation materialization pass with provenance | `tabula-mir` |
-| `crates/tabula-cli/src/io.rs` | Remove semantic validation logic; keep serialization adapters only | `tabula-cli` |
-| `crates/tabula-cli/src/commands/compile.rs` | Call driver compile endpoint and write `.tcb` | `tabula-cli` |
-| `crates/tabula-cli/src/commands/check.rs` | Call driver check endpoint and render diagnostics | `tabula-cli` |
-| `crates/tabula-cli/src/commands/execute.rs` | Call driver execute endpoint and enforce strict exit contract | `tabula-cli` |
-| `crates/tabula-core/src/traits/crypto.rs` | Separate primitive hash traits from semantic hash policy adapter | `tabula-core` |
-| `crates/tabula-executor/src/batch.rs` | Consume typed X-LIR and emit typed execution result and E-Trace | `tabula-runtime` |
-| `crates/tabula-executor/src/interpreter.rs` | Move to LIR interpreter with profile-bound guard semantics | `tabula-runtime` |
-| `crates/tabula-commitment/src/poseidon.rs` | Bind behavior via profile policy adapters, not backend overrides alone | `tabula-commitment` |
-| `crates/tabula-commitment/src/hybrid.rs` | Consume contract-defined leaf/commit semantics metadata | `tabula-commitment` + `tabula-contract` |
-| `crates/tabula-proof/src/statement.rs` | Replace isolated statement struct with contract-owned schema import | `tabula-contract` + `tabula-proof` |
-| `crates/tabula-proof/src/air/bus.rs` | Generate/consume bus schemas from contract registry | `tabula-contract` + `tabula-proof` |
-| `crates/tabula-proof/src/air/interaction.rs` | Align interaction tags and tuple arity to contract versions | `tabula-contract` + `tabula-proof` |
+| `crates/lang/src/lower/mod.rs` | Split into HIR elaboration and MIR lowering boundaries | `tabula-front` + `tabula-hir` |
+| `crates/lang/src/lower/expr.rs` | Remove implicit fallback typing; emit typed expression terms only | `tabula-hir` |
+| `crates/ir/src/program.rs` | Replace in-place mutation pipeline with pass manager invocation and artifact staging | `tabula-driver` + `tabula-mir` |
+| `crates/ir/src/pass/typecheck.rs` | Replace with profile-bound operator legality engine | `tabula-hir` / `tabula-mir` |
+| `crates/ir/src/pass/validate.rs` | Convert NF checks into obligation verification framework | `tabula-mir` |
+| `crates/ir/src/pass/canonicalize/mod.rs` | Limit to deterministic normalization only; no semantic mutation | `tabula-mir` |
+| `crates/ir/src/pass/canonicalize/nf4_alias_guard.rs` | Replace with obligation materialization pass with provenance | `tabula-mir` |
+| `crates/cli/src/io.rs` | Remove semantic validation logic; keep serialization adapters only | `tabula-cli` |
+| `crates/cli/src/commands/compile.rs` | Call driver compile endpoint and write `.tcb` | `tabula-cli` |
+| `crates/cli/src/commands/check.rs` | Call driver check endpoint and render diagnostics | `tabula-cli` |
+| `crates/cli/src/commands/execute.rs` | Call driver execute endpoint and enforce strict exit contract | `tabula-cli` |
+| `crates/core/src/traits/crypto.rs` | Separate primitive hash traits from semantic hash policy adapter | `tabula-core` |
+| `crates/executor/src/batch.rs` | Consume typed X-LIR and emit typed execution result and E-Trace | `tabula-runtime` |
+| `crates/executor/src/interpreter.rs` | Move to LIR interpreter with profile-bound guard semantics | `tabula-runtime` |
+| `crates/commitment/src/poseidon.rs` | Bind behavior via profile policy adapters, not backend overrides alone | `tabula-commitment` |
+| `crates/commitment/src/hybrid.rs` | Consume contract-defined leaf/commit semantics metadata | `tabula-commitment` + `tabula-contract` |
+| `crates/proof/src/statement.rs` | Replace isolated statement struct with contract-owned schema import | `tabula-contract` + `tabula-proof` |
+| `crates/proof/src/air/bus.rs` | Generate/consume bus schemas from contract registry | `tabula-contract` + `tabula-proof` |
+| `crates/proof/src/air/interaction.rs` | Align interaction tags and tuple arity to contract versions | `tabula-contract` + `tabula-proof` |
 
 Migration rule:
 - during transition, each file should expose compatibility adapters behind feature flags and explicit version guards.

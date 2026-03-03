@@ -30,6 +30,6 @@ fn main() {
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     eprintln!(
-        "tabula-web is a wasm app. Run with: trunk serve --manifest-path crates/tabula-web/Cargo.toml"
+        "tabula-web is a wasm app. Run with: trunk serve --manifest-path crates/web/Cargo.toml"
     );
 }

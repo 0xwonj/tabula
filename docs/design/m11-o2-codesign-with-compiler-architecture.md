@@ -31,18 +31,18 @@
 하지만 현재 코드 상태를 보면 구조적 중복/드리프트 가능성이 남아 있다:
 
 1. 버스 스키마 정의와 실제 payload 조립이 분산됨
-- `crates/tabula-proof/src/air/bus.rs`는 C10/C11 trait를 제공하지만,
-- `crates/tabula-proof/src/air/chips/execution/air.rs`는 아직 raw `AirInteraction`로 payload를 수동 조립한다.
+- `crates/proof/src/air/bus.rs`는 C10/C11 trait를 제공하지만,
+- `crates/proof/src/air/chips/execution/air.rs`는 아직 raw `AirInteraction`로 payload를 수동 조립한다.
 
 2. O2 문서는 C10/C11 `tx_index` 포함을 요구하지만 현재 버스 시그니처는 미반영
 - C10/C11 tuple이 아직 `(t, c, key[3], val[W], is_null)` 형태.
 
 3. statement 계약이 proof crate 로컬 구조에 머물러 있음
-- `crates/tabula-proof/src/statement.rs` 단일 struct만 존재.
+- `crates/proof/src/statement.rs` 단일 struct만 존재.
 - binding 상태/버전/deferred 사유를 코드 수준으로 강제하는 독립 계층이 없음.
 
 4. semantics/proof spec와 구현의 시간 앵커 모델이 혼재
-- witness 타입은 `time` + `tx_index`를 모두 가짐 (`crates/tabula-proof/src/witness/types.rs`).
+- witness 타입은 `time` + `tx_index`를 모두 가짐 (`crates/proof/src/witness/types.rs`).
 - proof-spec 일부 섹션은 global `tau` 중심 설명.
 - O2는 `tx_index` 기반 anchor를 요구.
 
@@ -120,7 +120,7 @@ flowchart LR
 
 ## C1. `contract/`를 extraction-ready로 설계
 
-현재 O2 PR-1에서 `crates/tabula-proof/src/contract/`를 도입할 때 다음을 강제:
+현재 O2 PR-1에서 `crates/proof/src/contract/`를 도입할 때 다음을 강제:
 
 1. 순수 데이터 타입 중심 (`serde` + `borsh` 가능성 고려)
 2. chip 내부 타입 의존 최소화

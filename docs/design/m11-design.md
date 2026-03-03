@@ -54,7 +54,7 @@ LeafDigest(t, c) = compress(
 - Matches the ColumnMeta `Com_empty` pattern (M10-B4): single perm_input[16] + perm_output[8]
 - Requires updating `hybrid.rs` `compute_leaf()` to use `hasher.compress()` instead of `hasher.hash_domain()`
 
-**Change scope**: `crates/tabula-commitment/src/hybrid.rs` — `compute_leaf()` method only.
+**Change scope**: `crates/commitment/src/hybrid.rs` — `compute_leaf()` method only.
 
 #### D2. SMT node hash: compress (no per-level domain tag)
 
@@ -160,7 +160,7 @@ Phase E is independent of A-D.
 SSMC row's LogUp fingerprint. LogUp references columns of a single row only — cannot join
 adjacent rows.
 
-**File**: `crates/tabula-proof/src/air/chips/ssmc/columns.rs`
+**File**: `crates/proof/src/air/chips/ssmc/columns.rs`
 
 Add after `key_ordering`:
 ```rust
@@ -454,7 +454,7 @@ values: [table_id, col_id, key[3], next_key[3], is_first, is_last]
 
 ### B1. Commitment Crate: compress-based `compute_leaf`
 
-**File**: `crates/tabula-commitment/src/hybrid.rs`
+**File**: `crates/commitment/src/hybrid.rs`
 
 Change `compute_leaf` from `hash_domain` to `compress`:
 
@@ -487,7 +487,7 @@ valid roots with the new formula. All witness generator tests must pass.
 
 ### B2. ColumnMeta Leaf Digest Columns
 
-**File**: `crates/tabula-proof/src/air/chips/column_meta/columns.rs`
+**File**: `crates/proof/src/air/chips/column_meta/columns.rs`
 
 Add after `has_empty_check`:
 
@@ -539,7 +539,7 @@ send(PoseidonPermutation, [leaf_perm_input_new[16], leaf_digest_new[8]], mult = 
 
 ### C1. SmtPathChip: Column Layout
 
-**New directory**: `crates/tabula-proof/src/air/chips/smt_path/`
+**New directory**: `crates/proof/src/air/chips/smt_path/`
 
 ```
 smt_path/
@@ -734,7 +734,7 @@ input mechanism.
 
 ### D1. AirBuilderWithPublicValues Integration
 
-**File**: `crates/tabula-proof/src/air/builder.rs`
+**File**: `crates/proof/src/air/builder.rs`
 
 Extend `InteractionAirBuilder` to include public values:
 
@@ -801,7 +801,7 @@ content (deferred to M12 when trace assembly connects the chip data).
 
 ### E1. StaticTableChip
 
-**New directory**: `crates/tabula-proof/src/air/chips/static_table/`
+**New directory**: `crates/proof/src/air/chips/static_table/`
 
 ```
 static_table/

@@ -847,7 +847,7 @@ preprocessed trace for round constant verification.
 ## 10. New Files
 
 ```
-crates/tabula-proof/src/air/
+crates/proof/src/air/
 ├── interaction.rs          — AirInteraction, Interaction, InteractionKind (replaces bus.rs)
 ├── builder.rs              — InteractionAirBuilder trait + InteractionCollector
 └── permutation.rs          — Permutation trace gen + constraint evaluation

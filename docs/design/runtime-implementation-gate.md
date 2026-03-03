@@ -20,7 +20,7 @@ This gate freezes file structure and ownership rules for the control-plane orche
 ## 3. Target Orchestrator Structure
 
 ```text
-crates/tabula-orchestrator/src/
+crates/orchestrator/src/
   lib.rs
   error.rs
   io.rs
@@ -46,7 +46,7 @@ crates/tabula-orchestrator/src/
 ## 4. Target Daemon Structure
 
 ```text
-crates/tabula-daemon/src/
+crates/daemon/src/
   lib.rs
   main.rs
   runtime/
@@ -81,7 +81,7 @@ crates/tabula-daemon/src/
 ## 5. Target Web IDE Structure
 
 ```text
-crates/tabula-web-ide/src/web/
+crates/web-ide/src/web/
   mod.rs
   app/
     mod.rs
@@ -123,17 +123,17 @@ Rules:
 
 ## 7. File Migration Map (Current -> Target)
 
-1. `/Users/wonj/Projects/tabula/crates/tabula-orchestrator/src/domain/stateful.rs`  
+1. `/Users/wonj/Projects/tabula/crates/orchestrator/src/domain/stateful.rs`  
 move to `types/state.rs`.
-2. `/Users/wonj/Projects/tabula/crates/tabula-orchestrator/src/service.rs`  
+2. `/Users/wonj/Projects/tabula/crates/orchestrator/src/service.rs`  
 move to `orchestrator/engine.rs` and split transition helpers into `machine/*`.
-3. `/Users/wonj/Projects/tabula/crates/tabula-daemon/src/api/*`  
+3. `/Users/wonj/Projects/tabula/crates/daemon/src/api/*`  
 move to `transport/http/*`.
-4. `/Users/wonj/Projects/tabula/crates/tabula-daemon/src/protocol/*`  
+4. `/Users/wonj/Projects/tabula/crates/daemon/src/protocol/*`  
 move to `transport/http/dto/*`.
-5. `/Users/wonj/Projects/tabula/crates/tabula-web-ide/src/web/app.rs`  
+5. `/Users/wonj/Projects/tabula/crates/web-ide/src/web/app.rs`  
 split into `app/*` + `panels/*`.
-6. `/Users/wonj/Projects/tabula/crates/tabula-web-ide/src/web/api.rs`  
+6. `/Users/wonj/Projects/tabula/crates/web-ide/src/web/api.rs`  
 split into `api/client.rs` + `api/dto.rs`.
 
 ## 8. Phase Plan with Gates

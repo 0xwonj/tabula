@@ -25,12 +25,12 @@ This is an adoption decision document, not only a design sketch.
 
 | ID | Finding | Evidence |
 |---|---|---|
-| G1 | Write activity is not AIR-linked to `segment_is_touched` | `crates/tabula-proof/src/air/chips/state_column/air.rs:137`, `crates/tabula-proof/src/air/chips/state_column/air.rs:572` |
-| G2 | `Com_new` send/receive path is touched-gated but delete-all edge is not explicitly modeled | `crates/tabula-proof/src/air/chips/state_column/air.rs:175`, `crates/tabula-proof/src/air/chips/column_meta/air.rs:183` |
-| G3 | C10/C11 access bus payload omits tx/time anchor (`tx_index` or `tau`) | `crates/tabula-proof/src/air/bus.rs:182`, `crates/tabula-proof/src/air/chips/execution/air.rs:450`, `crates/tabula-proof/src/air/chips/inter_tx_order/air.rs:371` |
-| G4 | `ApplyBatchStatement` contract (6 fields) is broader than active AIR binding | `crates/tabula-proof/src/statement.rs:7`, `crates/tabula-proof/src/air/chips/smt_path/air.rs:56` |
-| G5 | Static table root binding is still deferred | `crates/tabula-proof/src/air/chips/static_table/mod.rs:4` |
-| G6 | Infra bus coverage has placeholders for critical buses | `crates/tabula-proof/tests/infra/bus.rs:306`, `crates/tabula-proof/tests/infra/bus.rs:314` |
+| G1 | Write activity is not AIR-linked to `segment_is_touched` | `crates/proof/src/air/chips/state_column/air.rs:137`, `crates/proof/src/air/chips/state_column/air.rs:572` |
+| G2 | `Com_new` send/receive path is touched-gated but delete-all edge is not explicitly modeled | `crates/proof/src/air/chips/state_column/air.rs:175`, `crates/proof/src/air/chips/column_meta/air.rs:183` |
+| G3 | C10/C11 access bus payload omits tx/time anchor (`tx_index` or `tau`) | `crates/proof/src/air/bus.rs:182`, `crates/proof/src/air/chips/execution/air.rs:450`, `crates/proof/src/air/chips/inter_tx_order/air.rs:371` |
+| G4 | `ApplyBatchStatement` contract (6 fields) is broader than active AIR binding | `crates/proof/src/statement.rs:7`, `crates/proof/src/air/chips/smt_path/air.rs:56` |
+| G5 | Static table root binding is still deferred | `crates/proof/src/air/chips/static_table/mod.rs:4` |
+| G6 | Infra bus coverage has placeholders for critical buses | `crates/proof/tests/infra/bus.rs:306`, `crates/proof/tests/infra/bus.rs:314` |
 
 ### 2.2 Why these are architectural, not local bugs
 
@@ -143,7 +143,7 @@ Without this, statement/API and AIR evolve independently (G4).
 
 #### Proposed structure
 
-`crates/tabula-proof/src/contract/`:
+`crates/proof/src/contract/`:
 
 - `public_values.rs`
 - `bus_schema.rs`
