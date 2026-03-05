@@ -116,11 +116,15 @@ fn stark_pipeline(
 }
 
 fn make_tx(params: Vec<Value>) -> Transaction {
+    make_tx_nonce(params, 0)
+}
+
+fn make_tx_nonce(params: Vec<Value>, nonce: u64) -> Transaction {
     Transaction {
         tx_type: TxTypeId(0),
         params,
         sender: [7u8; 32],
-        nonce: 0,
+        nonce,
         signature: vec![],
     }
 }
@@ -171,5 +175,66 @@ tx op(id: u64) {
         source,
         &[(TableId(0), ColId(0), RowKey(5), Value::U64(100))],
         vec![make_tx(vec![Value::U64(5)])],
+    );
+}
+
+#[test]
+fn stark_prove_verify_multi_tx_batch() {
+    // Two independent transactions in one batch, each touching a different key.
+    let source = "\
+table t { val: u64 }
+tx bump(id: u64) {
+    let x = t[id].val
+    t[id].val = x + x
+}";
+    stark_pipeline(
+        source,
+        &[
+            (TableId(0), ColId(0), RowKey(1), Value::U64(10)),
+            (TableId(0), ColId(0), RowKey(2), Value::U64(20)),
+        ],
+        vec![
+            make_tx_nonce(vec![Value::U64(1)], 0),
+            make_tx_nonce(vec![Value::U64(2)], 1),
+        ],
+    );
+}
+
+#[test]
+fn stark_prove_verify_mul() {
+    // Multiplication opcode.
+    let source = "\
+table t { val: u64 }
+tx square(id: u64) {
+    let x = t[id].val
+    t[id].val = x * x
+}";
+    stark_pipeline(
+        source,
+        &[(TableId(0), ColId(0), RowKey(1), Value::U64(7))],
+        vec![make_tx(vec![Value::U64(1)])],
+    );
+}
+
+#[test]
+fn stark_prove_verify_select() {
+    // Conditional select opcode: pick between two read values.
+    let source = "\
+table t { val: u64 }
+tx pick(id: u64, use_first: bool) {
+    let x = t[id].val
+    let result = select(use_first, x, 0)
+    t[id].val = result
+}";
+    stark_pipeline(
+        source,
+        &[(TableId(0), ColId(0), RowKey(1), Value::U64(42))],
+        vec![Transaction {
+            tx_type: TxTypeId(0),
+            params: vec![Value::U64(1), Value::Bool(true)],
+            sender: [7u8; 32],
+            nonce: 0,
+            signature: vec![],
+        }],
     );
 }
