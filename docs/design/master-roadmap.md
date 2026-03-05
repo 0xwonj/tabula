@@ -10,15 +10,15 @@
 
 | Metric | Value |
 |--------|-------|
-| Crates | 13 (`core`, `contract`, `ir`, `executor`, `commitment`, `proof`, `lang`, `artifact`, `driver`, `cli`, `daemon`, `web`) |
+| Crates | 17 (`core`, `contract`, `ir`, `executor`, `commitment`, `stark`, `gadgets`, `chips`, `witness`, `machine`, `lang`, `artifact`, `driver`, `cli`, `daemon`, `web`) |
 | Source LOC | ~34,500 |
-| Tests | ~854 functions (391 in proof crate) |
-| Milestones complete | M1–M11 |
-| Active milestone | M12 (trace assembly), M13 (STARK prover/verifier) partially implemented |
+| Tests | ~860+ functions across workspace |
+| Milestones complete | M1–M13 (Phase 0 complete) |
+| Active milestone | Phase 1 (machine layer) |
 | Chips | 9 (Execution, InterTxOrder, StateColumn, ColumnMeta, Poseidon, RangeCheck, StaticTable, SmtColPath, SmtTablePath) |
-| LogUp buses | 11 (C5, C6, C8–C16) |
-| E2E STARK tests | 3 passing (DSL → compile → execute → witness → trace → prove → verify) |
-| Known soundness gap | C1: LogUp cumsums not PCS-committed |
+| LogUp buses | 11 (C5, C6, C8–C16) — all with positive/negative tests |
+| E2E STARK tests | 6 passing (DSL → compile → execute → witness → trace → prove → verify) |
+| Known soundness gap | C1: LogUp cumsums not PCS-committed (Phase 1 fix) |
 | Architecture target | Per-column sharding, shared PCS, single FRI, extensibility framework — none implemented |
 
 ---
@@ -94,20 +94,20 @@ Each phase has a strict completion gate:
 
 | Gate | Description | Status |
 |------|-------------|--------|
-| M12-G1 | Single trace orchestrator covering all 9 chips | Partial — Poseidon/RangeCheck auto-assembly missing |
-| M12-G2 | ContractMetadataEnvelope fail-closed validation | Not started |
-| M12-G3 | E-trace identity anchor (`tx_index` + `effect_ordinal`) | Not started |
-| M12-G4 | All 11 buses with positive/negative tests | Partial |
-| M12-G5 | E2E: DSL → execute → witness → all-chip trace → constraint check | 3 tests exist, need strengthening |
+| M12-G1 | Single trace orchestrator covering all 9 chips | **Complete** — Poseidon/RangeCheck auto-assembly via collectors |
+| M12-G2 | ContractMetadataEnvelope fail-closed validation | **Complete** — all 6 error variants + tests |
+| M12-G3 | E-trace identity anchor (`tx_index` + `effect_ordinal`) | **Complete** — wired into ExecutionCols |
+| M12-G4 | All 11 buses with positive/negative tests | **Complete** — C12 EmptyColRead added |
+| M12-G5 | E2E: DSL → execute → witness → all-chip trace → constraint check | **Complete** — 6 diverse tests |
 
 **M13: STARK Prover/Verifier (hardening)**
 
 | Task | Description | Status |
 |------|-------------|--------|
-| Permutation trace PCS | Prepare for C1 fix (current cumsums are non-committed) | Architecture ready, not committed |
-| Challenge derivation | Improve Fiat-Shamir to observe PCS commitments (not just heights) | Partial |
-| Multi-program support | ProvingKey/VerifyingKey for arbitrary registered programs | Not started |
-| E2E test expansion | 5+ diverse programs (multi-tx, multi-table, failed tx, empty columns) | 3 exist |
+| Permutation trace PCS | Prepare for C1 fix (current cumsums are non-committed) | Phase 1 — architecture ready |
+| Challenge derivation | Improve Fiat-Shamir to observe PCS commitments (not just heights) | Phase 1 |
+| Multi-program support | ProvingKey/VerifyingKey for arbitrary registered programs | Phase 1 |
+| E2E test expansion | 5+ diverse programs (multi-tx, mul, select, cmp, arith, read/write) | **Complete** — 6 tests |
 
 ### 4.3 Non-Goals for Phase 0
 
