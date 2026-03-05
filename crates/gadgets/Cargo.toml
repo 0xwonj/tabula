@@ -1,0 +1,18 @@
+[package]
+name = "tabula-gadgets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tabula-stark = { workspace = true }
+p3-air = { workspace = true }
+p3-baby-bear = { workspace = true }
+p3-field = { workspace = true }
+
+[dev-dependencies]
+tabula-stark = { workspace = true }
+p3-air = { workspace = true }
+p3-baby-bear = { workspace = true }
+p3-field = { workspace = true }
+p3-matrix = { workspace = true }

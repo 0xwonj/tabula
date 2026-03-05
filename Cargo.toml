@@ -6,7 +6,11 @@ members = [
     "crates/ir",
     "crates/executor",
     "crates/commitment",
-    "crates/proof",
+    "crates/stark",
+    "crates/gadgets",
+    "crates/chips",
+    "crates/witness",
+    "crates/machine",
     "crates/lang",
     "crates/artifact",
     "crates/driver",
@@ -33,7 +37,11 @@ tabula-contract = { path = "crates/contract" }
 tabula-ir = { path = "crates/ir" }
 tabula-executor = { path = "crates/executor" }
 tabula-commitment = { path = "crates/commitment" }
-tabula-proof = { path = "crates/proof" }
+tabula-stark = { path = "crates/stark" }
+tabula-gadgets = { path = "crates/gadgets" }
+tabula-chips = { path = "crates/chips" }
+tabula-witness = { path = "crates/witness" }
+tabula-machine = { path = "crates/machine" }
 tabula-lang = { path = "crates/lang" }
 tabula-artifact = { path = "crates/artifact" }
 tabula-driver = { path = "crates/driver" }
@@ -73,4 +81,17 @@ clap = { version = "4", features = ["derive"] }
 
 # Testing
 proptest = "1"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
+
+# Build profiles
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+
+[profile.bench]
+lto = "thin"

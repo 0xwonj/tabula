@@ -8,3 +8,6 @@ license.workspace = true
 blake3 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tabula-core = { workspace = true }
+
+[dev-dependencies]
+tabula-core = { workspace = true }

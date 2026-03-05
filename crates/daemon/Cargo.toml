@@ -27,7 +27,9 @@ tabula-artifact = { workspace = true }
 tabula-core = { workspace = true, features = ["test-utils"] }
 tabula-driver = { workspace = true }
 tabula-ir = { workspace = true }
-tabula-proof = { workspace = true, optional = true }
+tabula-chips = { workspace = true, optional = true }
+tabula-machine = { workspace = true, optional = true }
+tabula-witness = { workspace = true, optional = true }
 tabula-commitment = { workspace = true, optional = true }
 tabula-lang = { workspace = true, optional = true }
 p3-baby-bear = { workspace = true, optional = true }
@@ -36,4 +38,4 @@ sha2 = { workspace = true }
 
 [features]
 default = []
-stark = ["dep:tabula-proof", "tabula-proof/stark", "dep:tabula-commitment", "tabula-commitment/stark", "dep:tabula-lang", "dep:p3-baby-bear", "dep:p3-field"]
+stark = ["dep:tabula-chips", "dep:tabula-machine", "dep:tabula-witness", "dep:tabula-commitment", "tabula-commitment/stark", "dep:tabula-lang", "dep:p3-baby-bear", "dep:p3-field"]

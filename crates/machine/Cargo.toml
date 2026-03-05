@@ -1,0 +1,39 @@
+[package]
+name = "tabula-machine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tabula-stark = { workspace = true }
+tabula-witness = { workspace = true }
+thiserror = { workspace = true }
+p3-air = { workspace = true }
+p3-baby-bear = { workspace = true }
+p3-field = { workspace = true }
+p3-matrix = { workspace = true }
+p3-uni-stark = { workspace = true }
+p3-commit = { workspace = true }
+p3-fri = { workspace = true }
+p3-challenger = { workspace = true }
+p3-dft = { workspace = true }
+p3-merkle-tree = { workspace = true }
+p3-symmetric = { workspace = true }
+p3-poseidon2 = { workspace = true }
+
+[dev-dependencies]
+tabula-core = { workspace = true, features = ["test-utils"] }
+tabula-commitment = { workspace = true, features = ["stark"] }
+tabula-chips = { workspace = true }
+tabula-stark = { workspace = true }
+tabula-witness = { workspace = true }
+tabula-executor = { workspace = true }
+tabula-ir = { workspace = true }
+tabula-lang = { workspace = true }
+p3-baby-bear = { workspace = true }
+p3-field = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "prover"
+harness = false
