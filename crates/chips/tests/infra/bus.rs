@@ -11,7 +11,7 @@
 //! - C6  CommitmentVerif: StateColumn → ColumnMeta (tested below)
 //! - C8  RangeCheck: sender chips → RangeCheck (tested below)
 //! - C9  StaticTableLookup: Execution → StaticTable (tested below)
-//! - C12 EmptyColRead: deferred
+//! - C12 EmptyColRead: Execution → ColumnMeta (tested below)
 
 use std::collections::BTreeMap;
 
@@ -484,6 +484,97 @@ fn c8_range_check_detects_multiplicity_mismatch() {
 
 fn digest_from_seed(seed: u32) -> NativeDigest {
     NativeDigest(core::array::from_fn(|i| BabyBear::new(seed + i as u32)))
+}
+
+// ── C12 EmptyColRead: Execution → ColumnMeta ──
+
+#[test]
+fn c12_empty_col_read_balance() {
+    // Execution reads from an empty column → ColumnMeta receives (t, c).
+    let mut r = make_read(0, 1, 0, 100, 0, true);
+    r.is_empty_col = true;
+    let exec_trace = generate_execution_trace::<3>(&[r]);
+    let exec_record = evaluate_chip("Execution", &ExecutionChip::<3>, &exec_trace).unwrap();
+
+    // ColumnMeta: empty column with empty_read_mult=1.
+    let com = com_empty(1, 0);
+    let meta = ColumnMeta {
+        table: TableId(1),
+        col: ColId(0),
+        tag: CommitmentStrategy::Ssmc,
+        com_old: com,
+        com_new: com,
+        is_empty_old: true,
+        is_empty_new: true,
+        is_touched: false,
+    };
+    let mut empty_read_counts = BTreeMap::new();
+    empty_read_counts.insert((1u32, 0u16), 1u32);
+    let cm_trace = generate_column_meta_trace(&[meta], &empty_read_counts);
+    let cm_record = evaluate_chip("ColumnMeta", &ColumnMetaChip, &cm_trace).unwrap();
+
+    check_bus_balance(&[exec_record, cm_record], core_buses::EMPTY_COL_READ)
+        .expect("C12 EmptyColRead bus should balance");
+}
+
+#[test]
+fn c12_empty_col_read_multiple_reads() {
+    // Two reads from the same empty column → multiplicity 2.
+    let mut r0 = make_read(0, 2, 1, 10, 0, true);
+    r0.is_empty_col = true;
+    r0.tx_index = 0;
+    let mut r1 = make_read(0, 2, 1, 20, 0, true);
+    r1.is_empty_col = true;
+    r1.tx_index = 1;
+    let exec_trace = generate_execution_trace::<3>(&[r0, r1]);
+    let exec_record = evaluate_chip("Execution", &ExecutionChip::<3>, &exec_trace).unwrap();
+
+    let com = com_empty(2, 1);
+    let meta = ColumnMeta {
+        table: TableId(2),
+        col: ColId(1),
+        tag: CommitmentStrategy::Ssmc,
+        com_old: com,
+        com_new: com,
+        is_empty_old: true,
+        is_empty_new: true,
+        is_touched: false,
+    };
+    let mut empty_read_counts = BTreeMap::new();
+    empty_read_counts.insert((2u32, 1u16), 2u32);
+    let cm_trace = generate_column_meta_trace(&[meta], &empty_read_counts);
+    let cm_record = evaluate_chip("ColumnMeta", &ColumnMetaChip, &cm_trace).unwrap();
+
+    check_bus_balance(&[exec_record, cm_record], core_buses::EMPTY_COL_READ)
+        .expect("C12 EmptyColRead bus should balance for multiple reads");
+}
+
+#[test]
+fn c12_empty_col_read_multiplicity_mismatch_fails() {
+    // Execution sends 1 empty-col read, but ColumnMeta has empty_read_mult=2 → imbalance.
+    let mut r = make_read(0, 1, 0, 100, 0, true);
+    r.is_empty_col = true;
+    let exec_trace = generate_execution_trace::<3>(&[r]);
+    let exec_record = evaluate_chip("Execution", &ExecutionChip::<3>, &exec_trace).unwrap();
+
+    let com = com_empty(1, 0);
+    let meta = ColumnMeta {
+        table: TableId(1),
+        col: ColId(0),
+        tag: CommitmentStrategy::Ssmc,
+        com_old: com,
+        com_new: com,
+        is_empty_old: true,
+        is_empty_new: true,
+        is_touched: false,
+    };
+    let mut empty_read_counts = BTreeMap::new();
+    empty_read_counts.insert((1u32, 0u16), 2u32); // Mismatch: 2 != 1
+    let cm_trace = generate_column_meta_trace(&[meta], &empty_read_counts);
+    let cm_record = evaluate_chip("ColumnMeta", &ColumnMetaChip, &cm_trace).unwrap();
+
+    check_bus_balance(&[exec_record, cm_record], core_buses::EMPTY_COL_READ)
+        .expect_err("C12 must fail when empty_read_mult mismatches actual sends");
 }
 
 fn collect_range_check_multiplicities(records: &[ChipRecord<BabyBear>]) -> [u32; RANGE_CHECK_SIZE] {
