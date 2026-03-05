@@ -221,6 +221,7 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         InstructionRecord {
             opcode,
             tx_index: self.tx_index,
+            effect_ordinal_in_tx: self.effect_ordinal,
             written_slots: vec![],
             src1_val: vec![BabyBear::ZERO; W],
             src2_val: vec![BabyBear::ZERO; W],

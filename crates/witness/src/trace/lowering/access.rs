@@ -18,6 +18,7 @@ pub(super) fn lower_read<const W: usize>(
     let row_key = ctx.resolve_row(row)?;
 
     let event = ctx.find_event(instr_idx)?;
+    let effect_ordinal = ctx.effect_ordinal;
     ctx.effect_ordinal += 1;
 
     let vtype = *ctx
@@ -59,6 +60,7 @@ pub(super) fn lower_read<const W: usize>(
     let is_empty = ctx.empty_columns.contains(&(table, col));
 
     let mut rec = ctx.empty_record(Opcode::Read);
+    rec.effect_ordinal_in_tx = effect_ordinal;
     rec.written_slots = vec![slot];
     rec.access_t = Some(table.0);
     rec.access_c = Some(col.0);
@@ -86,6 +88,7 @@ pub(super) fn lower_write<const W: usize>(
     let value_encoded = ctx.encode_padded(&value)?;
 
     let event = ctx.find_event(instr_idx)?;
+    let effect_ordinal = ctx.effect_ordinal;
     ctx.effect_ordinal += 1;
 
     let src1_idx = ctx.resolve_slot_idx(
@@ -96,6 +99,7 @@ pub(super) fn lower_write<const W: usize>(
     )?;
 
     let mut rec = ctx.empty_record(Opcode::Write);
+    rec.effect_ordinal_in_tx = effect_ordinal;
     rec.src1_val = value_encoded.clone();
     rec.src1_slot_idx = src1_idx;
     rec.access_t = Some(table.0);

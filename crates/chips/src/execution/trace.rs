@@ -78,6 +78,8 @@ pub struct InstructionRecord {
     pub opcode: Opcode,
     /// Transaction index.
     pub tx_index: u32,
+    /// Effect ordinal within the transaction (increments on Read/Write only).
+    pub effect_ordinal_in_tx: u32,
     /// Which slots this instruction writes to.
     pub written_slots: Vec<usize>,
     /// Source operand 1 values (W field elements).
@@ -124,6 +126,7 @@ impl Default for InstructionRecord {
         Self {
             opcode: Opcode::Add,
             tx_index: 0,
+            effect_ordinal_in_tx: 0,
             written_slots: vec![],
             src1_val: vec![BabyBear::ZERO; 3],
             src2_val: vec![BabyBear::ZERO; 3],
@@ -170,6 +173,7 @@ pub fn generate_execution_trace<const W: usize>(
 
         cols.is_real = BabyBear::ONE;
         cols.tx_index = BabyBear::new(rec.tx_index);
+        cols.effect_ordinal_in_tx = BabyBear::new(rec.effect_ordinal_in_tx);
 
         // Set opcode one-hot
         set_opcode_selectors(cols, rec.opcode);

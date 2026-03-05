@@ -31,6 +31,12 @@ impl InstructionBuilder {
         self
     }
 
+    /// Set the effect ordinal within the transaction.
+    pub fn effect_ordinal(mut self, ordinal: u32) -> Self {
+        self.inner.effect_ordinal_in_tx = ordinal;
+        self
+    }
+
     /// Set the list of slot indices written by this instruction.
     pub fn written_slots(mut self, slots: Vec<usize>) -> Self {
         self.inner.written_slots = slots;

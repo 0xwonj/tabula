@@ -132,6 +132,7 @@ pub fn lower_execution_records<const W: usize>(
                 records.push(InstructionRecord {
                     opcode: Opcode::Read,
                     tx_index: event.tx_index,
+                    effect_ordinal_in_tx: event.effect_ordinal_in_tx,
                     written_slots: vec![slot],
                     src1_val: vec![BabyBear::ZERO; W],
                     src2_val: vec![BabyBear::ZERO; W],
@@ -178,6 +179,7 @@ pub fn lower_execution_records<const W: usize>(
                 records.push(InstructionRecord {
                     opcode: Opcode::Write,
                     tx_index: event.tx_index,
+                    effect_ordinal_in_tx: event.effect_ordinal_in_tx,
                     written_slots: vec![],
                     src1_val: encoded.clone(),
                     src2_val: vec![BabyBear::ZERO; W],

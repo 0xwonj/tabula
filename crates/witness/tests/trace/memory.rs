@@ -228,6 +228,7 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
         InstructionRecord {
             opcode: Opcode::Read,
             tx_index: 0,
+            effect_ordinal_in_tx: 0,
             written_slots: vec![0],
             src1_val: vec![BabyBear::ZERO; 3],
             src2_val: vec![BabyBear::ZERO; 3],
@@ -251,6 +252,7 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
         InstructionRecord {
             opcode: Opcode::Write,
             tx_index: 0,
+            effect_ordinal_in_tx: 1,
             written_slots: vec![],
             src1_val: encode_u64(50),
             src2_val: vec![BabyBear::ZERO; 3],

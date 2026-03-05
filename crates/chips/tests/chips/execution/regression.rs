@@ -268,5 +268,5 @@ fn lookup_forged_null_dst_fails() {
 
 #[test]
 fn standard_width() {
-    assert_eq!(EXECUTION_STANDARD_WIDTH, 267);
+    assert_eq!(EXECUTION_STANDARD_WIDTH, 268);
 }

@@ -34,6 +34,8 @@ pub struct ExecutionCols<T, const W: usize> {
     pub is_real: T,
     /// Transaction index within the batch.
     pub tx_index: T,
+    /// Effect ordinal within the transaction (E-Trace identity anchor).
+    pub effect_ordinal_in_tx: T,
 
     // ── Opcode one-hot selectors (12) ──
     // Note: Emit is intentionally omitted — it is out-of-protocol (semantics-spec §2.8)
