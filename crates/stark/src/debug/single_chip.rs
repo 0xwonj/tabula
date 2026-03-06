@@ -25,7 +25,7 @@ pub(super) fn empty_preprocessed<F: Field>()
 ///
 /// Iterates over each row, evaluates constraints, and returns the first
 /// violation found (if any).
-pub fn debug_check<F, A>(air: &A, trace: &RowMajorMatrix<F>) -> Result<(), ConstraintError>
+pub fn debug_check<F, A: ?Sized>(air: &A, trace: &RowMajorMatrix<F>) -> Result<(), ConstraintError>
 where
     F: Field,
     A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
@@ -34,7 +34,7 @@ where
 }
 
 /// Verify AIR constraints with explicit public values.
-pub fn debug_check_with_public_values<F, A>(
+pub fn debug_check_with_public_values<F, A: ?Sized>(
     air: &A,
     trace: &RowMajorMatrix<F>,
     public_values: &[F],
@@ -49,7 +49,7 @@ where
 /// Verify AIR constraints with an optional preprocessed trace.
 ///
 /// Like [`debug_check`] but passes a preprocessed matrix to `PairBuilder::preprocessed()`.
-pub fn debug_check_with_preprocessed<F, A>(
+pub fn debug_check_with_preprocessed<F, A: ?Sized>(
     air: &A,
     trace: &RowMajorMatrix<F>,
     preprocessed: Option<&RowMajorMatrix<F>>,
@@ -62,7 +62,7 @@ where
 }
 
 /// Like [`debug_check_with_preprocessed`] but also binds public values.
-pub fn debug_check_with_preprocessed_and_public_values<F, A>(
+pub fn debug_check_with_preprocessed_and_public_values<F, A: ?Sized>(
     air: &A,
     trace: &RowMajorMatrix<F>,
     preprocessed: Option<&RowMajorMatrix<F>>,
@@ -129,7 +129,7 @@ where
 ///
 /// Unlike [`debug_check`] (which stops at the first failing row), this
 /// scans every row and collects the first failing constraint from each.
-pub fn debug_check_all<F, A>(air: &A, trace: &RowMajorMatrix<F>) -> Vec<ConstraintError>
+pub fn debug_check_all<F, A: ?Sized>(air: &A, trace: &RowMajorMatrix<F>) -> Vec<ConstraintError>
 where
     F: Field,
     A: for<'a> Air<DebugConstraintBuilder<'a, F>>,

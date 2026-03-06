@@ -53,7 +53,7 @@ These are deliberately out of scope for this roadmap:
 
 | Non-Goal | Rationale |
 |----------|-----------|
-| Runtime-pluggable chips | p3's `Air<AB>` requires static dispatch. Composition is compile-time via `define_chip_set!`. |
+| ~~Runtime-pluggable chips~~ | **Superseded.** OpenVM proves `dyn AnyRap` works in production. Composition is now runtime via `ChipRegistry` — see [implementation-workplan.md Decision Record](implementation-workplan.md#composition-model-compile-time-enum-vs-runtime-registry). |
 | Base field change | BabyBear is fixed. The entire ecosystem (p3, chips, encoding) depends on it. |
 | General-purpose computation | Tabula is a state machine framework, not a zkVM. No arbitrary binary execution. |
 | Recursive proofs as prerequisite | Recursion is a Phase 5 extension. The architecture works without it. |
@@ -73,7 +73,7 @@ Each phase has a strict completion gate:
 | 0 | End-to-end proof works for any valid DSL program | `cargo test --features stark` all green, 5+ E2E tests |
 | 1 | Single FRI proof, C1 resolved, proof size < 50% of Phase 0 | Proof size benchmark, cumsum PCS-committed |
 | 2 | Per-column parallel proving, untouched columns = zero cost | Parallelism benchmark, `shard/` module complete |
-| 3 | App can add custom chip + bus + opcode without modifying Tabula | Example app crate compiles and proves |
+| 3 | App can add custom chip + bus + precompile without modifying Tabula | Example app crate compiles and proves |
 | 4 | All 8 optimizations active, proving time < 50% of Phase 2 | Optimization benchmark suite |
 
 ---
@@ -147,25 +147,29 @@ Each phase has a strict completion gate:
 
 | Task | Description | LOC Estimate |
 |------|-------------|--------------|
-| `machine/config.rs` | STARK config (same BabyBear + Poseidon2 + FRI) | ~100 |
-| `machine/prover.rs` | Two-round shared-PCS prover (Round 1: main, Round 2: perm) | ~300 |
-| `machine/verifier.rs` | Multi-trace verifier with shared opening | ~200 |
-| `machine/permutation.rs` | EF4 fingerprint + cumsum (migrated from `stark/permutation.rs`) | ~200 |
-| `machine/challenges.rs` | Fiat-Shamir bound to PCS commitments | ~100 |
-| `machine/proof.rs` | New `TabulaProof` with shared commitments | ~100 |
-| `machine/rap.rs` | `DiscardInteractionBuilder` (replaces `EmptyMessageBuilder`) | ~50 |
-| `machine/symbolic.rs` | `SymbolicInteractionBuilder` (replaces `extractor.rs`) | ~150 |
-| Remove `stark/` | Delete prover, verifier, permutation, bridge, config, proof | -1600 |
+| `stark/src/air/any_rap.rs` | `AnyRap` trait: bundles `ChipSpec` + all `Air<AB>` bounds | ~80 |
+| `stark/src/trace/contributor.rs` | `DynTraceContributor`: object-safe `TraceContributor` wrapper | ~50 |
+| `machine/src/registry.rs` | `ChipRegistry`: runtime chip registration + validation | ~200 |
+| `machine/src/machine.rs` | `TabulaMachine`: builder + prove/verify facade | ~200 |
+| `machine/src/keys.rs` | `TabulaProvingKey` / `TabulaVerifyingKey` | ~150 |
+| `machine/src/config.rs` | STARK config (same BabyBear + Poseidon2 + FRI) | ~100 |
+| `machine/src/prover.rs` | Two-round shared-PCS prover (Round 1: main, Round 2: perm) | ~300 |
+| `machine/src/verifier.rs` | Multi-trace verifier with shared opening | ~200 |
+| `machine/src/permutation/` | EF4 fingerprint + cumsum + challenge derivation | ~300 |
+| `machine/src/proof.rs` | New `TabulaProof` with shared commitments | ~100 |
+| Remove `define_chip_set!` | Delete macro + `ChipSet` trait + `TabulaAir` enum + `StarkAir` alias | -240 |
+| Remove `stark/` (old) | Delete prover, verifier, permutation, bridge, config, proof | -1600 |
 | Remove `air/extractor.rs` | Replaced by symbolic interaction capture | -360 |
 | Adapt `debug/` | Use new interaction collection | ~200 |
 | **Net** | | **~-600 LOC** |
 
 ### 5.3 Key Technical Decisions
 
+- **Runtime `ChipRegistry` replaces compile-time `define_chip_set!`.** OpenVM proves `dyn AnyRap` works. Vtable overhead <1% of constraint eval. Eliminates need for `include` proc macro, `ChipSet` trait, `TabulaAir` enum, `StarkAir` alias. See [implementation-workplan.md](implementation-workplan.md) Decision Record.
+- **`AnyRap` trait** bundles `ChipSpec` + all `Air<AB>` bounds into one object-safe supertrait with blanket impl. Individual chip structs unchanged.
+- **`TabulaMachine`** owns registry + config + keys. Builder API: `.with_core_chips().with_chip(X).build()`.
 - **p3-uni-stark removed.** We use p3 PCS primitives directly (`p3-commit`, `p3-fri`, `p3-dft`). This is required for shared PCS across chips.
-- **DiscardInteractionBuilder** is a concrete wrapper (not blanket impl). Explicit > implicit.
-- **SymbolicInteractionBuilder** captures interactions at keygen time. One-pass evaluation. Stored in ProvingKey.
-- **ProvingKey / VerifyingKey** introduced as first-class types.
+- **ProvingKey / VerifyingKey** introduced as first-class types. Computed at `TabulaMachine::build()`.
 
 ### 5.4 Non-Goals for Phase 1
 
@@ -265,28 +269,32 @@ Each phase has a strict completion gate:
 
 ### 7.2 Sub-Phases
 
-**Phase 3a: Foundation (~500 LOC)**
+**Phase 3a: Composition Framework (~400 LOC)**
 
 | Prerequisite | Change | Scope |
 |-------------|--------|-------|
 | F1 | `BusId(u16)` newtype replacing `InteractionKind` enum | ~50 LOC |
-| F2 | `define_chip_set!` `include` support | ~100 LOC macro |
-| F3 | `TraceContributor` trait | ~200 LOC |
+| F2 | `ChipExtension` trait: `register_chips()`, `populate_witness()`, `name()` | ~150 LOC |
+| F3 | `TraceContributor` trait (already in Phase 1 as `DynTraceContributor`) | ~0 LOC (done) |
 | F4 | `WitnessStore` typed key-value store | ~100 LOC |
 | F12 | `tabula-machine::prelude` (stable p3 re-exports) | ~50 LOC |
 
-Dependency chain: `F1 → F2 → F3+F4`, `F12` independent.
+Dependency chain: Phase 1 (ChipRegistry) → `F1 → F2 → F4`, `F12` independent.
 
-**Phase 3b: Instructions (~500 LOC)**
+> **Note:** F2 changed from `define_chip_set! include` to `ChipExtension`. The `AnyRap` + `ChipRegistry` from Phase 1 provide the composition mechanism. `ChipExtension` packages chips + witness logic as a distributable unit.
+
+**Phase 3b: Precompile Framework (~400 LOC)**
 
 | Prerequisite | Change | Scope |
 |-------------|--------|-------|
-| F7 | `OpcodeSpec` trait (execute + constrain + witness) | ~150 LOC |
-| F8 | `define_instruction_set!` macro | ~300 LOC |
 | F9 | `Precompile` IR variant | ~50 LOC |
 | F10 | `PrecompileHandler` trait (executor-side) | ~50 LOC |
+| F13 | `op_precompile` selector + `PrecompileBus` in ExecutionChip | ~100 LOC |
+| F14 | DSL `precompile!()` syntax | ~200 LOC |
 
-Dependency chain: `F7 → F8 → F9+F10`.
+Dependency chain: `F9 → F10 → F13 → F14`.
+
+> **Note:** `OpcodeSpec` (F7) and `define_instruction_set!` (F8) are removed. The 12 core opcodes are stable; new computation goes through the Precompile pattern (separate chip + bus).
 
 **Phase 3c: State (~200 LOC)**
 
@@ -303,14 +311,14 @@ Extract existing SSMC/SMT into trait implementations.
 |-------------|--------|-------|
 | F11 | `TemplateChip` trait + equivalence test harness | ~200 LOC |
 
-**Total: ~1,450 LOC of framework changes.**
+**Total: ~1,200 LOC of framework changes.**
 
 ### 7.3 API Stability Tiers
 
 | Tier | Guarantee | Examples |
 |------|-----------|---------|
 | **S (Stable)** | Breaking only on major versions | `Value`, `CellKey`, `Transaction`, `Batch`, `Program` |
-| **A (Extension)** | May evolve on minor (additive) | `ChipSpec`, `VectorCommitment`, `OpcodeSpec`, macros |
+| **A (Extension)** | May evolve on minor (additive) | `ChipSpec`, `AnyRap`, `ChipRegistry`, `ChipExtension`, `TabulaMachine`, `VectorCommitment`, `PrecompileHandler`, macros |
 | **I (Internal)** | No guarantee | Chip internals, column layouts, gadgets |
 
 ### 7.4 Validation
@@ -329,16 +337,16 @@ Extract existing SSMC/SMT into trait implementations.
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| `define_chip_set! include` macro complexity | Compile errors, wrong variant forwarding | Comprehensive macro tests, edge cases |
-| `OpcodeSpec` trait too broad/narrow | Apps can't express their opcodes | Design with 3+ example opcodes before finalizing |
+| `ChipExtension` API too broad/narrow | Extensions can't express their wiring | Design with 2+ example extensions before finalizing |
 | `BusId` migration breaks all tests | Massive churn | Automated sed + test-by-test migration |
+| Precompile bus overhead | Per-call bus cost for precompile invocations | Bus cost is ~5 EF4 ops, negligible vs precompile compute |
 
 ### 7.7 Completion Gate
 
-- F1-F12 all implemented
-- Example app crate compiles and proves successfully
+- F1-F6, F9-F14 all implemented
+- Example app crate compiles and proves with custom chip + bus + precompile (zero Tabula modification)
 - All existing Tabula tests pass
-- `extensibility-architecture.md` trait signatures match implementation
+- `extensibility-architecture.md` and `tabula-machine-architecture.md` updated to match implementation
 
 ---
 
@@ -503,10 +511,10 @@ Phase 5: Advanced
 ### 10.1 Internal Dependencies
 
 ```
-Phase 3 internal:     F1 → F2 → F3+F4 → F5
-                      F7 → F8 → F9+F10
+Phase 3 internal:     Phase 1 (ChipRegistry) → F1 → F2 (ChipExtension) → F4
+                      F9 → F10 → F13 (PrecompileBus) → F14
                       F12 (independent)
-                      F11 (depends on F2)
+                      F11 (independent after Phase 2)
 
 Phase 4 internal:     4a (late binding) — independent
                       4b (width) — independent
@@ -525,7 +533,7 @@ Phase 4 internal:     4a (late binding) — independent
 | R1 | C1 soundness gap exploitable before Phase 1 | 0-1 | Low | Critical | Document as known limitation; Phase 1 is highest priority after Phase 0 |
 | R2 | p3 0.4 → 0.5 breaking changes | 1 | Medium | High | Pin exact p3 versions; test against p3 CI |
 | R3 | Per-column migration breaks all tests | 2 | High | High | Incremental migration (one chip at a time); feature flag |
-| R4 | `define_chip_set! include` macro too complex | 3 | Medium | Medium | Prototype first, test exhaustively, consider proc-macro fallback |
+| R4 | ~~`define_chip_set! include` macro too complex~~ | 3 | — | — | **Eliminated.** Replaced by `ChipRegistry` + `ChipExtension`. No macro needed. |
 | R5 | Extractor affine assumption violated | 1 | Low | Medium | SymbolicInteractionBuilder eliminates this class of bugs |
 | R6 | ShortRun soundness | 4 | Medium | Critical | Mandatory equivalence test: ShortRun ≡ Full for same access pattern |
 | R7 | Pipeline parallelism non-determinism | 4 | Low | Medium | Deterministic parallel framework, no shared mutable state |
@@ -568,9 +576,9 @@ Phase 4 internal:     4a (late binding) — independent
 
 | Milestone | Phase | Description |
 |-----------|-------|-------------|
-| App chip compiles | 3a | `define_chip_set! { include TabulaCoreAir; + AppChip }` works |
+| App chip compiles | 3a | `machine.builder().with_chip(AppChip).build()` works |
 | App bus works | 3a | `BusId::app(1)` + `define_bus!` in app crate |
-| App opcode works | 3b | `impl OpcodeSpec` in app crate, dispatched by interpreter |
+| App precompile works | 3b | `impl PrecompileHandler` + precompile chip proves |
 | App VC works | 3c | `impl VectorCommitment` in app crate, used by prover |
 | Lighter DEX feasible | 3d | All 7 blocked requirements unblocked |
 

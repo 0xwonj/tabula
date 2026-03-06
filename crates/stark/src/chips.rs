@@ -87,12 +87,11 @@ pub mod core_chips {
 
 /// Metadata and capability interface for AIR chips.
 ///
-/// [`ChipId`] is the primary identifier, used by [`crate::air::chip_set::ChipSet`]
-/// for typed dispatch in the prover/verifier.
+/// [`ChipId`] is the primary identifier, used by the [`ChipRegistry`](crate)
+/// for dispatch in the prover/verifier.
 ///
-/// The `Default` bound enables construction from ZSTs in `ChipSet::all_chips()`.
 /// `Send + Sync` enables parallel proving across chips.
-pub trait ChipSpec: Default + Send + Sync {
+pub trait ChipSpec: Send + Sync {
     /// Open chip identifier.
     fn chip_id(&self) -> ChipId;
 

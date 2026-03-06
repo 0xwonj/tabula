@@ -18,12 +18,12 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::chip_set::ChipSet;
 use super::descriptor::InteractionDescriptor;
 use super::interaction::{ColumnRef, Interaction, InteractionDirection, VirtualPairCol};
-use crate::chips::ChipId;
+use crate::chips::{ChipId, ChipSpec};
 use crate::debug::{
-    ChipRecord, RecordedInteraction, evaluate_chip_with_preprocessed_and_public_values,
+    ChipRecord, RecordedInteraction, evaluate_chip_interactions_only,
+    evaluate_chip_with_preprocessed_and_public_values,
 };
 
 /// Baseline evaluation result: (sends, receives) from debug constraint builder.
@@ -47,63 +47,56 @@ pub struct ChipKeygenInfo {
     pub interactions: InteractionDescriptor<BabyBear>,
 }
 
-/// Extract keygen info for all chips in a chip set.
+/// Extract keygen info for a single chip.
 ///
-/// Uses column-scanning extraction wrapped in a soundness assertion:
-/// the extracted descriptors are verified against a random concrete trace
-/// to ensure the affine assumption holds.
-pub fn keygen<CS>() -> Vec<ChipKeygenInfo>
+/// Accepts any type implementing the required bounds (including `dyn AnyRap`
+/// via `?Sized`). Uses column-scanning extraction wrapped in a soundness
+/// assertion against a random trace.
+pub fn keygen_chip<A: ?Sized>(chip: &A) -> ChipKeygenInfo
 where
-    CS: ChipSet + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ChipSpec + BaseAir<BabyBear> + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
-    CS::all_chips()
-        .into_iter()
-        .map(|chip| {
-            let chip_id = chip.chip_id();
-            let main_width = <CS as BaseAir<BabyBear>>::width(&chip);
-            let pp_width = chip.preprocessed_width();
-            let num_pvs = chip.num_public_values();
+    let chip_id = chip.chip_id();
+    let main_width = chip.width();
+    let pp_width = chip.preprocessed_width();
+    let num_pvs = chip.num_public_values();
 
-            let preprocessed = if pp_width > 0 {
-                // Generate a zero preprocessed trace for extraction.
-                Some(RowMajorMatrix::new(
-                    vec![BabyBear::ZERO; pp_width * PROBE_HEIGHT],
-                    pp_width,
-                ))
-            } else {
-                None
-            };
+    let preprocessed = if pp_width > 0 {
+        Some(RowMajorMatrix::new(
+            vec![BabyBear::ZERO; pp_width * PROBE_HEIGHT],
+            pp_width,
+        ))
+    } else {
+        None
+    };
 
-            let (sends, receives) =
-                extract_interactions(&chip, main_width, preprocessed.as_ref(), num_pvs);
+    let (sends, receives) =
+        extract_interactions(chip, main_width, preprocessed.as_ref(), num_pvs);
 
-            let num_sends_per_row = sends.len();
-            let num_receives_per_row = receives.len();
+    let num_sends_per_row = sends.len();
+    let num_receives_per_row = receives.len();
 
-            // Soundness: verify extraction on a random trace.
-            verify_extraction_soundness(
-                &chip,
-                main_width,
-                preprocessed.as_ref(),
-                num_pvs,
-                &sends,
-                &receives,
-            );
+    verify_extraction_soundness(
+        chip,
+        main_width,
+        preprocessed.as_ref(),
+        num_pvs,
+        &sends,
+        &receives,
+    );
 
-            ChipKeygenInfo {
-                chip_id,
-                main_width,
-                preprocessed_width: pp_width,
-                num_public_values: num_pvs,
-                interactions: InteractionDescriptor {
-                    sends,
-                    receives,
-                    num_sends_per_row,
-                    num_receives_per_row,
-                },
-            }
-        })
-        .collect()
+    ChipKeygenInfo {
+        chip_id,
+        main_width,
+        preprocessed_width: pp_width,
+        num_public_values: num_pvs,
+        interactions: InteractionDescriptor {
+            sends,
+            receives,
+            num_sends_per_row,
+            num_receives_per_row,
+        },
+    }
 }
 
 // ─── Column-scanning extraction (migrated from extractor.rs) ────────────────
@@ -117,7 +110,7 @@ const PROBE_HEIGHT: usize = 2;
 /// in turn to determine its contribution to each interaction field.
 ///
 /// Returns `(sends, receives)` as static [`Interaction<BabyBear>`] descriptors.
-pub fn extract_interactions<A>(
+pub fn extract_interactions<A: ?Sized>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
@@ -160,7 +153,7 @@ where
 /// Count the number of send and receive interactions per row for a chip.
 ///
 /// Uses a minimal 2-row zero trace. Cheaper than full extraction.
-pub fn count_interactions<A>(
+pub fn count_interactions<A: ?Sized>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
@@ -173,16 +166,7 @@ where
         RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * PROBE_HEIGHT], main_width);
     let pvs = vec![BabyBear::ZERO; num_public_values];
 
-    let record = match evaluate_chip_with_preprocessed_and_public_values(
-        "_count",
-        air,
-        &zero_trace,
-        preprocessed,
-        &pvs,
-    ) {
-        Ok(r) => r,
-        Err(_) => return (0, 0),
-    };
+    let record = evaluate_chip_interactions_only(air, &zero_trace, preprocessed, &pvs);
 
     let mut sends = 0;
     let mut receives = 0;
@@ -204,7 +188,7 @@ where
 ///
 /// This catches any non-affine interaction that the column-scanning technique
 /// would miss.
-fn verify_extraction_soundness<A>(
+fn verify_extraction_soundness<A: ?Sized>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
@@ -299,9 +283,9 @@ fn generate_deterministic_trace(width: usize, height: usize) -> RowMajorMatrix<B
 
 /// Phase 1: Evaluate chip on an all-zero trace to establish baseline interaction counts.
 ///
-/// Returns `None` if the zero-trace causes constraint failures (some chips
-/// have constraints that are unsatisfiable on all-zero traces).
-fn eval_baseline<A>(
+/// Uses interaction-only evaluation to capture interactions even when the
+/// zero trace violates AIR constraints (which is common for most chips).
+fn eval_baseline<A: ?Sized>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
@@ -313,16 +297,16 @@ where
     let zero_trace =
         RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * PROBE_HEIGHT], main_width);
 
-    let baseline_record = evaluate_chip_with_preprocessed_and_public_values(
-        "_extract",
-        air,
-        &zero_trace,
-        preprocessed,
-        pvs,
-    )
-    .ok()?;
+    let baseline_record = evaluate_chip_interactions_only(air, &zero_trace, preprocessed, pvs);
 
-    Some(partition_per_row(&baseline_record))
+    let result = partition_per_row(&baseline_record);
+
+    // Return None only if there are no interactions at all.
+    if result.0.is_empty() && result.1.is_empty() {
+        return None;
+    }
+
+    Some(result)
 }
 
 /// Phase 2: Build initial [`Interaction`] descriptors from baseline constants.
@@ -352,7 +336,7 @@ fn build_initial_descriptors(
 }
 
 /// Phase 3: Probe each column to determine its linear contribution to each interaction.
-fn scan_column_contributions<A>(
+fn scan_column_contributions<A: ?Sized>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
@@ -402,7 +386,7 @@ fn scan_column_contributions<A>(
 }
 
 /// Probe a single column: set it to `1` in the probe trace, evaluate, and update descriptors.
-fn probe_single_column<A>(
+fn probe_single_column<A: ?Sized>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
@@ -420,16 +404,7 @@ fn probe_single_column<A>(
     probe_data[probe_index] = BabyBear::ONE;
     let probe_trace = RowMajorMatrix::new(probe_data, main_width);
 
-    let probe_record = match evaluate_chip_with_preprocessed_and_public_values(
-        "_extract",
-        air,
-        &probe_trace,
-        preprocessed,
-        pvs,
-    ) {
-        Ok(r) => r,
-        Err(_) => return, // Skip columns that cause constraint failures.
-    };
+    let probe_record = evaluate_chip_interactions_only(air, &probe_trace, preprocessed, pvs);
 
     let (probe_sends, probe_receives) = partition_per_row(&probe_record);
 

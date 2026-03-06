@@ -3,8 +3,7 @@ use tabula_chips::execution::ExecutionChip;
 use tabula_chips::poseidon::PoseidonChip;
 use tabula_chips::range_check::RangeCheckChip;
 use tabula_chips::state_column::StateColumnChip;
-use tabula_chips::{ChipSpec, TabulaAir, core_chips};
-use tabula_stark::air::ChipSet;
+use tabula_chips::{ChipSpec, core_chips, core_dyn_chips};
 
 #[test]
 fn chip_meta_id() {
@@ -14,54 +13,34 @@ fn chip_meta_id() {
 }
 
 #[test]
-fn tabula_air_delegates_chip_meta() {
-    let air = TabulaAir::ColumnMeta(ColumnMetaChip);
-    assert_eq!(air.chip_id(), core_chips::COLUMN_META);
+fn chip_spec_delegates() {
+    let exec = ExecutionChip::<3>;
+    assert_eq!(exec.chip_id(), core_chips::EXECUTION);
+
+    let rc = RangeCheckChip;
+    assert_eq!(rc.chip_id(), core_chips::RANGE_CHECK);
+
+    let pos = PoseidonChip;
+    assert_eq!(pos.chip_id(), core_chips::POSEIDON);
+
+    let sc = StateColumnChip::<3>;
+    assert_eq!(sc.chip_id(), core_chips::STATE_COLUMN);
+
+    let cm = ColumnMetaChip;
+    assert_eq!(cm.chip_id(), core_chips::COLUMN_META);
 }
 
 #[test]
-fn tabula_air_range_check() {
-    let air = TabulaAir::RangeCheck(RangeCheckChip);
-    assert_eq!(air.chip_id(), core_chips::RANGE_CHECK);
-}
-
-#[test]
-fn tabula_air_poseidon() {
-    let air = TabulaAir::Poseidon(PoseidonChip);
-    assert_eq!(air.chip_id(), core_chips::POSEIDON);
-}
-
-#[test]
-fn tabula_air_execution() {
-    let air = TabulaAir::Execution(ExecutionChip::<3>);
-    assert_eq!(air.chip_id(), core_chips::EXECUTION);
-}
-
-#[test]
-fn tabula_air_state_column() {
-    let air = TabulaAir::StateColumn(StateColumnChip::<3>);
-    assert_eq!(air.chip_id(), core_chips::STATE_COLUMN);
-}
-
-#[test]
-fn chip_set_all_chips() {
-    let chips = TabulaAir::all_chips();
+fn core_dyn_chips_returns_nine() {
+    let chips = core_dyn_chips();
     assert_eq!(chips.len(), 9);
 }
 
 #[test]
-fn chip_set_from_id() {
-    assert!(TabulaAir::from_id(core_chips::EXECUTION).is_some());
-    assert!(TabulaAir::from_id(core_chips::COLUMN_META).is_some());
-    assert!(TabulaAir::from_id(core_chips::POSEIDON).is_some());
-}
-
-#[test]
-fn chip_set_chip_ids() {
-    let ids = TabulaAir::chip_ids();
-    assert_eq!(ids.len(), 9);
-    assert!(ids.contains(&core_chips::EXECUTION));
-    assert!(ids.contains(&core_chips::SMT_TABLE_PATH));
+fn core_dyn_chips_ids_match() {
+    let chips = core_dyn_chips();
+    let ids: Vec<_> = chips.iter().map(|c| c.chip_id()).collect();
+    assert_eq!(ids, core_chips::ALL.to_vec());
 }
 
 #[test]

@@ -34,18 +34,53 @@ pub struct TabulaProof {
 pub struct ChipProofEntry {
     /// Type-safe chip identifier.
     pub chip_id: ChipId,
-    /// The p3-uni-stark proof for this chip's main constraints.
+    /// The p3-uni-stark proof covering the combined (main ∥ perm) trace.
+    ///
+    /// For chips with interactions, the committed trace has width
+    /// `main_width + perm_width`. For chips without, `perm_width = 0`.
     pub proof: Proof<TabulaStarkConfig>,
     /// The chip's final LogUp cumulative sum (4 BabyBear elements = 1 EF4 element).
     /// Cross-chip check: Σ_chips cumsum_final = 0.
+    ///
+    /// For chips with interactions, this value is also PCS-committed as the
+    /// last 4 columns of the last row in the permutation trace region.
     pub cumsum_final: EF4,
     /// Trace height (number of rows).
     pub trace_height: usize,
+    /// Width of the main (inner chip) trace columns.
+    pub main_width: usize,
+    /// Width of the permutation trace columns (0 if no interactions).
+    pub perm_width: usize,
     /// Public values used for this chip (may be empty).
     pub public_values: Vec<BabyBear>,
     /// Preprocessed verifier key for chips with preprocessed columns (e.g. Poseidon).
     /// `None` for chips without preprocessed data.
     pub preprocessed_vk: Option<PreprocessedVerifierKey<TabulaStarkConfig>>,
+}
+
+/// Errors during proof generation.
+#[derive(Debug, thiserror::Error)]
+pub enum ProveError {
+    /// A chip's trace height is not a power of two.
+    #[error("chip '{chip_id}' trace height {height} is not a power of two")]
+    InvalidTraceHeight {
+        /// Which chip has the invalid trace.
+        chip_id: ChipId,
+        /// The actual (non-power-of-two) height.
+        height: usize,
+    },
+    /// No keygen info found for a chip in the proving key.
+    #[error("no keygen info for chip '{chip_id}'")]
+    MissingKeygenInfo {
+        /// Which chip is missing.
+        chip_id: ChipId,
+    },
+    /// Cross-chip LogUp cumulative sums do not balance to zero.
+    #[error("LogUp imbalance during proving: cumsum total = {total:?}")]
+    LogUpImbalance {
+        /// The nonzero total cumsum (4 BabyBear coefficients).
+        total: [BabyBear; 4],
+    },
 }
 
 /// Errors during proof verification.

@@ -10,13 +10,12 @@ use std::collections::BTreeMap;
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use tabula_artifact::{ChipSummary, StarkProofSummary};
-use tabula_chips::TabulaAir;
 use tabula_commitment::{BabyBearCodec, ColumnState, HybridVC, NativeDigest, PoseidonHasher};
 use tabula_core::mock::InMemoryStaticTables;
 use tabula_core::traits::ValueCodec;
 use tabula_core::{Batch, ColId, RowKey, TableId, TableSchema};
 use tabula_driver::RegisteredProgram;
-use tabula_machine::{PublicStatement, default_config, prove, verify};
+use tabula_machine::{PublicStatement, TabulaMachine};
 use tabula_witness::WitnessGenerator;
 use tabula_witness::trace::build_trace_map;
 
@@ -92,13 +91,22 @@ pub fn prove_batch(
         old_root: witness.old_state_root,
         new_root: witness.new_state_root,
     };
+    let machine = TabulaMachine::builder()
+        .with_core_chips()
+        .build()
+        .map_err(|e| {
+            ServiceError::internal(ErrorCode::InternalError, format!("machine build: {e}"))
+        })?;
+
     let prove_start = std::time::Instant::now();
-    let proof = prove::<TabulaAir>(&default_config(), &traces, statement);
+    let proof = machine
+        .prove(&traces, statement)
+        .map_err(|e| ServiceError::internal(ErrorCode::InternalError, format!("proving: {e}")))?;
     let prove_time_ms = prove_start.elapsed().as_millis() as u64;
 
     // 6. Verify (timed).
     let verify_start = std::time::Instant::now();
-    let verified = verify::<TabulaAir>(&proof).is_ok();
+    let verified = machine.verify(&proof).is_ok();
     let verify_time_ms = verify_start.elapsed().as_millis() as u64;
 
     // 8. Assemble summary.

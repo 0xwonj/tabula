@@ -6,7 +6,7 @@
 //! Different builder implementations handle these declarations differently:
 //! - [`crate::debug::DebugConstraintBuilder`]: records concrete values for LogUp balance checking
 //! - `InteractionExtractor`: extracts symbolic descriptors for permutation trace generation
-//! - [`EmptyMessageBuilder`] impls (p3 builders): discard interactions (no-op)
+//! - p3 builders: no-op impls (see `bridge.rs`)
 
 use p3_air::{AirBuilder, PairBuilder};
 
@@ -37,23 +37,4 @@ pub trait InteractionAirBuilder: AirBuilder + PairBuilder {
     fn receive(&mut self, interaction: AirInteraction<Self::Expr>);
 }
 
-/// Marker trait for builder types that discard LogUp interactions.
-///
-/// All p3-uni-stark builder types (`SymbolicAirBuilder`, `ProverConstraintFolder`,
-/// `VerifierConstraintFolder`, `DebugConstraintBuilder`) implement this.
-/// The blanket impl provides no-op `send()`/`receive()` so chips can declare
-/// interactions unconditionally in `eval()`.
-///
-/// # Adding new p3 builder types
-///
-/// Just add `impl EmptyMessageBuilder for NewType {}` — the blanket impl
-/// handles the rest.
-pub trait EmptyMessageBuilder: AirBuilder + PairBuilder {}
-
-impl<AB> InteractionAirBuilder for AB
-where
-    AB: EmptyMessageBuilder,
-{
-    fn send(&mut self, _interaction: AirInteraction<Self::Expr>) {}
-    fn receive(&mut self, _interaction: AirInteraction<Self::Expr>) {}
-}
+// No-op InteractionAirBuilder impls for p3 builder types are in bridge.rs.

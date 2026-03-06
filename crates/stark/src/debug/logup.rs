@@ -59,7 +59,7 @@ pub struct ChipTrace<'a, F: Field, A> {
 /// Checks local constraints row-by-row. Returns a [`ChipRecord`] containing
 /// all interactions emitted during evaluation. Fails early on the first
 /// constraint violation.
-pub fn evaluate_chip<F, A>(
+pub fn evaluate_chip<F, A: ?Sized>(
     name: &str,
     air: &A,
     trace: &RowMajorMatrix<F>,
@@ -72,7 +72,7 @@ where
 }
 
 /// Like [`evaluate_chip`] but with explicit public values.
-pub fn evaluate_chip_with_public_values<F, A>(
+pub fn evaluate_chip_with_public_values<F, A: ?Sized>(
     name: &str,
     air: &A,
     trace: &RowMajorMatrix<F>,
@@ -86,7 +86,7 @@ where
 }
 
 /// Like [`evaluate_chip`] but with an optional preprocessed trace.
-pub fn evaluate_chip_with_preprocessed<F, A>(
+pub fn evaluate_chip_with_preprocessed<F, A: ?Sized>(
     name: &str,
     air: &A,
     trace: &RowMajorMatrix<F>,
@@ -100,7 +100,7 @@ where
 }
 
 /// Like [`evaluate_chip_with_preprocessed`] but also binds public values.
-pub fn evaluate_chip_with_preprocessed_and_public_values<F, A>(
+pub fn evaluate_chip_with_preprocessed_and_public_values<F, A: ?Sized>(
     name: &str,
     air: &A,
     trace: &RowMajorMatrix<F>,
@@ -168,6 +168,73 @@ where
         name: name.to_string(),
         interactions: all_interactions,
     })
+}
+
+/// Like [`evaluate_chip_with_preprocessed_and_public_values`] but ignores
+/// constraint failures and always returns recorded interactions.
+///
+/// Used by keygen column-scanning, which needs interaction metadata even when
+/// a probe trace violates AIR constraints.
+pub fn evaluate_chip_interactions_only<F, A: ?Sized>(
+    air: &A,
+    trace: &RowMajorMatrix<F>,
+    preprocessed: Option<&RowMajorMatrix<F>>,
+    public_values: &[F],
+) -> ChipRecord<F>
+where
+    F: Field,
+    A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
+{
+    let height = trace.height();
+    let mut all_interactions = Vec::new();
+
+    for i in 0..height {
+        let i_next = (i + 1) % height;
+        let local = trace.row_slice(i).expect("row exists");
+        let next = trace.row_slice(i_next).expect("row exists");
+
+        let main = VerticalPair::new(
+            RowMajorMatrixView::new_row(&*local),
+            RowMajorMatrixView::new_row(&*next),
+        );
+
+        let (prep_local_slice, prep_next_slice);
+        let prep = if let Some(prep_trace) = preprocessed {
+            prep_local_slice = prep_trace.row_slice(i).expect("preprocessed row exists");
+            prep_next_slice = prep_trace
+                .row_slice(i_next)
+                .expect("preprocessed row exists");
+            VerticalPair::new(
+                RowMajorMatrixView::new_row(&*prep_local_slice),
+                RowMajorMatrixView::new_row(&*prep_next_slice),
+            )
+        } else {
+            empty_preprocessed()
+        };
+
+        let mut builder = DebugConstraintBuilder {
+            row_index: i,
+            main,
+            preprocessed: prep,
+            is_first_row: if i == 0 { F::ONE } else { F::ZERO },
+            is_last_row: if i == height - 1 { F::ONE } else { F::ZERO },
+            is_transition: if i < height - 1 { F::ONE } else { F::ZERO },
+            constraint_index: 0,
+            first_failure: None, // Ignored — we don't check it.
+            interactions: Vec::new(),
+            public_values,
+        };
+
+        air.eval(&mut builder);
+
+        // Record interactions regardless of constraint failures.
+        all_interactions.extend(builder.interactions);
+    }
+
+    ChipRecord {
+        name: String::new(),
+        interactions: all_interactions,
+    }
 }
 
 // ── LogUp balance checking ──────────────────────────────────────────────────

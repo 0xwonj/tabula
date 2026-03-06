@@ -304,11 +304,11 @@ pub enum VcStrategy { Ssmc, Smt }
 - `DiscardInteractionBuilder` wraps p3 builders that don't need interaction data (quotient computation). Concrete wrapper, not blanket impl — explicit is better than implicit.
 - `SymbolicInteractionBuilder` captures interactions symbolically at keygen time, replacing column-scanning extraction. One-pass evaluation instead of two-pass.
 
-### 5.6 Static Chip Set (Not Dynamic Builder)
+### 5.6 Runtime ChipRegistry (Not Static Enum)
 
-**Decision:** Chip sets are compile-time enums via `define_chip_set!`, not runtime-built vectors.
+**Decision:** Chip sets are runtime-composed via `ChipRegistry` + `AnyRap`, not compile-time enums.
 
-**Rationale:** Tabula's chip set is known at compile time. Static dispatch enables exhaustive pattern matching, zero runtime overhead, and compile-time composition verification. Apps extend via `include TabulaCoreAir;` — compile-time inheritance.
+**Rationale:** OpenVM proves `dyn AnyRap` works in production with negligible overhead (<1% of constraint eval cost). Runtime composition eliminates the need for proc macros (`define_chip_set! include`), enables `.with_chip()` / `.with_extension()` composition, and simplifies the trait hierarchy. The `define_chip_set!` macro, `ChipSet` trait, `TabulaAir` enum, and `StarkAir` alias are all superseded. See [implementation-workplan.md Decision Record](implementation-workplan.md#composition-model-compile-time-enum-vs-runtime-registry).
 
 ### 5.7 Typed Buses (Not Raw Indices)
 
@@ -334,14 +334,16 @@ An application MUST be able to define all customizations **purely in its own cra
 ┌──────────────────────────▼──────────────────────────────────────┐
 │ App Crate (100% of customization)                                │
 │                                                                  │
-│  define_chip_set! { include TabulaCoreAir; + app chips }         │
-│  config.register_vc(app_vc)                                      │
-│  BatchEnv { precompile_handler: &app_handler, ... }              │
+│  TabulaMachine::builder()                                        │
+│      .with_core_chips()                                          │
+│      .with_extension(MyExtension)                                │
+│      .with_config(production_config())                           │
+│      .build()                                                    │
 │                                                                  │
-│  impl ChipSpec + Air<AB> for AppChip                             │
+│  impl ChipSpec + Air<AB> for AppChip  (auto AnyRap blanket)     │
+│  impl ChipExtension for MyExtension                              │
 │  impl VectorCommitment for AppVc                                 │
 │  impl PrecompileHandler for AppPrecompiles                       │
-│  impl OpcodeSpec for AppOpcode                                   │
 │  define_bus! for app buses                                       │
 │  .tab files (DSL tx types)                                       │
 └──────────────────────────────────────────────────────────────────┘
@@ -353,8 +355,8 @@ The three architectural axes decompose into seven extension axes for app develop
 
 | Ext Axis | Maps To | What Apps Customize | Mechanism |
 |----------|---------|---------------------|-----------|
-| 1. Instruction Set | Axis 2 | Custom opcodes | `OpcodeSpec` trait + `define_instruction_set!` |
-| 2. Chip Composition | Axis 3 | Custom AIR chips | `define_chip_set!` with `include` |
+| 1. Instruction Set | Axis 2 | Custom computation via precompiles | `PrecompileHandler` trait + precompile chip |
+| 2. Chip Composition | Axis 3 | Custom AIR chips | `ChipRegistry` + `AnyRap` + `ChipExtension` |
 | 3. Trace Pipeline | Axis 1 | Custom witness flow | `TraceContributor` trait + `WitnessStore` |
 | 4. State Commitment | Axis 1 L2 | Custom VC schemes | `VectorCommitment` trait |
 | 5. State Opening | Axis 1 L2 | Structural queries (min, successor) | `PropertyOpening` trait |
@@ -393,17 +395,18 @@ The Zero-Modification Principle requires one-time framework changes (~1,450 LOC)
 | ID | Change | Scope | Enables |
 |----|--------|-------|---------|
 | F1 | `BusId` newtype (replaces closed enum) | ~50 LOC | App-defined buses |
-| F2 | `define_chip_set!` `include` support | ~100 LOC | Composable chip sets |
-| F3 | `TraceContributor` trait | ~200 LOC | Auto-wired trace pipeline |
+| F2 | `ChipExtension` trait (registers chips + witness logic) | ~150 LOC | Extension packaging |
+| F3 | `DynTraceContributor` (object-safe `TraceContributor`) | Phase 1 | Auto-wired trace pipeline |
 | F4 | `WitnessStore` typed key-value store | ~100 LOC | Chip data exchange |
 | F5 | `VectorCommitment` trait | ~100 LOC | Custom state commitments |
 | F6 | `PropertyOpening` trait | ~100 LOC | Structural queries |
-| F7 | `OpcodeSpec` trait | ~150 LOC | Custom instructions |
-| F8 | `define_instruction_set!` macro | ~300 LOC | Composable instruction sets |
 | F9 | `Precompile` IR variant | ~50 LOC | Generic computation dispatch |
 | F10 | `PrecompileHandler` trait | ~50 LOC | App-defined execution |
 | F11 | `TemplateChip` trait | ~200 LOC | Specialized tx execution |
 | F12 | `tabula-machine::prelude` | ~50 LOC | Stable p3 re-exports |
+| F13 | `op_precompile` selector + `PrecompileBus` | ~100 LOC | ExecutionChip precompile support |
+
+> **Note:** F7 (`OpcodeSpec`) and F8 (`define_instruction_set!`) removed — precompile pattern replaces per-opcode extensibility. F2 changed from `define_chip_set! include` to `ChipExtension`. `AnyRap` + `ChipRegistry` (Phase 1) provide the underlying composition mechanism.
 
 After these changes, all app development requires zero changes to Tabula's codebase.
 
@@ -465,7 +468,7 @@ These are choices, not requirements. They could change without breaking the arch
 | Extension field | BabyBear^4 (~124-bit) | BabyBear^3, larger extension | Balance of security/performance |
 | FRI parameters | log_blowup=3, queries=TBD | Different blowup/query tradeoffs | Degree-9 constraint support |
 | VC threshold | ~100-300 rows | Different threshold | Calibrated by benchmark (B7) |
-| Chip set dispatch | Static enum | Dynamic trait objects | Compile-time verification |
+| Chip set dispatch | Runtime `ChipRegistry` + `dyn AnyRap` | Static enum | Runtime composition, negligible vtable overhead |
 | Instruction format | 13 core + extensible | Different core set | Minimal but sufficient |
 | SMT depth | 16-24 levels | Different depth | Expected table/column count |
 | Value encoding split | 30+30+4 for U64 | 31+31+2 (WRONG: exceeds p) | Fits BabyBear range cleanly |
@@ -601,10 +604,10 @@ crates/proof/src/
 │   └── path.rs                # SmtColPathSegment
 │
 ├── air/                       # Constraint framework (Axis 3)
+│   ├── any_rap.rs             # AnyRap trait (type-erased chip interface)
 │   ├── builder.rs             # InteractionAirBuilder
 │   ├── bus_macro.rs           # define_bus!
 │   ├── bus.rs                 # Bus definitions
-│   ├── chip_set.rs            # define_chip_set! (with include support)
 │   ├── interaction.rs         # BusId, AirInteraction
 │   └── columns.rs             # Column struct pattern
 │
@@ -639,9 +642,9 @@ crates/proof/src/
 - Eliminate lex.rs, segment.rs gadgets
 - Per-column parallel trace building
 
-**Phase 3: Extensibility Framework** (prerequisites F1-F12)
-- BusId newtype, chip_set include, TraceContributor, WitnessStore
-- OpcodeSpec, define_instruction_set!, Precompile variant
+**Phase 3: Extensibility Framework** (prerequisites F1-F13)
+- BusId newtype, ChipExtension, WitnessStore
+- Precompile variant, PrecompileHandler, PrecompileBus
 - VectorCommitment, PropertyOpening, TemplateChip traits
 - `tabula-machine::prelude` re-exports
 
@@ -718,8 +721,8 @@ This document absorbs and supersedes `extensibility-architecture.md`. The mappin
 |---------------------------------------|---------------|
 | §1 Vision + Zero-Modification | §1.2 P4, §6.1 |
 | §2 Extension Axes | §6.2 |
-| §3 Instruction Set (Axis 1) | §6.2 row 1, §6.5 F7-F8 |
-| §4 Chip Composition (Axis 2) | §5.6, §6.2 row 2, §6.5 F2 |
+| §3 Instruction Set (Axis 1) | §6.2 row 1, §6.5 F9-F10 (Precompile) |
+| §4 Chip Composition (Axis 2) | §5.6, §6.2 row 2, §6.5 F2 (ChipExtension) |
 | §5 Trace Pipeline (Axis 3) | §6.2 row 3, §6.5 F3-F4 |
 | §6 State Commitment (Axis 4) | §6.2 row 4, §6.5 F5 |
 | §7 State Opening (Axis 5) | §6.2 row 5, §6.5 F6 |

@@ -1,4 +1,4 @@
-//! Generic trace orchestration via [`TraceContributor`] dispatch.
+//! Generic trace orchestration via [`DynChip`] dispatch.
 //!
 //! Replaces hardcoded per-chip trace building with phase-ordered dispatch.
 //! Each chip pulls its own inputs from a [`WitnessStore`] and inserts its
@@ -6,46 +6,42 @@
 
 use std::collections::BTreeMap;
 
-use p3_air::Air;
-use p3_baby_bear::BabyBear;
-
 use tabula_core::error::TabulaError;
 
-use tabula_stark::air::chip_set::ChipSet;
-use tabula_stark::debug::{
-    DebugConstraintBuilder, evaluate_chip_with_preprocessed_and_public_values,
-};
+use tabula_stark::trace::{DynChip, TracePhase, WitnessStore, witness_labels};
 
-use tabula_stark::trace::{TraceContributor, TracePhase, WitnessStore, witness_labels};
+use tabula_stark::debug::evaluate_chip_with_preprocessed_and_public_values;
 
 use super::TraceMap;
 use super::collectors::{collect_poseidon_inputs, collect_range_check_multiplicities};
 
-/// Build all chip traces into a [`TraceMap`] via [`TraceContributor`] dispatch.
+/// Build all chip traces into a [`TraceMap`] via [`DynChip`] dispatch.
 ///
 /// Dispatches chips in phase order (Independent → Memory → Dependent).
 /// Between Memory and Dependent phases, evaluates Phase 0+1 chip constraints
 /// to collect Poseidon/RangeCheck inputs for Dependent-phase chips.
-pub(super) fn build_all_traces<CS>(mut store: WitnessStore) -> Result<TraceMap, TabulaError>
-where
-    CS: ChipSet + TraceContributor + for<'a> Air<DebugConstraintBuilder<'a, BabyBear>>,
-{
-    let all_chips = CS::all_chips();
+pub(super) fn build_all_traces(
+    chips: &[Box<dyn DynChip>],
+    mut store: WitnessStore,
+) -> Result<TraceMap, TabulaError> {
     let mut map = TraceMap::new();
 
     // Group chips by phase for ordered dispatch.
-    let mut by_phase: BTreeMap<TracePhase, Vec<&CS>> = BTreeMap::new();
-    for chip in &all_chips {
-        by_phase.entry(chip.phase()).or_default().push(chip);
+    let mut by_phase: BTreeMap<TracePhase, Vec<&dyn DynChip>> = BTreeMap::new();
+    for chip in chips {
+        by_phase
+            .entry(chip.phase())
+            .or_default()
+            .push(chip.as_ref());
     }
 
-    for (phase, chips) in &by_phase {
+    for (phase, phase_chips) in &by_phase {
         // Before Dependent phase: collect interaction data from Phase 0+1 traces.
         if *phase == TracePhase::Dependent {
-            collect_dependent_inputs::<CS>(&all_chips, &map, &mut store)?;
+            collect_dependent_inputs(chips, &map, &mut store)?;
         }
 
-        for chip in chips {
+        for chip in phase_chips {
             chip.contribute(&store, &mut map)?;
         }
     }
@@ -58,17 +54,14 @@ where
 /// This is the single point where AIR constraint evaluation occurs during
 /// trace building. The collected data is inserted into the store for
 /// Dependent-phase chips (Poseidon, RangeCheck).
-fn collect_dependent_inputs<CS>(
-    all_chips: &[CS],
+fn collect_dependent_inputs(
+    chips: &[Box<dyn DynChip>],
     map: &TraceMap,
     store: &mut WitnessStore,
-) -> Result<(), TabulaError>
-where
-    CS: ChipSet + TraceContributor + for<'a> Air<DebugConstraintBuilder<'a, BabyBear>>,
-{
+) -> Result<(), TabulaError> {
     let mut records = Vec::new();
 
-    for chip in all_chips {
+    for chip in chips {
         if chip.phase() >= TracePhase::Dependent {
             continue;
         }
@@ -84,7 +77,7 @@ where
 
         let record = evaluate_chip_with_preprocessed_and_public_values(
             &chip_id.to_string(),
-            chip,
+            chip.as_ref(),
             &entry.main,
             entry.preprocessed.as_ref(),
             &entry.public_values,

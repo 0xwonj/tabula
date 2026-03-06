@@ -26,7 +26,7 @@ use p3_uni_stark::StarkConfig;
 pub type EF4 = BinomialExtensionField<BabyBear, 4>;
 
 /// Concrete Poseidon2 permutation type (width=16, s-box degree=7).
-type Perm = Poseidon2<
+pub(crate) type Perm = Poseidon2<
     BabyBear,
     Poseidon2ExternalLayerBabyBear<16>,
     Poseidon2InternalLayerBabyBear<16>,
@@ -53,13 +53,16 @@ type ValMmcs = MerkleTreeMmcs<
 type ChallengeMmcs = ExtensionMmcs<BabyBear, EF4, ValMmcs>;
 
 /// Challenger: duplex sponge over BabyBear with Poseidon2.
-type Challenger = DuplexChallenger<BabyBear, Perm, 16, 8>;
+pub(crate) type Challenger = DuplexChallenger<BabyBear, Perm, 16, 8>;
 
 /// Polynomial commitment scheme: FRI over two-adic cosets.
 type Pcs = TwoAdicFriPcs<BabyBear, Radix2DitParallel<BabyBear>, ValMmcs, ChallengeMmcs>;
 
 /// Concrete STARK configuration for Tabula proofs.
 pub type TabulaStarkConfig = StarkConfig<Pcs, EF4, Challenger>;
+
+/// PCS type alias for UFCS disambiguation of `Pcs` trait methods.
+pub(crate) type TabulaPcs = <TabulaStarkConfig as p3_uni_stark::StarkGenericConfig>::Pcs;
 
 /// Build a default `TabulaStarkConfig` with test-friendly FRI parameters.
 ///

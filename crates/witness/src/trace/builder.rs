@@ -9,7 +9,7 @@ use tabula_core::{Batch, ColId, ExecutionResult, TableId, TableSchema};
 use tabula_ir::Program;
 
 use crate::witness::BatchWitness;
-use tabula_chips::TabulaAir;
+use tabula_chips::core_dyn_chips;
 use tabula_chips::execution::trace::InstructionRecord;
 use tabula_chips::smt_path::trace::{SmtPathWitness, SmtTablePathWitness};
 use tabula_chips::static_table::trace::StaticTableRow;
@@ -59,7 +59,8 @@ where
         validate_smt_path_shapes(inputs.smt_col_paths, inputs.smt_table_paths)?;
 
         let store = self.populate_store(inputs)?;
-        orchestration::build_all_traces::<TabulaAir>(store)
+        let chips = core_dyn_chips();
+        orchestration::build_all_traces(&chips, store)
     }
 
     /// Full pipeline: IR program + execution result → [`TraceMap`].
@@ -98,7 +99,9 @@ where
 
     /// Validate all chip traces in a [`TraceMap`] with debug constraints and bus balance.
     pub fn debug_validate(&self, map: &TraceMap) -> Result<(), TabulaError> {
-        validation::debug_validate_trace_map::<TabulaAir>(map)
+        let chips = core_dyn_chips();
+        let buses = tabula_stark::air::interaction::core_buses::ALL.to_vec();
+        validation::debug_validate_trace_map(&chips, &buses, map)
     }
 
     /// Populate a [`WitnessStore`] with all chip inputs from raw trace inputs.

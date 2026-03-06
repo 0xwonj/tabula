@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
-use tabula_chips::TabulaAir;
 use tabula_commitment::{BabyBearCodec, HybridVC, PoseidonHasher};
 use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
 use tabula_core::traits::ValueCodec;
@@ -127,11 +126,14 @@ tx touch(id: u64) {
         &[(TableId(0), ColId(0), RowKey(10), Value::U64(50))],
         vec![make_tx(vec![Value::U64(10)])],
     );
-    let config = tabula_machine::default_config();
+    let machine = tabula_machine::TabulaMachine::builder()
+        .with_core_chips()
+        .build()
+        .expect("machine build");
 
     c.bench_function("prove_read_write", |b| {
         b.iter(|| {
-            tabula_machine::prove::<TabulaAir>(&config, &traces, statement.clone());
+            machine.prove(&traces, statement.clone()).expect("proving");
         });
     });
 }
@@ -148,12 +150,15 @@ tx touch(id: u64) {
         &[(TableId(0), ColId(0), RowKey(10), Value::U64(50))],
         vec![make_tx(vec![Value::U64(10)])],
     );
-    let config = tabula_machine::default_config();
-    let proof = tabula_machine::prove::<TabulaAir>(&config, &traces, statement);
+    let machine = tabula_machine::TabulaMachine::builder()
+        .with_core_chips()
+        .build()
+        .expect("machine build");
+    let proof = machine.prove(&traces, statement).expect("proving");
 
     c.bench_function("verify_read_write", |b| {
         b.iter(|| {
-            tabula_machine::verify::<TabulaAir>(&proof).expect("verification");
+            machine.verify(&proof).expect("verification");
         });
     });
 }

@@ -1,7 +1,7 @@
 # Tabula Extensibility Architecture
 
-> **Status**: Draft v0.3
-> **Date**: 2026-03-05
+> **Status**: Draft v0.4
+> **Date**: 2026-03-06
 > **Depends on**: tabula-machine-architecture.md (v0.4), proof-spec.md, semantics-spec.md
 > **Scope**: Framework-level extensibility for purpose-built ZK applications
 
@@ -26,13 +26,15 @@ An application MUST be able to define all customizations — chips, buses, state
 │  App Crate (100% of customization lives here)                │
 │                                                              │
 │  Composition point (the only "wiring" code):                 │
-│    define_chip_set! { include TabulaCoreAir; + app chips }   │
-│    config.register_vc(app_vc)                                │
-│    BatchEnv { precompile_handler: &app_handler, ... }        │
+│    TabulaMachine::builder()                                  │
+│        .with_core_chips()                                    │
+│        .with_extension(MyExtension)                          │
+│        .with_config(production_config())                     │
+│        .build()                                              │
 │                                                              │
 │  Pure app definitions (trait impls, no Tabula code changes): │
-│    impl ChipSpec + Air<AB> for AppChip                       │
-│    impl TraceContributor for AppChip                         │
+│    impl ChipSpec + Air<AB> for AppChip  (auto AnyRap)       │
+│    impl ChipExtension for MyExtension                        │
 │    impl VectorCommitment for AppVc                           │
 │    impl PrecompileHandler for AppPrecompiles                 │
 │    define_bus! for app buses                                 │
@@ -50,13 +52,13 @@ An application MUST be able to define all customizations — chips, buses, state
 2. **Graduated complexity**: Simple apps use core IR unchanged. Complex apps go deeper.
 3. **Composability**: Extensions compose via LogUp buses — no coupling between components.
 4. **Near-optimal efficiency**: Custom chips approach purpose-built circuit performance.
-5. **Type safety**: Compile-time verification of chip composition, bus signatures, instruction schemas.
+5. **Type safety**: Setup-time validation of chip composition, compile-time bus signatures.
 6. **Minimal boilerplate**: Macros and traits eliminate repetitive wiring code.
 7. **Upgrade resilience**: Apps survive Tabula minor version updates without code changes.
 
 ### 1.3 Non-Goals
 
-- Runtime-pluggable chips (p3's `Air<AB>` requires static dispatch)
+- ~~Runtime-pluggable chips (p3's `Air<AB>` requires static dispatch)~~ **Superseded.** OpenVM proves `dyn AnyRap` works. Tabula uses runtime `ChipRegistry` — see [implementation-workplan.md](implementation-workplan.md#composition-model-compile-time-enum-vs-runtime-registry).
 - Changing the base field (BabyBear is fixed)
 - General-purpose computation (Tabula is a state machine, not a zkVM)
 
@@ -67,26 +69,27 @@ The Zero-Modification Principle requires a set of **one-time framework changes**
 | # | Change | Current State | Target State | Scope |
 |---|--------|---------------|--------------|-------|
 | F1 | `BusId` newtype | Closed `InteractionKind` enum (11 variants) | `BusId(u16)` newtype with reserved ranges (core: 0-99, app: 100+) | ~50 LOC |
-| F2 | `define_chip_set!` `include` | No composition syntax | `include TabulaCoreAir;` copies all core variants into app enum | ~100 LOC macro |
-| F3 | `TraceContributor` trait | Hardcoded per-chip wiring in `orchestration.rs` | Trait-based generic loop, chips self-register | ~200 LOC |
+| F2 | `ChipExtension` trait | No extension packaging | Registers chips + buses + witness as a unit | ~150 LOC |
+| F3 | `DynTraceContributor` | Hardcoded per-chip wiring in `orchestration.rs` | Object-safe `TraceContributor` wrapper (Phase 1) | Phase 1 |
 | F4 | `WitnessStore` | Implicit data passing via function arguments | Typed key-value store, chips declare dependencies | ~100 LOC |
 | F5 | `VectorCommitment` trait | SSMC/SMT hardcoded | Trait with `commit()`, `prove_transition()`, `chip_name()` | ~100 LOC |
 | F6 | `PropertyOpening` trait | No structural query mechanism | Trait for ordered/aggregate queries against committed state | ~100 LOC |
-| F7 | `OpcodeSpec` trait | 13-variant closed `Instruction` enum | Trait-based dispatch for execute / constrain / witness | ~150 LOC |
-| F8 | `define_instruction_set!` macro | Manual enum + `map_slots()` + typecheck | Generates enum, serialization, dispatch from declarative spec | ~300 LOC macro |
 | F9 | `Precompile` IR variant | No generic computation dispatch | Single `Precompile { id, dst_slots, inputs }` variant | ~50 LOC |
 | F10 | `PrecompileHandler` trait | N/A | Executor-side dispatch for precompile execution | ~50 LOC |
 | F11 | `TemplateChip` trait | Only generic `ExecutionChip` | Trait for specialized tx-pattern chips + equivalence harness | ~200 LOC |
 | F12 | `tabula-machine::prelude` | Apps import p3 crates directly | Stable re-export of p3 types through Tabula | ~50 LOC |
+| F13 | `op_precompile` + `PrecompileBus` | N/A | One-time ExecutionChip addition for precompile dispatch | ~100 LOC |
 
-**Total**: ~1,450 LOC of framework-level changes (traits, macros, and refactoring). After these changes, every "Files Affected" section in this document (§3.3, §4.5, §5.5, etc.) applies only to the initial framework setup — not to individual applications.
+> **v0.4 changes:** F2 changed from `define_chip_set! include` to `ChipExtension` (composition via `ChipRegistry` + `AnyRap` from Phase 1). F7 (`OpcodeSpec`) and F8 (`define_instruction_set!`) removed — the 12 core opcodes are stable; new computation uses the Precompile pattern (F9-F10, F13). F13 added for ExecutionChip precompile support.
+
+**Total**: ~950 LOC of framework-level changes. After these changes (plus Phase 1 `ChipRegistry`/`AnyRap`), all app development requires zero changes to Tabula's codebase.
 
 The dependency between these prerequisites:
 
 ```
-F1 (BusId) ──→ F2 (chip_set include) ──→ F3+F4 (TraceContributor) ──→ F5 (VC trait)
-                                                                    ──→ F11 (Template)
-F7 (OpcodeSpec) ──→ F8 (instruction_set macro) ──→ F9+F10 (Precompile)
+Phase 1 (AnyRap + ChipRegistry) ──→ F1 (BusId) ──→ F2 (ChipExtension) ──→ F4 (WitnessStore) ──→ F5 (VC trait)
+                                                                                                ──→ F11 (Template)
+F9 (Precompile) ──→ F10 (PrecompileHandler) ──→ F13 (PrecompileBus)
 F12 (prelude) — independent, can be done anytime
 ```
 
@@ -110,185 +113,91 @@ Each axis is independently extensible. An extension on one axis composes with al
 
 ---
 
-## 3. Axis 1: Instruction Set Extension
+## 3. Axis 1: Computation Extension
 
 ### 3.1 Problem
 
-The current `Instruction` enum is a closed 13-variant type. Adding a new opcode requires coordinated changes across 12 files in 5 crates. At 30+ opcodes, this pattern becomes a maintenance burden.
+The current `Instruction` enum has 12 core opcodes. Apps need new computational operations (ECDSA verification, Keccak hashing, bitwise operations, etc.) without modifying the core instruction set.
 
-### 3.2 Mechanism: Opcode Trait + Instruction Set Macro
+### 3.2 Mechanism: Precompile Pattern
 
-#### 3.2.1 `OpcodeSpec` Trait
+> **v0.4 decision:** The Precompile pattern replaces the previously proposed `OpcodeSpec` trait + `define_instruction_set!` macro. See [implementation-workplan.md](implementation-workplan.md#precompile-vs-opcodehandler) for rationale.
+>
+> Key reasons:
+> - 12 core opcodes are computationally complete and stable (Arith, Cmp, Logic, Select, DivMod, Hash, Read/Write/Lookup, Assert, Emit)
+> - Hash→PoseidonChip and Lookup→StaticTableChip already demonstrate the precompile pattern
+> - SSA slot carry (80 columns) makes per-opcode chip decomposition impractical
+> - New computation = new chip + bus, zero core modification after one-time setup
 
-Each opcode is a self-contained unit implementing a trait:
+#### 3.2.1 Precompile IR Variant
 
 ```rust
-/// Defines a single opcode's behavior across all layers.
-trait OpcodeSpec: Send + Sync + 'static {
-    /// Unique identifier.
-    const OPCODE_ID: u16;
-    /// Human-readable name.
-    const NAME: &'static str;
+// Added to Instruction enum (one-time, ~50 LOC)
+Precompile {
+    dst: Slot,
+    precompile_id: PrecompileId,
+    args: Vec<SlotRef>,
+}
+```
 
-    /// Operand schema for static type checking.
-    fn operand_schema(&self) -> OperandSchema;
+#### 3.2.2 Executor-Side Dispatch
 
-    /// Execute in the interpreter.
+```rust
+/// App-defined precompile execution handler.
+pub trait PrecompileHandler: Send + Sync {
     fn execute(
         &self,
-        operands: &ResolvedOperands,
-        ctx: &ExecContext,
-    ) -> Result<OpcodeResult, TabulaError>;
+        id: PrecompileId,
+        args: &[Value],
+    ) -> Result<Value, TabulaError>;
+}
 
-    /// Populate witness columns.
-    fn populate_witness(
-        &self,
-        record: &InstructionRecord,
-        cols: &mut [BabyBear],
-        offset: usize,
-    );
+// Registered in BatchEnv
+let env = BatchEnv {
+    precompile_handler: &MyPrecompileHandler,
+    // ...
+};
+```
 
-    /// Emit AIR constraints.
-    fn constrain<AB: InteractionAirBuilder>(
-        &self,
-        builder: &mut AB,
-        local: &[AB::Var],
-        offset: usize,
-        selector: AB::Var,
-    );
+#### 3.2.3 ExecutionChip Support (One-Time)
 
-    /// Number of witness columns this opcode requires.
-    fn witness_width(&self) -> usize;
+```rust
+// Added to ExecutionCols (~1 boolean selector + bus send)
+op_precompile: T,  // selector
+
+// Constraint: when op_precompile active, send to PrecompileBus
+if op_precompile {
+    send_precompile(precompile_id, args..., result)
 }
 ```
 
-```rust
-/// Describes an opcode's type-checking rules declaratively.
-struct OperandSchema {
-    /// Input operands with type constraints.
-    inputs: Vec<OperandConstraint>,
-    /// Output slots with result type rules.
-    outputs: Vec<ResultTypeRule>,
-    /// Whether this opcode accesses state (affects NF validation).
-    accesses_state: bool,
-}
-
-enum OperandConstraint {
-    /// Any value type (inferred from context).
-    AnyValue,
-    /// Must be a specific type.
-    Typed(ValueType),
-    /// Must match another operand's type.
-    SameAs(usize),
-    /// Row expression.
-    RowExpr,
-}
-
-enum ResultTypeRule {
-    /// Same type as input operand at index.
-    SameAsInput(usize),
-    /// Fixed type.
-    Fixed(ValueType),
-    /// Inferred from schema (for Read).
-    FromSchema,
-}
-```
-
-#### 3.2.2 `define_instruction_set!` Macro
-
-Generates the `Instruction` enum, serialization, `map_slots()`, `dst_slots()`, and typecheck dispatch from a declarative specification:
+#### 3.2.4 App-Defined Precompile Chip
 
 ```rust
-define_instruction_set! {
-    pub enum AppInstruction {
-        // Include all Tabula core instructions
-        include TabulaCore;
+// App defines: chip + bus receive + constraints
+struct EcdsaVerifyChip;
 
-        // App-defined instructions
-        Bitwise {
-            dst: Slot,
-            op: BitwiseOp,
-            lhs: ValueExpr,
-            rhs: ValueExpr,
-        } => impl BitwiseOpcode;
-
-        SigVerify {
-            dst: Slot,
-            scheme: SigScheme,
-            pubkey: ValueExpr,
-            message: ValueExpr,
-            signature: ValueExpr,
-        } => impl SigVerifyOpcode;
-
-        WideMul {
-            dst_hi: Slot,
-            dst_lo: Slot,
-            lhs: ValueExpr,
-            rhs: ValueExpr,
-        } => impl WideMulOpcode;
-    }
-}
-```
-
-The macro generates:
-- The `AppInstruction` enum with all core + custom variants
-- `map_slots()` and `dst_slots()` implementations (derived from field types)
-- Borsh/Serde serialization
-- A dispatch table mapping opcode ID → `&dyn OpcodeSpec`
-- Typecheck dispatch using `OperandSchema` from each opcode's `operand_schema()`
-- NF validation classification (`accesses_state` flag)
-
-#### 3.2.3 What the App Developer Writes
-
-For a pure-compute opcode like `Bitwise`:
-
-```rust
-struct BitwiseOpcode;
-
-impl OpcodeSpec for BitwiseOpcode {
-    const OPCODE_ID: u16 = 100;
-    const NAME: &'static str = "bitwise";
-
-    fn operand_schema(&self) -> OperandSchema {
-        OperandSchema {
-            inputs: vec![OperandConstraint::AnyValue, OperandConstraint::SameAs(0)],
-            outputs: vec![ResultTypeRule::SameAsInput(0)],
-            accesses_state: false,
-        }
-    }
-
-    fn execute(&self, ops: &ResolvedOperands, _ctx: &ExecContext) -> Result<OpcodeResult> {
-        let (lhs, rhs) = (ops.value(0)?, ops.value(1)?);
-        let op: BitwiseOp = ops.metadata()?;
-        let result = match (lhs, rhs, op) {
-            (Value::U64(a), Value::U64(b), BitwiseOp::And) => Value::U64(a & b),
-            (Value::U64(a), Value::U64(b), BitwiseOp::Or)  => Value::U64(a | b),
-            (Value::U64(a), Value::U64(b), BitwiseOp::Xor) => Value::U64(a ^ b),
-            (Value::U64(a), Value::U64(b), BitwiseOp::Shl) => Value::U64(a << (b as u32)),
-            (Value::U64(a), Value::U64(b), BitwiseOp::Shr) => Value::U64(a >> (b as u32)),
-            _ => return Err(TabulaError::TypeMismatch { .. }),
-        };
-        Ok(OpcodeResult::single(result))
-    }
-
-    fn witness_width(&self) -> usize { 64 + 64 + 64 } // bit decomposition
-
-    fn populate_witness(&self, record: &InstructionRecord, cols: &mut [BabyBear], offset: usize) {
-        // Decompose lhs, rhs, dst into individual bits
-        // ...
-    }
-
-    fn constrain<AB: InteractionAirBuilder>(&self, builder: &mut AB, ...) {
-        // For AND: dst_bit[i] = lhs_bit[i] * rhs_bit[i]
-        // Reconstitution: sum(bit[i] * 2^i) = original value
+impl ChipSpec for EcdsaVerifyChip { /* ... */ }
+impl<AB: InteractionAirBuilder + PrecompileAirBuilder> Air<AB> for EcdsaVerifyChip {
+    fn eval(&self, builder: &mut AB) {
+        // Receive from PrecompileBus
+        builder.receive_precompile(/* ... */);
+        // ECDSA-specific constraints
         // ...
     }
 }
+impl TraceContributor for EcdsaVerifyChip { /* ... */ }
+
+// Register via ChipExtension
+impl ChipExtension for EcdsaExtension {
+    fn register_chips(&self, reg: &mut ChipRegistry) {
+        reg.register(EcdsaVerifyChip::default());
+    }
+    // ...
+}
 ```
 
-#### 3.2.4 Standard Library Opcodes
-
-Tabula provides ready-to-use opcode implementations:
+#### 3.2.5 Core + Standard Library Opcodes
 
 | Opcode | Category | Status |
 |--------|----------|--------|
@@ -297,29 +206,25 @@ Tabula provides ready-to-use opcode implementations:
 | Cmp (6 sub-ops) | Comparison | Core (built-in) |
 | Not, And, Or | Logic | Core (built-in) |
 | Assert, Select | Control | Core (built-in) |
-| Hash | Crypto | Core (built-in) |
+| Hash | Crypto | Core (precompile: PoseidonChip) |
 | Emit | Side-effect | Core (built-in) |
-| Bitwise (And/Or/Xor/Shl/Shr) | Bitwise | Standard library |
-| WideMul | Wide arithmetic | Standard library |
-| SigVerify (Ed25519/Secp256k1) | Crypto | Standard library |
-| Cast (U64↔I64, Bool→U64) | Type conversion | Standard library |
+| ECDSA Verify | Crypto | Standard library (precompile) |
+| Keccak | Crypto | Standard library (precompile) |
+| Bitwise (And/Or/Xor/Shl/Shr) | Bitwise | Standard library (precompile) |
 
-Core opcodes are always included. Standard library opcodes are opt-in via `include` in the instruction set definition.
+Core opcodes and their constraints live in `ExecutionChip` (unchanged). Standard library precompiles are separate chips registered via `ChipExtension`.
 
 ### 3.3 Files Affected
 
-All changes below are **one-time framework changes** (prerequisites F7, F8). After these, app-defined opcodes live entirely in the app crate.
+All changes below are **one-time framework changes** (prerequisites F9, F10, F13). After these, app-defined precompiles live entirely in the app crate.
 
 | File | Change | Prerequisite |
 |---|---|---|
-| `crates/ir/src/instruction.rs` | Refactor into `OpcodeSpec` trait + macro | F7 |
-| New: `crates/ir/src/opcode.rs` | `OpcodeSpec`, `OperandSchema`, dispatch table | F7 |
-| New: `crates/ir/src/opcodes/` | Per-opcode implementations (core + standard library) | F7 |
-| `crates/ir/src/pass/typecheck.rs` | Replace match block with `OperandSchema`-driven dispatch | F8 |
-| `crates/ir/src/pass/validate.rs` | Use `accesses_state` flag instead of pattern matching | F8 |
-| `crates/executor/src/interpreter.rs` | Replace match block with `OpcodeSpec::execute()` dispatch | F8 |
-| `crates/proof/src/chips/execution/` | `ExecutionChip` becomes opcode-table-driven | F8 |
-| `crates/proof/src/trace/lowering/` | Replace per-opcode files with `OpcodeSpec::populate_witness()` | F8 |
+| `crates/ir/src/instruction.rs` | Add `Precompile` variant | F9 |
+| `crates/executor/src/interpreter.rs` | Add `PrecompileHandler` dispatch | F10 |
+| `crates/chips/src/execution/columns.rs` | Add `op_precompile` selector | F13 |
+| `crates/chips/src/execution/buses.rs` | Add `PrecompileBus` send | F13 |
+| `crates/stark/src/air/bus.rs` | `PrecompileAirBuilder` trait via `define_bus!` | F13 |
 
 ---
 
@@ -327,54 +232,111 @@ All changes below are **one-time framework changes** (prerequisites F7, F8). Aft
 
 ### 4.1 Problem
 
-The `TabulaAir` enum generated by `define_chip_set!` is a compile-time-closed set. Adding a chip requires modifying `chips/mod.rs`. There is no mechanism to compose a core chip set with app-defined chips.
+The `TabulaAir` enum generated by `define_chip_set!` was a compile-time-closed set. Adding a chip required modifying `chips/mod.rs`. There was no mechanism to compose a core chip set with app-defined chips.
 
-### 4.2 Mechanism: Composable Chip Set Macro
+> **v0.4 resolution:** `ChipRegistry` + `AnyRap` (Phase 1) solve this. `define_chip_set!`, `ChipSet` trait, `TabulaAir` enum, and `StarkAir` alias are all superseded. See [implementation-workplan.md](implementation-workplan.md#composition-model-compile-time-enum-vs-runtime-registry).
 
-#### 4.2.1 `include` Syntax
+### 4.2 Mechanism: Runtime ChipRegistry + AnyRap
+
+#### 4.2.1 AnyRap Trait
 
 ```rust
-// Core chip set (provided by tabula-machine)
-define_chip_set! {
-    pub enum TabulaCoreAir {
-        Execution(ExecutionChip<3>),
-        InterTxOrder(InterTxOrderChip<3>),
-        StateColumn(StateColumnChip<3>),
-        ColumnMeta(ColumnMetaChip),
-        Poseidon(PoseidonChip),
-        RangeCheck(RangeCheckChip),
-        StaticTable(StaticTableChip<3>),
-        SmtColPath(SmtColPathChip),
-        SmtTablePath(SmtTablePathChip),
-    }
+/// Type-erased AIR trait. Blanket-implemented for any type satisfying the bounds.
+pub trait AnyRap:
+    BaseAir<BabyBear>
+    + Air<SymbolicAirBuilder<BabyBear>>
+    + for<'a> Air<ProverConstraintFolder<'a, TabulaStarkConfig>>
+    + for<'a> Air<VerifierConstraintFolder<'a, TabulaStarkConfig>>
+    + for<'a> Air<DebugConstraintBuilder<'a, BabyBear>>
+    + for<'a> Air<RapProverFolder<'a>>
+    + for<'a> Air<RapVerifierFolder<'a>>
+    + Send + Sync
+{
+    fn chip_id(&self) -> ChipId;
+    fn chip_name(&self) -> &str;
+    fn has_interactions(&self) -> bool;
+    fn num_public_values(&self) -> usize;
+    fn preprocessed_width(&self) -> usize;
+    fn width(&self) -> usize;
 }
 
-// App extends with custom chips
-define_chip_set! {
-    pub enum LighterAir {
-        include TabulaCoreAir;
-        EcdsaVerify(EcdsaVerifyChip),
-        OrderbookTree(OrderbookTreeChip<24>),
-        FillOrder(FillOrderTemplateChip),
-    }
+// Blanket impl: any chip implementing ChipSpec + all Air<AB> bounds gets AnyRap for free.
+impl<T> AnyRap for T
+where
+    T: ChipSpec + BaseAir<BabyBear>
+        + Air<SymbolicAirBuilder<BabyBear>>
+        + for<'a> Air<ProverConstraintFolder<'a, TabulaStarkConfig>>
+        // ... (all bounds)
+        + Send + Sync,
+{ /* delegate to ChipSpec + BaseAir methods */ }
+```
+
+#### 4.2.2 ChipRegistry
+
+```rust
+pub struct ChipRegistry {
+    chips: Vec<RegisteredChip>,
+    buses: BTreeSet<BusId>,
+    public_value_chip: Option<ChipId>,
+}
+
+pub struct RegisteredChip {
+    pub air: Box<dyn AnyRap>,
+    pub contributor: Box<dyn DynTraceContributor>,
+    // Populated at validate():
+    pub interactions: InteractionDescriptor<BabyBear>,
+    pub log_quotient_degree: usize,
 }
 ```
 
-The `include` directive:
-- Copies all variants from `TabulaCoreAir` into `LighterAir`
-- Forwards `ChipSpec`, `BaseAir<F>`, `Air<AB>` implementations
-- Merges `ChipSet::all_chips()`, `from_name()`, `chip_names()`
-- Preserves exhaustive pattern matching
+#### 4.2.3 App Composition
 
-#### 4.2.2 Chip Definition Pattern
+```rust
+// App extends with custom chips — pure Rust, no macros
+let machine = TabulaMachine::builder()
+    .with_core_chips()                           // 9 core chips
+    .with_chip(EcdsaVerifyChip::default())       // one-off chip
+    .with_extension(LighterDexExtension)         // packaged extension
+    .with_config(production_config())
+    .build()
+    .expect("setup failed");
+```
+
+#### 4.2.4 ChipExtension Trait
+
+```rust
+/// Packages chips + witness logic as a distributable unit.
+pub trait ChipExtension {
+    fn register_chips(&self, registry: &mut ChipRegistry);
+    fn populate_witness(&self, store: &mut WitnessStore, ctx: &ExtensionContext);
+    fn name(&self) -> &str;
+}
+
+// Example:
+struct LighterDexExtension;
+impl ChipExtension for LighterDexExtension {
+    fn register_chips(&self, reg: &mut ChipRegistry) {
+        reg.register(EcdsaVerifyChip::default());
+        reg.register(OrderbookTreeChip::<24>::default());
+        reg.register(FillOrderTemplateChip::default());
+    }
+    fn populate_witness(&self, store: &mut WitnessStore, ctx: &ExtensionContext) {
+        let events = ctx.precompile_events(ECDSA_VERIFY_ID);
+        store.put::<Vec<EcdsaEvent>>("ecdsa_events", events);
+    }
+    fn name(&self) -> &str { "lighter-dex" }
+}
+```
+
+#### 4.2.5 Chip Definition Pattern (unchanged)
 
 A new chip follows the existing 3-file pattern. The framework provides helper traits:
 
 ```rust
-/// Minimal trait for registering a chip in a chip set.
-/// ChipSpec + Default + Send + Sync is required by define_chip_set!.
+/// Minimal trait for registering a chip.
 pub trait ChipSpec: Default + Send + Sync {
-    fn chip_name(&self) -> &'static str;
+    fn chip_id(&self) -> ChipId;
+    fn chip_name(&self) -> &str;
     fn num_public_values(&self) -> usize { 0 }
     fn preprocessed_width(&self) -> usize { 0 }
     fn has_interactions(&self) -> bool { true }
@@ -386,36 +348,44 @@ The developer defines:
 2. **`air.rs`**: `impl Air<AB> for MyChip where AB: InteractionAirBuilder`
 3. **`trace.rs`**: `impl TraceContributor for MyChip` (see Axis 3)
 
-#### 4.2.3 Feature-Gated Chips
+The `AnyRap` blanket impl automatically applies — zero additional boilerplate.
 
-For optional or app-specific chips that should not inflate the binary:
+#### 4.2.6 Feature-Gated Chips
+
+Optional chips are simply conditionally registered:
 
 ```rust
-define_chip_set! {
-    pub enum AppAir {
-        include TabulaCoreAir;
-
-        #[cfg(feature = "ecdsa")]
-        EcdsaVerify(EcdsaVerifyChip),
-
-        #[cfg(feature = "keccak")]
-        Keccak(KeccakChip),
-    }
+let mut builder = TabulaMachine::builder().with_core_chips();
+if cfg!(feature = "ecdsa") {
+    builder = builder.with_chip(EcdsaVerifyChip::default());
 }
+if cfg!(feature = "keccak") {
+    builder = builder.with_chip(KeccakChip::default());
+}
+let machine = builder.build().expect("setup failed");
 ```
 
-Inactive chips are excluded at compile time — zero overhead.
+Inactive chips are excluded — zero overhead.
 
-### 4.3 Prover/Verifier Genericity
+### 4.3 Prover/Verifier API
 
-The prover and verifier are already generic over `CS: StarkAir`:
+The prover and verifier operate through `TabulaMachine`, which owns the `ChipRegistry`:
 
 ```rust
-pub fn prove<CS: StarkAir>(traces: TraceMap, ...) -> TabulaProof { ... }
-pub fn verify<CS: StarkAir>(proof: &TabulaProof, ...) -> Result<()> { ... }
-```
+// Build machine once
+let machine = TabulaMachine::builder()
+    .with_core_chips()
+    .with_extension(MyExtension)
+    .build()?;
 
-App code calls `prove::<LighterAir>(...)`. No prover/verifier changes needed.
+// Prove and verify
+let proof = machine.prove(&traces, statement);
+machine.verify(&proof)?;
+
+// Standalone verification with serialized key
+let vk = machine.verifying_key();
+verify_with_key(&vk, &proof)?;
+```
 
 ### 4.4 Bus Extension
 
@@ -458,13 +428,17 @@ impl BusId {
 
 ### 4.5 Files Affected
 
-All changes below are **one-time framework changes** (prerequisites F1, F2). After these, app-defined chips and buses live entirely in the app crate via `define_chip_set! { include ...; }` and `BusId::app(N)`.
+All changes below are **one-time framework changes** (Phase 1 + prerequisites F1, F2). After these, app-defined chips and buses live entirely in the app crate via `ChipExtension` + `BusId::app(N)`.
 
 | File | Change | Prerequisite |
 |---|---|---|
-| `crates/proof/src/air/chip_set.rs` | Add `include` support to `define_chip_set!` | F2 |
-| `crates/proof/src/air/interaction.rs` | Replace `InteractionKind` enum with `BusId` newtype | F1 |
-| `crates/proof/src/chips/mod.rs` | Split into `TabulaCoreAir` (lib) + app-specific set | F2 |
+| `crates/stark/src/air/any_rap.rs` | New: `AnyRap` trait + blanket impl | Phase 1 |
+| `crates/stark/src/trace/contributor.rs` | New: `DynTraceContributor` | Phase 1 |
+| `crates/machine/src/registry.rs` | New: `ChipRegistry` + `RegisteredChip` | Phase 1 |
+| `crates/machine/src/machine.rs` | New: `TabulaMachine` builder | Phase 1 |
+| `crates/stark/src/air/interaction.rs` | Replace `InteractionKind` enum with `BusId` newtype | F1 |
+| `crates/chips/src/lib.rs` | Replace `TabulaAir` enum with `core_chips()` function | Phase 1 |
+| `crates/stark/src/air/chip_set.rs` | **Delete**: `ChipSet` trait + `define_chip_set!` macro | Phase 1 |
 
 ---
 
@@ -819,7 +793,7 @@ Framework changes (F6) provide the trait; `PropertyRead` is added once via the i
 | File | Change | Prerequisite |
 |---|---|---|
 | New: `crates/proof/src/state/property.rs` | `PropertyOpening` trait, `PropertyQuery` enum | F6 |
-| `crates/ir/src/instruction.rs` | Add `PropertyRead` variant (or via `define_instruction_set!`) | F8 |
+| `crates/ir/src/instruction.rs` | Add `PropertyRead` variant | F6 |
 | App code | Implement `PropertyOpening` for custom VCs | — (app-side) |
 
 ---
@@ -1189,46 +1163,40 @@ The 5-10% overhead is the composability tax: LogUp bus fingerprint computation t
 
 ## 12. Implementation Roadmap
 
-### Phase 1: Foundation (framework prerequisites F1-F4, F12)
+### Phase 1: Machine Layer + Composition (ChipRegistry, AnyRap, DynTraceContributor)
 
-These are the one-time framework changes from §1.4 that enable the Zero-Modification Principle.
+> See [implementation-workplan.md §Phase 1](implementation-workplan.md) for detailed task list.
+
+| Item | Prerequisite | Scope | Priority |
+|---|---|---|---|
+| `AnyRap` trait + blanket impl | Phase 1.1 | ~80 LOC | Critical |
+| `DynTraceContributor` | Phase 1.1 | ~50 LOC | Critical |
+| `ChipRegistry` + `TabulaMachine` | Phase 1.2 | ~400 LOC | Critical |
+| Remove `define_chip_set!`, `ChipSet`, `TabulaAir`, `StarkAir` | Phase 1.3 | ~-240 LOC | Critical |
+| `TabulaProvingKey` / `TabulaVerifyingKey` | Phase 1.4 | ~150 LOC | High |
+| Shared PCS + single FRI | Phase 1.7 | ~500 LOC | High |
+
+### Phase 2: Extensibility Framework (F1-F2, F9-F13)
 
 | Item | Prerequisite | Scope | Priority |
 |---|---|---|---|
 | `BusId` newtype replacing `InteractionKind` enum | F1 | Axis 2, ~50 LOC | High |
-| `define_chip_set!` `include` support | F2 | Axis 2, ~100 LOC macro | High |
-| `TraceContributor` trait + `WitnessStore` | F3, F4 | Axis 3, ~300 LOC | High |
-| Refactor `trace/orchestration.rs` to generic loop | F3 | Axis 3, ~100 LOC | High |
+| `ChipExtension` trait | F2 | Axis 2, ~150 LOC | High |
+| `WitnessStore` typed key-value store | F4 | Axis 3, ~100 LOC | High |
 | `tabula-machine::prelude` re-exports | F12 | Stable API, ~50 LOC | High |
+| `Precompile` IR variant + `PrecompileHandler` | F9, F10 | Axis 1, ~100 LOC | High |
+| `op_precompile` + `PrecompileBus` in ExecutionChip | F13 | Axis 1, ~100 LOC | High |
+| Standard precompile: ECDSA secp256k1 | — (app-side pattern) | ~500 LOC (chip) | High |
 
-### Phase 2: Instruction Extensibility (F7, F8)
-
-| Item | Prerequisite | Scope | Priority |
-|---|---|---|---|
-| `OpcodeSpec` trait | F7 | Axis 1, ~150 LOC | High |
-| `define_instruction_set!` macro (basic) | F8 | Axis 1, ~300 LOC | High |
-| Standard library: `BitwiseOp` | — (app-side pattern) | Axis 1, ~200 LOC | High |
-| Standard library: `WideMul` | — (app-side pattern) | Axis 1, ~150 LOC | High |
-
-### Phase 3: Precompile System (F9, F10)
-
-| Item | Prerequisite | Scope | Priority |
-|---|---|---|---|
-| `Precompile` instruction + `PrecompileRegistry` | F9 | §10, ~200 LOC | High |
-| `PrecompileBus` definition | F1 | §10, ~50 LOC | High |
-| `PrecompileHandler` trait (executor) | F10 | §10, ~50 LOC | High |
-| Standard precompile: ECDSA secp256k1 | — (app-side pattern) | §10, ~500 LOC (chip) | High |
-
-### Phase 4: State Extensibility (F5, F6)
+### Phase 3: State Extensibility (F5, F6)
 
 | Item | Prerequisite | Scope | Priority |
 |---|---|---|---|
 | `VectorCommitment` trait | F5 | Axis 4, ~100 LOC | Medium |
 | Extract SSMC/SMT into trait impls | F5 | Axis 4, ~refactor | Medium |
 | `PropertyOpening` trait | F6 | Axis 5, ~100 LOC | Medium |
-| `PropertyRead` instruction | F8 | Axis 5, ~150 LOC | Medium |
 
-### Phase 5: Execution Optimization (F11)
+### Phase 4: Execution Optimization (F11)
 
 | Item | Prerequisite | Scope | Priority |
 |---|---|---|---|
@@ -1236,7 +1204,7 @@ These are the one-time framework changes from §1.4 that enable the Zero-Modific
 | Equivalence test harness | F11 | Axis 6, ~200 LOC | Medium |
 | Built-in template: Transfer | — (app-side pattern) | Axis 6, ~300 LOC | Low |
 
-### Phase 6: Proof Composition
+### Phase 5: Proof Composition
 
 | Item | Prerequisite | Scope | Priority |
 |---|---|---|---|
@@ -1251,10 +1219,9 @@ These are the one-time framework changes from §1.4 that enable the Zero-Modific
 | Extension | Who | Effort | What They Write |
 |---|---|---|---|
 | Use core IR | App developer | **Trivial** | `.tab` files (DSL) |
-| Use standard library opcodes | App developer | **Trivial** | `include StdLib;` in instruction set |
-| Use standard precompiles | App developer | **Trivial** | `@ecdsa_verify(...)` in DSL |
-| Define custom opcode | Framework contributor | **Low** | `OpcodeSpec` impl (~100 LOC) |
-| Define custom precompile | App developer (ZK) | **Medium** | `PrecompileChip` impl (~300-500 LOC) |
+| Use standard precompiles | App developer | **Trivial** | `precompile!(ecdsa_verify, ...)` in DSL |
+| Define custom precompile | App developer (ZK) | **Medium** | `PrecompileChip` + `ChipExtension` (~300-500 LOC) |
+| Define custom chip | App developer (ZK) | **Medium** | `ChipSpec` + `Air<AB>` + register via `.with_chip()` |
 | Define template chip | Framework contributor | **Medium** | `TemplateChip` impl (~300 LOC) + equivalence tests |
 | Define custom VC | App developer (ZK) | **High** | `VectorCommitment` + AIR chip (~500-1000 LOC) |
 | Define property opening | App developer (ZK) | **High** | `PropertyOpening` + AIR chip (~500 LOC) |
@@ -1269,12 +1236,12 @@ Requirements for supporting arbitrary ZK applications:
 
 | Requirement | Axis | Mechanism | Status |
 |---|---|---|---|
-| Custom computations | 1 | `OpcodeSpec` trait | Designed |
-| Bitwise operations | 1 | Standard library opcode | Designed |
-| Wide arithmetic (U128) | 1 | `WideMul` opcode | Designed |
-| Signature verification | Precompile | `EcdsaVerifyChip` | Designed |
-| Custom hash functions | Precompile | `KeccakChip`, etc. | Designed |
-| App-defined chips | 2 | `define_chip_set!` + `include` | Designed |
+| Custom computations | 1 | Precompile pattern (chip + bus) | Designed |
+| Bitwise operations | 1 | Standard precompile | Designed |
+| Wide arithmetic (U128) | 1 | Standard precompile | Designed |
+| Signature verification | 1 | `EcdsaVerifyChip` precompile | Designed |
+| Custom hash functions | 1 | `KeccakChip` precompile | Designed |
+| App-defined chips | 2 | `ChipRegistry` + `AnyRap` + `ChipExtension` | Designed |
 | App-defined buses | 2 | `BusId` newtype + `define_bus!` | Designed |
 | Automatic trace routing | 3 | `TraceContributor` trait | Designed |
 | Custom state commitment | 4 | `VectorCommitment` trait | Designed |
@@ -1298,7 +1265,7 @@ Every public API in Tabula is classified into one of three stability tiers. Apps
 | Tier | Guarantee | What's Included |
 |------|-----------|-----------------|
 | **S (Stable)** | Breaking changes only on major versions. Deprecation warnings for 2 minor versions before removal. | `Value`, `ValueType`, `CellKey`, `TableId`, `ColId`, `RowKey`, `Transaction`, `Batch`, `Program`, `TxTypeDef`, `ProgramBudgets`, `TabulaError`, `Hasher`, `SigVerifier`, `StateSnapshot`, `BatchResult`, `ExecutionResult` |
-| **A (Extension)** | May evolve across minor versions, but with migration path documented. Additive changes (new trait methods with defaults) are non-breaking. | `ChipSpec`, `TraceContributor`, `VectorCommitment`, `PropertyOpening`, `OpcodeSpec`, `PrecompileHandler`, `TemplateChip`, `ProofAggregator`, `define_chip_set!`, `define_bus!`, `define_instruction_set!`, `BusId`, `WitnessStore`, `PrecompileId`, `VcId` |
+| **A (Extension)** | May evolve across minor versions, but with migration path documented. Additive changes (new trait methods with defaults) are non-breaking. | `ChipSpec`, `AnyRap`, `ChipRegistry`, `ChipExtension`, `TabulaMachine`, `DynTraceContributor`, `VectorCommitment`, `PropertyOpening`, `PrecompileHandler`, `TemplateChip`, `ProofAggregator`, `define_bus!`, `BusId`, `WitnessStore`, `PrecompileId`, `VcId` |
 | **I (Internal)** | No stability guarantee. May change between any release. | Individual chip implementations (`ExecutionChip`, `PoseidonChip`, etc.), column struct layouts, gadget internals, `trace/orchestration.rs`, constraint details, `stark/prover.rs` internals |
 
 **Rule**: An app that depends only on Tier S + Tier A APIs survives all minor version upgrades without code changes. Apps that import Tier I types (e.g., to reuse a gadget inside a custom chip) accept the risk of breakage.
@@ -1335,8 +1302,8 @@ Bus signatures (the field layout of LogUp fingerprints) are the primary interope
 
 | Scenario | App Impact | Why |
 |----------|-----------|-----|
-| Tabula adds new core opcode | **None** | App's `define_instruction_set!` inherits new opcodes via `include TabulaCore` |
-| Tabula adds new core chip | **None** | App's `define_chip_set!` inherits new chips via `include TabulaCoreAir` |
+| Tabula adds new core opcode | **None** | App uses `with_core_chips()` which includes all core chips |
+| Tabula adds new core chip | **None** | `core_chips()` returns all core chips; apps inherit via `.with_core_chips()` |
 | Tabula improves SSMC/SMT internals | **None** | Internal chip changes are Tier I; VC trait interface is unchanged |
 | Tabula changes bus signature | **Recompile** | App's custom chips on affected bus need constraint updates |
 | Tabula changes `VectorCommitment` trait | **Minor update** | Tier A — new methods have defaults; app may need to implement new optional methods |

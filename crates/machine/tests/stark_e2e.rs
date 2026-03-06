@@ -4,7 +4,6 @@
 
 use std::collections::BTreeMap;
 
-use tabula_chips::TabulaAir;
 use tabula_commitment::{BabyBearCodec, HybridVC, PoseidonHasher};
 use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
 use tabula_core::traits::ValueCodec;
@@ -12,7 +11,7 @@ use tabula_core::{Batch, CellKey, ColId, RowKey, TableId, Transaction, TxTypeId,
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_ir::Program;
 use tabula_lang::compile;
-use tabula_machine::{default_config, prove, verify};
+use tabula_machine::TabulaMachine;
 use tabula_stark::air::statement::PublicStatement;
 use tabula_witness::WitnessGenerator;
 use tabula_witness::trace::build_trace_map;
@@ -105,14 +104,20 @@ fn stark_pipeline(
         old_root: witness.old_state_root,
         new_root: witness.new_state_root,
     };
-    let proof = prove::<TabulaAir>(&default_config(), &traces, statement);
+    let machine = TabulaMachine::builder()
+        .with_core_chips()
+        .build()
+        .expect("machine build");
+    let proof = machine.prove(&traces, statement).expect("proving");
     assert!(
         !proof.chip_proofs.is_empty(),
         "proof should contain at least one chip proof"
     );
 
     // 6. Verify.
-    verify::<TabulaAir>(&proof).expect("STARK verification should succeed");
+    machine
+        .verify(&proof)
+        .expect("STARK verification should succeed");
 }
 
 fn make_tx(params: Vec<Value>) -> Transaction {

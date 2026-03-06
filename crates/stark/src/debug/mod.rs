@@ -21,8 +21,8 @@ pub use errors::{ConstraintError, MultiChipError};
 pub use logup::{
     ChipRecord, ChipTrace, RecordedInteraction, check_bus_balance, check_logup_balance,
     check_logup_balance_with_challenges, compute_fingerprint, debug_check_logup, evaluate_chip,
-    evaluate_chip_with_preprocessed, evaluate_chip_with_preprocessed_and_public_values,
-    evaluate_chip_with_public_values,
+    evaluate_chip_interactions_only, evaluate_chip_with_preprocessed,
+    evaluate_chip_with_preprocessed_and_public_values, evaluate_chip_with_public_values,
 };
 pub use single_chip::{
     debug_check, debug_check_all, debug_check_with_preprocessed,
