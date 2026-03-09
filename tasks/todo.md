@@ -29,7 +29,7 @@
 
 | # | Goal | Status | Detail | Depends On |
 |---|------|--------|--------|------------|
-| 1 | Machine code quality | 🔧 | [code-quality.md](code-quality.md) | — |
+| 1 | Machine code quality | ✅ | [code-quality.md](code-quality.md) | — |
 | 2 | Commitment traits | 🔵 | [commitment-traits.md](commitment-traits.md) | — |
 | 3 | Composition framework | 🔵 | [composition.md](composition.md) | — |
 | 4 | Precompile framework | ⬜ | [precompile.md](precompile.md) | 3 |
