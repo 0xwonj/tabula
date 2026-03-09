@@ -153,7 +153,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
             let meta = ColumnMeta {
                 table,
                 col,
-                tag: old_state.strategy(),
+                tag: old_state.scheme_tag(),
                 com_old,
                 com_new,
                 is_empty_old: old_state.is_empty(),

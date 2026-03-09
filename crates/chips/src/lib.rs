@@ -14,6 +14,7 @@ pub mod execution;
 pub mod inter_tx_order;
 pub mod poseidon;
 pub mod range_check;
+pub mod shards;
 pub mod smt_path;
 pub mod state_column;
 pub mod static_table;
@@ -144,7 +145,9 @@ pub mod public_input;
 
 // ── Dynamic chip dispatch ───────────────────────────────────────────────────
 
+use tabula_stark::chips::DEFAULT_VALUE_WIDTH;
 use tabula_stark::trace::DynChip;
+use tabula_stark::trace::BusConsumer;
 
 /// All 9 core Tabula chips as boxed [`DynChip`] trait objects.
 ///
@@ -152,14 +155,25 @@ use tabula_stark::trace::DynChip;
 /// Chips are returned in the canonical order matching [`core_chips::ALL`].
 pub fn core_dyn_chips() -> Vec<Box<dyn DynChip>> {
     vec![
-        Box::new(ExecutionChip::<3>),
-        Box::new(InterTxOrderChip::<3>),
-        Box::new(StateColumnChip::<3>),
+        Box::new(ExecutionChip::<DEFAULT_VALUE_WIDTH>),
+        Box::new(InterTxOrderChip::<DEFAULT_VALUE_WIDTH>),
+        Box::new(StateColumnChip::<DEFAULT_VALUE_WIDTH>),
         Box::new(ColumnMetaChip),
         Box::new(PoseidonChip),
         Box::new(RangeCheckChip),
-        Box::new(StaticTableChip::<3>),
+        Box::new(StaticTableChip::<DEFAULT_VALUE_WIDTH>),
         Box::new(SmtColPathChip),
         Box::new(SmtTablePathChip),
+    ]
+}
+
+/// Core chips that are bus consumers (dependent on upstream interaction data).
+///
+/// Returns chips that implement [`BusConsumer`] for bus-driven collection.
+/// Used by the orchestrator to replace hardcoded Poseidon/RangeCheck collection.
+pub fn core_bus_consumers() -> Vec<Box<dyn BusConsumer>> {
+    vec![
+        Box::new(PoseidonChip),
+        Box::new(RangeCheckChip),
     ]
 }

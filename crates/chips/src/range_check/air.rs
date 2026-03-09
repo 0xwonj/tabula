@@ -15,7 +15,7 @@ use super::columns::{RANGE_CHECK_WIDTH, RangeCheckCols};
 /// argument: any chip sending a range-check request must have a matching entry
 /// in this table. If the requested value is outside `[0, 2^16)`, no matching
 /// row exists and the LogUp argument fails.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct RangeCheckChip;
 
 impl<F> BaseAir<F> for RangeCheckChip {

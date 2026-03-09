@@ -15,7 +15,7 @@ use tabula_stark::air::columns::borrow_cols;
 use super::columns::{StaticTableCols, static_table_width};
 
 /// The StaticTable AIR chip.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct StaticTableChip<const W: usize>;
 
 impl<F, const W: usize> BaseAir<F> for StaticTableChip<W> {

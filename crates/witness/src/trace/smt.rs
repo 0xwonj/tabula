@@ -4,7 +4,7 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
 use tabula_commitment::{
-    ColumnMeta, CommitmentStrategy, DOMAIN_COL, DOMAIN_LEAF, DOMAIN_TABLE, FieldHasher,
+    ColumnMeta, DOMAIN_COL, DOMAIN_LEAF, DOMAIN_TABLE, FieldHasher,
     NativeDigest, SparseMerkleTree,
 };
 use tabula_core::TableId;
@@ -196,11 +196,8 @@ where
     Ok((col_paths, table_paths))
 }
 
-fn commitment_tag(strategy: CommitmentStrategy) -> u32 {
-    match strategy {
-        CommitmentStrategy::Ssmc => 0,
-        CommitmentStrategy::Smt => 1,
-    }
+fn commitment_tag(tag: u16) -> u32 {
+    tag as u32
 }
 
 fn compute_leaf_digest(table: u32, col: u16, tag: u32, com: &NativeDigest) -> NativeDigest {

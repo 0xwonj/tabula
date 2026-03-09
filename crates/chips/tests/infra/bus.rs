@@ -19,7 +19,7 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 
-use tabula_commitment::{ColumnMeta, CommitmentStrategy, NativeDigest};
+use tabula_commitment::{ColumnMeta, scheme_tags, NativeDigest};
 use tabula_core::{ColId, TableId};
 
 use tabula_chips::column_meta::air::ColumnMetaChip;
@@ -56,7 +56,7 @@ fn c5_poseidon_com_empty_balance() {
     let meta = ColumnMeta {
         table: TableId(1),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: com,
         com_new: com,
         is_empty_old: true,
@@ -391,7 +391,7 @@ fn c6_commitment_verification_balances() {
     let meta = ColumnMeta {
         table: TableId(1),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old,
         com_new,
         is_empty_old: false,
@@ -420,7 +420,7 @@ fn c6_commitment_verification_detects_digest_mismatch() {
     let meta = ColumnMeta {
         table: TableId(1),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old,
         com_new: wrong_com_new,
         is_empty_old: false,
@@ -501,7 +501,7 @@ fn c12_empty_col_read_balance() {
     let meta = ColumnMeta {
         table: TableId(1),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: com,
         com_new: com,
         is_empty_old: true,
@@ -533,7 +533,7 @@ fn c12_empty_col_read_multiple_reads() {
     let meta = ColumnMeta {
         table: TableId(2),
         col: ColId(1),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: com,
         com_new: com,
         is_empty_old: true,
@@ -561,7 +561,7 @@ fn c12_empty_col_read_multiplicity_mismatch_fails() {
     let meta = ColumnMeta {
         table: TableId(1),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: com,
         com_new: com,
         is_empty_old: true,

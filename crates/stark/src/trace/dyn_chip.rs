@@ -21,6 +21,27 @@ use crate::trace::contributor::TraceContributor;
 ///
 /// Used as `&dyn DynChip` or `Box<dyn DynChip>` to iterate over heterogeneous
 /// chip collections without compile-time enum dispatch.
+///
+/// # WitnessStore contract
+///
+/// Each chip's [`TraceContributor::contribute()`] reads specific entries from a
+/// [`WitnessStore`]. The required labels are defined in
+/// [`witness_labels`](crate::trace::witness_labels):
+///
+/// | Phase | Chip | Required Label(s) |
+/// |-------|------|-------------------|
+/// | Independent | ExecutionChip | `EXECUTION_RECORDS` |
+/// | Independent | StaticTableChip | `STATIC_TABLE_ROWS` |
+/// | Independent | SmtColPathChip | `SMT_COL_PATHS` |
+/// | Independent | SmtTablePathChip | `SMT_TABLE_PATHS`, `SMT_TABLE_PVS` |
+/// | Memory | InterTxOrderChip | `INTER_TX_ROWS` |
+/// | Memory | StateColumnChip | `STATE_ROWS` |
+/// | Memory | ColumnMetaChip | `COLUMN_META_INPUT` |
+/// | Dependent | PoseidonChip | `POSEIDON_INPUTS` (populated by `BusConsumer`) |
+/// | Dependent | RangeCheckChip | `RANGE_CHECK_MULTS` (populated by `BusConsumer`) |
+///
+/// Labels for Dependent-phase chips are populated automatically by the
+/// orchestrator's [`BusConsumer::collect()`] step between Phase 1 and Phase 2.
 pub trait DynChip:
     ChipSpec
     + TraceContributor

@@ -18,7 +18,7 @@ fn trace_builder_builds_valid_memory_traces() {
     let meta = ColumnMeta {
         table,
         col,
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old,
         com_new,
         is_empty_old: false,
@@ -86,13 +86,17 @@ fn trace_builder_builds_valid_memory_traces() {
 
     // Build memory traces via the full trace builder, then check the memory chips.
     let builder = TraceBuilder::<MockFieldHasher, 3>::new(&witness);
-    let trace_map = builder
-        .build_all_traces(AllTraceInputs {
+    let store = builder
+        .populate_store(AllTraceInputs {
             execution_records: &[],
             static_table_rows: &[],
             smt_col_paths: &[],
             smt_table_paths: &[],
         })
+        .expect("witness store");
+    let chips = tabula_chips::core_dyn_chips();
+    let consumers = tabula_chips::core_bus_consumers();
+    let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)
         .expect("trace bundle");
 
     use tabula_chips::core_chips;
@@ -132,7 +136,7 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
     let meta = ColumnMeta {
         table,
         col,
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old,
         com_new,
         is_empty_old: false,
@@ -296,16 +300,20 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
     }];
 
     let builder = TraceBuilder::<MockFieldHasher, 3>::new(&witness);
-    let trace_map = builder
-        .build_all_traces(AllTraceInputs {
+    let store = builder
+        .populate_store(AllTraceInputs {
             execution_records: &execution_records,
             static_table_rows: &[],
             smt_col_paths: &smt_col_paths,
             smt_table_paths: &smt_table_paths,
         })
+        .expect("witness store");
+    let chips = tabula_chips::core_dyn_chips();
+    let consumers = tabula_chips::core_bus_consumers();
+    let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)
         .expect("all-chip trace map");
-    builder
-        .debug_validate(&trace_map)
+    let buses = tabula_stark::air::interaction::core_buses::ALL.to_vec();
+    tabula_witness::trace::debug_validate_trace_map(&chips, &buses, &trace_map)
         .expect("all-chip trace map must satisfy constraints and bus balances");
 }
 
@@ -408,15 +416,19 @@ tx touch(id: u64) {
         .expect("execution record lowering");
 
     let builder = TraceBuilder::<PoseidonHasher, 3>::new(&witness);
-    let trace_map = builder
-        .build_all_traces(AllTraceInputs {
+    let store = builder
+        .populate_store(AllTraceInputs {
             execution_records: &execution_records,
             static_table_rows: &[],
             smt_col_paths: &smt_col_paths,
             smt_table_paths: &smt_table_paths,
         })
+        .expect("witness store");
+    let chips = tabula_chips::core_dyn_chips();
+    let consumers = tabula_chips::core_bus_consumers();
+    let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)
         .expect("all-chip trace assembly from execution result should succeed");
-    builder
-        .debug_validate(&trace_map)
+    let buses = tabula_stark::air::interaction::core_buses::ALL.to_vec();
+    tabula_witness::trace::debug_validate_trace_map(&chips, &buses, &trace_map)
         .expect("DSL->execute->witness->trace map must satisfy all chip checks");
 }

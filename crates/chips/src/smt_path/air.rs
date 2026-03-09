@@ -31,13 +31,13 @@ use super::columns::{
 /// SmtColPathChip — column-level SMT path verification.
 ///
 /// Receives leaf digests from ColumnMeta (C15), sends table roots (C16).
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SmtColPathChip;
 
 /// SmtTablePathChip — table-level SMT path verification.
 ///
 /// Receives table roots from SmtColPathChip (C16), roots verified against public inputs.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SmtTablePathChip;
 
 impl<F> BaseAir<F> for SmtColPathChip {

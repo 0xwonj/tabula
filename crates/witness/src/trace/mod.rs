@@ -4,12 +4,11 @@
 //! enforcing a shared E-Trace/contract boundary.
 
 mod builder;
-mod collectors;
 mod lowering;
 mod memory;
-mod orchestration;
+pub mod orchestration;
 mod smt;
-mod validation;
+pub mod validation;
 
 // Re-export core trace types from tabula-stark.
 pub use tabula_stark::trace::{
@@ -17,6 +16,8 @@ pub use tabula_stark::trace::{
     witness_labels,
 };
 
-pub use builder::{AllTraceInputs, TraceBuilder, build_trace_map};
+pub use builder::{AllTraceInputs, TraceBuilder};
 pub use lowering::{LoweringOutput, lower_execution_records, lower_program_batch};
+pub use orchestration::build_all_traces;
 pub use smt::build_smt_paths;
+pub use validation::debug_validate_trace_map;

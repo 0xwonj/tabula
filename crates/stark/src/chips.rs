@@ -3,6 +3,13 @@
 //! [`ChipId`], [`ChipSpec`], and [`core_chips`] define the chip identification
 //! framework. Chip implementations live in downstream crates (e.g. `tabula-chips`).
 
+/// Default value encoding width for core chip instantiation.
+///
+/// All core chips use `W = DEFAULT_VALUE_WIDTH` as the const generic parameter.
+/// This corresponds to the U64/I64 encoding (30+30+4 bit split → 3 BabyBear limbs).
+/// Application chips may use different widths via [`EncodingWidth`](crate::trace::EncodingWidth).
+pub const DEFAULT_VALUE_WIDTH: usize = 3;
+
 /// Open chip identifier for the proof system.
 ///
 /// Unlike a closed enum, `ChipId` is a transparent newtype that allows
@@ -55,7 +62,26 @@ pub mod core_chips {
     /// SMT table-level path chip.
     pub const SMT_TABLE_PATH: ChipId = ChipId(8);
 
-    /// All core chip IDs, for iteration and validation.
+    /// Layer 0 core chip IDs (fixed identity of Tabula).
+    ///
+    /// Registered by [`MachineBuilder::with_core_chips()`]:
+    /// Execution, Memory, RootProof, BusConsumers.
+    /// Commitment-layer chips (e.g., [`STATE_COLUMN`]) are registered separately
+    /// via [`MachineBuilder::with_default_commitments()`].
+    ///
+    /// Note: ordering is canonical (by chip ID), not registration order.
+    pub const LAYER0: [ChipId; 8] = [
+        EXECUTION,
+        INTER_TX_ORDER,
+        COLUMN_META,
+        POSEIDON,
+        RANGE_CHECK,
+        STATIC_TABLE,
+        SMT_COL_PATH,
+        SMT_TABLE_PATH,
+    ];
+
+    /// All core chip IDs (Layer 0 + default commitments), for iteration and validation.
     pub const ALL: [ChipId; 9] = [
         EXECUTION,
         INTER_TX_ORDER,
@@ -82,6 +108,51 @@ pub mod core_chips {
             8 => Some("SmtTablePath"),
             _ => None,
         }
+    }
+}
+
+// ── ChipId Allocator ─────────────────────────────────────────────────────
+
+/// Sequential [`ChipId`] allocator for shard chips.
+///
+/// Eliminates magic offset constants by allocating unique IDs on demand.
+/// Core chips use IDs 0–99; the default shard allocator starts at 100.
+///
+/// # Example
+///
+/// ```
+/// use tabula_stark::chips::ChipIdAllocator;
+///
+/// let mut alloc = ChipIdAllocator::for_shards();
+/// let id1 = alloc.next(); // ChipId(100)
+/// let id2 = alloc.next(); // ChipId(101)
+/// assert_ne!(id1, id2);
+/// ```
+pub struct ChipIdAllocator {
+    next_id: u16,
+}
+
+impl ChipIdAllocator {
+    /// Create an allocator starting at the given ID.
+    pub fn new(start: u16) -> Self {
+        Self { next_id: start }
+    }
+
+    /// Create an allocator for shard chips (starts at 100, after core chips).
+    pub fn for_shards() -> Self {
+        Self::new(100)
+    }
+
+    /// Allocate the next available [`ChipId`].
+    pub fn next(&mut self) -> ChipId {
+        let id = ChipId(self.next_id);
+        self.next_id += 1;
+        id
+    }
+
+    /// Current next ID (for inspection/testing).
+    pub fn peek(&self) -> u16 {
+        self.next_id
     }
 }
 

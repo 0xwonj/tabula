@@ -12,7 +12,7 @@ use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_ir::Program;
 use tabula_lang::compile;
 use tabula_witness::WitnessGenerator;
-use tabula_witness::trace::build_trace_map;
+use tabula_witness::TraceBuilder;
 
 type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<p3_baby_bear::BabyBear>)>>;
 
@@ -126,16 +126,20 @@ tx touch(id: u64) {
 
     c.bench_function("trace_read_write", |b| {
         b.iter(|| {
-            build_trace_map::<PoseidonHasher, 3>(
-                &s.witness,
-                &s.program,
-                &s.batch,
-                &s.result,
-                &s.schemas_by_id,
-                &InMemoryStaticTables::new(),
-                PoseidonHasher::new(),
-            )
-            .unwrap();
+            let builder = TraceBuilder::<PoseidonHasher, 3>::new(&s.witness);
+            let store = builder
+                .prepare_witness_store(
+                    &s.program,
+                    &s.batch,
+                    &s.result,
+                    &s.schemas_by_id,
+                    &InMemoryStaticTables::new(),
+                    PoseidonHasher::new(),
+                )
+                .unwrap();
+            let chips = tabula_chips::core_dyn_chips();
+            let consumers = tabula_chips::core_bus_consumers();
+            tabula_witness::trace::build_all_traces(&chips, &consumers, store).unwrap();
         });
     });
 }
@@ -156,16 +160,20 @@ tx op(id: u64) {
 
     c.bench_function("trace_arith", |b| {
         b.iter(|| {
-            build_trace_map::<PoseidonHasher, 3>(
-                &s.witness,
-                &s.program,
-                &s.batch,
-                &s.result,
-                &s.schemas_by_id,
-                &InMemoryStaticTables::new(),
-                PoseidonHasher::new(),
-            )
-            .unwrap();
+            let builder = TraceBuilder::<PoseidonHasher, 3>::new(&s.witness);
+            let store = builder
+                .prepare_witness_store(
+                    &s.program,
+                    &s.batch,
+                    &s.result,
+                    &s.schemas_by_id,
+                    &InMemoryStaticTables::new(),
+                    PoseidonHasher::new(),
+                )
+                .unwrap();
+            let chips = tabula_chips::core_dyn_chips();
+            let consumers = tabula_chips::core_bus_consumers();
+            tabula_witness::trace::build_all_traces(&chips, &consumers, store).unwrap();
         });
     });
 }

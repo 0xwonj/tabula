@@ -18,7 +18,14 @@ use super::TraceMap;
 /// 2. Records LogUp interaction sends/receives.
 ///
 /// Then checks bus balance across all chips for every bus in the provided manifest.
-pub(super) fn debug_validate_trace_map(
+///
+/// # Usage
+///
+/// External callers should prefer [`TabulaMachine::debug_validate()`] which
+/// delegates to this function with the machine's own chip and bus configuration.
+///
+/// [`TabulaMachine::debug_validate()`]: tabula_machine::TabulaMachine::debug_validate
+pub fn debug_validate_trace_map(
     chips: &[Box<dyn DynChip>],
     buses: &[BusId],
     map: &TraceMap,

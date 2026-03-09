@@ -21,6 +21,17 @@ pub struct TraceEntry {
     pub public_values: Vec<BabyBear>,
 }
 
+impl TraceEntry {
+    /// Create a trace entry with only a main trace (no preprocessed, no public values).
+    pub fn main_only(main: RowMajorMatrix<BabyBear>) -> Self {
+        Self {
+            main,
+            preprocessed: None,
+            public_values: vec![],
+        }
+    }
+}
+
 /// Typed map of chip traces keyed by [`ChipId`].
 ///
 /// The prover iterates `CS::all_chips()` and looks up each chip's trace here.

@@ -335,7 +335,7 @@ use tabula_stark::trace::trace_map::TraceMap;
 
 impl<const W: usize> TraceContributor for super::air::ExecutionChip<W> {
     fn phase(&self) -> TracePhase {
-        TracePhase::Independent
+        TracePhase::INDEPENDENT
     }
 
     fn contribute(&self, store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {

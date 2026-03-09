@@ -1,8 +1,13 @@
 mod column_meta;
 mod execution;
 mod inter_tx_order;
+mod memory_shard;
+mod meta_shard;
 mod poseidon;
 mod range_check;
 mod smt_path;
+mod smt_commitment;
+mod ssmc_commitment;
 mod state_column;
+mod state_shard;
 mod static_table;

@@ -40,10 +40,7 @@ pub fn generate_column_meta_trace(
         cols.is_real = BabyBear::ONE;
         cols.table_id = BabyBear::new(meta.table.0);
         cols.col_id = BabyBear::new(meta.col.0 as u32);
-        cols.tag = match meta.tag {
-            tabula_commitment::CommitmentStrategy::Ssmc => BabyBear::ZERO,
-            tabula_commitment::CommitmentStrategy::Smt => BabyBear::ONE,
-        };
+        cols.tag = BabyBear::new(meta.tag as u32);
         cols.com_old = meta.com_old.0;
         cols.com_new = meta.com_new.0;
         cols.is_empty_old = bool_fe(meta.is_empty_old);
@@ -99,10 +96,7 @@ pub fn generate_column_meta_trace(
 
         // Leaf digest (M11 Phase 3)
         {
-            let tag_fe = match meta.tag {
-                tabula_commitment::CommitmentStrategy::Ssmc => BabyBear::ZERO,
-                tabula_commitment::CommitmentStrategy::Smt => BabyBear::ONE,
-            };
+            let tag_fe = BabyBear::new(meta.tag as u32);
 
             // Old leaf perm input: [0x10, t, c, tag, 0,0,0,0, com_old[8]]
             let mut leaf_input_old = [BabyBear::ZERO; 16];
@@ -193,7 +187,7 @@ use tabula_stark::trace::trace_map::TraceMap;
 
 impl TraceContributor for super::air::ColumnMetaChip {
     fn phase(&self) -> TracePhase {
-        TracePhase::Memory
+        TracePhase::MEMORY
     }
 
     fn contribute(&self, store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {

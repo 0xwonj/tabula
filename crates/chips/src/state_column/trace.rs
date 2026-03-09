@@ -27,7 +27,7 @@ pub enum EntrySource {
 
 impl EntrySource {
     /// Encode as (s1, s0) pair.
-    fn encode(self) -> (bool, bool) {
+    pub fn encode(self) -> (bool, bool) {
         match self {
             Self::OldOnly => (false, false),
             Self::WriteOnly => (false, true),
@@ -372,7 +372,7 @@ use tabula_stark::trace::trace_map::TraceMap;
 
 impl<const W: usize> TraceContributor for super::air::StateColumnChip<W> {
     fn phase(&self) -> TracePhase {
-        TracePhase::Memory
+        TracePhase::MEMORY
     }
 
     fn contribute(&self, store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {

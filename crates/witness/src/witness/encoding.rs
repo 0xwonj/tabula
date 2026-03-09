@@ -164,7 +164,7 @@ pub(crate) fn compute_state_root<H: FieldHasher<F = BabyBear, Digest = NativeDig
     let mut tables: BTreeMap<TableId, BTreeMap<ColId, NativeDigest>> = BTreeMap::new();
     for (&(table, col), state) in column_states {
         let com = proof_column_commitment(table, col, state)?;
-        let leaf = vc.compute_leaf(table, col, state.strategy(), &com);
+        let leaf = vc.compute_leaf(table, col, state.scheme_tag(), &com);
         tables.entry(table).or_default().insert(col, leaf);
     }
 

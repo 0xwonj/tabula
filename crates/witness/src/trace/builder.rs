@@ -9,19 +9,15 @@ use tabula_core::{Batch, ColId, ExecutionResult, TableId, TableSchema};
 use tabula_ir::Program;
 
 use crate::witness::BatchWitness;
-use tabula_chips::core_dyn_chips;
 use tabula_chips::execution::trace::InstructionRecord;
 use tabula_chips::smt_path::trace::{SmtPathWitness, SmtTablePathWitness};
 use tabula_chips::static_table::trace::StaticTableRow;
 
 use tabula_stark::trace::{WitnessStore, witness_labels};
 
-use super::TraceMap;
 use super::lowering::lower_program_batch;
 use super::memory::prepare_memory_inputs;
-use super::orchestration;
-use super::smt::{smt_table_public_statement, validate_smt_path_shapes};
-use super::validation;
+use super::smt::validate_smt_path_shapes;
 
 /// Input bundle for all-chip trace construction.
 #[derive(Clone, Copy)]
@@ -54,19 +50,15 @@ where
         Self { witness }
     }
 
-    /// Build all chip traces into a [`TraceMap`].
-    pub fn build_all_traces(&self, inputs: AllTraceInputs<'_>) -> Result<TraceMap, TabulaError> {
-        validate_smt_path_shapes(inputs.smt_col_paths, inputs.smt_table_paths)?;
-
-        let store = self.populate_store(inputs)?;
-        let chips = core_dyn_chips();
-        orchestration::build_all_traces(&chips, store)
-    }
-
-    /// Full pipeline: IR program + execution result → [`TraceMap`].
+    /// Full pipeline: IR program + execution result → populated [`WitnessStore`].
     ///
-    /// Builds all chip traces and sets SmtTablePath public values automatically.
-    pub fn build_trace_map(
+    /// Runs the complete preparation pipeline:
+    /// 1. Derives empty columns from witness metadata.
+    /// 2. Lowers IR body → instruction records + static table rows.
+    /// 3. Builds SMT paths from witness metadata.
+    /// 4. Validates SMT path shapes.
+    /// 5. Populates a [`WitnessStore`] with all chip inputs.
+    pub fn prepare_witness_store(
         &self,
         program: &Program,
         batch: &Batch,
@@ -74,7 +66,7 @@ where
         schemas: &BTreeMap<TableId, TableSchema>,
         static_tables: &dyn StaticTableProvider,
         hasher: H,
-    ) -> Result<TraceMap, TabulaError>
+    ) -> Result<WitnessStore, TabulaError>
     where
         H: Clone,
     {
@@ -94,20 +86,18 @@ where
             smt_table_paths: &prepared.smt_table_paths,
         };
 
-        self.build_all_traces(inputs)
+        validate_smt_path_shapes(inputs.smt_col_paths, inputs.smt_table_paths)?;
+        self.populate_store(inputs)
     }
 
-    /// Validate all chip traces in a [`TraceMap`] with debug constraints and bus balance.
-    pub fn debug_validate(&self, map: &TraceMap) -> Result<(), TabulaError> {
-        let chips = core_dyn_chips();
-        let buses = tabula_stark::air::interaction::core_buses::ALL.to_vec();
-        validation::debug_validate_trace_map(&chips, &buses, map)
-    }
-
-    /// Populate a [`WitnessStore`] with all chip inputs from raw trace inputs.
-    fn populate_store(&self, inputs: AllTraceInputs<'_>) -> Result<WitnessStore, TabulaError> {
+    /// Populate a [`WitnessStore`] from pre-computed [`AllTraceInputs`].
+    ///
+    /// Lower-level entry point for callers that already have instruction records,
+    /// static table rows, and SMT paths (e.g. chip-level tests).
+    /// For the full IR-based pipeline, use [`prepare_witness_store`](Self::prepare_witness_store).
+    pub fn populate_store(&self, inputs: AllTraceInputs<'_>) -> Result<WitnessStore, TabulaError> {
         let memory = prepare_memory_inputs::<H, W>(self.witness)?;
-        let statement = smt_table_public_statement(self.witness);
+        let statement = super::smt::smt_table_public_statement(self.witness);
         let smt_table_pvs = statement.to_field_elements();
 
         let mut store = WitnessStore::new();
@@ -134,7 +124,7 @@ where
         store.put(witness_labels::COLUMN_META_INPUT, memory.column_meta_input);
 
         // Phase 2 (Dependent) inputs are collected by the orchestrator
-        // between Phase 1 and Phase 2.
+        // via BusConsumer dispatch between Phase 1 and Phase 2.
 
         Ok(store)
     }
@@ -194,29 +184,4 @@ struct PreparedInputs {
     static_table_rows: Vec<StaticTableRow>,
     smt_col_paths: Vec<SmtPathWitness>,
     smt_table_paths: Vec<SmtTablePathWitness>,
-}
-
-/// Full pipeline: IR program + execution result → [`TraceMap`].
-///
-/// Convenience wrapper around [`TraceBuilder::build_trace_map`].
-pub fn build_trace_map<H, const W: usize>(
-    witness: &BatchWitness<H>,
-    program: &Program,
-    batch: &Batch,
-    execution_result: &ExecutionResult,
-    schemas: &BTreeMap<TableId, TableSchema>,
-    static_tables: &dyn StaticTableProvider,
-    hasher: H,
-) -> Result<TraceMap, TabulaError>
-where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest> + Clone,
-{
-    TraceBuilder::<H, W>::new(witness).build_trace_map(
-        program,
-        batch,
-        execution_result,
-        schemas,
-        static_tables,
-        hasher,
-    )
 }

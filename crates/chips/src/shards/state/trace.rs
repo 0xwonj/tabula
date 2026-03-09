@@ -1,0 +1,261 @@
+//! Trace generation for the StateShard chip.
+//!
+//! Converts per-column witness data (sorted by key) into a
+//! `RowMajorMatrix<BabyBear>` trace with two parallel hash chains.
+
+use p3_baby_bear::BabyBear;
+use p3_field::PrimeCharacteristicRing;
+use p3_matrix::dense::RowMajorMatrix;
+
+use tabula_gadgets::bool_fe;
+use tabula_stark::air::columns::borrow_cols_mut;
+use tabula_stark::trace::generator::TraceGenerator;
+
+use super::air::StateShardChip;
+use super::columns::{StateShardCols, state_shard_width};
+
+// Re-export from canonical location to avoid type duplication.
+pub use crate::state_column::trace::EntrySource;
+
+/// A single row for building the StateShard trace.
+///
+/// Pre-sorted by `key` within the column.
+#[derive(Debug, Clone)]
+pub struct StateShardRow {
+    /// Row key (u64).
+    pub key: u64,
+    /// True if this is a gap row (non-membership proof).
+    pub is_gap: bool,
+    /// Source type (meaningful only for entry rows).
+    pub source: EntrySource,
+    /// Old value (zeros for write_only/gap).
+    pub old_val: Vec<BabyBear>,
+    /// New value (zeros for delete/gap).
+    pub new_val: Vec<BabyBear>,
+    /// Whether this column is touched in the batch.
+    pub segment_is_touched: bool,
+    /// Precomputed old hash chain accumulator.
+    pub old_hash_acc: [BabyBear; 8],
+    /// Precomputed new hash chain accumulator.
+    pub new_hash_acc: [BabyBear; 8],
+    /// Multiplicity for BaseStateEntry bus receive.
+    pub read_mult: bool,
+    /// Multiplicity for CoalescedWrite bus receive.
+    pub write_mult: bool,
+}
+
+/// Generate a StateShard trace from pre-sorted rows for a single column.
+///
+/// `rows` must be sorted by `key`. Keys must be strictly increasing.
+pub fn generate_state_shard_trace<const W: usize>(
+    table_id: u32,
+    col_id: u16,
+    rows: &[StateShardRow],
+) -> RowMajorMatrix<BabyBear> {
+    debug_assert!(
+        rows.windows(2).all(|w| w[0].key < w[1].key),
+        "rows must be sorted by key"
+    );
+
+    let width = state_shard_width::<W>();
+    let num_real = rows.len();
+    let num_rows = (num_real + 1).next_power_of_two().max(2);
+    let mut values = vec![BabyBear::ZERO; num_rows * width];
+
+    // Pass 1: populate base columns, hash chains, chain tracking.
+    populate_base_and_chains::<W>(table_id, col_id, rows, width, &mut values);
+
+    // Pass 2: chain tracking flags (look-ahead).
+    populate_chain_tracking_flags::<W>(rows, num_real, width, &mut values);
+
+    // Pass 3: key ordering witnesses.
+    populate_ordering_witnesses::<W>(rows, num_real, num_rows, width, &mut values);
+
+    RowMajorMatrix::new(values, width)
+}
+
+/// Populate base columns, hash chain inputs, and forward-scan flags.
+fn populate_base_and_chains<const W: usize>(
+    table_id: u32,
+    col_id: u16,
+    rows: &[StateShardRow],
+    width: usize,
+    values: &mut [BabyBear],
+) {
+    let mut seen_old = false;
+    let mut seen_new = false;
+    let mut seen_write = false;
+    let mut prev_old_hash_acc: Option<[BabyBear; 8]> = None;
+    let mut prev_new_hash_acc: Option<[BabyBear; 8]> = None;
+
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(row.old_val.len(), W, "old_val length mismatch");
+        assert_eq!(row.new_val.len(), W, "new_val length mismatch");
+
+        let offset = i * width;
+        let cols: &mut StateShardCols<BabyBear, W> =
+            borrow_cols_mut(&mut values[offset..offset + width]);
+
+        cols.is_real = BabyBear::ONE;
+        cols.table_id = BabyBear::new(table_id);
+        cols.col_id = BabyBear::new(col_id as u32);
+        cols.key.populate(row.key);
+
+        cols.is_gap = bool_fe(row.is_gap);
+        if !row.is_gap {
+            let (s1, s0) = row.source.encode();
+            cols.s1 = bool_fe(s1);
+            cols.s0 = bool_fe(s0);
+            for (j, v) in row.old_val.iter().enumerate() {
+                cols.old_val[j] = *v;
+            }
+            for (j, v) in row.new_val.iter().enumerate() {
+                cols.new_val[j] = *v;
+            }
+        }
+
+        cols.segment_is_touched = bool_fe(row.segment_is_touched);
+        cols.old_hash_acc = row.old_hash_acc;
+        cols.new_hash_acc = row.new_hash_acc;
+        cols.read_mult_witness = bool_fe(row.read_mult);
+        cols.write_mult_witness = bool_fe(row.write_mult);
+
+        let in_old = !row.is_gap && row.source.in_old();
+        let in_new = !row.is_gap && row.source.in_new();
+        let in_write = !row.is_gap && row.source.in_write();
+        seen_write |= in_write;
+        cols.write_seen_prefix = bool_fe(seen_write);
+
+        // Old chain tracking
+        cols.has_prev_old_entry = bool_fe(seen_old);
+        if in_old {
+            if !seen_old {
+                cols.old_hash_chain.populate_first(
+                    table_id,
+                    col_id as u32,
+                    row.key,
+                    &row.old_val,
+                );
+            } else {
+                cols.old_hash_chain.populate_continuation(
+                    prev_old_hash_acc
+                        .as_ref()
+                        .expect("continuation must have prev"),
+                    row.key,
+                    &row.old_val,
+                );
+            }
+            prev_old_hash_acc = Some(row.old_hash_acc);
+            seen_old = true;
+        }
+
+        // New chain tracking
+        cols.has_prev_new_entry = bool_fe(seen_new);
+        if in_new {
+            if !seen_new {
+                cols.new_hash_chain.populate_first(
+                    table_id,
+                    col_id as u32,
+                    row.key,
+                    &row.new_val,
+                );
+            } else {
+                cols.new_hash_chain.populate_continuation(
+                    prev_new_hash_acc
+                        .as_ref()
+                        .expect("continuation must have prev"),
+                    row.key,
+                    &row.new_val,
+                );
+            }
+            prev_new_hash_acc = Some(row.new_hash_acc);
+            seen_new = true;
+        }
+    }
+}
+
+/// Compute chain tracking flags requiring look-ahead.
+fn populate_chain_tracking_flags<const W: usize>(
+    rows: &[StateShardRow],
+    num_real: usize,
+    width: usize,
+    values: &mut [BabyBear],
+) {
+    // Backward pass: find last old/new entries.
+    let mut found_last_old = false;
+    let mut found_last_new = false;
+
+    for i in (0..num_real).rev() {
+        let row = &rows[i];
+        let in_old = !row.is_gap && row.source.in_old();
+        let in_new = !row.is_gap && row.source.in_new();
+
+        let offset = i * width;
+        let cols: &mut StateShardCols<BabyBear, W> =
+            borrow_cols_mut(&mut values[offset..offset + width]);
+
+        if in_old && !found_last_old {
+            cols.is_last_old_entry = BabyBear::ONE;
+            found_last_old = true;
+        }
+
+        if in_new && !found_last_new {
+            cols.is_last_new_entry = BabyBear::ONE;
+            found_last_new = true;
+        }
+    }
+
+    // Forward pass: past_last_old_entry.
+    let mut past_last_old = false;
+    for i in 0..num_real {
+        let offset = i * width;
+        let cols: &mut StateShardCols<BabyBear, W> =
+            borrow_cols_mut(&mut values[offset..offset + width]);
+
+        if cols.is_last_old_entry == BabyBear::ONE {
+            cols.past_last_old_entry = BabyBear::ZERO;
+            past_last_old = true;
+        } else {
+            cols.past_last_old_entry = bool_fe(past_last_old);
+        }
+    }
+}
+
+/// Populate key ordering witnesses.
+fn populate_ordering_witnesses<const W: usize>(
+    rows: &[StateShardRow],
+    num_real: usize,
+    num_rows: usize,
+    width: usize,
+    values: &mut [BabyBear],
+) {
+    for i in 0..num_rows {
+        let next_idx = (i + 1) % num_rows;
+
+        let is_real_cur = i < num_real;
+        let is_real_next = next_idx < num_real;
+
+        if is_real_cur && is_real_next {
+            let cur_key = rows[i].key;
+            let next_key = rows[next_idx].key;
+            let offset = i * width;
+            let cols: &mut StateShardCols<BabyBear, W> =
+                borrow_cols_mut(&mut values[offset..offset + width]);
+            cols.key_ordering.populate(cur_key, next_key);
+        }
+    }
+}
+
+/// Input bundle for `StateShardChip` trace generation.
+pub struct StateShardInput {
+    /// Pre-sorted rows for the column.
+    pub rows: Vec<StateShardRow>,
+}
+
+impl<const W: usize> TraceGenerator for StateShardChip<W> {
+    type Input = StateShardInput;
+
+    fn generate_trace(&self, input: &StateShardInput) -> RowMajorMatrix<BabyBear> {
+        generate_state_shard_trace::<W>(self.table_id(), self.col_id(), &input.rows)
+    }
+}

@@ -1,7 +1,7 @@
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
-use tabula_commitment::{ColumnMeta, CommitmentStrategy};
+use tabula_commitment::{ColumnMeta, scheme_tags};
 use tabula_core::{ColId, TableId};
 
 use tabula_chips::column_meta::air::ColumnMetaChip;
@@ -63,7 +63,7 @@ fn valid_smt_tag() {
     let metas = vec![ColumnMeta {
         table: TableId(0),
         col: ColId(0),
-        tag: CommitmentStrategy::Smt,
+        tag: scheme_tags::SMT,
         com_old: d1,
         com_new: d2,
         is_empty_old: false,
@@ -170,7 +170,7 @@ fn valid_untouched_empty_preserved() {
     let metas = vec![ColumnMeta {
         table: TableId(0),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: d,
         com_new: d,
         is_empty_old: true,
@@ -188,7 +188,7 @@ fn valid_empty_to_nonempty_transition() {
     let metas = vec![ColumnMeta {
         table: TableId(0),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: d_empty,
         com_new: d_new,
         is_empty_old: true,
@@ -206,7 +206,7 @@ fn valid_nonempty_stays_nonempty() {
     let metas = vec![ColumnMeta {
         table: TableId(0),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: d1,
         com_new: d2,
         is_empty_old: false,
@@ -223,7 +223,7 @@ fn invalid_untouched_empty_changed() {
     let metas = vec![ColumnMeta {
         table: TableId(0),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: d1,
         com_new: d1,
         is_empty_old: true,
@@ -241,7 +241,7 @@ fn invalid_empty_stays_empty_when_touched() {
     let metas = vec![ColumnMeta {
         table: TableId(0),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: d1,
         com_new: d2,
         is_empty_old: true,
@@ -286,7 +286,7 @@ fn valid_com_empty_both_empty() {
     let metas = vec![ColumnMeta {
         table: TableId(2),
         col: ColId(5),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: d,
         com_new: d,
         is_empty_old: true,
@@ -305,7 +305,7 @@ fn invalid_com_empty_wrong_com_old() {
     let metas = vec![ColumnMeta {
         table: TableId(0),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: wrong, // not Com_empty(0, 0)!
         com_new: d_new,
         is_empty_old: true,
@@ -325,7 +325,7 @@ fn invalid_com_empty_wrong_com_new() {
     let metas = vec![ColumnMeta {
         table: TableId(0),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: d_old,
         com_new: wrong, // not Com_empty(0, 0)!
         is_empty_old: false,
@@ -346,7 +346,7 @@ fn valid_com_empty_not_empty_arbitrary_com() {
     let metas = vec![ColumnMeta {
         table: TableId(0),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: d1,
         com_new: d2,
         is_empty_old: false,
@@ -365,7 +365,7 @@ fn valid_com_empty_different_table_col() {
     let metas = vec![ColumnMeta {
         table: TableId(3),
         col: ColId(7),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: d,
         com_new: d_new,
         is_empty_old: true,
@@ -384,7 +384,7 @@ fn invalid_com_empty_wrong_table_col() {
     let metas = vec![ColumnMeta {
         table: TableId(1),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old: wrong,
         com_new: d_new,
         is_empty_old: true,
@@ -414,7 +414,7 @@ fn valid_mixed_empty_and_nonempty_columns() {
         ColumnMeta {
             table: TableId(0),
             col: ColId(0),
-            tag: CommitmentStrategy::Ssmc,
+            tag: scheme_tags::SSMC,
             com_old: d_empty_00,
             com_new: d_new_00,
             is_empty_old: true,
@@ -425,7 +425,7 @@ fn valid_mixed_empty_and_nonempty_columns() {
         ColumnMeta {
             table: TableId(0),
             col: ColId(1),
-            tag: CommitmentStrategy::Ssmc,
+            tag: scheme_tags::SSMC,
             com_old: d_empty_01,
             com_new: d_empty_01,
             is_empty_old: true,
@@ -436,7 +436,7 @@ fn valid_mixed_empty_and_nonempty_columns() {
         ColumnMeta {
             table: TableId(1),
             col: ColId(0),
-            tag: CommitmentStrategy::Ssmc,
+            tag: scheme_tags::SSMC,
             com_old: d_old_10,
             com_new: d_new_10,
             is_empty_old: false,
@@ -462,7 +462,7 @@ fn invalid_mixed_wrong_com_empty_in_empty_row() {
         ColumnMeta {
             table: TableId(0),
             col: ColId(0),
-            tag: CommitmentStrategy::Ssmc,
+            tag: scheme_tags::SSMC,
             com_old: d_wrong_for_00,
             com_new: d_new_00,
             is_empty_old: true,
@@ -473,7 +473,7 @@ fn invalid_mixed_wrong_com_empty_in_empty_row() {
         ColumnMeta {
             table: TableId(1),
             col: ColId(0),
-            tag: CommitmentStrategy::Ssmc,
+            tag: scheme_tags::SSMC,
             com_old: d_old_10,
             com_new: d_new_10,
             is_empty_old: false,
@@ -499,7 +499,7 @@ fn valid_mixed_untouched_nonempty_and_touched_empty() {
         ColumnMeta {
             table: TableId(0),
             col: ColId(0),
-            tag: CommitmentStrategy::Ssmc,
+            tag: scheme_tags::SSMC,
             com_old: d_empty_00,
             com_new: d_new_00,
             is_empty_old: true,
@@ -510,7 +510,7 @@ fn valid_mixed_untouched_nonempty_and_touched_empty() {
         ColumnMeta {
             table: TableId(0),
             col: ColId(1),
-            tag: CommitmentStrategy::Ssmc,
+            tag: scheme_tags::SSMC,
             com_old: d_nonempty_01,
             com_new: d_nonempty_01,
             is_empty_old: false,

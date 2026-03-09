@@ -14,17 +14,23 @@ use crate::chips::ChipSpec;
 
 /// Execution phase for trace generation.
 ///
-/// Chips are dispatched in phase order. Between Memory and Dependent phases,
-/// the orchestrator collects interaction data (C5 Poseidon inputs, C8 range
-/// check multiplicities) from Phase 0+1 chip traces.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum TracePhase {
+/// Chips are dispatched in phase order. Between [`MEMORY`](Self::MEMORY) and
+/// [`DEPENDENT`](Self::DEPENDENT) phases, the orchestrator collects interaction
+/// data (Poseidon inputs, range check multiplicities) from earlier chip traces.
+///
+/// This is an open integer — application chips can define custom phases
+/// (e.g., `TracePhase(150)`) to insert between the well-known constants.
+/// Phases are ordered by their inner value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TracePhase(pub u32);
+
+impl TracePhase {
     /// Chips whose traces are independent: Execution, StaticTable, SmtColPath, SmtTablePath.
-    Independent = 0,
+    pub const INDEPENDENT: Self = Self(0);
     /// Memory-layer chips built from witness data: InterTxOrder, StateColumn, ColumnMeta.
-    Memory = 1,
-    /// Chips consuming interaction data from Phase 0+1: Poseidon, RangeCheck.
-    Dependent = 2,
+    pub const MEMORY: Self = Self(100);
+    /// Chips consuming interaction data from earlier phases: Poseidon, RangeCheck.
+    pub const DEPENDENT: Self = Self(200);
 }
 
 /// Trait for chips that can generate their own trace from a [`WitnessStore`].
@@ -112,6 +118,18 @@ impl Default for WitnessStore {
 ///
 /// Each label uniquely identifies a data payload that the orchestrator
 /// or a chip's [`TraceContributor::contribute`] reads from the store.
+///
+/// Labels for Independent/Memory-phase chips must be populated before
+/// calling [`build_all_traces()`]. Labels for Dependent-phase chips
+/// (`POSEIDON_INPUTS`, `RANGE_CHECK_MULTS`) are populated automatically
+/// by [`BusConsumer::collect()`] during orchestration.
+///
+/// Extension chips may define additional labels in their own crates.
+/// Pre-populate the [`WitnessStore`] with custom data before passing it
+/// to [`TabulaMachine::build_traces()`].
+///
+/// [`build_all_traces()`]: tabula_witness::trace::build_all_traces
+/// [`TabulaMachine::build_traces()`]: tabula_machine::TabulaMachine::build_traces
 pub mod witness_labels {
     /// `Vec<InstructionRecord>` — execution instruction trace input.
     pub const EXECUTION_RECORDS: &str = "execution_records";

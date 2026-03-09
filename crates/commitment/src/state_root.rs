@@ -10,7 +10,6 @@ use p3_field::PrimeCharacteristicRing;
 
 use tabula_core::{ColId, TableId};
 
-use crate::column_meta::CommitmentStrategy;
 use crate::field::{
     COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_LEAF, DOMAIN_TABLE, NativeDigest, TABLE_STATE_SMT_DEPTH,
 };
@@ -27,13 +26,10 @@ pub fn compute_leaf<H: FieldHasher<F = BabyBear, Digest = NativeDigest>>(
     hasher: &H,
     table: TableId,
     col: ColId,
-    tag: CommitmentStrategy,
+    tag: u16,
     commitment: &NativeDigest,
 ) -> NativeDigest {
-    let tag_val: u32 = match tag {
-        CommitmentStrategy::Ssmc => 0,
-        CommitmentStrategy::Smt => 1,
-    };
+    let tag_val: u32 = tag as u32;
     let left = NativeDigest([
         BabyBear::new(DOMAIN_LEAF),
         BabyBear::new(table.0),

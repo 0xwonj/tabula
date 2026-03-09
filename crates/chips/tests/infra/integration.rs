@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
-use tabula_commitment::{ColumnMeta, CommitmentStrategy, NativeDigest};
+use tabula_commitment::{ColumnMeta, scheme_tags, NativeDigest};
 use tabula_core::{ColId, TableId};
 
 use tabula_chips::column_meta::air::ColumnMetaChip;
@@ -296,7 +296,7 @@ fn smt_state_root_end_to_end() {
     let metas = vec![ColumnMeta {
         table: TableId(1),
         col: ColId(0),
-        tag: CommitmentStrategy::Ssmc,
+        tag: scheme_tags::SSMC,
         com_old,
         com_new,
         is_empty_old: false,

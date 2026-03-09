@@ -262,7 +262,7 @@ use tabula_stark::trace::trace_map::TraceMap;
 
 impl TraceContributor for super::air::SmtColPathChip {
     fn phase(&self) -> TracePhase {
-        TracePhase::Independent
+        TracePhase::INDEPENDENT
     }
 
     fn contribute(&self, store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {
@@ -275,7 +275,7 @@ impl TraceContributor for super::air::SmtColPathChip {
 
 impl TraceContributor for super::air::SmtTablePathChip {
     fn phase(&self) -> TracePhase {
-        TracePhase::Independent
+        TracePhase::INDEPENDENT
     }
 
     fn contribute(&self, store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {

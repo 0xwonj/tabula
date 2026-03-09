@@ -96,43 +96,20 @@ pub(super) fn lower_build_validate(
     witness: &BatchWitness<PoseidonHasher>,
     schemas: &BTreeMap<TableId, tabula_core::TableSchema>,
 ) {
-    let empty_columns: BTreeSet<(TableId, ColId)> = witness
-        .column_metas
-        .iter()
-        .filter(|m| m.is_empty_old)
-        .map(|m| (m.table, m.col))
-        .collect();
     let static_tables = InMemoryStaticTables::new();
 
-    let lowering = lower_program_batch::<3>(
-        program,
-        batch,
-        result,
-        schemas,
-        &static_tables,
-        &empty_columns,
-    )
-    .expect("IR lowering");
-
-    let (smt_col, smt_table) = tabula_witness::trace::build_smt_paths(
-        &witness.column_metas,
-        &witness.old_state_root,
-        &witness.new_state_root,
-        PoseidonHasher::new(),
-    )
-    .expect("SMT paths");
-
     let builder = TraceBuilder::<PoseidonHasher, 3>::new(witness);
-    let trace_map = builder
-        .build_all_traces(AllTraceInputs {
-            execution_records: &lowering.instruction_records,
-            static_table_rows: &lowering.static_table_rows,
-            smt_col_paths: &smt_col,
-            smt_table_paths: &smt_table,
-        })
+    let store = builder
+        .prepare_witness_store(program, batch, result, schemas, &static_tables, PoseidonHasher::new())
+        .expect("witness store preparation");
+
+    let chips = tabula_chips::core_dyn_chips();
+    let consumers = tabula_chips::core_bus_consumers();
+    let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)
         .expect("trace assembly");
-    builder
-        .debug_validate(&trace_map)
+
+    let buses = tabula_stark::air::interaction::core_buses::ALL.to_vec();
+    tabula_witness::trace::debug_validate_trace_map(&chips, &buses, &trace_map)
         .expect("constraint + bus validation");
 }
 
@@ -195,8 +172,8 @@ tx touch(id: u64) {
     assert!(matches!(result.tx_outcomes[0], TxOutcome::Success));
 
     let builder = TraceBuilder::<PoseidonHasher, 3>::new(&witness);
-    let trace_map = builder
-        .build_trace_map(
+    let store = builder
+        .prepare_witness_store(
             &program,
             &batch,
             &result,
@@ -205,8 +182,14 @@ tx touch(id: u64) {
             PoseidonHasher::new(),
         )
         .expect("unified pipeline");
-    builder
-        .debug_validate(&trace_map)
+
+    let chips = tabula_chips::core_dyn_chips();
+    let consumers = tabula_chips::core_bus_consumers();
+    let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)
+        .expect("trace assembly");
+
+    let buses = tabula_stark::air::interaction::core_buses::ALL.to_vec();
+    tabula_witness::trace::debug_validate_trace_map(&chips, &buses, &trace_map)
         .expect("unified pipeline must satisfy all constraints");
 }
 

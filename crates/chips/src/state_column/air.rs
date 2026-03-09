@@ -38,7 +38,7 @@ use super::columns::{StateColumnCols, state_column_width};
 use super::derived::{derive_in_new, derive_in_old, derive_in_write};
 
 /// The StateColumn AIR chip, generic over value width.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct StateColumnChip<const W: usize>;
 
 impl<F, const W: usize> BaseAir<F> for StateColumnChip<W> {

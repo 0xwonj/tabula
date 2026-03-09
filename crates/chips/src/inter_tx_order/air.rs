@@ -41,7 +41,7 @@ use tabula_stark::air::columns::borrow_cols;
 use super::columns::{InterTxOrderCols, inter_tx_order_width};
 
 /// The InterTxOrder AIR chip, generic over value width.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct InterTxOrderChip<const W: usize>;
 
 impl<F, const W: usize> BaseAir<F> for InterTxOrderChip<W> {

@@ -10,16 +10,20 @@ use crate::hasher::FieldHasher;
 use crate::smt::SparseMerkleTree;
 use crate::ssmc::SsmcList;
 
-// ── Types ──────────────────────────────────────────────────────────────────
+// ── Scheme Tags ──────────────────────────────────────────────────────────────
 
-/// Strategy used for a column's commitment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CommitmentStrategy {
-    /// Small Sparse Map Commitment (hash chain). Used when entry count <= threshold.
-    Ssmc,
-    /// Sparse Merkle Tree. Used when entry count > threshold.
-    Smt,
+/// Well-known scheme tag constants for commitment strategies.
+///
+/// Core schemes use values 0–9. Application-defined schemes should
+/// use values >= 100 to avoid collisions.
+pub mod scheme_tags {
+    /// Small Sparse Map Commitment (hash chain).
+    pub const SSMC: u16 = 0;
+    /// Sparse Merkle Tree.
+    pub const SMT: u16 = 1;
 }
+
+// ── Types ──────────────────────────────────────────────────────────────────
 
 /// Per-column state holding the underlying data structure.
 #[derive(Clone, Debug)]
@@ -39,11 +43,11 @@ impl<H: FieldHasher> ColumnState<H> {
         }
     }
 
-    /// Which strategy this column uses.
-    pub fn strategy(&self) -> CommitmentStrategy {
+    /// Scheme tag for this column's commitment strategy.
+    pub fn scheme_tag(&self) -> u16 {
         match self {
-            ColumnState::Ssmc(_) => CommitmentStrategy::Ssmc,
-            ColumnState::Smt(_) => CommitmentStrategy::Smt,
+            ColumnState::Ssmc(_) => scheme_tags::SSMC,
+            ColumnState::Smt(_) => scheme_tags::SMT,
         }
     }
 }
@@ -57,8 +61,8 @@ pub struct ColumnMeta {
     pub table: TableId,
     /// Column identifier.
     pub col: ColId,
-    /// Commitment strategy used.
-    pub tag: CommitmentStrategy,
+    /// Scheme tag (see [`scheme_tags`]).
+    pub tag: u16,
     /// Commitment before the batch.
     pub com_old: NativeDigest,
     /// Commitment after the batch.

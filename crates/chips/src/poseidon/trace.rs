@@ -115,13 +115,61 @@ use tabula_stark::trace::trace_map::TraceMap;
 
 impl TraceContributor for super::air::PoseidonChip {
     fn phase(&self) -> TracePhase {
-        TracePhase::Dependent
+        TracePhase::DEPENDENT
     }
 
     fn contribute(&self, store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {
         let inputs = store.get::<Vec<[BabyBear; WIDTH]>>(witness_labels::POSEIDON_INPUTS)?;
         let entry = self.build_entry(inputs);
         map.insert_entry(self.chip_id(), entry);
+        Ok(())
+    }
+}
+
+// ── BusConsumer impl ─────────────────────────────────────────────────────
+
+use p3_field::PrimeField32;
+use tabula_stark::air::interaction::{InteractionDirection, core_buses};
+use tabula_stark::debug::RecordedInteraction;
+use tabula_stark::trace::BusConsumer;
+
+impl BusConsumer for super::air::PoseidonChip {
+    fn consumed_buses(&self) -> Vec<tabula_stark::air::BusId> {
+        vec![core_buses::POSEIDON_PERM]
+    }
+
+    fn collect(
+        &self,
+        interactions: &[RecordedInteraction<BabyBear>],
+        store: &mut WitnessStore,
+    ) -> Result<(), TabulaError> {
+        let mut inputs = Vec::new();
+        for interaction in interactions {
+            if interaction.bus != core_buses::POSEIDON_PERM
+                || interaction.direction != InteractionDirection::Send
+            {
+                continue;
+            }
+            if interaction.values.len() != 24 {
+                return Err(TabulaError::ProofError {
+                    phase: "bus_consumer",
+                    detail: format!(
+                        "poseidon interaction width mismatch: expected 24, got {}",
+                        interaction.values.len()
+                    ),
+                });
+            }
+            let mult = interaction.multiplicity.as_canonical_u32();
+            if mult == 0 {
+                continue;
+            }
+            let mut input = [BabyBear::ZERO; 16];
+            input.copy_from_slice(&interaction.values[..16]);
+            for _ in 0..mult {
+                inputs.push(input);
+            }
+        }
+        store.put(witness_labels::POSEIDON_INPUTS, inputs);
         Ok(())
     }
 }

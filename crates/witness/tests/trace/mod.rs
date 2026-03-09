@@ -10,7 +10,7 @@ use tabula_chips::poseidon::constants::poseidon2_permutation;
 use tabula_chips::smt_path::trace::{SmtPathWitness, SmtTablePathWitness};
 use tabula_chips::state_column::air::StateColumnChip;
 use tabula_commitment::{
-    BabyBearCodec, ColumnMeta, CommitmentStrategy, DOMAIN_COL, DOMAIN_TABLE, HybridVC,
+    BabyBearCodec, ColumnMeta, scheme_tags, DOMAIN_COL, DOMAIN_TABLE, HybridVC,
     MockFieldHasher, NativeDigest, PoseidonHasher, SparseMerkleTree,
 };
 use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
@@ -45,8 +45,8 @@ pub(super) fn single_column_roots(
     com_old: NativeDigest,
     com_new: NativeDigest,
 ) -> (NativeDigest, NativeDigest) {
-    let old_leaf = vc.compute_leaf(table, col, CommitmentStrategy::Ssmc, &com_old);
-    let new_leaf = vc.compute_leaf(table, col, CommitmentStrategy::Ssmc, &com_new);
+    let old_leaf = vc.compute_leaf(table, col, scheme_tags::SSMC, &com_old);
+    let new_leaf = vc.compute_leaf(table, col, scheme_tags::SSMC, &com_new);
 
     let mut old_cols = BTreeMap::new();
     old_cols.insert(col, old_leaf);
@@ -147,19 +147,13 @@ pub(super) fn build_smt_paths_from_metas(
             let old_leaf = compute_leaf_digest(
                 meta.table.0,
                 meta.col.0,
-                match meta.tag {
-                    CommitmentStrategy::Ssmc => 0,
-                    CommitmentStrategy::Smt => 1,
-                },
+                meta.tag as u32,
                 &meta.com_old,
             );
             let new_leaf = compute_leaf_digest(
                 meta.table.0,
                 meta.col.0,
-                match meta.tag {
-                    CommitmentStrategy::Ssmc => 0,
-                    CommitmentStrategy::Smt => 1,
-                },
+                meta.tag as u32,
                 &meta.com_new,
             );
 
@@ -171,19 +165,13 @@ pub(super) fn build_smt_paths_from_metas(
             let old_leaf = compute_leaf_digest(
                 meta.table.0,
                 meta.col.0,
-                match meta.tag {
-                    CommitmentStrategy::Ssmc => 0,
-                    CommitmentStrategy::Smt => 1,
-                },
+                meta.tag as u32,
                 &meta.com_old,
             );
             let new_leaf = compute_leaf_digest(
                 meta.table.0,
                 meta.col.0,
-                match meta.tag {
-                    CommitmentStrategy::Ssmc => 0,
-                    CommitmentStrategy::Smt => 1,
-                },
+                meta.tag as u32,
                 &meta.com_new,
             );
 

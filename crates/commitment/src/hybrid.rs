@@ -12,7 +12,7 @@ use p3_baby_bear::BabyBear;
 
 use tabula_core::{ColId, RowKey, TableId};
 
-use crate::column_meta::{ColumnState, CommitmentStrategy};
+use crate::column_meta::{ColumnState, scheme_tags};
 use crate::field::{COL_DATA_SMT_DEPTH, DOMAIN_SMT, NativeDigest};
 use crate::hasher::FieldHasher;
 use crate::smt::SparseMerkleTree;
@@ -46,11 +46,11 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
     }
 
     /// Choose commitment strategy based on entry count.
-    pub fn strategy_for(&self, entry_count: usize) -> CommitmentStrategy {
+    pub fn strategy_for(&self, entry_count: usize) -> u16 {
         if entry_count <= self.threshold {
-            CommitmentStrategy::Ssmc
+            scheme_tags::SSMC
         } else {
-            CommitmentStrategy::Smt
+            scheme_tags::SMT
         }
     }
 
@@ -145,7 +145,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> HybridVC<H> {
         &self,
         table: TableId,
         col: ColId,
-        tag: CommitmentStrategy,
+        tag: u16,
         commitment: &NativeDigest,
     ) -> NativeDigest {
         state_root::compute_leaf(&self.hasher, table, col, tag, commitment)
@@ -194,7 +194,7 @@ mod tests {
         let (state, _) = h
             .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]))
             .unwrap();
-        assert_eq!(state.strategy(), CommitmentStrategy::Ssmc);
+        assert_eq!(state.scheme_tag(), scheme_tags::SSMC);
     }
 
     #[test]
@@ -203,7 +203,7 @@ mod tests {
         let (state, _) = h
             .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2), (2, 3)]))
             .unwrap();
-        assert_eq!(state.strategy(), CommitmentStrategy::Ssmc);
+        assert_eq!(state.scheme_tag(), scheme_tags::SSMC);
     }
 
     #[test]
@@ -212,7 +212,7 @@ mod tests {
         let (state, _) = h
             .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2), (2, 3)]))
             .unwrap();
-        assert_eq!(state.strategy(), CommitmentStrategy::Smt);
+        assert_eq!(state.scheme_tag(), scheme_tags::SMT);
     }
 
     // ── Leaf digest ────────────────────────────────────────────────────────
@@ -223,8 +223,8 @@ mod tests {
         let (_, com) = h
             .commit_column(TableId(1), ColId(0), entries(&[(0, 42)]))
             .unwrap();
-        let l1 = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Ssmc, &com);
-        let l2 = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Ssmc, &com);
+        let l1 = h.compute_leaf(TableId(1), ColId(0), scheme_tags::SSMC, &com);
+        let l2 = h.compute_leaf(TableId(1), ColId(0), scheme_tags::SSMC, &com);
         assert_eq!(l1, l2);
     }
 
@@ -232,8 +232,8 @@ mod tests {
     fn leaf_digest_changes_with_strategy_tag() {
         let h = vc(10);
         let com = NativeDigest::default();
-        let l_ssmc = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Ssmc, &com);
-        let l_smt = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Smt, &com);
+        let l_ssmc = h.compute_leaf(TableId(1), ColId(0), scheme_tags::SSMC, &com);
+        let l_smt = h.compute_leaf(TableId(1), ColId(0), scheme_tags::SMT, &com);
         assert_ne!(l_ssmc, l_smt);
     }
 
@@ -245,7 +245,7 @@ mod tests {
         let (_, com) = h
             .commit_column(TableId(1), ColId(0), entries(&[(0, 1)]))
             .unwrap();
-        let leaf = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Ssmc, &com);
+        let leaf = h.compute_leaf(TableId(1), ColId(0), scheme_tags::SSMC, &com);
         let mut cols = BTreeMap::new();
         cols.insert(ColId(0), leaf);
         let root = h.compute_table_root(&cols);
@@ -263,8 +263,8 @@ mod tests {
         let (_, com1) = h
             .commit_column(TableId(1), ColId(1), entries(&[(0, 2)]))
             .unwrap();
-        let leaf0 = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Ssmc, &com0);
-        let leaf1 = h.compute_leaf(TableId(1), ColId(1), CommitmentStrategy::Ssmc, &com1);
+        let leaf0 = h.compute_leaf(TableId(1), ColId(0), scheme_tags::SSMC, &com0);
+        let leaf1 = h.compute_leaf(TableId(1), ColId(1), scheme_tags::SSMC, &com1);
 
         let mut cols_both = BTreeMap::new();
         cols_both.insert(ColId(0), leaf0);
@@ -328,7 +328,7 @@ mod tests {
         let (new_state, com_new, trace) =
             h.apply_column_writes(&state, TableId(1), ColId(0), &writes);
         assert_ne!(com_old, com_new);
-        assert_eq!(new_state.strategy(), CommitmentStrategy::Ssmc);
+        assert_eq!(new_state.scheme_tag(), scheme_tags::SSMC);
         assert!(trace.is_some());
         assert_eq!(trace.unwrap().steps.len(), 2); // old key 0 + new key 1
     }
@@ -339,13 +339,13 @@ mod tests {
         let (state, com_old) = h
             .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]))
             .unwrap();
-        assert_eq!(state.strategy(), CommitmentStrategy::Smt);
+        assert_eq!(state.scheme_tag(), scheme_tags::SMT);
 
         let writes = vec![(RowKey(2), Some(val(3)))];
         let (new_state, com_new, trace) =
             h.apply_column_writes(&state, TableId(1), ColId(0), &writes);
         assert_ne!(com_old, com_new);
-        assert_eq!(new_state.strategy(), CommitmentStrategy::Smt);
+        assert_eq!(new_state.scheme_tag(), scheme_tags::SMT);
         assert!(trace.is_none()); // SMT produces no merge trace
     }
 
@@ -378,7 +378,7 @@ mod tests {
         let meta = ColumnMeta {
             table: TableId(1),
             col: ColId(0),
-            tag: state.strategy(),
+            tag: state.scheme_tag(),
             com_old,
             com_new,
             is_empty_old: state.is_empty(),
@@ -386,7 +386,7 @@ mod tests {
             is_touched: true,
         };
 
-        assert_eq!(meta.tag, CommitmentStrategy::Ssmc);
+        assert_eq!(meta.tag, scheme_tags::SSMC);
         assert_ne!(meta.com_old, meta.com_new);
         assert!(!meta.is_empty_old);
         assert!(!meta.is_empty_new);
@@ -430,7 +430,7 @@ mod tests {
         let (state, com) = h
             .commit_column(TableId(1), ColId(0), entries(&[(0, 1), (1, 2)]))
             .unwrap();
-        assert_eq!(state.strategy(), CommitmentStrategy::Smt);
+        assert_eq!(state.scheme_tag(), scheme_tags::SMT);
         let (_, com_after, _) = h.apply_column_writes(&state, TableId(1), ColId(0), &[]);
         assert_eq!(com, com_after);
     }
@@ -450,8 +450,8 @@ mod tests {
             .unwrap();
 
         // Build ColumnMeta leaves.
-        let leaf_t1c0 = h.compute_leaf(TableId(1), ColId(0), CommitmentStrategy::Ssmc, &com_t1c0);
-        let leaf_t1c1 = h.compute_leaf(TableId(1), ColId(1), CommitmentStrategy::Ssmc, &com_t1c1);
+        let leaf_t1c0 = h.compute_leaf(TableId(1), ColId(0), scheme_tags::SSMC, &com_t1c0);
+        let leaf_t1c1 = h.compute_leaf(TableId(1), ColId(1), scheme_tags::SSMC, &com_t1c1);
 
         // Table root.
         let mut cols = BTreeMap::new();

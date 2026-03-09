@@ -25,7 +25,7 @@ use super::columns::{PoseidonCols, PoseidonPreprocessedCols, poseidon_width};
 use super::constants::WIDTH;
 
 /// The Poseidon2 AIR chip.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct PoseidonChip;
 
 impl<F> BaseAir<F> for PoseidonChip {

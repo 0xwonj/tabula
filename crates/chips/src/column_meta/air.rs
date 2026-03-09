@@ -34,7 +34,7 @@ use tabula_stark::air::columns::borrow_cols;
 use super::columns::{COLUMN_META_WIDTH, ColumnMetaCols, DIGEST_WIDTH};
 
 /// The ColumnMeta AIR chip.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ColumnMetaChip;
 
 impl<F> BaseAir<F> for ColumnMetaChip {

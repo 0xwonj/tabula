@@ -34,7 +34,7 @@ pub const HASH_INSTRUCTION_DOMAIN_TAG: u32 = 0x20;
 pub const HASH_INSTRUCTION_INPUT_COUNT: u32 = 2;
 
 /// The ExecutionChip AIR, generic over value width.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ExecutionChip<const W: usize>;
 
 impl<F, const W: usize> BaseAir<F> for ExecutionChip<W> {
