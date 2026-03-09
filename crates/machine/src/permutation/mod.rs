@@ -19,8 +19,7 @@
 mod challenges;
 mod trace;
 
-pub(crate) use challenges::{ChipTraceInfo, derive_challenges, derive_challenges_from_main};
-pub(crate) use trace::{concat_traces, generate_permutation_trace_from_interactions};
+pub(crate) use trace::generate_permutation_trace_from_interactions;
 
 #[cfg(test)]
 mod tests;

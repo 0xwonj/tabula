@@ -1,61 +1,75 @@
-//! Proof types for the multi-chip Tabula STARK.
+//! Proof types for the batched multi-chip Tabula STARK.
 //!
-//! A [`TabulaProof`] wraps independent per-chip STARK proofs (produced by
-//! `p3-uni-stark`) with cross-chip LogUp balance data.
+//! A [`TabulaProof`] contains shared PCS commitments across all chips
+//! with a single FRI opening proof, plus per-chip OOD evaluations.
 
 use p3_baby_bear::BabyBear;
-use p3_uni_stark::{PreprocessedVerifierKey, Proof};
 
 use tabula_stark::air::statement::PublicStatement;
 use tabula_stark::chips::ChipId;
 
-use super::config::{EF4, TabulaStarkConfig};
+use crate::config::{EF4, PcsCommitment, PcsOpeningProof};
 
-/// A complete Tabula batch proof.
+/// A complete Tabula batch proof with shared PCS.
 ///
-/// Contains one STARK proof per chip plus cross-chip LogUp metadata.
-/// Verification checks:
-/// 1. Each per-chip STARK proof is valid (main constraints hold).
-/// 2. The LogUp challenges match the Fiat-Shamir transcript.
-/// 3. The LogUp cumulative sums across all chips sum to zero in EF4.
+/// Uses a 3-round protocol:
+/// 1. **Round 1**: Commit all main traces → sample LogUp challenges
+/// 2. **Round 2**: Commit all permutation traces → sample alpha
+/// 3. **Round 3**: Commit all quotient polynomials → sample zeta
+///
+/// A single FRI opening proof covers all committed data.
 pub struct TabulaProof {
-    /// Per-chip STARK proofs.
-    pub chip_proofs: Vec<ChipProofEntry>,
-    /// Fiat-Shamir-derived LogUp challenges [α, β] in EF4.
-    ///
-    /// Bound to the proof instance via a Poseidon2 duplex challenger that
-    /// observes chip trace heights and public values.
-    pub logup_challenges: [EF4; 2],
-    /// The public statement this proof attests to (state root transition).
+    /// Commitment to preprocessed traces (e.g., Poseidon round constants).
+    /// `None` if no chip requires preprocessing.
+    pub preprocessed_commitment: Option<PcsCommitment>,
+    /// Round 1: shared commitment to all chip main traces.
+    pub main_commitment: PcsCommitment,
+    /// Round 2: shared commitment to all chip permutation traces.
+    /// `None` if no chip has LogUp interactions (unlikely in practice).
+    pub perm_commitment: Option<PcsCommitment>,
+    /// Round 3: shared commitment to all quotient polynomial chunks.
+    pub quotient_commitment: PcsCommitment,
+    /// Single FRI opening proof for all commitments.
+    pub opening_proof: PcsOpeningProof,
+    /// Per-chip OOD evaluations and metadata.
+    pub chip_openings: Vec<ChipOpening>,
+    /// The public statement this proof attests to.
     pub statement: PublicStatement,
 }
 
-/// A per-chip STARK proof with metadata.
-pub struct ChipProofEntry {
+/// Per-chip out-of-domain evaluations and metadata.
+///
+/// Contains the polynomial evaluations at the random point `zeta`
+/// and `zeta_next` for each chip's traces.
+pub struct ChipOpening {
     /// Type-safe chip identifier.
     pub chip_id: ChipId,
-    /// The p3-uni-stark proof covering the combined (main ∥ perm) trace.
-    ///
-    /// For chips with interactions, the committed trace has width
-    /// `main_width + perm_width`. For chips without, `perm_width = 0`.
-    pub proof: Proof<TabulaStarkConfig>,
-    /// The chip's final LogUp cumulative sum (4 BabyBear elements = 1 EF4 element).
-    /// Cross-chip check: Σ_chips cumsum_final = 0.
-    ///
-    /// For chips with interactions, this value is also PCS-committed as the
-    /// last 4 columns of the last row in the permutation trace region.
-    pub cumsum_final: EF4,
-    /// Trace height (number of rows).
-    pub trace_height: usize,
-    /// Width of the main (inner chip) trace columns.
+    /// Main trace evaluated at zeta (one value per column).
+    pub main_local: Vec<EF4>,
+    /// Main trace evaluated at zeta·g (next row).
+    pub main_next: Vec<EF4>,
+    /// Permutation trace evaluated at zeta (empty if no interactions).
+    pub perm_local: Vec<EF4>,
+    /// Permutation trace evaluated at zeta·g (empty if no interactions).
+    pub perm_next: Vec<EF4>,
+    /// Preprocessed trace at zeta (None if no preprocessing).
+    pub preprocessed_local: Option<Vec<EF4>>,
+    /// Preprocessed trace at zeta·g (None if no preprocessing).
+    pub preprocessed_next: Option<Vec<EF4>>,
+    /// Quotient polynomial chunks evaluated at zeta.
+    pub quotient_chunks: Vec<Vec<EF4>>,
+    /// log2(trace_height).
+    pub degree_bits: usize,
+    /// Width of the main trace.
     pub main_width: usize,
-    /// Width of the permutation trace columns (0 if no interactions).
+    /// Width of the permutation trace (0 if no interactions).
     pub perm_width: usize,
-    /// Public values used for this chip (may be empty).
+    /// Final LogUp cumulative sum for this chip.
+    pub cumsum_final: EF4,
+    /// log2(number of quotient chunks).
+    pub log_quotient_chunks: usize,
+    /// Public values for this chip.
     pub public_values: Vec<BabyBear>,
-    /// Preprocessed verifier key for chips with preprocessed columns (e.g. Poseidon).
-    /// `None` for chips without preprocessed data.
-    pub preprocessed_vk: Option<PreprocessedVerifierKey<TabulaStarkConfig>>,
 }
 
 /// Errors during proof generation.
@@ -75,23 +89,37 @@ pub enum ProveError {
         /// Which chip is missing.
         chip_id: ChipId,
     },
+    /// No chip traces were provided to the prover.
+    #[error("no chip traces to prove")]
+    NoChips,
     /// Cross-chip LogUp cumulative sums do not balance to zero.
     #[error("LogUp imbalance during proving: cumsum total = {total:?}")]
     LogUpImbalance {
         /// The nonzero total cumsum (4 BabyBear coefficients).
         total: [BabyBear; 4],
     },
+    /// LogUp fingerprint evaluated to zero (division by zero).
+    ///
+    /// Probability ~2^{-124} with random challenges. If this occurs, retry
+    /// with different randomness.
+    #[error("LogUp fingerprint is zero at row {row}, interaction {interaction}")]
+    FingerprintZero {
+        /// Trace row where the zero fingerprint occurred.
+        row: usize,
+        /// Interaction index within that row.
+        interaction: usize,
+    },
 }
 
 /// Errors during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
-    /// A per-chip STARK proof failed verification.
+    /// A per-chip constraint check failed.
     #[error("chip '{chip_id}' verification failed: {detail}")]
     ChipVerificationFailed {
         /// Which chip failed.
         chip_id: ChipId,
-        /// The underlying p3-uni-stark verification error message.
+        /// The underlying verification error message.
         detail: String,
     },
     /// The cross-chip LogUp cumulative sums do not sum to zero.
@@ -106,12 +134,10 @@ pub enum VerificationError {
         /// Description of the manifest error.
         detail: String,
     },
-    /// The proof's LogUp challenges do not match the Fiat-Shamir transcript.
-    #[error("LogUp challenges mismatch: expected {expected:?}, got {got:?}")]
-    ChallengesMismatch {
-        /// The challenges re-derived by the verifier.
-        expected: [EF4; 2],
-        /// The challenges found in the proof.
-        got: [EF4; 2],
+    /// PCS verification failed.
+    #[error("PCS verification failed: {detail}")]
+    PcsVerificationFailed {
+        /// Error from the PCS verify call.
+        detail: String,
     },
 }

@@ -17,7 +17,7 @@ use tabula_core::{Batch, ColId, RowKey, TableId, TableSchema};
 use tabula_driver::RegisteredProgram;
 use tabula_machine::{PublicStatement, TabulaMachine};
 use tabula_witness::WitnessGenerator;
-use tabula_witness::trace::build_trace_map;
+use tabula_witness::TraceBuilder;
 
 use super::error::{ServiceError, ServiceResult};
 use super::execute::ExecutedBatch;
@@ -74,29 +74,33 @@ pub fn prove_batch(
             ServiceError::internal(ErrorCode::InternalError, format!("witness gen: {e}"))
         })?;
 
-    // 4. Build trace map (all chip traces + public values).
-    let traces = build_trace_map::<PoseidonHasher, 3>(
-        &witness,
-        &registered.program,
-        &batch,
-        &execution_result,
-        &schemas_by_id,
-        &InMemoryStaticTables::new(),
-        PoseidonHasher::new(),
-    )
-    .map_err(|e| ServiceError::internal(ErrorCode::InternalError, format!("trace build: {e}")))?;
+    // 4. Build machine and trace map.
+    let machine = TabulaMachine::builder()
+        .with_core_chips()
+        .with_default_commitments()
+        .build()
+        .map_err(|e| {
+            ServiceError::internal(ErrorCode::InternalError, format!("machine build: {e}"))
+        })?;
+
+    let store = TraceBuilder::<PoseidonHasher, 3>::new(&witness)
+        .prepare_witness_store(
+            &registered.program,
+            &batch,
+            &execution_result,
+            &schemas_by_id,
+            &InMemoryStaticTables::new(),
+            PoseidonHasher::new(),
+        )
+        .map_err(|e| ServiceError::internal(ErrorCode::InternalError, format!("witness store: {e}")))?;
+    let traces = machine.build_traces(store)
+        .map_err(|e| ServiceError::internal(ErrorCode::InternalError, format!("trace build: {e}")))?;
 
     // 5. Prove (timed).
     let statement = PublicStatement {
         old_root: witness.old_state_root,
         new_root: witness.new_state_root,
     };
-    let machine = TabulaMachine::builder()
-        .with_core_chips()
-        .build()
-        .map_err(|e| {
-            ServiceError::internal(ErrorCode::InternalError, format!("machine build: {e}"))
-        })?;
 
     let prove_start = std::time::Instant::now();
     let proof = machine
@@ -111,11 +115,11 @@ pub fn prove_batch(
 
     // 8. Assemble summary.
     let chips: Vec<ChipSummary> = proof
-        .chip_proofs
+        .chip_openings
         .iter()
         .map(|entry| ChipSummary {
             name: entry.chip_id.to_string(),
-            trace_height: entry.trace_height,
+            trace_height: 1 << entry.degree_bits,
         })
         .collect();
 

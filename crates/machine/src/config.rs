@@ -64,6 +64,15 @@ pub type TabulaStarkConfig = StarkConfig<Pcs, EF4, Challenger>;
 /// PCS type alias for UFCS disambiguation of `Pcs` trait methods.
 pub(crate) type TabulaPcs = <TabulaStarkConfig as p3_uni_stark::StarkGenericConfig>::Pcs;
 
+/// PCS domain type (two-adic coset).
+pub(crate) type PcsDomain = <TabulaPcs as p3_commit::Pcs<EF4, Challenger>>::Domain;
+
+/// PCS commitment type (Merkle root).
+pub(crate) type PcsCommitment = <TabulaPcs as p3_commit::Pcs<EF4, Challenger>>::Commitment;
+
+/// PCS opening proof type (FRI proof).
+pub(crate) type PcsOpeningProof = <TabulaPcs as p3_commit::Pcs<EF4, Challenger>>::Proof;
+
 /// Build a default `TabulaStarkConfig` with test-friendly FRI parameters.
 ///
 /// Uses `log_blowup = 3, num_queries = 2, proof_of_work_bits = 1`

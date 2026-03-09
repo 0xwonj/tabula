@@ -9,8 +9,6 @@ use p3_baby_bear::BabyBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{ProverConstraintFolder, SymbolicAirBuilder, VerifierConstraintFolder};
 
-use tabula_stark::chips::ChipId;
-
 use crate::AnyRap;
 use crate::config::TabulaStarkConfig;
 use crate::prove::RapProverFolder;
@@ -44,11 +42,6 @@ impl<'a> ChipRef<'a> {
     pub fn with_preprocessed(mut self, trace: RowMajorMatrix<BabyBear>) -> Self {
         self.preprocessed = Some(trace);
         self
-    }
-
-    /// The chip identifier.
-    pub fn chip_id(&self) -> ChipId {
-        self.air.chip_id()
     }
 
     /// The underlying trait object.

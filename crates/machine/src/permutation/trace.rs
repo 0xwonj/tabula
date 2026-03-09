@@ -2,13 +2,13 @@
 
 use p3_baby_bear::BabyBear;
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
-use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_stark::air::interaction::{BusId, InteractionDirection};
 use tabula_stark::debug::RecordedInteraction;
 
 use crate::config::EF4;
+use crate::proof::ProveError;
 
 /// Compute an RLC fingerprint in the extension field EF4.
 ///
@@ -51,12 +51,17 @@ fn write_ef4(row: &mut [BabyBear], offset: usize, val: EF4) {
 ///
 /// # Returns
 ///
-/// `(permutation_trace, cumsum_final)`
+/// `Ok((permutation_trace, cumsum_final))` on success.
+///
+/// # Errors
+///
+/// Returns [`ProveError::FingerprintZero`] if a LogUp fingerprint evaluates
+/// to zero (probability ~2^{-124} with random challenges).
 pub(crate) fn generate_permutation_trace_from_interactions(
     recorded: &[RecordedInteraction<BabyBear>],
     height: usize,
     challenges: [EF4; 2],
-) -> (RowMajorMatrix<BabyBear>, EF4) {
+) -> Result<(RowMajorMatrix<BabyBear>, EF4), ProveError> {
     let [alpha, beta] = challenges;
 
     assert!(
@@ -96,8 +101,10 @@ pub(crate) fn generate_permutation_trace_from_interactions(
                 compute_fingerprint_ef4(&interaction.values, interaction.bus, alpha, beta);
 
             if fingerprint == EF4::ZERO {
-                // Negligible probability (~2^{-124}). Skip to avoid division by zero.
-                continue;
+                return Err(ProveError::FingerprintZero {
+                    row: row_idx,
+                    interaction: j,
+                });
             }
 
             let phi = EF4::from(mult) / fingerprint;
@@ -117,16 +124,18 @@ pub(crate) fn generate_permutation_trace_from_interactions(
     }
 
     let perm_trace = RowMajorMatrix::new(perm_values, perm_width);
-    (perm_trace, cumsum)
+    Ok((perm_trace, cumsum))
 }
 
-/// Horizontally concatenate main and permutation traces.
+/// Horizontally concatenate main and permutation traces (test only).
 ///
 /// Returns a new trace with width = `main_width + perm_width`.
+#[cfg(test)]
 pub(crate) fn concat_traces(
     main_trace: &RowMajorMatrix<BabyBear>,
     perm_trace: &RowMajorMatrix<BabyBear>,
 ) -> RowMajorMatrix<BabyBear> {
+    use p3_matrix::Matrix;
     let height = main_trace.height();
     assert_eq!(height, perm_trace.height(), "trace heights must match");
 

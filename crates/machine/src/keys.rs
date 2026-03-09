@@ -118,9 +118,9 @@ impl TabulaVerifyingKey {
 /// Number of RAP constraints for a given interaction count.
 ///
 /// Each interaction contributes 4 constraints (phi·f = m decomposed into EF4 components).
-/// Plus 4 first-row cumsum constraints + 4 transition cumsum constraints = 8.
+/// Plus 4 first-row + 4 transition + 4 last-row cumsum constraints = 12.
 pub(crate) fn rap_constraint_count(interactions_per_row: usize) -> usize {
-    4 * interactions_per_row + 8
+    4 * interactions_per_row + 12
 }
 
 #[cfg(test)]
@@ -142,6 +142,7 @@ mod tests {
     fn proving_key_from_registry() {
         let machine = crate::TabulaMachine::builder()
             .with_core_chips()
+            .with_default_commitments()
             .build()
             .expect("build");
         let pk = machine.proving_key();
@@ -155,6 +156,7 @@ mod tests {
     fn verifying_key_from_proving_key() {
         let machine = crate::TabulaMachine::builder()
             .with_core_chips()
+            .with_default_commitments()
             .build()
             .expect("build");
         let vk = machine.verifying_key();
@@ -172,6 +174,7 @@ mod tests {
     fn verify_info_widths_match_keygen() {
         let machine = crate::TabulaMachine::builder()
             .with_core_chips()
+            .with_default_commitments()
             .build()
             .expect("build");
         let pk = machine.proving_key();
@@ -227,6 +230,7 @@ mod tests {
     fn execution_chip_has_nonzero_perm_width() {
         let machine = crate::TabulaMachine::builder()
             .with_core_chips()
+            .with_default_commitments()
             .build()
             .expect("build");
         let pk = machine.proving_key();

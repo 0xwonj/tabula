@@ -10,7 +10,9 @@ use tabula_stark::air::builder::InteractionAirBuilder;
 use tabula_stark::air::interaction::AirInteraction;
 
 use crate::config::EF4;
-use crate::ef4::{ef4_coeffs, ef4_mul};
+use crate::ef4::{
+    RowSelectors, compute_fingerprint_components, cumsum_constraint_values, ef4_coeffs, ef4_mul,
+};
 
 /// Constraint folder for Phase 2 (RAP constraints) of the verifier.
 ///
@@ -107,42 +109,32 @@ impl<'a> RapVerifierFolder<'a> {
 
     /// Generate cumsum constraints (call after chip.eval() returns).
     ///
-    /// First row: `cumsum[0] = Σ(±phi_j)`
-    /// Transition: `cumsum_next = cumsum_local + Σ(±phi_j_next)`
-    pub fn finalize_cumsum(&mut self) {
+    /// Delegates to [`cumsum_constraint_values`] for the 12 constraint
+    /// expressions (shared with prover), then feeds each to `rap_assert_zero`.
+    pub fn finalize_cumsum(&mut self, cumsum_final: [EF4; 4]) {
         let trace = self.full_trace;
         let local_row = trace.row_slice(0).expect("row exists");
         let next_row = trace.row_slice(1).expect("row exists");
 
         let cumsum_offset = self.main_width + self.interaction_index * 4;
+        let cumsum_local = read_ef4_components(&local_row, cumsum_offset);
+        let cumsum_next = read_ef4_components(&next_row, cumsum_offset);
 
-        let cumsum_local: [EF4; 4] = [
-            local_row[cumsum_offset],
-            local_row[cumsum_offset + 1],
-            local_row[cumsum_offset + 2],
-            local_row[cumsum_offset + 3],
-        ];
-        let cumsum_next: [EF4; 4] = [
-            next_row[cumsum_offset],
-            next_row[cumsum_offset + 1],
-            next_row[cumsum_offset + 2],
-            next_row[cumsum_offset + 3],
-        ];
-
-        // Copy phi_sum arrays to avoid borrow conflict with rap_assert_zero.
-        let phi_sum_local = self.phi_sum_local;
-        let phi_sum_next = self.phi_sum_next;
-
-        // First row: cumsum = phi_sum
-        for k in 0..4 {
-            self.rap_assert_zero(self.is_first_row * (cumsum_local[k] - phi_sum_local[k]));
-        }
-
-        // Transition: cumsum_next = cumsum_local + phi_sum_next
-        for k in 0..4 {
-            self.rap_assert_zero(
-                self.is_transition * (cumsum_next[k] - cumsum_local[k] - phi_sum_next[k]),
-            );
+        let sels = RowSelectors {
+            is_first_row: self.is_first_row,
+            is_last_row: self.is_last_row,
+            is_transition: self.is_transition,
+        };
+        let constraints = cumsum_constraint_values(
+            cumsum_local,
+            cumsum_next,
+            self.phi_sum_local,
+            self.phi_sum_next,
+            cumsum_final,
+            sels,
+        );
+        for c in constraints {
+            self.rap_assert_zero(c);
         }
     }
 
@@ -153,34 +145,17 @@ impl<'a> RapVerifierFolder<'a> {
         let next_row = trace.row_slice(1).expect("row exists");
 
         let phi_offset = self.main_width + self.interaction_index * 4;
+        let phi_local = read_ef4_components(&local_row, phi_offset);
 
-        let phi_local: [EF4; 4] = [
-            local_row[phi_offset],
-            local_row[phi_offset + 1],
-            local_row[phi_offset + 2],
-            local_row[phi_offset + 3],
-        ];
-
-        // Compute fingerprint: f = α + tag + β·v[0] + β²·v[1] + ...
+        // Compute fingerprint via shared helper.
         let [alpha, beta] = self.challenges;
-        let alpha_coeffs = ef4_coeffs(alpha);
-        let beta_coeffs = ef4_coeffs(beta);
-
         let tag = EF4::from(BabyBear::from_u64(interaction.bus.tag() as u64));
-        let mut f: [EF4; 4] = [
-            EF4::from(alpha_coeffs[0]) + tag,
-            EF4::from(alpha_coeffs[1]),
-            EF4::from(alpha_coeffs[2]),
-            EF4::from(alpha_coeffs[3]),
-        ];
-
-        let mut beta_power = beta_coeffs;
-        for val in &interaction.values {
-            for k in 0..4 {
-                f[k] += EF4::from(beta_power[k]) * *val;
-            }
-            beta_power = ef4_mul(&beta_power, &beta_coeffs);
-        }
+        let f = compute_fingerprint_components(
+            ef4_coeffs(alpha),
+            ef4_coeffs(beta),
+            tag,
+            &interaction.values,
+        );
 
         // Constrain: phi · f = m (4 component equations).
         let product = ef4_mul(&phi_local, &f);
@@ -191,13 +166,7 @@ impl<'a> RapVerifierFolder<'a> {
         self.rap_assert_zero(product[3]);
 
         // Accumulate ±phi.
-        let phi_next: [EF4; 4] = [
-            next_row[phi_offset],
-            next_row[phi_offset + 1],
-            next_row[phi_offset + 2],
-            next_row[phi_offset + 3],
-        ];
-
+        let phi_next = read_ef4_components(&next_row, phi_offset);
         if is_send {
             for k in 0..4 {
                 self.phi_sum_local[k] += phi_local[k];
@@ -212,6 +181,11 @@ impl<'a> RapVerifierFolder<'a> {
 
         self.interaction_index += 1;
     }
+}
+
+/// Read 4 consecutive values from a row slice as an EF4-component array.
+fn read_ef4_components<T: Copy>(row: &[T], offset: usize) -> [T; 4] {
+    [row[offset], row[offset + 1], row[offset + 2], row[offset + 3]]
 }
 
 type VF4View<'a> =

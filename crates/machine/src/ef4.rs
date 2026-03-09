@@ -39,6 +39,86 @@ where
     [c0, c1, c2, c3]
 }
 
+// ─── Shared RAP helpers ────────────────────────────────────────────────────
+//
+// Generic over `T` so that both the prover (`PackedVal<SC>`) and verifier
+// (`EF4`) use the same algorithmic implementation — preventing constraint
+// divergence between the two RAP folders.
+
+/// Selector values for a single row evaluation.
+///
+/// Shared by [`RapProverFolder`] and [`RapVerifierFolder`] to guarantee
+/// identical selector semantics.
+#[derive(Clone, Copy)]
+pub(crate) struct RowSelectors<T> {
+    pub is_first_row: T,
+    pub is_last_row: T,
+    pub is_transition: T,
+}
+
+/// Compute the LogUp fingerprint components in decomposed EF4.
+///
+/// `f = α + tag + β·v[0] + β²·v[1] + …`
+///
+/// Returns the 4 BabyBear-basis components of the fingerprint, evaluated
+/// in the caller's expression type `T` (either `PackedVal` or `EF4`).
+pub(crate) fn compute_fingerprint_components<T>(
+    alpha_coeffs: [BabyBear; 4],
+    beta_coeffs: [BabyBear; 4],
+    tag: T,
+    values: &[T],
+) -> [T; 4]
+where
+    T: PrimeCharacteristicRing + Copy + From<BabyBear>,
+{
+    let mut f: [T; 4] = [
+        T::from(alpha_coeffs[0]) + tag,
+        T::from(alpha_coeffs[1]),
+        T::from(alpha_coeffs[2]),
+        T::from(alpha_coeffs[3]),
+    ];
+
+    let mut beta_power = beta_coeffs;
+    for val in values {
+        for k in 0..4 {
+            f[k] += T::from(beta_power[k]) * *val;
+        }
+        beta_power = ef4_mul(&beta_power, &beta_coeffs);
+    }
+    f
+}
+
+/// Compute the 12 cumsum constraint expressions.
+///
+/// Returns `[first_row × 4, transition × 4, last_row × 4]` in that order.
+/// The caller feeds each value to its own `rap_assert_zero` method.
+pub(crate) fn cumsum_constraint_values<T>(
+    cumsum_local: [T; 4],
+    cumsum_next: [T; 4],
+    phi_sum_local: [T; 4],
+    phi_sum_next: [T; 4],
+    cumsum_final: [T; 4],
+    sels: RowSelectors<T>,
+) -> [T; 12]
+where
+    T: PrimeCharacteristicRing + Copy,
+{
+    let mut out = [T::ZERO; 12];
+    // First row: cumsum[0] = phi_sum
+    for k in 0..4 {
+        out[k] = sels.is_first_row * (cumsum_local[k] - phi_sum_local[k]);
+    }
+    // Transition: cumsum_next = cumsum_local + phi_sum_next
+    for k in 0..4 {
+        out[4 + k] = sels.is_transition * (cumsum_next[k] - cumsum_local[k] - phi_sum_next[k]);
+    }
+    // Last row: cumsum = cumsum_final (binds to proof value for cross-chip balance)
+    for k in 0..4 {
+        out[8 + k] = sels.is_last_row * (cumsum_local[k] - cumsum_final[k]);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
