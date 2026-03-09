@@ -1,8 +1,8 @@
-# Tabula Master Roadmap
+# Tabula Architecture Overview
 
-> **Version 1.0** — Complete path from current state to production-ready proving framework.
-> Date: 2026-03-05
-> Depends on: [tabula-machine-architecture.md](tabula-machine-architecture.md) (v0.5)
+> Architecture principles, composition model, and design decisions for the Tabula proving framework.
+> Date: 2026-03-09
+> Related: [commitment-architecture-research.md](commitment-architecture-research.md), [full-sharding-research.md](full-sharding-research.md), [proof-optimization-architecture.md](proof-optimization-architecture.md)
 
 ---
 
@@ -12,21 +12,17 @@
 |--------|-------|
 | Crates | 17 (`core`, `contract`, `ir`, `executor`, `commitment`, `stark`, `gadgets`, `chips`, `witness`, `machine`, `lang`, `artifact`, `driver`, `cli`, `daemon`, `web`) |
 | Source LOC | ~34,500 |
-| Tests | ~860+ functions across workspace |
-| Milestones complete | M1–M13 (Phase 0 complete) |
-| Active milestone | Phase 1 (machine layer) |
-| Chips | 9 (Execution, InterTxOrder, StateColumn, ColumnMeta, Poseidon, RangeCheck, StaticTable, SmtColPath, SmtTablePath) |
-| LogUp buses | 11 (C5, C6, C8–C16) — all with positive/negative tests |
+| Tests | 979 functions across workspace |
+| Chips | 9 core + 3 shard types (MemoryShard, StateShard, MetaShard) |
+| LogUp buses | 11 — all with positive/negative tests |
 | E2E STARK tests | 6 passing (DSL → compile → execute → witness → trace → prove → verify) |
-| Known soundness gap | C1: LogUp cumsums not PCS-committed (Phase 1 fix) |
-| Architecture target | Per-column sharding, shared PCS, single FRI, extensibility framework — none implemented |
+| Known soundness gap | None (C1 resolved: cumsums PCS-committed) |
 
 ---
 
-## §1 Principles
+## Invariants
 
-Six invariant properties of the Tabula protocol constrain the architecture
-(see [tabula-machine-architecture.md §2](tabula-machine-architecture.md#2-foundational-invariants)):
+Six properties constrain the architecture:
 
 | ID | Invariant |
 |----|-----------|
@@ -37,7 +33,7 @@ Six invariant properties of the Tabula protocol constrain the architecture
 | I5 | Trusted compiler: `Program::register()` validates NF |
 | I6 | LogUp soundness: bus balance as sole cross-chip mechanism |
 
-Five design principles guide all decisions:
+## Design Principles
 
 1. **Derive architecture from invariants** — the architecture is discovered, not designed
 2. **Own the critical path** — field/PCS from p3, orchestration/LogUp/sharding owned
@@ -47,273 +43,81 @@ Five design principles guide all decisions:
 
 ---
 
-## §2 Non-Goals
-
-These are deliberately out of scope for this roadmap:
+## Non-Goals
 
 | Non-Goal | Rationale |
 |----------|-----------|
-| ~~Runtime-pluggable chips~~ | **Superseded.** OpenVM proves `dyn AnyRap` works in production. Composition is now runtime via `ChipRegistry` — see [implementation-workplan.md Decision Record](implementation-workplan.md#composition-model-compile-time-enum-vs-runtime-registry). |
 | Base field change | BabyBear is fixed. The entire ecosystem (p3, chips, encoding) depends on it. |
 | General-purpose computation | Tabula is a state machine framework, not a zkVM. No arbitrary binary execution. |
-| Recursive proofs as prerequisite | Recursion is a Phase 5 extension. The architecture works without it. |
+| Recursive proofs as prerequisite | Recursion is a future extension. The architecture works without it. |
 | GPU/hardware acceleration | Implementation detail of trace builders. Not an architectural concern. |
-| L1 bridge / data availability | Separate crates (`tabula-da`, `tabula-bridge`), separate roadmap. |
-| Production operations | Monitoring, alerting, deployment — infrastructure, not proof architecture. |
+| L1 bridge / data availability | Separate crates, separate roadmap. |
 | Formal verification | Desirable but separate effort. Correctness comes from testing + specification. |
 
 ---
 
-## §3 Success Criteria
+## Layered Composition Model
 
-Each phase has a strict completion gate:
+The proof system is organized into three layers. Only Layer 1 is app-customizable.
 
-| Phase | Gate | Measurable |
-|-------|------|------------|
-| 0 | End-to-end proof works for any valid DSL program | `cargo test --features stark` all green, 5+ E2E tests |
-| 1 | Single FRI proof, C1 resolved, proof size < 50% of Phase 0 | Proof size benchmark, cumsum PCS-committed |
-| 2 | Per-column parallel proving, untouched columns = zero cost | Parallelism benchmark, `shard/` module complete |
-| 3 | App can add custom chip + bus + precompile without modifying Tabula | Example app crate compiles and proves |
-| 4 | All 8 optimizations active, proving time < 50% of Phase 2 | Optimization benchmark suite |
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Layer 0: Core (fixed — Tabula's identity)                   │
+│                                                              │
+│  Execution:    ExecutionChip, StaticTableChip                 │
+│  Memory:       InterTxOrderChip  (internal MemoryModel trait) │
+│  Root Proof:   ColumnMetaChip, SmtColPathChip,               │
+│                SmtTablePathChip  (internal RootProof trait)    │
+│  Bus Consumers: PoseidonChip, RangeCheckChip (BusConsumer)   │
+├──────────────────────────────────────────────────────────────┤
+│  Layer 1: Column Commitment (pluggable — app choice)         │
+│                                                              │
+│  ColumnCommitment trait (batch API)                           │
+│    "ssmc" → SsmcCommitment → StateColumnChip (global)        │
+│    "smt"  → SmtCommitment  → (no extra chip)                 │
+│    "custom" → CustomCommitment → CustomChip (global or shard)│
+│                                                              │
+│  SSMC/SMT are default-provided plugins, not hardcoded core.  │
+│  Bus contract: Memory bus receive → CommitVerif bus send.     │
+├──────────────────────────────────────────────────────────────┤
+│  Layer 2: Bus Consumers (auto-collected)                     │
+│                                                              │
+│  BusConsumer trait: declare consumed_buses(), collect()        │
+│  PoseidonChip, RangeCheckChip, ...extensible                  │
+└──────────────────────────────────────────────────────────────┘
+```
 
----
+**Key insight**: StateColumnChip is NOT core — it is the SSMC scheme's implementation detail. It registers via `with_commitment("ssmc", ...)` alongside custom schemes. ColumnMetaChip receives commitment values from ANY scheme via CommitVerif bus without knowing the source.
 
-## §4 Phase 0: Foundation Completion
-
-> **Goal**: Working end-to-end proof system for any valid Tabula program.
-> **Milestone IDs**: M12 (trace assembly) + M13 (STARK prover/verifier) completion.
-> **Principle**: Correctness first. No optimization. No shortcuts.
-
-### 4.1 Core Value
-
-**Soundness and correctness.** Every constraint is checked. Every bus balances. Every proof verifies. This is the foundation everything else builds on. If Phase 0 is wrong, nothing above it matters.
-
-### 4.2 Scope
-
-**M12: Trace Assembly (complete remaining gates)**
-
-| Gate | Description | Status |
-|------|-------------|--------|
-| M12-G1 | Single trace orchestrator covering all 9 chips | **Complete** — Poseidon/RangeCheck auto-assembly via collectors |
-| M12-G2 | ContractMetadataEnvelope fail-closed validation | **Complete** — all 6 error variants + tests |
-| M12-G3 | E-trace identity anchor (`tx_index` + `effect_ordinal`) | **Complete** — wired into ExecutionCols |
-| M12-G4 | All 11 buses with positive/negative tests | **Complete** — C12 EmptyColRead added |
-| M12-G5 | E2E: DSL → execute → witness → all-chip trace → constraint check | **Complete** — 6 diverse tests |
-
-**M13: STARK Prover/Verifier (hardening)**
-
-| Task | Description | Status |
-|------|-------------|--------|
-| Permutation trace PCS | Prepare for C1 fix (current cumsums are non-committed) | Phase 1 — architecture ready |
-| Challenge derivation | Improve Fiat-Shamir to observe PCS commitments (not just heights) | Phase 1 |
-| Multi-program support | ProvingKey/VerifyingKey for arbitrary registered programs | Phase 1 |
-| E2E test expansion | 5+ diverse programs (multi-tx, mul, select, cmp, arith, read/write) | **Complete** — 6 tests |
-
-### 4.3 Non-Goals for Phase 0
-
-- Proof size optimization (per-chip FRI is acceptable)
-- Performance tuning (correctness over speed)
-- Extensibility (closed chip set is fine)
-- Per-column parallelism (global traces are fine)
-
-### 4.4 Risks
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Poseidon/RC auto-assembly miscount | Bus imbalance → proof failure | Compare auto-collected vs manually-computed counts in tests |
-| `p3-uni-stark` API limitations | Cannot commit perm trace separately | Phase 1 replaces p3-uni-stark |
-| Multi-tx ordering bugs | Wrong `(r,τ)` ordering in InterTxOrder | Exhaustive multi-tx E2E tests |
-
-### 4.5 Metrics
-
-| Metric | Target |
-|--------|--------|
-| Tests passing | 400+ (from current 391 in proof) |
-| E2E STARK tests | 5+ diverse programs |
-| Proof verification | All E2E proofs verify correctly |
+**Internal traits** (`pub(crate)`, not app-facing):
+- `MemoryModel` — currently `GlobalSortedMemory` (InterTxOrderChip). Enables future A/B benchmarking.
+- `RootProof` — currently `SmtRootProof` (ColumnMetaChip + SmtPath chips). Enables future replacement.
 
 ---
 
-## §5 Phase 1: Machine Layer
+## Builder API
 
-> **Goal**: Replace `stark/` with `machine/` — shared PCS, two-round protocol, single FRI, C1 resolved.
-> **Principle**: Own the critical path. Soundness is non-negotiable.
+```rust
+// Default usage
+let machine = TabulaMachine::builder()
+    .with_core_chips()            // Layer 0 (memory + root proof)
+    .with_default_commitments()   // "ssmc" + "smt" plugins
+    .build();
 
-### 5.1 Core Value
-
-**Soundness and proof efficiency.** The C1 gap (non-committed cumsums) is a real vulnerability. Phase 1 eliminates it by PCS-committing all cumsums. As a bonus, shared PCS produces a single FRI proof instead of 9, dramatically reducing proof size.
-
-### 5.2 Scope
-
-| Task | Description | LOC Estimate |
-|------|-------------|--------------|
-| `stark/src/air/any_rap.rs` | `AnyRap` trait: bundles `ChipSpec` + all `Air<AB>` bounds | ~80 |
-| `stark/src/trace/contributor.rs` | `DynTraceContributor`: object-safe `TraceContributor` wrapper | ~50 |
-| `machine/src/registry.rs` | `ChipRegistry`: runtime chip registration + validation | ~200 |
-| `machine/src/machine.rs` | `TabulaMachine`: builder + prove/verify facade | ~200 |
-| `machine/src/keys.rs` | `TabulaProvingKey` / `TabulaVerifyingKey` | ~150 |
-| `machine/src/config.rs` | STARK config (same BabyBear + Poseidon2 + FRI) | ~100 |
-| `machine/src/prover.rs` | Two-round shared-PCS prover (Round 1: main, Round 2: perm) | ~300 |
-| `machine/src/verifier.rs` | Multi-trace verifier with shared opening | ~200 |
-| `machine/src/permutation/` | EF4 fingerprint + cumsum + challenge derivation | ~300 |
-| `machine/src/proof.rs` | New `TabulaProof` with shared commitments | ~100 |
-| Remove `define_chip_set!` | Delete macro + `ChipSet` trait + `TabulaAir` enum + `StarkAir` alias | -240 |
-| Remove `stark/` (old) | Delete prover, verifier, permutation, bridge, config, proof | -1600 |
-| Remove `air/extractor.rs` | Replaced by symbolic interaction capture | -360 |
-| Adapt `debug/` | Use new interaction collection | ~200 |
-| **Net** | | **~-600 LOC** |
-
-### 5.3 Key Technical Decisions
-
-- **Runtime `ChipRegistry` replaces compile-time `define_chip_set!`.** OpenVM proves `dyn AnyRap` works. Vtable overhead <1% of constraint eval. Eliminates need for `include` proc macro, `ChipSet` trait, `TabulaAir` enum, `StarkAir` alias. See [implementation-workplan.md](implementation-workplan.md) Decision Record.
-- **`AnyRap` trait** bundles `ChipSpec` + all `Air<AB>` bounds into one object-safe supertrait with blanket impl. Individual chip structs unchanged.
-- **`TabulaMachine`** owns registry + config + keys. Builder API: `.with_core_chips().with_chip(X).build()`.
-- **p3-uni-stark removed.** We use p3 PCS primitives directly (`p3-commit`, `p3-fri`, `p3-dft`). This is required for shared PCS across chips.
-- **ProvingKey / VerifyingKey** introduced as first-class types. Computed at `TabulaMachine::build()`.
-
-### 5.4 Non-Goals for Phase 1
-
-- Per-column sharding (Phase 2)
-- ProofPlan / ColumnStrategy (Phase 2)
-- Extensibility framework (Phase 3)
-- Any chip changes — existing 9 chips are unchanged
-
-### 5.5 Risks
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| p3 PCS API complexity | Incorrect batched commitment | Port openvm patterns (proven in production) |
-| Extension field commitment | EF4 trace commitment requires `ExtensionMmcs` wrapping | Reference SP1's implementation |
-| FRI parameter tuning | Proof too large or too slow | Start with conservative params, benchmark later |
-
-### 5.6 Completion Gate
-
-- All existing tests pass on new `machine/` infrastructure
-- C1 resolved: cumsums are PCS-committed and verified
-- Proof size < 50% of Phase 0 (single FRI vs 9 FRIs)
-- `stark/` directory completely removed
+// App developer: add custom commitment
+let machine = TabulaMachine::builder()
+    .with_core_chips()
+    .with_default_commitments()
+    .with_commitment("accumulator", AccumulatorCommitment::new())
+    .with_proof_plan(|plan| {
+        plan.set_scheme(TableId(5), ColId(0), "accumulator");
+    })
+    .build();
+```
 
 ---
 
-## §6 Phase 2: Shard Architecture
-
-> **Goal**: Per-column proof decomposition. Each `(t,c)` becomes an independent shard.
-> **Principle**: Derive decomposition from I1 (hierarchical state) + I2 (static addressing).
-
-### 6.1 Core Value
-
-**Parallelism and modularity.** Per-column sharding enables embarrassingly parallel proving, fault isolation, and incremental state proofs (untouched columns = zero cost). This is the structural foundation for all subsequent optimizations.
-
-### 6.2 Scope
-
-| Task | Description |
-|------|-------------|
-| `shard/mod.rs` | `ColumnStrategy`, `VcStrategy`, `Shard` types |
-| `shard/builder.rs` | `build_shard_traces()` dispatch by strategy |
-| `shard/memory.rs` | `MemorySegment<W>` — per-column sorted memory |
-| `shard/state.rs` | `StateSegment<W>` — per-column SSMC |
-| `shard/meta.rs` | `MetaSegment` — per-column ColumnMeta |
-| `shard/short_run.rs` | `ShortRunSegment<W>` — lightweight single-tx |
-| `shard/path.rs` | `SmtColPathSegment` — per-column Merkle path |
-| Migrate `InterTxOrderChip` | Split global trace → per-column segments |
-| Migrate `StateColumnChip` | Split global trace → per-column segments |
-| Eliminate `gadgets/lex.rs` | No cross-column ordering needed (~170 LOC) |
-| Eliminate `gadgets/segment.rs` | No column boundary detection (~131 LOC) |
-| Simplify `gadgets/key_rc.rs` | `(r,τ)` only, no `(t,c)` comparison |
-| `machine/plan.rs` | `ProofPlan`, `ColumnPlan`, `TraceBounds`, `PreprocessedCatalog` |
-| `machine/keygen.rs` | `ProofPlan → ProvingKey / VerifyingKey` |
-| Per-column parallel trace build | `rayon::par_iter()` over columns |
-| 4-stage witness pipeline | Collector → RowBuilder → ColumnAssembler → Orchestrator |
-
-### 6.3 Key Technical Decisions
-
-- **Unified ColumnStrategy**: proof structure + VC scheme in one decision per column.
-- **ProofPlan as first-class type**: bridges compile-time guarantees to prove-time.
-- **Width parameterization**: `MemorySegment<W>` with W determined by schema type.
-- **ProvingKey contains all variant definitions**: prover selects active subset per batch.
-- **Zero-height traces** for unused shard variants (not excluded from chip set).
-
-### 6.4 Non-Goals for Phase 2
-
-- Extensibility (chip set is still closed)
-- ShortRun activation (defined but unused until Phase 4)
-- Template chips (Phase 4)
-- Width specialization (defined but W=3 only until Phase 4)
-
-### 6.5 Risks
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Global → per-column migration | Massive refactor of 2 largest chips | Incremental: extract segments one at a time |
-| Dynamic shard count vs static ProvingKey | Prover instantiation complexity | Zero-height traces for inactive shards |
-| Bus fingerprint changes | All tests break | Migrate one bus at a time, verify balance |
-
-### 6.6 Completion Gate
-
-- All existing tests pass (rewritten for shard architecture)
-- `InterTxOrderChip` and `StateColumnChip` replaced by per-column segments
-- `gadgets/lex.rs` and `gadgets/segment.rs` deleted
-- Untouched columns produce zero trace rows
-- Per-column parallel trace building benchmarked
-
----
-
-## §7 Phase 3: Extensibility Framework
-
-> **Goal**: Zero-Modification Principle — apps customize purely in their own crate.
-> **Principle**: Bus as universal interface (I6). Graduated complexity.
-
-### 7.1 Core Value
-
-**Composability and ecosystem.** Tabula becomes a framework, not a monolith. 80% of apps need only DSL. 15% use standard library. 5% build custom chips. All without forking Tabula.
-
-### 7.2 Sub-Phases
-
-**Phase 3a: Composition Framework (~400 LOC)**
-
-| Prerequisite | Change | Scope |
-|-------------|--------|-------|
-| F1 | `BusId(u16)` newtype replacing `InteractionKind` enum | ~50 LOC |
-| F2 | `ChipExtension` trait: `register_chips()`, `populate_witness()`, `name()` | ~150 LOC |
-| F3 | `TraceContributor` trait (already in Phase 1 as `DynTraceContributor`) | ~0 LOC (done) |
-| F4 | `WitnessStore` typed key-value store | ~100 LOC |
-| F12 | `tabula-machine::prelude` (stable p3 re-exports) | ~50 LOC |
-
-Dependency chain: Phase 1 (ChipRegistry) → `F1 → F2 → F4`, `F12` independent.
-
-> **Note:** F2 changed from `define_chip_set! include` to `ChipExtension`. The `AnyRap` + `ChipRegistry` from Phase 1 provide the composition mechanism. `ChipExtension` packages chips + witness logic as a distributable unit.
-
-**Phase 3b: Precompile Framework (~400 LOC)**
-
-| Prerequisite | Change | Scope |
-|-------------|--------|-------|
-| F9 | `Precompile` IR variant | ~50 LOC |
-| F10 | `PrecompileHandler` trait (executor-side) | ~50 LOC |
-| F13 | `op_precompile` selector + `PrecompileBus` in ExecutionChip | ~100 LOC |
-| F14 | DSL `precompile!()` syntax | ~200 LOC |
-
-Dependency chain: `F9 → F10 → F13 → F14`.
-
-> **Note:** `OpcodeSpec` (F7) and `define_instruction_set!` (F8) are removed. The 12 core opcodes are stable; new computation goes through the Precompile pattern (separate chip + bus).
-
-**Phase 3c: State (~200 LOC)**
-
-| Prerequisite | Change | Scope |
-|-------------|--------|-------|
-| F5 | `VectorCommitment` trait | ~100 LOC |
-| F6 | `PropertyOpening` trait | ~100 LOC |
-
-Extract existing SSMC/SMT into trait implementations.
-
-**Phase 3d: Execution (~200 LOC)**
-
-| Prerequisite | Change | Scope |
-|-------------|--------|-------|
-| F11 | `TemplateChip` trait + equivalence test harness | ~200 LOC |
-
-**Total: ~1,200 LOC of framework changes.**
-
-### 7.3 API Stability Tiers
+## API Stability Tiers
 
 | Tier | Guarantee | Examples |
 |------|-----------|---------|
@@ -321,280 +125,47 @@ Extract existing SSMC/SMT into trait implementations.
 | **A (Extension)** | May evolve on minor (additive) | `ChipSpec`, `AnyRap`, `ChipRegistry`, `ChipExtension`, `TabulaMachine`, `VectorCommitment`, `PrecompileHandler`, macros |
 | **I (Internal)** | No guarantee | Chip internals, column layouts, gadgets |
 
-### 7.4 Validation
+---
 
-- **Example app crate**: Build a minimal app that adds one custom chip, one custom bus, one custom opcode — verify it compiles and proves without modifying Tabula.
-- **Lighter DEX skeleton**: Verify all 7 blocked requirements (from review) are unblocked by F1-F12.
+## Optimization Directions
 
-### 7.5 Non-Goals for Phase 3
+Four confirmed optimization directions, each derived from invariants:
 
-- Actual app implementations (validation only)
-- Standard library opcodes (BitwiseOp, WideMul — separate work)
-- Standard precompiles (ECDSA — separate work)
-- Performance optimization of the framework itself
+| Direction | Derives From | Effect |
+|-----------|-------------|--------|
+| D1: Poseidon chain delegation | I6 (bus composition) | Eliminate StateColumn hash chains, 261→163 cols |
+| D2+D3: Algebraic accumulator | I6 (bus composition) | Replace hash chain with order-independent accumulator, 163→73 cols |
+| D4: Recursive composition | I2 (static addressing) | Per-column parallel proving, O(1) proof size |
+| KeyRoute (ShortRun) | I3 (SSA) + I4 (schema) | Lightweight chip for single-tx access patterns |
+| Template chips | I3 (SSA) | Specialized execution for known tx patterns, 278→~60 cols |
+| NF-aware constraint elision | I3 (SSA) + I5 (trusted compiler) | Remove redundant AIR constraints, ~15 cols saved |
+| Width specialization | I4 (schema typing) | Per-type chip instantiation (W=1, W=3, W=8) |
 
-### 7.6 Risks
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| `ChipExtension` API too broad/narrow | Extensions can't express their wiring | Design with 2+ example extensions before finalizing |
-| `BusId` migration breaks all tests | Massive churn | Automated sed + test-by-test migration |
-| Precompile bus overhead | Per-call bus cost for precompile invocations | Bus cost is ~5 EF4 ops, negligible vs precompile compute |
-
-### 7.7 Completion Gate
-
-- F1-F6, F9-F14 all implemented
-- Example app crate compiles and proves with custom chip + bus + precompile (zero Tabula modification)
-- All existing Tabula tests pass
-- `extensibility-architecture.md` and `tabula-machine-architecture.md` updated to match implementation
+See [proof-optimization-architecture.md](proof-optimization-architecture.md) for detailed analysis. See [full-sharding-research.md](full-sharding-research.md) for sharding-specific research.
 
 ---
 
-## §8 Phase 4: Optimization
+## Success Criteria
 
-> **Goal**: Realize all 8 Tabula-native optimizations.
-> **Principle**: Every optimization is a consequence of I1-I6.
-
-### 8.1 Core Value
-
-**Proving efficiency.** Phase 0-3 prioritize correctness and composability. Phase 4 makes it fast. The architecture was designed so that every optimization slots in naturally — this phase proves that claim.
-
-### 8.2 Sub-Phases
-
-**Phase 4a: Late-Binding Proof Strategy**
-
-| Task | Description |
-|------|-------------|
-| Activate ShortRun routing | `route_keys()` produces `ShortRun` for eligible keys |
-| `ShortRunChip<W>` | Lightweight chip for single-tx access patterns |
-| Strategy selection logic | `select_strategy()` in witness pipeline |
-| LogUp bus integration | ShortRunChip sends on Memory + MergeCompleteness buses |
-
-Derives from: I6 (bus balance ensures any valid strategy is sound).
-
-**Phase 4b: Schema-Driven Width Specialization**
-
-| Task | Description |
-|------|-------------|
-| Width-class chip instantiation | `MemorySegment<1>`, `MemorySegment<3>`, `MemorySegment<8>` |
-| ProofPlan width map | `ColumnPlan.schema_type → W` |
-| Keygen deduplication | Same-width variants share definitions |
-
-Derives from: I4 (schema typing).
-
-**Phase 4c: NF-Aware Constraint Elision**
-
-| Task | Description |
-|------|-------------|
-| `PreprocessedCatalog` | Batch-invariant data: range check, Poseidon RC, NF selectors |
-| `ConstraintElision` enum | NF-1~4 elision variants |
-| Program-specific preprocessed selectors | Replace `slot_written` flags (~15 columns saved) |
-| Keygen specialization | ProofPlan.elisions → specialized ExecutionChip constraints |
-
-Derives from: I3 (SSA/NF) + I5 (trusted compiler).
-
-**Phase 4d: Pipeline Parallelism**
-
-| Task | Description |
-|------|-------------|
-| Witness Stage 3 → trace overlap | ColumnAssembler completion triggers shard trace building |
-| Async shard processing | Per-column pipeline without barrier synchronization |
-| Level 0 independence | Execution/Poseidon/RangeCheck traces built in parallel with shards |
-
-Derives from: I1 (hierarchical state) + I2 (static addressing).
-
-### 8.3 Non-Goals for Phase 4
-
-- Template chips (Phase 5 — requires pattern recognition infrastructure)
-- Recursive aggregation (Phase 5)
-- Compiled per-program AIR (Phase 5)
-
-### 8.4 Risks
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| ShortRun constraint correctness | Soundness bug | Equivalence test: ShortRun produces same bus messages as Full |
-| Width specialization W=1 edge cases | Bool columns with unexpected encoding | Comprehensive W=1 tests |
-| NF elision over-aggressive | Elide a constraint that was actually needed | Conservative: elide only with proof of NF guarantee |
-| Pipeline parallelism races | Non-deterministic test failures | Deterministic parallel framework (rayon), no shared mutable state |
-
-### 8.5 Completion Gate
-
-- All 8 optimizations from [tabula-native-optimizations.md](../research/tabula-native-optimizations.md) active
-- Proving time benchmark < 50% of Phase 2
-- Untouched columns = zero proving cost verified
-- Per-column parallelism demonstrated
+| Milestone | Measurable |
+|-----------|------------|
+| End-to-end proof for any valid DSL program | All E2E tests green |
+| C1 soundness resolved | Cumsums PCS-committed and verified |
+| Pluggable commitment schemes | ColumnCommitment trait with SSMC/SMT implementations |
+| Zero-modification extensibility | Example app crate compiles and proves with custom chip + bus + precompile |
+| D1 Poseidon delegation | Global width 261→163 cols |
+| Proving time < 50% of baseline | Performance benchmark |
 
 ---
 
-## §9 Phase 5: Advanced (Future Research)
-
-> **Goal**: Push the boundaries of what's possible with Tabula's architecture.
-> **Status**: Design-phase only. No implementation commitment.
-
-### 9.1 Template Chips
-
-Specialized execution chips for hot-path transaction patterns (e.g., `fill_order`, `transfer`). ~60 columns vs 278 for generic interpreter. Same LogUp bus fingerprints — provable equivalence via test harness.
-
-**Prerequisite**: Phase 3d (TemplateChip trait) + pattern recognition infrastructure.
-
-### 9.2 Compiled Per-Program AIR
-
-Generate a program-specific AIR at compile time. The entire instruction sequence becomes a single fixed constraint system. Maximum efficiency, minimum generality.
-
-**Prerequisite**: Phase 4c (compiler-proof co-design infrastructure).
-
-### 9.3 Recursive Proof Aggregation
-
-Layer STARK proofs: Block → Segment → Batch. Each layer compresses N proofs into 1 by re-proving verification. Enables constant-size proofs regardless of batch size.
-
-**Prerequisite**: Phase 1 (machine layer must support standalone per-shard proofs).
-
-### 9.4 Distributed Proving
-
-Per-shard independence (from Phase 2) enables distributing shards across machines. Each machine proves its assigned columns independently. Aggregation at the end.
-
-**Prerequisite**: Phase 2 (shard architecture) + network protocol design.
-
-### 9.5 Cross-Batch State Caching
-
-Persist per-column commitments between batches. Only re-prove columns that changed. Amortize fixed costs across batch sequences.
-
-**Prerequisite**: Phase 2 (shard commitment persistence infrastructure).
-
-### 9.6 Conditional Branching
-
-Basic block CFG in IR, `if/else` in DSL, AIR constraints for block transitions. Enables more expressive programs without sacrificing NF properties.
-
-**Prerequisite**: IR extension (CB1-3 design in `docs/research/conditional-branching.md`).
-
----
-
-## §10 Dependency Graph
-
-```
-Phase 0: Foundation Completion
-  │  M12 (trace assembly) + M13 (STARK prover/verifier)
-  │  ← current work
-  │
-  ▼
-Phase 1: Machine Layer
-  │  shared PCS, two-round protocol, C1 fix
-  │  ← replaces stark/ with machine/
-  │
-  ▼
-Phase 2: Shard Architecture
-  │  per-column decomposition, ProofPlan, ColumnStrategy
-  │  ← structural refactor of chips + trace pipeline
-  │
-  ├─────────────────────────────────┐
-  ▼                                 ▼
-Phase 3: Extensibility          Phase 4a-b: Optimization (partial)
-  │  F1-F12, zero-modification      Late binding, width specialization
-  │  ← can start after Phase 2      ← can start after Phase 2
-  │
-  ▼
-Phase 4c-d: Optimization (remaining)
-  │  NF elision, pipeline parallelism
-  │  ← requires Phase 3 (PreprocessedCatalog)
-  │
-  ▼
-Phase 5: Advanced
-  │  templates, recursion, distributed, compiled AIR
-  │  ← future research
-```
-
-**Critical path**: Phase 0 → Phase 1 → Phase 2 → Phase 3/4
-
-**Parallelizable**: Phase 3 and Phase 4a-b can proceed concurrently after Phase 2.
-
-### 10.1 Internal Dependencies
-
-```
-Phase 3 internal:     Phase 1 (ChipRegistry) → F1 → F2 (ChipExtension) → F4
-                      F9 → F10 → F13 (PrecompileBus) → F14
-                      F12 (independent)
-                      F11 (independent after Phase 2)
-
-Phase 4 internal:     4a (late binding) — independent
-                      4b (width) — independent
-                      4c (NF elision) — needs Phase 3a (PreprocessedCatalog)
-                      4d (pipeline) — needs Phase 2 completion
-```
-
----
-
-## §11 Risk Registry
-
-### 11.1 Technical Risks
-
-| ID | Risk | Phase | Likelihood | Impact | Mitigation |
-|----|------|-------|-----------|--------|------------|
-| R1 | C1 soundness gap exploitable before Phase 1 | 0-1 | Low | Critical | Document as known limitation; Phase 1 is highest priority after Phase 0 |
-| R2 | p3 0.4 → 0.5 breaking changes | 1 | Medium | High | Pin exact p3 versions; test against p3 CI |
-| R3 | Per-column migration breaks all tests | 2 | High | High | Incremental migration (one chip at a time); feature flag |
-| R4 | ~~`define_chip_set! include` macro too complex~~ | 3 | — | — | **Eliminated.** Replaced by `ChipRegistry` + `ChipExtension`. No macro needed. |
-| R5 | Extractor affine assumption violated | 1 | Low | Medium | SymbolicInteractionBuilder eliminates this class of bugs |
-| R6 | ShortRun soundness | 4 | Medium | Critical | Mandatory equivalence test: ShortRun ≡ Full for same access pattern |
-| R7 | Pipeline parallelism non-determinism | 4 | Low | Medium | Deterministic parallel framework, no shared mutable state |
-
-### 11.2 Strategic Risks
-
-| ID | Risk | Mitigation |
-|----|------|------------|
-| S1 | Scope creep — adding features before foundation is solid | Phase gates are strict. No Phase N+1 work until Phase N gate passes. |
-| S2 | Over-engineering extensibility before real apps exist | Phase 3 validates with example app only. Real app feedback drives Phase 3 revisions. |
-| S3 | Performance optimization before correctness | Phase 4 is explicitly after Phase 0-2. Benchmarks only after soundness is proven. |
-| S4 | Design document divergence from code | Each Phase completion includes doc review and update. |
-
----
-
-## §12 Metrics
-
-### 12.1 Per-Phase Quantitative Targets
-
-| Phase | LOC Change | Test Count | Proof Size | Proving Time |
-|-------|-----------|------------|------------|--------------|
-| 0 | +500 (M12/M13 completion) | 450+ | Baseline (per-chip FRI) | Baseline |
-| 1 | -600 (net: remove stark/, add machine/) | 480+ | < 50% of Phase 0 | ~same |
-| 2 | +1500 (shard/ + ProofPlan) | 550+ | ~same as Phase 1 | < 80% of Phase 1 (parallelism) |
-| 3 | +1450 (F1-F12 framework) | 600+ | ~same | ~same |
-| 4 | +1000 (optimizations) | 650+ | ~same | < 50% of Phase 2 |
-
-### 12.2 Soundness Milestones
-
-| Milestone | Phase | Description |
-|-----------|-------|-------------|
-| All constraints proven | 0 | Every AIR constraint checked in E2E tests |
-| All buses balanced | 0 | Cross-chip LogUp Σ=0 in every test |
-| C1 resolved | 1 | Cumsums PCS-committed |
-| Per-column independence | 2 | Shards provable independently |
-| Extension soundness | 3 | Custom chips cannot break bus balance |
-| Strategy soundness | 4 | Misclassification detected by bus imbalance |
-
-### 12.3 Extensibility Milestones
-
-| Milestone | Phase | Description |
-|-----------|-------|-------------|
-| App chip compiles | 3a | `machine.builder().with_chip(AppChip).build()` works |
-| App bus works | 3a | `BusId::app(1)` + `define_bus!` in app crate |
-| App precompile works | 3b | `impl PrecompileHandler` + precompile chip proves |
-| App VC works | 3c | `impl VectorCommitment` in app crate, used by prover |
-| Lighter DEX feasible | 3d | All 7 blocked requirements unblocked |
-
----
-
-## §13 Relationship to Existing Documents
+## Related Documents
 
 | Document | Relationship |
 |----------|-------------|
-| [tabula-machine-architecture.md](tabula-machine-architecture.md) | Target architecture — this roadmap implements it |
-| [extensibility-architecture.md](extensibility-architecture.md) | Detailed API definitions — Phase 3 implements them |
-| [tabula-native-optimizations.md](../research/tabula-native-optimizations.md) | 8 optimizations — Phase 2+4 realize them |
-| [machine-layer-architecture.md](../research/machine-layer-architecture.md) | Option C decision — Phase 1 executes it |
-| [stark-backend-landscape.md](../research/stark-backend-landscape.md) | Backend evaluation — informed Phase 1 design |
-| [roadmap-m11-m13.md](roadmap-m11-m13.md) | M11-M13 detail — Phase 0 completes this |
-| [proof-optimization-architecture.md](proof-optimization-architecture.md) | KeyRoute, templates — Phase 4+5 implement these |
-| [m12-completion-gate.md](m12-completion-gate.md) | M12 gates — Phase 0 satisfies these |
-
-This document supersedes `roadmap-m11-m13.md` for work beyond M13. The M14+ section of that document is absorbed into Phases 1-5 of this roadmap.
+| [commitment-architecture-research.md](commitment-architecture-research.md) | Global vs shard quantitative analysis |
+| [full-sharding-research.md](full-sharding-research.md) | Per-column sharding research and ideal protocol |
+| [proof-optimization-architecture.md](proof-optimization-architecture.md) | Two orthogonal optimization axes (execution + memory layer) |
+| [extensibility-architecture.md](extensibility-architecture.md) | Detailed API definitions for extensibility traits |
+| [custom-type-extensibility.md](custom-type-extensibility.md) | Type system extension: TypeTag, TypeEncoding, bus width |
+| [sharded-protocol-design.md](sharded-protocol-design.md) | Shard chip protocol design |
+| [architecture.md](architecture.md) | Workspace-level architecture specification |

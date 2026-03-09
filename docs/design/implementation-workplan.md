@@ -1,7 +1,7 @@
 # Tabula Implementation Workplan
 
-> **Version**: 2.0
-> **Date**: 2026-03-06
+> **Version**: 5.1
+> **Date**: 2026-03-08
 > **References**: [master-roadmap.md](master-roadmap.md), [extensibility-architecture.md](extensibility-architecture.md), [tabula-machine-architecture.md](tabula-machine-architecture.md)
 > **Scope**: Concrete implementation tasks derived from architecture analysis and SP1/OpenVM comparison study
 
@@ -16,6 +16,17 @@ This document consolidates all planned work into a single actionable list. It de
 3. **Extensibility analysis** — OpcodeHandler vs Precompile tradeoff (Precompile chosen)
 4. **Constraint audit** — compiler-enforced vs ZK-verified separation (verified correct)
 5. **Composition model analysis** — compile-time enum vs runtime registry (Registry chosen)
+6. **ColumnCommitment trait analysis** — pluggable per-column commitment schemes via bus protocol boundary
+
+### Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 2.0 | 2026-03-06 | Phase 1 closed, 1.8 moved to 2.5 |
+| 3.0 | 2026-03-07 | Holistic Phase 2 redesign: `ColumnCommitment` trait replaces `ColumnStrategy` enum. SSMC/SMT become implementations, not special cases. Bus-driven collection replaces hardcoded Poseidon/RangeCheck. Phase 3.3 absorbed into Phase 2.1. Parallel trace pipeline restructured around per-column independence. |
+| 4.0 | 2026-03-07 | **Major revision**: Research proved pure shard migration causes 18-20x proof size explosion. Phase 2 revised: global chips KEPT as default, shard chips for extensibility only. |
+| 5.0 | 2026-03-08 | **Architecture refinement**: StateColumnChip moved from core to `SsmcCommitment` plugin. SSMC/SMT as equal-citizen plugins via `ColumnCommitment` trait, not hardcoded. Internal `MemoryModel` and `RootProof` traits added (`pub(crate)`) for Tabula's own development. Builder API: `with_core_chips()` + `with_commitment()`. Layered composition: Core (fixed) + Column Commitment (pluggable) + Bus Consumers (auto-collected). |
+| 5.1 | 2026-03-08 | **Phase 2 complete**: `CommitmentScheme` trait (machine-level) with `SsmcScheme`/`SmtScheme` impls. Witness pipeline confirmed working (no revert needed). `MemoryModel` + `RootProof` traits implemented (public, in `composition.rs`). `BusConsumer` trait wired for PoseidonChip/RangeCheckChip. `ProveError` replaces panics. 49 tests passing. |
 
 ### Key Architectural Decisions
 
@@ -31,7 +42,7 @@ This document consolidates all planned work into a single actionable list. It de
 
 ## Trait Hierarchy (Target)
 
-After all phases, the proof system traits simplify to:
+After all phases, the proof system traits form three layers:
 
 ```
 Individual chip traits (implemented by each chip struct):
@@ -44,10 +55,16 @@ Type-erased traits (blanket-implemented, used by registry/machine):
   AnyRap             — bundles ChipSpec + all Air<AB> bounds into one object-safe trait
   DynTraceContributor — object-safe wrapper for TraceContributor
 
+Pluggable commitment (per-column proof strategy):
+  ColumnCommitment   — register shard chips, populate witness, build traces
+  BusConsumer        — declare bus dependencies, collect interaction records
+  (SSMC, SMT are implementations — not special cases)
+
 Composition (replaces define_chip_set! + ChipSet + TabulaAir):
   ChipRegistry       — dynamic chip registration, bus manifest, setup validation
-  ChipExtension      — extension package (registers chips + buses + witness data)
-  TabulaMachine      — owns registry + config, provides prove/verify
+  ChipExtension      — extension package (chips + buses + commitment schemes)
+  ProofPlan          — per-(t,c) commitment scheme selection + width class
+  TabulaMachine      — owns registry + config + plan, provides prove/verify
 
 Removed:
   ChipSet trait       — replaced by ChipRegistry
@@ -60,131 +77,196 @@ Removed:
 
 ## Work Items
 
-### Phase 1: Machine Layer
+### Phase 1: Machine Layer — COMPLETE
 
 > **Goal**: Soundness, shared PCS, single FRI, registry-based composition.
-> **Ref**: [master-roadmap.md §5](master-roadmap.md#5-phase-1-machine-layer)
+> **Status**: Complete. 36 tests passing, zero clippy warnings.
 
-#### 1.1 AnyRap + DynTraceContributor (foundation for everything else)
+| Task | Status | Summary |
+|------|--------|---------|
+| 1.1 AnyRap | **Done** | `AnyRap` trait with blanket impl (`machine/src/any_rap.rs`). `DynChip` (in `stark/src/trace/dyn_chip.rs`) serves as the witness-side equivalent of `DynTraceContributor`. |
+| 1.2 ChipRegistry + TabulaMachine | **Done** | `ChipRegistry`, `RegisteredChip`, `TabulaMachine` with builder pattern, `core_chips()` function. |
+| 1.3 Remove Superseded Abstractions | **Done** | `define_chip_set!`, `ChipSet`, `TabulaAir`, `StarkAir` — all deleted. Zero references in codebase. `chip_set.rs`, `chip_instance.rs` removed. |
+| 1.4 ProvingKey / VerifyingKey | **Done** | `TabulaProvingKey`, `TabulaVerifyingKey`, `verify_with_key()`. Keys cached at `TabulaMachine::build()`. |
+| 1.5 Directory Structure Cleanup | **Done** | `permutation/` (mod, challenges, trace, tests), `prove/` (mod, quotient, rap_folder), `verify/` (mod, rap_folder). |
+| 1.6 RAP Phase Abstraction | **Dropped** | Single RAP implementation (LogUp) with no second consumer planned. Trait abstraction would add indirection without value. Prover/verifier construct `RapProverFolder`/`RapVerifierFolder` directly. |
+| 1.7 Shared PCS + Single FRI | **Done** | 3-round batched protocol: commit main → sample LogUp challenges → commit perm → sample alpha → commit quotients → sample zeta → single FRI open. `TabulaProof` with shared commitments. |
+| 1.8 Dependent Chip Collection | **→ Moved to 2.4** | Deferred to Phase 2 where witness pipeline is redesigned. Generalized as `BusConsumer` trait in 2.4 (Bus-Driven Collection). |
 
-**Motivation**: Enable type-erased chip references. Prerequisite for ChipRegistry and TabulaMachine.
+**Completion gate results:**
+- Single FRI proof ✅
+- C1 soundness resolved (perm trace PCS-committed) ✅
+- `define_chip_set!`/`ChipSet`/`TabulaAir`/`StarkAir` deleted ✅
+- 36 tests passing (17 unit + 2 any_rap + 11 machine + 6 E2E) ✅
 
-| Task | Files | Description |
-|------|-------|-------------|
-| 1.1.1 | `stark/src/air/any_rap.rs` | `AnyRap` trait: bundles `ChipSpec` + all `Air<AB>` bounds. Blanket impl for any type satisfying the bounds. Methods: `chip_id()`, `chip_name()`, `has_interactions()`, `num_public_values()`, `preprocessed_width()`, `width()`. |
-| 1.1.2 | `stark/src/trace/contributor.rs` | `DynTraceContributor` trait: object-safe version of `TraceContributor`. Blanket impl: `impl<T: TraceContributor + Send + Sync> DynTraceContributor for T`. |
-| 1.1.3 | `stark/src/air/mod.rs` | Re-export `AnyRap`. |
-
-#### 1.2 ChipRegistry + TabulaMachine
-
-**Motivation**: Replace `define_chip_set!` enum dispatch with runtime registration. Eliminate `ChipSet` trait, `StarkAir` alias, `TabulaAir` enum.
-
-| Task | Files | Description |
-|------|-------|-------------|
-| 1.2.1 | `machine/src/registry.rs` | `ChipRegistry` struct: `chips: Vec<RegisteredChip>`, `buses: BTreeSet<BusId>`, `public_value_chip: Option<ChipId>`. Methods: `register()`, `register_core()`, `set_public_value_chip()`, `validate()`. |
-| 1.2.2 | `machine/src/registry.rs` | `RegisteredChip` struct: `air: Box<dyn AnyRap>`, `contributor: Box<dyn DynTraceContributor>`, cached `interactions: InteractionDescriptor<BabyBear>`, `log_quotient_degree: usize`. Populated at `validate()`. |
-| 1.2.3 | `machine/src/machine.rs` | `TabulaMachine` struct: `config`, `registry`, `proving_key`, `verifying_key`. Builder pattern: `TabulaMachine::builder().with_core_chips().with_chip(X).build()`. `build()` calls `registry.validate()` and runs keygen. |
-| 1.2.4 | `chips/src/lib.rs` | `core_chips() -> Vec<(Box<dyn AnyRap>, Box<dyn DynTraceContributor>)>` function — returns all 9 core chips. Replaces `TabulaAir` enum. |
-| 1.2.5 | `machine/src/lib.rs` | Public API: `TabulaMachine::builder()`, `machine.prove()`, `machine.verify()`. Remove `prove::<CS>()` / `verify::<CS>()` free functions. |
-
-#### 1.3 Remove Superseded Abstractions
-
-| Task | Files | Description |
-|------|-------|-------------|
-| 1.3.1 | `stark/src/air/chip_set.rs` | Delete `ChipSet` trait and `define_chip_set!` macro entirely. |
-| 1.3.2 | `chips/src/lib.rs` | Remove `TabulaAir` enum. Remove `define_chip_set!` invocation. Keep individual chip structs and their `ChipSpec` / `Air<AB>` / `TraceContributor` impls unchanged. |
-| 1.3.3 | `machine/src/prover.rs` | Remove `StarkAir` trait alias. Prover works with `&ChipRegistry` internally. |
-| 1.3.4 | `stark/src/bridge.rs` | Review: `EmptyMessageBuilder` impls may need updating for `AnyRap` bounds. |
-| 1.3.5 | All test files | Migrate from `prove::<TabulaAir>(...)` to `machine.prove(...)`. Replace `TabulaAir::Execution(...)` with direct chip construction. |
-
-#### 1.4 ProvingKey / VerifyingKey
-
-| Task | Files | Description |
-|------|-------|-------------|
-| 1.4.1 | `machine/src/keys.rs` | `TabulaProvingKey`: per-chip keygen info, interaction descriptors, preprocessed data, log_quotient_degree. Computed once at `TabulaMachine::build()`. |
-| 1.4.2 | `machine/src/keys.rs` | `TabulaVerifyingKey`: per-chip verify info (chip_id, main_width, preprocessed commitment, num_public_values, public_value_chip). Serializable. Sufficient for standalone verification without the machine. |
-| 1.4.3 | `machine/src/verifier.rs` | `verify_with_key(vk: &TabulaVerifyingKey, proof: &TabulaProof)` — standalone verification without machine instance. |
-
-#### 1.5 Directory Structure Cleanup
-
-| Task | Files | Description |
-|------|-------|-------------|
-| 1.5.1 | `machine/src/permutation/` | Split `permutation.rs` (545 lines) into `challenges.rs` (~100 lines) + `trace.rs` (~200 lines). |
-| 1.5.2 | `machine/src/rap/` | Split `rap_folder.rs` (524 lines) into `prover_folder.rs` (~260 lines) + `verifier_folder.rs` (~260 lines). |
-| 1.5.3 | `machine/src/verifier.rs` | Remove hardcoded `core_chips::SMT_TABLE_PATH`. Use `verifying_key.public_value_chip` instead. |
-
-#### 1.6 RAP Phase Abstraction
-
-| Task | Files | Description |
-|------|-------|-------------|
-| 1.6.1 | `machine/src/rap/mod.rs` | `RapPhase` trait: `generate_perm_trace()`, `eval_rap_constraints()`. Current folders become implementations. |
-| 1.6.2 | `machine/src/prover.rs`, `verifier.rs` | Prover/verifier use `RapPhase` trait instead of directly constructing folders. |
-
-#### 1.7 Shared PCS + Single FRI
-
-| Task | Files | Description |
-|------|-------|-------------|
-| 1.7.1 | `machine/src/prover.rs` | Batch all chip traces into single PCS commitment. Two rounds: Round 1 (main), Round 2 (perm after challenge). |
-| 1.7.2 | `machine/src/verifier.rs` | Verify single batched PCS opening. |
-| 1.7.3 | `machine/src/proof.rs` | `TabulaProof` with single `main_commitment`, `perm_commitment`, `quotient_commitment`, `opening_proof`. |
-| 1.7.4 | `machine/src/config.rs` | Remove `p3-uni-stark` dependency. Use `p3-commit`, `p3-fri`, `p3-dft` directly. |
-
-#### 1.8 Dependent Chip Collection Generalization
-
-| Task | Files | Description |
-|------|-------|-------------|
-| 1.8.1 | `stark/src/trace/contributor.rs` | `DependentChip` trait: `required_buses() -> Vec<BusId>`, `collect_and_store(interactions, store)`. |
-| 1.8.2 | `witness/src/trace/orchestration.rs` | Replace hardcoded `collect_dependent_inputs` with generic collection driven by `DependentChip::required_buses()`. |
-
-**Phase 1 completion gate**: All existing tests pass on new registry-based infrastructure. Proof size < 50% of current. `define_chip_set!`, `ChipSet`, `TabulaAir`, `StarkAir` all deleted.
-
-**Phase 1 internal dependencies:**
-```
-1.1 (AnyRap) ─→ 1.2 (Registry) ─→ 1.3 (Remove old) ─→ 1.7 (Shared PCS)
-                 1.2 ─→ 1.4 (ProvingKey)
-1.5 (Directory), 1.6 (RAP), 1.8 (Dependent) — independent, can parallelize
-```
+**Note on `p3-uni-stark`**: Task 1.7.4 proposed removing this dependency. In practice, utility types (`StarkConfig`, `ProverConstraintFolder`, `VerifierConstraintFolder`, `SymbolicAirBuilder`, etc.) are still used as building blocks — the per-chip `p3_uni_stark::prove()`/`verify()` are no longer called. Full removal would require reimplementing ~10 types with no soundness benefit.
 
 ---
 
-### Phase 2: Shard Architecture
+### Phase 2: Extensibility Infrastructure + Code Quality — COMPLETE
 
-> **Goal**: Per-column proof decomposition. Untouched columns = zero cost.
-> **Ref**: [master-roadmap.md §6](master-roadmap.md#6-phase-2-shard-architecture)
+> **Goal**: CommitmentScheme trait for pluggable commitment schemes, BusConsumer for bus-driven
+> collection, code quality improvements. **Global chips kept as default** — no migration.
+> **Status**: Complete. 49 tests passing, zero clippy warnings.
+> **Ref**: [master-roadmap.md §6](master-roadmap.md#6-phase-2-extensibility-infrastructure),
+>         [commitment-architecture-research.md](commitment-architecture-research.md)
 
-#### 2.1 Column Strategy + ProofPlan
+#### Design Rationale
 
-| Task | Description |
-|------|-------------|
-| 2.1.1 | `ColumnStrategy` enum: `SortedMemory`, `ShortRun`, `ReadOnly`, per-column VC choice. |
-| 2.1.2 | `ProofPlan` struct: `Vec<ColumnPlan>` mapping each (t,c) to strategy + width + chip variant. |
-| 2.1.3 | `ProvingKey` generation from `ProofPlan` — shard variant definitions, preprocessed data. |
+Research ([commitment-architecture-research.md](commitment-architecture-research.md)) proved pure per-column
+sharding causes **18-20x proof size explosion** (261 cols fixed → C×237 for C=50 columns).
 
-#### 2.2 Per-Column Chip Migration
+The central insight: **bus protocol is the interface boundary**. Commitment schemes are pluggable —
+each receives from Memory bus and sends on CommitVerif bus. SSMC and SMT are default-provided
+plugins, not hardcoded core. StateColumnChip is SSMC's implementation detail, not a core chip.
 
-| Task | Description |
-|------|-------------|
-| 2.2.1 | `MemorySegment<W>` — per-column sorted memory (replaces global `InterTxOrderChip`). |
-| 2.2.2 | `StateSegment<W>` — per-column SSMC+Merge (replaces global `StateColumnChip`). |
-| 2.2.3 | `MetaSegment` — per-column ColumnMeta. |
-| 2.2.4 | `SmtColPathSegment` — per-column Merkle path. |
+**What changed from v4.0**:
+- StateColumnChip moved from core to `SsmcCommitment` plugin
+- SSMC/SMT register via `with_commitment()`, same API as custom schemes
+- Internal `MemoryModel` and `RootProof` traits added (`pub(crate)`)
+- Builder API: `with_core_chips()` + `with_commitment()` + `with_default_commitments()`
 
-#### 2.3 Gadget Simplification
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Layer 0: Core (fixed — Tabula's identity)                   │
+│  Execution:     ExecutionChip, StaticTableChip                │
+│  Memory:        InterTxOrderChip  (MemoryModel trait, internal)│
+│  Root Proof:    ColumnMetaChip, SmtColPathChip,               │
+│                 SmtTablePathChip  (RootProof trait, internal)  │
+│  Bus Consumers: PoseidonChip, RangeCheckChip (BusConsumer)    │
+├──────────────────────────────────────────────────────────────┤
+│  Layer 1: Column Commitment (pluggable — app choice)         │
+│  ColumnCommitment trait (batch API)                           │
+│    "ssmc" → SsmcCommitment → StateColumnChip (global)        │
+│    "smt"  → SmtCommitment  → (no extra chip)                 │
+│    "custom" → CustomCommitment → CustomChip                  │
+│  Bus contract: Memory bus receive → CommitVerif bus send      │
+├──────────────────────────────────────────────────────────────┤
+│  Layer 2: Bus Consumers (auto-collected via BusConsumer)      │
+│  PoseidonChip, RangeCheckChip, ...extensible                  │
+└──────────────────────────────────────────────────────────────┘
+```
 
-| Task | Description |
-|------|-------------|
-| 2.3.1 | Delete `gadgets/lex.rs` (~170 lines) — no cross-column ordering needed. |
-| 2.3.2 | Delete `gadgets/segment.rs` (~131 lines) — no column boundary detection needed. |
-| 2.3.3 | Simplify `gadgets/key_rc.rs` — `(r,τ)` only, no `(t,c)` comparison. |
+#### Trait Design (Implemented)
 
-#### 2.4 Parallel Trace Building
+Two-level trait design avoids circular deps between `tabula-stark` and `tabula-machine`:
 
-| Task | Description |
-|------|-------------|
-| 2.4.1 | `rayon::par_iter()` over columns for independent shard trace generation. |
-| 2.4.2 | 4-stage witness pipeline: Collector → RowBuilder → ColumnAssembler → Orchestrator. |
+```rust
+// Machine-level (tabula-machine/src/composition.rs) — provides AIRs + DynChips for builder
+pub trait CommitmentScheme: Send + Sync {
+    fn airs(&self) -> Vec<Box<dyn AnyRap>>;      // for proving/verifying
+    fn dyn_chips(&self) -> Vec<Box<dyn DynChip>>; // for trace building
+}
+// Impls: SsmcScheme (StateColumnChip), SmtScheme (empty)
 
-**Phase 2 completion gate**: All tests rewritten for shard architecture. Untouched columns produce zero trace rows.
+pub trait MemoryModel: Send + Sync {
+    fn airs(&self) -> Vec<Box<dyn AnyRap>>;
+    fn dyn_chips(&self) -> Vec<Box<dyn DynChip>>;
+}
+// Impl: GlobalSortedMemory (InterTxOrderChip)
+
+pub trait RootProof: Send + Sync {
+    fn airs(&self) -> Vec<Box<dyn AnyRap>>;
+    fn dyn_chips(&self) -> Vec<Box<dyn DynChip>>;
+}
+// Impl: SmtRootProof (ColumnMetaChip + SmtColPathChip + SmtTablePathChip)
+
+// Stark-level (tabula-stark/src/trace/column_commitment.rs) — shard-style trace building
+// ColumnCommitment trait (pre-existing, for per-column batch trace building)
+// BusConsumer trait (pre-existing, for interaction collection)
+```
+
+#### Builder API (Implemented)
+
+```rust
+// Default usage (9 chips: 8 core + 1 SSMC)
+let machine = TabulaMachine::builder()
+    .with_core_chips()            // Layer 0: exec + memory + root proof + bus consumers
+    .with_default_commitments()   // Layer 1: SsmcScheme (StateColumnChip)
+    .build()?;
+
+// Custom commitment scheme
+let machine = TabulaMachine::builder()
+    .with_core_chips()
+    .with_commitment(&SsmcScheme)           // explicit SSMC
+    .with_commitment(&MyAccumulatorScheme)   // custom scheme
+    .build()?;
+
+// Granular layer control
+let machine = TabulaMachine::builder()
+    .with_execution()                       // ExecutionChip + StaticTableChip
+    .with_memory_model(&GlobalSortedMemory) // InterTxOrderChip
+    .with_root_proof(&SmtRootProof)         // ColumnMeta + SmtPath chips
+    .with_bus_consumers()                   // Poseidon + RangeCheck
+    .with_commitment(&SsmcScheme)
+    .build()?;
+```
+
+#### 2.0 Witness Pipeline — No Revert Needed
+
+Investigation confirmed the witness pipeline was already working correctly after Phase 1.
+The files referenced below use `BusConsumer` trait (from `tabula-stark::trace`) and compile cleanly.
+No revert was necessary.
+
+| Task | Status |
+|------|--------|
+| 2.0.1–2.0.6 | **Skipped** — witness pipeline functional, `cargo check -p tabula-witness` passes |
+
+#### 2.1 Core Trait Definitions
+
+| Task | Status | Notes |
+|------|--------|-------|
+| 2.1.1 | **Done** (pre-existing) | `ColumnCommitment` trait already in `tabula-stark::trace::column_commitment`. |
+| 2.1.2 | **Done** (pre-existing) | `BusConsumer` trait already in `tabula-stark::trace`. |
+| 2.1.3 | **Done** | `MemoryModel` trait in `machine/src/composition.rs`. Impl: `GlobalSortedMemory` wrapping InterTxOrderChip. |
+| 2.1.4 | **Done** | `RootProof` trait in `machine/src/composition.rs`. Impl: `SmtRootProof` wrapping ColumnMeta + SmtPath chips. |
+| 2.1.5 | **Deferred** | `ColumnPlan` exists in `tabula-stark` but not yet used by machine builder. Not needed for Phase 2 gate. |
+| 2.1.6 | **Deferred** | `ProofPlan` dispatch deferred to Phase 3/4. Current default: all columns use SSMC. |
+
+#### 2.2 Commitment Scheme Separation
+
+StateColumnChip moved from core to `SsmcScheme`. SSMC/SMT register via `CommitmentScheme` trait.
+
+**Design note**: Machine-level `CommitmentScheme` trait (in `composition.rs`) is distinct from
+lower-level `ColumnCommitment` trait (in `tabula-stark`). `CommitmentScheme` provides `airs()` +
+`dyn_chips()` for the builder. `ColumnCommitment` provides `build_traces()` for shard-style trace
+building. This avoids circular deps (`AnyRap` is in tabula-machine, can't be referenced from tabula-stark).
+
+| Task | Status | Notes |
+|------|--------|-------|
+| 2.2.1 | **Done** | `SsmcScheme` implements `CommitmentScheme`. Owns `StateColumnChip::<3>`. |
+| 2.2.2 | **Done** | `SmtScheme` implements `CommitmentScheme`. Returns empty `airs()`/`dyn_chips()`. |
+| 2.2.3 | **Done** | `with_core_chips()` registers Layer 0 only (8 chips). No StateColumnChip. |
+| 2.2.4 | **Done** | `with_commitment(&dyn CommitmentScheme)` registers scheme's AIRs + DynChips. |
+| 2.2.5 | **Done** | `with_default_commitments()` delegates to `with_commitment(&SsmcScheme)`. |
+| 2.2.6 | **Done** | 8 integration tests: scheme isolation, equivalence, prove/verify pipeline. |
+
+#### 2.3 Bus-Driven Collection
+
+| Task | Status | Notes |
+|------|--------|-------|
+| 2.3.1 | **Done** | `PoseidonChip` implements `BusConsumer`. Registered via `with_bus_consumers()`. |
+| 2.3.2 | **Done** | `RangeCheckChip` implements `BusConsumer`. Registered via `with_bus_consumers()`. |
+| 2.3.3 | **Done** | Builder's `with_bus_consumer()` method for custom consumers. Orchestration uses trait. |
+
+#### 2.4 Machine Code Quality
+
+| Task | Status | Notes |
+|------|--------|-------|
+| 2.4.1 | **Done** | `ProveError` enum in `proof.rs`. Prover returns `Result<TabulaProof, ProveError>`. |
+| 2.4.2 | **Done** | RAP folder fields encapsulated — private fields + getters in `prove/rap_folder.rs` and `verify/rap_folder.rs`. |
+| 2.4.3 | **Done** | PCS ceremony extracted into `pcs_commit_and_open()` and `pcs_verify_and_recompose()`. |
+| 2.4.4 | **Done** | `prove/` (mod, quotient, rap_folder) and `verify/` (mod, rap_folder) modules. |
+
+**Phase 2 completion gate** (all met):
+- ✅ All existing tests pass (49 total: 17 unit + 2 any_rap + 24 machine + 6 E2E)
+- ✅ StateColumnChip owned by `SsmcScheme`, not core
+- ✅ SSMC registered via `CommitmentScheme` trait (no hardcoded dispatch)
+- ✅ `BusConsumer` for PoseidonChip and RangeCheckChip
+- ✅ `MemoryModel` and `RootProof` trait boundaries exist
+- ✅ Builder: `with_core_chips()` + `with_commitment()` working
+- ✅ Witness pipeline confirmed working (no revert needed)
+- ✅ `ProveError` replaces panics in prover
 
 ---
 
@@ -195,13 +277,14 @@ Removed:
 
 #### 3.1 ChipExtension Trait
 
-**Motivation**: Standardized extension packaging. Each extension registers its chips, buses, and witness population logic as a unit.
+**Motivation**: Standardized extension packaging. Each extension registers its chips, buses,
+witness population logic, and optionally custom `ColumnCommitment` schemes as a unit.
 
 | Task | Description |
 |------|-------------|
-| 3.1.1 | `ChipExtension` trait: `register_chips(&self, registry)`, `populate_witness(&self, store, context)`, `name()`. |
-| 3.1.2 | `CoreChipExtension` — wraps `core_chips()` as a `ChipExtension`. |
-| 3.1.3 | `TabulaMachine::builder().with_extension(ext)` — registers all chips from an extension. |
+| 3.1.1 | `ChipExtension` trait: `register(&self, registry, plan)`, `populate_witness(&self, store, context)`, `name()`. Includes optional `commitment_schemes() -> Vec<Box<dyn ColumnCommitment>>` for state commitment extensions. |
+| 3.1.2 | `CoreExtension` — wraps `core_chips()` + `SsmcCommitment` + `SmtCommitment` as a `ChipExtension`. |
+| 3.1.3 | `TabulaMachine::builder().with_extension(ext)` — registers all chips and commitment schemes from an extension. |
 | 3.1.4 | `tabula-machine::prelude` — stable re-exports of p3 types apps need (`BabyBear`, `RowMajorMatrix`, `InteractionAirBuilder`, etc.). |
 
 #### 3.2 Precompile Framework
@@ -219,12 +302,15 @@ Removed:
 
 **Scope**: One-time ~100 lines added to ExecutionChip. Each subsequent precompile = independent chip, zero core modification.
 
-#### 3.3 State Commitment Extension
+#### 3.3 Custom Commitment Scheme Example
+
+**Motivation**: Validate that the `ColumnCommitment` trait from Phase 2 actually supports
+third-party commitment schemes without core modification.
 
 | Task | Description |
 |------|-------------|
-| 3.3.1 | `VectorCommitment` trait — abstract SSMC/SMT operations. Existing `HybridVC` implements it. |
-| 3.3.2 | `PropertyOpening` trait — abstract proof-of-inclusion/update. |
+| 3.3.1 | Example: `AccumulatorCommitment` — Pedersen/inner-product commitment for columns where order doesn't matter. Demonstrates a completely different data structure proving through the same bus interface. |
+| 3.3.2 | Integration test: `TabulaMachine::builder().with_extension(AccumulatorExtension).build()` — proves a batch where one column uses SSMC and another uses Accumulator. |
 
 #### 3.4 Template Chip Framework
 
@@ -233,7 +319,7 @@ Removed:
 | 3.4.1 | `TemplateChip` trait — `matches(tx_type)`, specialized AIR, equivalence test harness. |
 | 3.4.2 | Equivalence test infrastructure — same bus messages as interpreter for identical inputs. |
 
-**Phase 3 completion gate**: Example app crate compiles and proves with custom chip + bus + precompile, without modifying Tabula.
+**Phase 3 completion gate**: Example app crate compiles and proves with custom chip + bus + precompile + custom commitment scheme, without modifying Tabula.
 
 ---
 
@@ -271,11 +357,135 @@ Removed:
 | 4.4.1 | Witness → trace overlap: shard trace building starts as column assembly completes. |
 | 4.4.2 | Level 0 independence: Execution/Poseidon/RangeCheck traces built in parallel with shards. |
 
-**Phase 4 completion gate**: Proving time < 50% of Phase 2. All 8 optimizations active.
+#### 4.5 D1: Poseidon Chain Delegation
+
+> **Ref**: [master-roadmap.md §8.2 Phase 4d](master-roadmap.md#82-sub-phases), [commitment-architecture-research.md §3.1](commitment-architecture-research.md#31-direction-d1-poseidon-chain-delegation)
+
+| Task | Description |
+|------|-------------|
+| 4.5.1 | **PoseidonChip chain tracking**: Add `chain_id` (table+col identifier), `step_index` (position in chain), and chaining constraint (`state_out[i] == state_in[i+1]` within same chain) to PoseidonChip. +3 columns (93→96 main). |
+| 4.5.2 | **Eliminate StateColumn hash chains**: Remove `old_hash_acc[8]`, `new_hash_acc[8]`, `old_hash_chain[16]`, `new_hash_chain[16]` (48 columns total) from StateColumnChip. The hash chain computation moves entirely to PoseidonChip. |
+| 4.5.3 | **StateColumn reduction or elimination**: After hash chain removal, StateColumnChip's remaining role is state entry tracking (identity + key + source + values + segment + key ordering ≈ 53 cols). Evaluate whether this can be folded into InterTxOrderChip or a unified memory chip. |
+| 4.5.4 | **LogUp binding update**: Update CommitmentVerification bus to carry chain commitment from PoseidonChip instead of StateColumnChip's hash accumulator. |
+| 4.5.5 | **Width reduction verification**: Total global chip width should drop from 261 to ~163 cols (38% reduction). Verify with proof size benchmark. |
+
+**Feasibility**: HIGH — engineering optimization, no new cryptography. PoseidonChip already processes all Poseidon permutations; adding chain continuity tracking is a natural extension.
+
+**Phase 4 completion gate**: Proving time < 50% of Phase 2. D1 chain delegation active. Global chip width reduced from 261 to ~163 cols.
+
+---
+
+### Phase 5: Advanced (Future Research)
+
+> **Goal**: Push beyond current architecture for maximum efficiency.
+> **Status**: Design-phase only. No implementation commitment.
+> **Ref**: [master-roadmap.md §9](master-roadmap.md#9-phase-5-advanced-future-research), [commitment-architecture-research.md §3](commitment-architecture-research.md#3-research-directions)
+
+#### 5.1 D2+D3: Algebraic Accumulator
+
+> **Ref**: [commitment-architecture-research.md §3.2](commitment-architecture-research.md#32-direction-d2d3-algebraic-accumulator-in-global-chip)
+
+Replace Poseidon hash chain commitment with an order-independent algebraic accumulator. In the layered composition architecture (Phase 2), this is a **new `ColumnCommitment` implementation** — not a core modification.
+
+| Task | Description |
+|------|-------------|
+| 5.1.1 | **Security proof**: Formal analysis of sum-based multiset hash over EF4 (2^124 birthday bound ~2^62). Evaluate mitigations: double accumulator (Σ H₁, Σ H₂), power-sum symmetric hash, multiplicative accumulator. Must achieve ≥128-bit security. |
+| 5.1.2 | **`AccumulatorCommitment` implementation**: New `ColumnCommitment` that embeds ~17 accumulator columns (h_old[4], h_new[4], acc_old[4], acc_new[4], is_state_entry) directly in a unified memory chip. Registers via `with_commitment("accumulator", ...)`. |
+| 5.1.3 | **Unified memory chip**: Combine InterTxOrderChip (56 cols) + accumulator columns (17 cols) = 73 cols total (fixed, C-independent). Eliminates StateColumnChip entirely. |
+| 5.1.4 | **Non-membership proof alternative**: SSMC uses sorted-list adjacency for non-membership. Sum-based accumulator is orderless — implement alternative (explicit table-size commitment or delegation to SMT). |
+| 5.1.5 | **Integration test**: Prove a batch where one column uses SSMC and another uses AccumulatorCommitment, coexisting via the bus protocol. |
+
+**Effect**: Global chip width drops from ~163 cols (after D1) to ~73 cols — 72% total reduction from baseline (261→73).
+
+**Prerequisites**: Phase 4.5 (D1 Poseidon delegation). Security proof for chosen accumulator (estimated 1-2 month research effort).
+
+**Architecture relationship**: `AccumulatorCommitment` registers via `with_commitment("accumulator", AccumulatorCommitment::new())` and can coexist with SSMC/SMT for different columns. The `ColumnCommitment` trait from Phase 2 enables this without core modification.
+
+#### 5.2 D4: Recursive Proof Composition
+
+> **Ref**: [commitment-architecture-research.md §3.3](commitment-architecture-research.md#33-direction-d4-recursive-composition)
+
+Per-column inner STARK proofs + recursive tree aggregation → fixed-size final proof.
+
+| Task | Description |
+|------|-------------|
+| 5.2.1 | **STARK verifier circuit in AIR**: Implement Plonky3 FRI verifier as an AIR circuit (~10K columns). This is the core engineering effort. |
+| 5.2.2 | **Per-column inner proofs**: Shard chips (MemoryShard, StateShard, MetaShard) generate independent STARK proofs per column. |
+| 5.2.3 | **Tree reduction**: Binary tree aggregation — each node verifies 2 inner proofs. Layer count = ⌈log₂(C)⌉. |
+| 5.2.4 | **Final proof**: Execution + meta + recursive verifications → single compact proof. Optional Groth16 wrapping for O(1) on-chain. |
+
+**Tradeoff** (C=50): ~2-5s global STARK vs ~60s recursive. Crossover at C > ~1000 with R > ~100K rows each.
+
+**Prerequisites**: Phase 1 (machine layer). Estimated 6+ months for recursive verifier circuit.
+
+**Relationship to D2+D3**: Complementary, not competing. D2+D3 optimizes single-proof path. D4 adds recursive compression at scale. Natural progression: D1 → D2+D3 → D4.
+
+#### 5.3 Template Chips
+
+| Task | Description |
+|------|-------------|
+| 5.3.1 | Pattern recognition for hot-path tx types (e.g., `fill_order`, `transfer`). |
+| 5.3.2 | Specialized execution chips (~60 cols vs 278 for generic interpreter). |
+| 5.3.3 | Provable equivalence via test harness (same LogUp bus fingerprints). |
+
+**Prerequisites**: Phase 3.4 (TemplateChip trait + equivalence test infrastructure).
+
+#### 5.4 Compiled Per-Program AIR
+
+| Task | Description |
+|------|-------------|
+| 5.4.1 | Program-specific AIR generation at compile time. |
+| 5.4.2 | Entire instruction sequence as a single fixed constraint system. |
+
+**Prerequisites**: Phase 4.3 (compiler-proof co-design infrastructure).
+
+**Phase 5 completion gate**: D2+D3 security proof complete. AccumulatorCommitment passing integration tests. Global width ≤73 cols. (D4 and beyond are separate research milestones.)
 
 ---
 
 ## Completed Work
+
+### Phase 1: Machine Layer (Done)
+
+| ID | Change | Status |
+|----|--------|--------|
+| 1.1 | `AnyRap` trait + blanket impl (`machine/src/any_rap.rs`), `ChipRef` wrapper (`chip_ref.rs`) | **Done** |
+| 1.2 | `ChipRegistry` + `TabulaMachine` + builder pattern + `core_chips()` | **Done** |
+| 1.3 | Deleted `define_chip_set!`, `ChipSet`, `TabulaAir`, `StarkAir`, `chip_set.rs`, `chip_instance.rs` | **Done** |
+| 1.4 | `TabulaProvingKey` / `TabulaVerifyingKey` with keygen caching | **Done** |
+| 1.5 | Directory reorganization: `prove/`, `verify/`, `permutation/` modules | **Done** |
+| 1.6 | RAP Phase Abstraction — **dropped** (YAGNI: single LogUp impl, no second consumer) | **Dropped** |
+| 1.7 | Batched 3-round PCS protocol, single FRI opening proof, `TabulaProof` rewrite | **Done** |
+| 1.8 | Dependent chip collection — **moved to 2.4** (generalized as `BusConsumer` trait) | **→ 2.4** |
+
+**Verification**: 36 tests passing (17 unit + 2 any_rap + 11 machine + 6 E2E), zero clippy warnings.
+
+### Phase 2: Extensibility Infrastructure + Code Quality (Done)
+
+| ID | Change | Status |
+|----|--------|--------|
+| 2.0 | Witness pipeline — confirmed working, no revert needed | **Skipped** |
+| 2.1.1–2 | `ColumnCommitment` + `BusConsumer` traits (pre-existing in `tabula-stark`) | **Done** |
+| 2.1.3 | `MemoryModel` trait + `GlobalSortedMemory` impl (`composition.rs`) | **Done** |
+| 2.1.4 | `RootProof` trait + `SmtRootProof` impl (`composition.rs`) | **Done** |
+| 2.1.5–6 | `ColumnPlan`/`ProofPlan` dispatch — deferred to Phase 3/4 | **Deferred** |
+| 2.2 | `CommitmentScheme` trait + `SsmcScheme`/`SmtScheme` + `with_commitment()` builder API | **Done** |
+| 2.3 | `BusConsumer` wired for PoseidonChip + RangeCheckChip + `with_bus_consumer()` API | **Done** |
+| 2.4.1 | `ProveError` enum replaces panics in prover | **Done** |
+| 2.4.2 | RAP folder field encapsulation (private + getters) | **Done** |
+| 2.4.3 | PCS ceremony extraction (`pcs_commit_and_open`, `pcs_verify_and_recompose`) | **Done** |
+| 2.4.4 | Directory reorganization (`prove/`, `verify/` modules) | **Done** |
+
+**Key files added/modified**:
+- `machine/src/composition.rs` — `MemoryModel`, `RootProof`, `CommitmentScheme` traits + impls
+- `machine/src/machine.rs` — `with_commitment()`, `with_bus_consumer()`, `with_buses()`, `with_config()` APIs
+- `machine/src/registry.rs` — `default_commitment_chips()` uses `SsmcScheme.airs()`
+- `machine/tests/common/mod.rs` — shared test infrastructure (extracted from duplicated pipelines)
+- `machine/tests/machine.rs` — 24 tests (up from 11) covering all builder APIs
+
+**Verification**: 49 tests passing (17 unit + 2 any_rap + 24 machine + 6 E2E), zero clippy warnings.
+
+---
 
 ### R-series: Machine Layer Refactoring (Done)
 
@@ -332,59 +542,50 @@ Removed:
 Phase 0: Foundation ──────────── COMPLETE (M1-M13, C1 fixed, 21 E2E tests)
   │
   ▼
-Phase 1: Machine Layer
-  │  1.1 AnyRap + DynTraceContributor
-  │  1.2 ChipRegistry + TabulaMachine
-  │  1.3 Remove define_chip_set!/ChipSet/TabulaAir/StarkAir
-  │  1.4 ProvingKey / VerifyingKey
-  │  1.5 Directory structure cleanup
-  │  1.6 RAP phase abstraction
-  │  1.7 Shared PCS + single FRI
-  │  1.8 Dependent chip collection generalization
+Phase 1: Machine Layer ──────── COMPLETE (36 tests, single FRI, registry-based)
   │
   ▼
-Phase 2: Shard Architecture
-  │  2.1 ColumnStrategy + ProofPlan
-  │  2.2 Per-column chip migration
-  │  2.3 Gadget simplification
-  │  2.4 Parallel trace building
+Phase 2: Extensibility + Quality  COMPLETE (49 tests, CommitmentScheme, BusConsumer)
   │
   ├──────────────────────────────────┐
   ▼                                  ▼
-Phase 3: Extensibility           Phase 4a-b: Optimization (partial)
+Phase 3: Extensibility ← NEXT   Phase 4a-c: Optimization (partial)
   │  3.1 ChipExtension trait         │  4.1 Late binding
   │  3.2 Precompile framework        │  4.2 Width specialization
-  │  3.3 State commitment ext.       │
+  │  3.3 Custom commitment example   │  4.3 NF elision
   │  3.4 Template chip framework     │
   │                                  │
-  └──────────────┬───────────────────┘
-                 ▼
-             Phase 4c-d: Optimization (remaining)
-                 │  4.3 NF elision
-                 │  4.4 Pipeline parallelism
-                 │
-                 ▼
-             Phase 5: Advanced (future)
-                 Template chips, recursive aggregation,
-                 compiled per-program AIR, distributed proving
+  └──────────┬───────────────────────┘
+             ▼
+         Phase 4d: D1 Poseidon Delegation
+             │  Eliminate StateColumn hash chains
+             ▼
+         Phase 4e: Pipeline Parallelism
+             │
+             ▼
+         Phase 5: Advanced (future)
+             D2+D3 (algebraic accumulator),
+             D4 (recursive composition),
+             templates, compiled AIR, distributed proving
 ```
 
 ### Internal Dependencies
 
 ```
-Phase 1:  1.1 (AnyRap) ─→ 1.2 (Registry) ─→ 1.3 (Remove old) ─→ 1.7 (Shared PCS)
-                            1.2 ─→ 1.4 (Keys)
-          1.5 (Directory), 1.6 (RAP), 1.8 (Dependent) — independent
+Phase 1:  COMPLETE
 
-Phase 2:  2.1 ─→ 2.2 ─→ 2.4
-          2.3 (independent)
+Phase 2:  COMPLETE
 
 Phase 3:  3.1 ─→ 3.2 ─→ 3.4
-          3.3 (independent after 3.1)
+          3.3 (independent after 3.1, validates Phase 2 trait design)
 
 Phase 4:  4.1, 4.2 (independent, after Phase 2)
           4.3 (after Phase 3.1)
-          4.4 (after Phase 2.4)
+          4.4d D1 (after Phase 3+4a-c complete)
+          4.4e pipeline (after Phase 2)
+
+Phase 5:  D2+D3 (after 4d D1 + security proof)
+          D4 (after Phase 1, can be parallel with D2+D3)
 ```
 
 ---
@@ -524,17 +725,18 @@ This is essential: it models the SSA register file. Without it, a malicious prov
 | Phase | Gate | Measurable |
 |-------|------|------------|
 | 1 | Single FRI proof, C1 resolved, proof size < 50% of current. `define_chip_set!` deleted. | Proof size benchmark. No `ChipSet`/`TabulaAir` in codebase. |
-| 2 | Per-column parallel proving, untouched columns = zero cost | Parallelism benchmark |
-| 3 | App can add custom chip + bus + precompile without modifying Tabula | Example app crate compiles and proves |
-| 4 | All 8 optimizations active, proving time < 50% of Phase 2 | Optimization benchmark |
+| 2 | CommitmentScheme + BusConsumer traits. Global chips unchanged. Code quality improved. | ✅ 49 tests passing. No hardcoded dispatch. ProveError replaces panics. |
+| 3 | App can add custom chip + bus + precompile + commitment scheme without modifying Tabula | Example app crate compiles and proves |
+| 4 | D1 eliminates StateColumn hash chains, proving time < 50% of Phase 2 | Global width 261→163. Optimization benchmark. |
+| 5 | D2+D3 security proof. AccumulatorCommitment integration tests passing. | Global width ≤73 cols. Security proof document published. |
 
 ---
 
 ## Appendix: App Developer Experience (Target)
 
-```rust
-// ── my-app/src/main.rs ──────────────────────────────────────────
+### A. Custom precompile chip
 
+```rust
 use tabula_machine::prelude::*;
 use tabula_machine::{TabulaMachine, ChipExtension};
 
@@ -545,9 +747,9 @@ impl<AB: InteractionAirBuilder> Air<AB> for KeccakChip { /* constraints */ }
 impl TraceContributor for KeccakChip { /* trace generation */ }
 
 // App defines an extension package
-struct MyExtension;
-impl ChipExtension for MyExtension {
-    fn register_chips(&self, registry: &mut ChipRegistry) {
+struct KeccakExtension;
+impl ChipExtension for KeccakExtension {
+    fn register(&self, registry: &mut ChipRegistry, _plan: &ProofPlan) {
         registry.register(KeccakChip::default());
     }
     fn populate_witness(&self, store: &mut WitnessStore, ctx: &ExtensionContext) {
@@ -558,11 +760,9 @@ impl ChipExtension for MyExtension {
 }
 
 fn main() {
-    // Compose: core + app extension (zero Tabula modification)
     let machine = TabulaMachine::builder()
         .with_core_chips()
-        .with_extension(MyExtension)
-        .with_config(production_config())
+        .with_extension(KeccakExtension)
         .build()
         .expect("setup failed");
 
@@ -570,6 +770,63 @@ fn main() {
     machine.verify(&proof).expect("verification failed");
 }
 ```
+
+### B. Custom commitment scheme
+
+```rust
+use tabula_machine::prelude::*;
+use tabula_witness::{ColumnCommitment, ColumnPlan};
+
+// A DEX-optimized accumulator commitment for order-book columns.
+// Internally uses an algebraic accumulator instead of SSMC's sorted list.
+struct AccumulatorCommitment;
+impl ColumnCommitment for AccumulatorCommitment {
+    fn name(&self) -> &str { "accumulator" }
+
+    fn register_shard_chips(&self, col: &ColumnPlan, registry: &mut ChipRegistry)
+        -> Vec<ChipId>
+    {
+        let chip = AccumulatorShardChip::new(col);
+        let id = registry.register(chip);
+        vec![id]
+    }
+
+    fn populate_shard_witness(&self, col: &ColumnPlan, store: &mut WitnessStore) {
+        // Read column accesses from store, produce accumulator witness
+    }
+
+    fn build_shard_traces(&self, col: &ColumnPlan, store: &WitnessStore)
+        -> Vec<(ChipId, TraceEntry)>
+    {
+        // Build trace from witness — same Memory bus receive, CommitVerif bus send
+    }
+
+    fn output_buses(&self) -> Vec<BusId> {
+        vec![core_buses::COMMITMENT_VERIF, core_buses::POSEIDON_PERM]
+    }
+}
+
+fn main() {
+    let machine = TabulaMachine::builder()
+        .with_core_chips()
+        // Override commitment scheme for specific columns
+        .with_commitment_scheme("accumulator", AccumulatorCommitment)
+        .with_proof_plan_override(|plan| {
+            // Use accumulator for table 5, column 0 (order book)
+            plan.set_scheme(TableId(5), ColId(0), "accumulator");
+        })
+        .build()
+        .expect("setup failed");
+
+    let proof = machine.prove(&traces, statement);
+    machine.verify(&proof).expect("verification failed");
+}
+```
+
+**Key property**: `AccumulatorCommitment` speaks the same bus protocol (Memory bus in,
+CommitVerif bus out). The prover, verifier, and all other chips are completely unaware
+of the commitment scheme change. Soundness is maintained because the bus balancing
+constraint is scheme-agnostic.
 
 ---
 
