@@ -16,3 +16,4 @@ p3-uni-stark = { workspace = true }
 
 [dev-dependencies]
 tabula-core = { workspace = true }
+p3-challenger = { workspace = true }

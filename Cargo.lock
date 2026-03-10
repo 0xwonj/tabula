@@ -2807,6 +2807,7 @@ version = "0.1.0"
 dependencies = [
  "p3-air",
  "p3-baby-bear",
+ "p3-challenger",
  "p3-field",
  "p3-matrix",
  "p3-uni-stark",

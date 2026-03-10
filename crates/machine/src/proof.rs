@@ -111,6 +111,16 @@ pub enum ProveError {
     },
 }
 
+impl From<tabula_stark::permutation::PermutationError> for ProveError {
+    fn from(err: tabula_stark::permutation::PermutationError) -> Self {
+        match err {
+            tabula_stark::permutation::PermutationError::FingerprintZero { row, interaction } => {
+                ProveError::FingerprintZero { row, interaction }
+            }
+        }
+    }
+}
+
 /// Errors during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {

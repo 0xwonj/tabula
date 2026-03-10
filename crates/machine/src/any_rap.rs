@@ -17,8 +17,8 @@ use p3_uni_stark::{ProverConstraintFolder, SymbolicAirBuilder, VerifierConstrain
 use tabula_stark::chips::ChipSpec;
 
 use crate::config::TabulaStarkConfig;
-use crate::prove::RapProverFolder;
-use crate::verify::RapVerifierFolder;
+use tabula_stark::rap::prover::RapProverFolder;
+use tabula_stark::rap::verifier::RapVerifierFolder;
 
 /// Object-safe supertrait bundling all AIR bounds for the STARK pipeline.
 ///

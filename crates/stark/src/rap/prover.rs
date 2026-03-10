@@ -2,22 +2,22 @@
 
 use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder};
 use p3_baby_bear::BabyBear;
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrixView;
-use p3_uni_stark::{PackedChallenge, PackedVal, StarkGenericConfig};
 
-use tabula_stark::air::builder::InteractionAirBuilder;
-use tabula_stark::air::interaction::AirInteraction;
+use crate::EF4;
+use crate::air::builder::InteractionAirBuilder;
+use crate::air::interaction::AirInteraction;
 
-use crate::config::{EF4, TabulaStarkConfig};
-use crate::ef4::{
+use super::ef4::{
     RowSelectors, compute_fingerprint_components, cumsum_constraint_values, ef4_coeffs, ef4_mul,
 };
 
-type SC = TabulaStarkConfig;
-type PV = PackedVal<SC>;
-type PC = PackedChallenge<SC>;
+/// Packed base field (platform-optimized).
+type PV = <BabyBear as Field>::Packing;
+/// Packed extension field (for challenge accumulation).
+type PC = <EF4 as ExtensionField<BabyBear>>::ExtensionPacking;
 
 /// Constraint folder for Phase 2 (RAP constraints) of the prover.
 ///
@@ -41,7 +41,7 @@ pub struct RapProverFolder<'a> {
     is_last_row: PV,
     is_transition: PV,
     /// Alpha powers for constraint folding (shared with Phase 1).
-    alpha_powers: &'a [<SC as StarkGenericConfig>::Challenge],
+    alpha_powers: &'a [EF4],
     /// Running accumulator (starts from Phase 1's accumulator).
     accumulator: PC,
     /// Current constraint index (starts from Phase 1's constraint_index).
@@ -74,7 +74,7 @@ impl<'a> RapProverFolder<'a> {
         is_first_row: PV,
         is_last_row: PV,
         is_transition: PV,
-        alpha_powers: &'a [<SC as StarkGenericConfig>::Challenge],
+        alpha_powers: &'a [EF4],
         accumulator: PC,
         constraint_index: usize,
         challenges: [EF4; 2],
@@ -100,12 +100,12 @@ impl<'a> RapProverFolder<'a> {
     }
 
     /// The running accumulator after constraint folding.
-    pub(crate) fn accumulator(&self) -> PC {
+    pub fn accumulator(&self) -> PC {
         self.accumulator
     }
 
     /// The current constraint index (number of constraints folded so far).
-    pub(crate) fn constraint_index(&self) -> usize {
+    pub fn constraint_index(&self) -> usize {
         self.constraint_index
     }
 

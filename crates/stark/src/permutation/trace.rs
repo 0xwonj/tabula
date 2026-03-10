@@ -4,16 +4,16 @@ use p3_baby_bear::BabyBear;
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
-use tabula_stark::air::interaction::{BusId, InteractionDirection};
-use tabula_stark::debug::RecordedInteraction;
+use crate::EF4;
+use crate::air::interaction::{BusId, InteractionDirection};
+use crate::debug::RecordedInteraction;
 
-use crate::config::EF4;
-use crate::proof::ProveError;
+use super::PermutationError;
 
 /// Compute an RLC fingerprint in the extension field EF4.
 ///
 /// `f = α + kind_tag + β · values[0] + β² · values[1] + …`
-pub(crate) fn compute_fingerprint_ef4(
+pub fn compute_fingerprint_ef4(
     values: &[BabyBear],
     bus: BusId,
     alpha: EF4,
@@ -55,13 +55,13 @@ fn write_ef4(row: &mut [BabyBear], offset: usize, val: EF4) {
 ///
 /// # Errors
 ///
-/// Returns [`ProveError::FingerprintZero`] if a LogUp fingerprint evaluates
+/// Returns [`PermutationError::FingerprintZero`] if a LogUp fingerprint evaluates
 /// to zero (probability ~2^{-124} with random challenges).
-pub(crate) fn generate_permutation_trace_from_interactions(
+pub fn generate_permutation_trace_from_interactions(
     recorded: &[RecordedInteraction<BabyBear>],
     height: usize,
     challenges: [EF4; 2],
-) -> Result<(RowMajorMatrix<BabyBear>, EF4), ProveError> {
+) -> Result<(RowMajorMatrix<BabyBear>, EF4), PermutationError> {
     let [alpha, beta] = challenges;
 
     assert!(
@@ -101,7 +101,7 @@ pub(crate) fn generate_permutation_trace_from_interactions(
                 compute_fingerprint_ef4(&interaction.values, interaction.bus, alpha, beta);
 
             if fingerprint == EF4::ZERO {
-                return Err(ProveError::FingerprintZero {
+                return Err(PermutationError::FingerprintZero {
                     row: row_idx,
                     interaction: j,
                 });

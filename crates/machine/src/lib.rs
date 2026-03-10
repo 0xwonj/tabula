@@ -34,7 +34,6 @@ mod any_rap;
 pub(crate) mod chip_ref;
 pub mod composition;
 pub mod config;
-pub(crate) mod ef4;
 pub mod keys;
 mod machine;
 pub(crate) mod permutation;

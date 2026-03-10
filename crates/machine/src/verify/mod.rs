@@ -6,9 +6,7 @@
 //! 2. Per-chip constraint evaluation at the OOD point
 //! 3. Cross-chip LogUp balance (Σ cumsums = 0)
 
-pub(crate) mod rap_folder;
-
-pub(crate) use rap_folder::RapVerifierFolder;
+use tabula_stark::rap::verifier::RapVerifierFolder;
 
 use std::collections::BTreeSet;
 
@@ -204,7 +202,7 @@ fn verify_logup_and_public_values(
         .fold(EF4::ZERO, |acc, c| acc + c);
     if cumsum_total != EF4::ZERO {
         return Err(VerificationError::LogUpImbalance {
-            total: crate::ef4::ef4_coeffs(cumsum_total),
+            total: tabula_stark::rap::ef4::ef4_coeffs(cumsum_total),
         });
     }
 
@@ -323,7 +321,7 @@ fn verify_chip_constraints(
         );
         chip_ref.eval(&mut rap_folder);
 
-        let coeffs = crate::ef4::ef4_coeffs(opening.cumsum_final);
+        let coeffs = tabula_stark::rap::ef4::ef4_coeffs(opening.cumsum_final);
         rap_folder.finalize_cumsum(coeffs.map(EF4::from));
 
         if rap_folder.accumulator() * sels.inv_vanishing != quotient {

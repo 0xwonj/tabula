@@ -6,17 +6,18 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrixView;
 
-use tabula_stark::air::builder::InteractionAirBuilder;
-use tabula_stark::air::interaction::AirInteraction;
+use crate::EF4;
+use crate::air::builder::InteractionAirBuilder;
+use crate::air::interaction::AirInteraction;
 
-use crate::config::EF4;
-use crate::ef4::{
+use super::ef4::{
     RowSelectors, compute_fingerprint_components, cumsum_constraint_values, ef4_coeffs, ef4_mul,
 };
 
 /// Constraint folder for Phase 2 (RAP constraints) of the verifier.
 ///
-/// Same pattern as [`super::RapProverFolder`] but for the verifier's scalar types.
+/// Same pattern as [`RapProverFolder`](super::prover::RapProverFolder) but
+/// for the verifier's scalar types.
 pub struct RapVerifierFolder<'a> {
     /// Truncated main trace (main columns only) — returned by `AirBuilder::main()`.
     main_truncated:
@@ -98,7 +99,7 @@ impl<'a> RapVerifierFolder<'a> {
     }
 
     /// The running accumulator after constraint folding.
-    pub(crate) fn accumulator(&self) -> EF4 {
+    pub fn accumulator(&self) -> EF4 {
         self.accumulator
     }
 

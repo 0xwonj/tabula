@@ -7,15 +7,16 @@
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_commit::PolynomialSpace;
-use p3_field::{BasedVectorSpace, PackedFieldExtension, PackedValue, PrimeCharacteristicRing};
+use p3_field::{PackedFieldExtension, PackedValue, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{PackedChallenge, PackedVal, ProverConstraintFolder};
 
+use tabula_stark::rap::ef4::build_alpha_powers;
+use tabula_stark::rap::prover::RapProverFolder;
+
 use crate::chip_ref::ChipRef;
 use crate::config::{EF4, PcsDomain, TabulaStarkConfig};
-
-use super::RapProverFolder;
 
 /// Per-chip info for quotient computation.
 ///
@@ -220,7 +221,7 @@ pub(super) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
         air.eval(&mut rap_folder);
 
         // Broadcast cumsum_final EF4 into packed values for last-row constraint.
-        let cumsum_coeffs = crate::ef4::ef4_coeffs(cumsum_final);
+        let cumsum_coeffs = tabula_stark::rap::ef4::ef4_coeffs(cumsum_final);
         let cumsum_final_packed: [PV; 4] = [
             PV::from(cumsum_coeffs[0]),
             PV::from(cumsum_coeffs[1]),
@@ -248,28 +249,3 @@ pub(super) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
     result
 }
 
-/// Build alpha power vectors for constraint folding.
-fn build_alpha_powers(
-    alpha: EF4,
-    count: usize,
-) -> (Vec<EF4>, Vec<Vec<BabyBear>>) {
-    let mut alpha_powers = Vec::with_capacity(count);
-    let mut power = EF4::ONE;
-    for _ in 0..count {
-        alpha_powers.push(power);
-        power *= alpha;
-    }
-    alpha_powers.reverse();
-
-    let decomposed: Vec<Vec<BabyBear>> =
-        (0..<EF4 as BasedVectorSpace<BabyBear>>::DIMENSION)
-            .map(|i| {
-                alpha_powers
-                    .iter()
-                    .map(|x| <EF4 as BasedVectorSpace<BabyBear>>::as_basis_coefficients_slice(x)[i])
-                    .collect()
-            })
-            .collect();
-
-    (alpha_powers, decomposed)
-}

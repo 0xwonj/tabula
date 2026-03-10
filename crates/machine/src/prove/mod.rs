@@ -4,9 +4,6 @@
 //! fixing the C1 soundness gap and reducing proof size by ~N×.
 
 mod quotient;
-pub(crate) mod rap_folder;
-
-pub(crate) use rap_folder::RapProverFolder;
 
 use p3_baby_bear::BabyBear;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
@@ -173,7 +170,7 @@ pub fn prove_with_key(
 
     if cumsum_total != EF4::ZERO {
         return Err(ProveError::LogUpImbalance {
-            total: crate::ef4::ef4_coeffs(cumsum_total),
+            total: tabula_stark::rap::ef4::ef4_coeffs(cumsum_total),
         });
     }
 

@@ -15,7 +15,6 @@ use p3_baby_bear::{
 use p3_challenger::DuplexChallenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::extension::BinomialExtensionField;
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_poseidon2::Poseidon2;
@@ -23,7 +22,9 @@ use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use p3_uni_stark::StarkConfig;
 
 /// Quartic extension of BabyBear for ~124-bit security.
-pub type EF4 = BinomialExtensionField<BabyBear, 4>;
+///
+/// Re-exported from `tabula-stark` where it is canonically defined.
+pub use tabula_stark::EF4;
 
 /// Concrete Poseidon2 permutation type (width=16, s-box degree=7).
 pub(crate) type Perm = Poseidon2<

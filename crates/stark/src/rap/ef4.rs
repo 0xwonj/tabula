@@ -8,12 +8,12 @@
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
-use super::config::EF4;
+use crate::EF4;
 
 // ─── EF4 arithmetic helpers ─────────────────────────────────────────────────
 
 /// Extract 4 BabyBear coefficients from an EF4 value.
-pub(crate) fn ef4_coeffs(val: EF4) -> [BabyBear; 4] {
+pub fn ef4_coeffs(val: EF4) -> [BabyBear; 4] {
     use p3_field::BasedVectorSpace;
     let s = val.as_basis_coefficients_slice();
     [s[0], s[1], s[2], s[3]]
@@ -25,7 +25,7 @@ pub(crate) fn ef4_coeffs(val: EF4) -> [BabyBear; 4] {
 /// `PackedVal<SC>` (prover constraints), and `EF4` (verifier constraints).
 ///
 /// Uses the identity `X^4 = 11` in BabyBear^4 to reduce the product.
-pub(crate) fn ef4_mul<T>(a: &[T; 4], b: &[T; 4]) -> [T; 4]
+pub fn ef4_mul<T>(a: &[T; 4], b: &[T; 4]) -> [T; 4]
 where
     T: PrimeCharacteristicRing + Copy,
 {
@@ -47,12 +47,16 @@ where
 
 /// Selector values for a single row evaluation.
 ///
-/// Shared by [`RapProverFolder`] and [`RapVerifierFolder`] to guarantee
+/// Shared by [`RapProverFolder`](super::prover::RapProverFolder) and
+/// [`RapVerifierFolder`](super::verifier::RapVerifierFolder) to guarantee
 /// identical selector semantics.
 #[derive(Clone, Copy)]
-pub(crate) struct RowSelectors<T> {
+pub struct RowSelectors<T> {
+    /// `1` on the first row, `0` elsewhere.
     pub is_first_row: T,
+    /// `1` on the last row, `0` elsewhere.
     pub is_last_row: T,
+    /// `1` on all rows except the last, `0` on the last.
     pub is_transition: T,
 }
 
@@ -62,7 +66,7 @@ pub(crate) struct RowSelectors<T> {
 ///
 /// Returns the 4 BabyBear-basis components of the fingerprint, evaluated
 /// in the caller's expression type `T` (either `PackedVal` or `EF4`).
-pub(crate) fn compute_fingerprint_components<T>(
+pub fn compute_fingerprint_components<T>(
     alpha_coeffs: [BabyBear; 4],
     beta_coeffs: [BabyBear; 4],
     tag: T,
@@ -92,7 +96,7 @@ where
 ///
 /// Returns `[first_row × 4, transition × 4, last_row × 4]` in that order.
 /// The caller feeds each value to its own `rap_assert_zero` method.
-pub(crate) fn cumsum_constraint_values<T>(
+pub fn cumsum_constraint_values<T>(
     cumsum_local: [T; 4],
     cumsum_next: [T; 4],
     phi_sum_local: [T; 4],
@@ -117,6 +121,39 @@ where
         out[8 + k] = sels.is_last_row * (cumsum_local[k] - cumsum_final[k]);
     }
     out
+}
+
+/// Build alpha power vectors for constraint folding.
+///
+/// Returns `(alpha_powers, decomposed_alpha_powers)` where `alpha_powers`
+/// is in reverse order (highest power first) for Horner's method accumulation,
+/// and `decomposed_alpha_powers` splits each EF4 into its 4 BabyBear basis
+/// components (required by p3's `ProverConstraintFolder`).
+pub fn build_alpha_powers(
+    alpha: EF4,
+    count: usize,
+) -> (Vec<EF4>, Vec<Vec<BabyBear>>) {
+    use p3_field::BasedVectorSpace;
+
+    let mut alpha_powers = Vec::with_capacity(count);
+    let mut power = EF4::ONE;
+    for _ in 0..count {
+        alpha_powers.push(power);
+        power *= alpha;
+    }
+    alpha_powers.reverse();
+
+    let decomposed: Vec<Vec<BabyBear>> =
+        (0..<EF4 as BasedVectorSpace<BabyBear>>::DIMENSION)
+            .map(|i| {
+                alpha_powers
+                    .iter()
+                    .map(|x| <EF4 as BasedVectorSpace<BabyBear>>::as_basis_coefficients_slice(x)[i])
+                    .collect()
+            })
+            .collect();
+
+    (alpha_powers, decomposed)
 }
 
 #[cfg(test)]

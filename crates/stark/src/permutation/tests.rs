@@ -5,15 +5,15 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 
-use tabula_stark::air::descriptor::InteractionDescriptor;
-use tabula_stark::air::interaction::{
+use crate::EF4;
+use crate::air::descriptor::InteractionDescriptor;
+use crate::air::interaction::{
     Interaction, InteractionDirection, VirtualPairCol, core_buses,
 };
-use tabula_stark::debug::RecordedInteraction;
+use crate::debug::RecordedInteraction;
 
 use super::challenges::{ChipTraceInfo, derive_challenges_from_main};
 use super::trace::{compute_fingerprint_ef4, concat_traces};
-use crate::config::EF4;
 
 /// Generate a permutation trace from an interaction descriptor (test-only).
 fn generate_permutation_trace(
