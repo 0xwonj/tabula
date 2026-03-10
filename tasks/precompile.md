@@ -1,7 +1,9 @@
 # Precompile Framework
 
-> Status: ⬜ Blocked on [composition.md](composition.md) (needs BusId)
+> Status: ⬜ Blocked on [composition.md](composition.md) (Goal 6 — needs BusId, ChipExtension)
 > Design: [docs/design/extensibility-architecture.md](../docs/design/extensibility-architecture.md) §3 (Computation Extension), §10 (Precompile System)
+
+**Sharding context**: Precompile chips live in Tier 1 (execution proof) — bus-linked to ExecutionChip via PrecompileBus. Orthogonal to column sharding.
 
 ## Goal
 

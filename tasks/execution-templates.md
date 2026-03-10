@@ -1,11 +1,14 @@
 # Execution Templates
 
-> Status: ⬜ Blocked on [composition.md](composition.md) (needs BusId, ChipExtension, WitnessStore)
-> Design: [docs/design/extensibility-architecture.md](../docs/design/extensibility-architecture.md) §8 (Execution Strategy Extension), [docs/design/proof-optimization-architecture.md](../docs/design/proof-optimization-architecture.md) §3 (Template Chips)
+> Status: ⬜ Blocked on [composition.md](composition.md) (Goal 6 — needs BusId, ChipExtension, WitnessStore)
+> Design: [docs/design/extensibility-architecture.md](../docs/design/extensibility-architecture.md) §8 (Execution Strategy Extension), [docs/design/proof-optimization-architecture.md](../docs/design/proof-optimization-architecture.md) §3 (Template Chips), [docs/design/execution-chip-evolution.md](../docs/design/execution-chip-evolution.md)
+> Related: [research.md](research.md) "Template Chip Implementations" — concrete templates (TransferTemplate, FillOrderTemplate) depend on this trait infrastructure
 
 ## Goal
 
 TemplateChip trait for hot-path tx pattern specialization. A template produces the same LogUp bus fingerprints as the generic ExecutionChip but with fewer columns (~60 vs 278).
+
+**Sharding context**: Templates operate in Tier 1 (execution proof) — orthogonal to column sharding. The execution proof is a single global proof regardless of sharding. Templates reduce its width, which is independent of per-column proof structure.
 
 ## Tasks
 

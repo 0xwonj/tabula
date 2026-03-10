@@ -1,30 +1,32 @@
 # Commitment Traits
 
-> Status: 🔵 Ready
-> Depends: None (builds on existing ChipRegistry + MachineBuilder)
+> Status: ⬜ Blocked (Goal 6 — depends on sharding migration)
+> Depends: [sharding.md](sharding.md) §Migration (Goal 4) — design on sharded architecture
 > Design: [docs/design/extensibility-architecture.md](../docs/design/extensibility-architecture.md) §6 (State Commitment Extension), §7 (State Opening Extension)
 > Related: [docs/design/master-roadmap.md](../docs/design/master-roadmap.md) (layered composition), [docs/design/commitment-architecture-research.md](../docs/design/commitment-architecture-research.md)
 
 ## Goal
 
-Make commitment schemes (SSMC, SMT) pluggable via traits. App developers can provide custom commitment schemes without modifying Tabula. StateColumnChip becomes an SSMC implementation detail, not core infrastructure.
+Make commitment schemes (SSMC, SMT) pluggable via traits. App developers can provide custom commitment schemes without modifying Tabula. StateShard becomes an SSMC implementation detail, not core infrastructure.
+
+**Sharding context**: With full sharding as base architecture, ColumnCommitment operates within Tier 2 (per-column proofs). Each column proof independently runs its commitment scheme. The trait must be designed for per-column-proof context, not global batching.
 
 ## Architecture
 
-Three-layer composition model (see [master-roadmap.md](../docs/design/master-roadmap.md)):
+Three-tier composition model (aligned with sharded proof structure):
 
 ```
-Layer 0: Core (fixed)
-  Execution, Memory, Root Proof, Bus Consumers
+Tier 1: Execution Proof (fixed)
+  ExecutionChip, StaticTableChip, PoseidonLocal, RCLocal
 
-Layer 1: Column Commitment (pluggable)
-  ColumnCommitment trait — batch API
-  "ssmc" → SsmcCommitment → StateColumnChip
-  "smt"  → SmtCommitment → (no extra chip)
+Tier 2: Column Proofs (pluggable commitment per column)
+  ColumnCommitment trait — per-column API
+  "ssmc" → SsmcCommitment → MemoryShard + StateShard
+  "smt"  → SmtCommitment → (lightweight)
   "custom" → user-defined
 
-Layer 2: Bus Consumers (auto-collected)
-  BusConsumer trait: PoseidonChip, RangeCheckChip, extensible
+Tier 3: Root Proof (fixed)
+  Cumsum balance, SMT path verification
 ```
 
 ## Tasks
@@ -76,7 +78,6 @@ Layer 2: Bus Consumers (auto-collected)
 
 ### Internal traits (pub(crate))
 
-- [ ] MemoryModel — abstraction over InterTxOrderChip (single impl: GlobalSortedMemory)
 - [ ] RootProof — abstraction over ColumnMeta + SmtPath (single impl: SmtRootProof)
 
 ### Builder API extensions
@@ -92,7 +93,7 @@ Layer 2: Bus Consumers (auto-collected)
 
 ## Completion Criteria
 
-- StateColumnChip owned by SsmcCommitment, not core
+- StateShard owned by SsmcCommitment, not core
 - SSMC/SMT registered via ColumnCommitment trait
 - PoseidonChip and RangeCheckChip via BusConsumer
 - Internal trait boundaries (MemoryModel, RootProof) exist

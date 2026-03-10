@@ -381,204 +381,389 @@ With execution (278 + 93 + 2 = 373) + root (~50): 11,800 + 373 + 50 ≈ 12,223 F
 
 ## 7. Gap Analysis: Current → Sharded
 
-### 7.1 Summary
+This section is based on a complete code-level audit of the `machine`, `witness`,
+`stark`, and `chips` crates.
 
-| ID | Gap | Current | Target | Effort |
-|----|-----|---------|--------|--------|
-| G1 | Multi-proof orchestrator | `TabulaMachine.prove()` single proof | `ShardedProver` producing C+2 proofs | Large |
-| G2 | Independent PCS per proof | Shared PCS (one Merkle tree) | Per-proof PCS instances | Medium |
-| G3 | Public value cumsums | Internal cumsum balance check | Export cumsums as public outputs | Medium |
-| G4 | Per-column Poseidon/RC | Global PoseidonChip + RangeCheckChip | PoseidonLocal + RangeCheckLocal per column | Medium |
-| G5 | Cross-proof Fiat-Shamir | Single-proof transcript | Multi-commitment transcript with sync point | Medium |
-| G6 | ColumnMeta decomposition | Global ColumnMetaChip | Per-column public outputs + SmtPath in root proof | Small |
-| G7 | Multi-proof verifier | `TabulaMachine.verify()` single proof | `ShardedVerifier` checking C+2 proofs | Medium |
-| G8 | Witness partitioning | Global WitnessStore | Per-column witness partitioning | Small |
-| G9 | Recursive aggregation | Not needed | Binary tree proof reduction (optional) | Large (Phase 5) |
+### 7.1 No Changes Needed
 
-### 7.2 Detailed Gap Analysis
+These components are already sharding-ready:
+
+| Component | Location | Why It Works |
+|-----------|----------|--------------|
+| `ChipId(u16)` + `ChipIdAllocator` | `stark/src/chips.rs` | Open newtype, dynamic allocation, 65K IDs |
+| `BusId(u16)` + `define_bus!` | `stark/src/air/bus.rs` | Multi-instance safe; same bus ID aggregates correctly |
+| `ChipSpec`, `AnyRap`, `DynChip` | `stark/src/chips.rs`, `machine/src/any_rap.rs` | Stateless traits, per-instance independent |
+| `TraceMap` | `stark/src/trace/trace_map.rs` | `BTreeMap<ChipId, TraceEntry>` — unlimited entries |
+| MemoryShard, StateShard, MetaShard | `chips/src/shards/` | Implemented + tested (48, 93, 96 cols) |
+| LogUp fingerprint computation | `machine/src/permutation/` | Pure function; multi-instance aggregation automatic |
+| Inter-chip coupling | All chip `air.rs` | **Zero** direct code references between chips; all via LogUp buses |
+| `MemoryModel`, `CommitmentScheme`, `RootProof` traits | `machine/src/composition.rs` | Interface supports sharded impls (add new structs) |
+| PoseidonChip, RangeCheckChip | `chips/src/` | Stateless; can instantiate per-column without code changes |
+
+### 7.2 Summary of All Gaps
+
+| ID | Area | Gap | Severity | Effort |
+|----|------|-----|----------|--------|
+| **Machine crate** | | | | |
+| G1 | `prove/mod.rs` | Single-proof prover → multi-proof orchestrator | Critical | Large |
+| G2 | `prove/mod.rs:137,198,231` | Shared PCS → independent PCS per proof | Critical | Medium |
+| G3 | `prove/mod.rs:174`, `verify/mod.rs:202` | Internal cumsum check → public value export | Critical | Medium |
+| G4 | `composition.rs` | Global Poseidon/RC → per-proof local instances | Medium | Medium |
+| G5 | `prove/mod.rs:141-149` | Single Fiat-Shamir → cross-proof transcript with sync | Critical | Medium |
+| G6 | `composition.rs` | Global ColumnMeta → per-column public values + root proof | Medium | Small |
+| G7 | `verify/mod.rs:34-89` | Single-proof verifier → multi-proof verifier | Critical | Medium |
+| G10 | `keys.rs:16-116` | Single ProvingKey/VerifyingKey → per-proof-instance keys | Medium | Small |
+| G11 | `prove/quotient.rs:359-459` | Batched quotient LDEs → per-proof quotient | Medium | Small |
+| G12 | `verify/mod.rs:231-250` | `validate_chip_manifest()` expects all chips → per-proof subset | Medium | Small |
+| **Witness crate** | | | | |
+| W1 | `generator.rs:134-135` | All-column single loop → per-column partitioning | High | Medium |
+| W2 | `encoding.rs:159-177` | Global state root → root proof tier responsibility | High | Medium |
+| W3 | `smt.rs:71-197` | Global SMT tree build → root proof tier | High | Medium |
+| W4 | `memory/mod.rs:49-55` | Global memory input aggregation → per-column | Critical | Large |
+| W5 | `memory/chain.rs:7-45` | Cross-column sequential hash chain → per-column in StateShard | High | Medium |
+| W6 | `memory/inter_tx.rs:134-142` | Global inter-tx sort `(t,c,key,tx)` → per-column sort | High | Small |
+| W7 | `builder.rs:145-162` | Global `prepare_inputs()` → per-proof partitioned inputs | Medium | Medium |
+| W8 | `orchestration.rs:34-62` | Single-pipeline `build_all_traces()` → per-proof-instance dispatch | Critical | Large |
+| W9 | `validation.rs:28-66` | Global bus balance check → per-proof + cross-proof check | Low | Small |
+| W10 | `types.rs:85-115` | `BatchWitness.columns: Vec` flat → `PartitionedWitness` | Medium | Medium |
+| W11 | `route.rs:60-84` | Global write-set key routing → per-column (trivial in sharded) | Low | Small |
+| **Composition** | | | | |
+| G13 | `composition.rs:38-224` | Only global impls exist → `ShardedMemory` + `ShardedCommitment` | High | Medium |
+
+### 7.3 Machine Crate Gaps (Detailed)
 
 #### G1: Multi-Proof Orchestrator
 
-**Current**: `TabulaMachine::prove()` builds all traces, commits all in shared PCS,
-runs single FRI.
+**Current** (`prove/mod.rs:65-263`): `prove_with_key()` is an 11-phase sequential
+pipeline. Phase 3 (line 137) commits ALL chip main traces in one `PcsCommitment`.
+Phase 5 (line 154) accumulates a single `cumsum_total` across all chips. Phase 9
+(line 231) commits all quotient LDEs together. Single FRI proof covers everything.
 
-**Target**: `ShardedProver` orchestrates:
+**Target**: `ShardedProver` orchestrates C+2 `ProofInstance` objects:
 1. Parallel main trace building (C+1 independent trace sets)
 2. Parallel main commits (C+1 independent PCS instances)
-3. Sync: collect all commitments, derive shared (α, β)
+3. **Sync point**: collect all commitments, derive shared (α, β)
 4. Parallel perm trace building + commit
 5. Parallel quotient + FRI completion
-6. Root proof construction
+6. Root proof construction (sequential, after all column proofs)
 
-**Key change**: The prover becomes a **two-phase parallel pipeline** with one sync point,
-rather than a sequential pipeline.
-
-**Implementation approach**: `ShardedProver` wraps C+1 instances of the existing
-single-proof prover. Each instance operates on a subset of chips. The sync point is a
-barrier where commitments are exchanged.
+**Implementation**: `ShardedProver` wraps C+1 instances of a new `ProofInstance`
+abstraction. Each instance operates on a subset of chips with its own PCS. The sync
+point is a barrier where commitments are exchanged for challenge derivation.
 
 #### G2: Independent PCS per Proof
 
-**Current**: All chip traces go into one batched MMCS. One `PcsCommitment` per round
-covers all chips.
+**Current** (`prove/mod.rs:137,198,231`): Three `commit()` calls each batch ALL chips:
+- Line 137: `commit(pcs, main_pairs)` — all chip main traces in one Merkle tree
+- Line 198: `commit(pcs, perm_pairs)` — all perm traces together
+- Line 231: `commit_ldes(pcs, all_quotient_ldes)` — all quotients together
 
-**Target**: Each proof instance has its own MMCS. Column proof [i] commits only
+**Target**: Each `ProofInstance` has its own MMCS. Column proof [i] commits only
 MemoryShard[i] + StateShard[i] + PoseidonLocal[i] + RangeCheckLocal[i].
-
-**Key change**: `TabulaProvingKey` and `TabulaVerifyingKey` become per-proof-instance.
-The machine generates C+2 key sets.
-
-**Benefit**: FRI query opening data per proof is ~236 FE (column) instead of ~12,223 FE
-(all chips combined). Individual proof sizes are small; aggregate is larger but each
-can be verified independently.
 
 #### G3: Public Value Cumsums
 
-**Current**: `cumsum_final` is a field in `ChipOpening`. The verifier sums all cumsums
-within the single proof and checks Σ = 0.
+**Current** (`prove/mod.rs:154-178`, `verify/mod.rs:197-209`):
+```
+cumsum_total = Σ (all chip cumsums)
+if cumsum_total ≠ 0 → Error::LogUpImbalance
+```
+Single accumulator checked within one proof.
 
-**Target**: Each proof exports its total cumsum as a public value. The root proof
-verifier checks: `cumsum_exec + Σ cumsum_col[i] = 0`.
+**Target**: Split cumsums into two categories per proof:
+- **Internal** (BaseStateEntry + CoalescedWrite + PoseidonPerm + RangeCheck): must
+  sum to 0 within each column proof
+- **External** (ReadAccess + WriteAccess): exported as `cumsum_memory` public value
 
-**Key change**: Split cumsums into "intra-proof" (must be zero for internal buses) and
-"cross-proof" (exported as public values for Memory bus).
-
-**Design detail**: Each column proof computes two cumsum categories:
-- Internal: BaseStateEntry + CoalescedWrite + PoseidonPerm + RangeCheck → must sum to 0
-  within the column proof
-- External: ReadAccess + WriteAccess → exported as `cumsum_memory` public value
-
-The verifier checks internal balance per proof, then cross-proof balance in root.
-
-#### G4: Per-Column Poseidon and RangeCheck
-
-**Current**: One global `PoseidonChip` (93 main + 17 preprocessed cols) processes all
-Poseidon permutations. One global `RangeCheckChip` (2 cols) accumulates all range checks.
-Both registered as `BusConsumer` in orchestration.
-
-**Target**: Each column proof has local instances. The `BusConsumer` trait is replaced
-by direct chip registration within the column proof's chip set.
-
-**Key change**: `PoseidonLocal` and `RangeCheckLocal` are the same chip implementations
-as the current global versions, just instantiated per-column with only that column's
-data. No code change to the chips themselves — only to how they're registered and
-populated.
-
-**Preprocessed trace**: PoseidonLocal reuses the same preprocessed round constants.
-Each column proof includes the same 17-column preprocessed trace. This is duplicated
-C times but is tiny (21 rows × 17 cols = 357 FE per column).
+Root proof verifier checks: `cumsum_exec + Σ cumsum_col[i] = 0`.
 
 #### G5: Cross-Proof Fiat-Shamir
 
-**Current**: Single challenger observes statement → preprocessed → main → sample (α,β)
-→ perm → sample alpha → quotient → sample zeta, all within one proof.
+**Current** (`prove/mod.rs:141-149`): Single challenger observes one `main_commitment`
+(line 146), samples one pair of LogUp challenges (lines 148-149).
 
 **Target**: Two-level Fiat-Shamir:
-1. **Global transcript** (Phase 2): observes all main commitments from all proofs,
-   samples shared (α, β). Distributed to all proof instances.
-2. **Per-proof transcript** (Phase 4): each proof observes its own perm commitment,
-   samples its own alpha and zeta independently.
+1. **Global transcript**: observes all C+1 main commitments in canonical `(t,c)` order,
+   samples shared (α, β)
+2. **Per-proof transcript**: each proof observes its own perm commitment, samples its
+   own alpha and zeta independently
 
-**Soundness**: The global transcript ensures LogUp challenges are unpredictable.
-Per-proof alpha and zeta are safe to derive independently because they only affect
-constraint folding within each proof.
-
-**Implementation**: The `ShardedProver` manages the global transcript. After Phase 2,
-it forks into C+1 independent per-proof transcripts, each seeded with (α, β) from the
-global transcript.
-
-#### G6: ColumnMeta Decomposition
-
-**Current**: `ColumnMetaChip` (56 cols) handles per-column metadata AND SMT leaf
-computation in one global chip.
-
-**Target**: Split into:
-1. **Per-column commitment output**: Com_old, Com_new, is_empty flags become public
-   values of each column proof (from StateShard's final state).
-2. **SmtPath chips**: Remain in root proof. Verify that Com values are consistent
-   with old_root → new_root via SMT inclusion proofs.
-
-**Key change**: `MetaShard` is simplified. Instead of a full chip with SMT leaf
-computation, it becomes a public-value extractor from StateShard. SMT verification
-moves entirely to the root proof.
+Per-proof alpha and zeta are safe to derive independently — they only affect constraint
+folding within each proof, not cross-proof bus balance.
 
 #### G7: Multi-Proof Verifier
 
-**Current**: `TabulaMachine::verify()` checks one proof with one FRI opening.
+**Current** (`verify/mod.rs:34-89`): `validate_chip_manifest()` (line 45) requires ALL
+registered chips to appear in proof. Reconstructs single Fiat-Shamir transcript. Verifies
+one PCS opening proof. Sums all `cumsum_final` values (line 202) for global balance.
 
 **Target**: `ShardedVerifier`:
 1. Reconstruct global (α, β) from all main commitments
 2. Verify each proof independently (parallel)
-3. Verify root proof (SMT paths + bus balance)
+3. Verify root proof (SMT paths + bus balance arithmetic)
 
-**Key change**: Verification becomes parallelizable. Each column proof can be verified
-independently by different machines.
+#### G10: Per-Proof Keys
 
-#### G8: Witness Partitioning
+**Current** (`keys.rs:16-116`): `TabulaProvingKey::from_registry()` iterates ALL chips
+in the registry (line 24) to produce one key. `TabulaVerifyingKey` mirrors this.
 
-**Current**: `WitnessStore` is a single typed key-value store. `TraceBuilder` populates
-it with all chip data. `build_all_traces()` iterates all chips sequentially.
+**Target**: Per-`ProofInstance` keys. Each proof instance generates its own
+ProvingKey/VerifyingKey from its chip subset.
 
-**Target**: Witness data is partitioned by column during `TraceBuilder`:
-1. Global partition: InstructionRecords, StaticTableRows (for execution proof)
-2. Per-column partitions: ColumnMemoryAccesses, ColumnSsmcWitness (for column proofs)
-3. Root partition: SmtPaths, ColumnCommitments (for root proof)
+#### G11: Per-Proof Quotients
 
-**Key change**: `WitnessStore` becomes `WitnessPartition` or similar. Each proof
-instance receives only its relevant partition.
+**Current** (`prove/quotient.rs:359-459`): `compute_chip_quotients()` iterates all
+`chip_infos`, accumulates quotient LDEs into a single `Vec`, using shared `alpha` and
+`logup_challenges`.
+
+**Target**: Each `ProofInstance` computes quotients only for its own chips.
+
+#### G12: Per-Proof Chip Manifest
+
+**Current** (`verify/mod.rs:231-250`): `validate_chip_manifest()` rejects proofs that
+don't contain ALL registered chips.
+
+**Target**: Each proof's manifest matches only its proof instance's chip subset.
+
+### 7.4 Witness Crate Gaps (Detailed)
+
+The witness pipeline has **11 global assumptions** — this is the most underestimated
+area. The entire pipeline is architected as a single monolithic pass over all columns.
+
+#### W1: WitnessGenerator Column Loop
+
+**Current** (`generator.rs:134-135`):
+```rust
+for (&(table, col), old_state) in old_column_states {
+    // processes ALL columns in one loop
+}
+```
+
+**Target**: Partition `old_column_states` by proof tier before witness generation.
+Execution proof gets instruction-level data. Each column proof gets its own
+`(table, col)` subset. Root proof gets SMT path data.
+
+#### W2: Global State Root Computation
+
+**Current** (`encoding.rs:159-177`): `compute_state_root()` takes ALL column states,
+groups by table (line 164), computes per-table roots, combines into single global root.
+
+**Target**: State root computation moves to root proof tier. Column proofs output
+`Com_old`, `Com_new` as public values. Root proof takes these as inputs and verifies
+SMT paths to `old_root` / `new_root`.
+
+#### W3: Global SMT Path Building
+
+**Current** (`smt.rs:71-197`): `build_smt_paths()` groups ALL ColumnMeta entries by
+table (line 80), builds per-table SMT trees with ALL column leaves (lines 92-102),
+then builds a global table-level SMT tree (line 138).
+
+**Target**: SMT path computation is root proof tier responsibility. It receives
+commitment values from all column proofs and builds the merkle proof. Column proofs
+do not touch SMT.
+
+#### W4: Global Memory Input Preparation
+
+**Current** (`memory/mod.rs:49-55`):
+```rust
+for column in &witness.columns {
+    inter_tx_rows.extend(build_inter_tx_rows(column)?);
+    state_rows.extend(build_state_rows(column)?);
+}
+// sorts ALL rows globally (line 54-55)
+```
+
+All columns' memory rows are aggregated and globally sorted. Hash chain accumulators
+are populated sequentially across all columns (line 58).
+
+**Target**: Per-column memory input preparation. Each column proof builds its own
+sorted memory rows and hash chain accumulators independently. No cross-column
+aggregation. This is the largest witness pipeline change.
+
+#### W5: Cross-Column Hash Chain Accumulation
+
+**Current** (`memory/chain.rs:7-45`): `populate_state_chain_accumulators()` identifies
+column boundaries by `(table_id, col_id)` pairs, chains hash accumulators sequentially
+across all columns. `prev_old` and `prev_new` carry state between columns.
+
+**Target**: Per-column hash chain accumulation within each StateShard. No cross-column
+chaining. Each column proof's StateShard independently maintains its own hash chain
+from first entry to last.
+
+#### W6: Global Inter-Tx Row Sorting
+
+**Current** (`memory/inter_tx.rs:134-142`): `sort_inter_tx_rows()` sorts ALL inter-tx
+rows globally by `(table_id, col_id, key, tx_index)`.
+
+**Target**: Per-column sort within each MemoryShard. Since each column proof handles
+one `(t,c)`, the sort key simplifies to just `(key, tx_index)`.
+
+#### W7: Global TraceBuilder Inputs
+
+**Current** (`builder.rs:145-162`): `prepare_inputs()` derives `empty_columns` from all
+`column_metas` together (line 146-152), calls lowering and SMT path building for the
+entire batch.
+
+**Target**: Partitioned input preparation. Execution proof gets instruction records.
+Each column proof gets its column-specific witness. Root proof gets SMT paths and
+commitment values.
+
+#### W8: Single-Pipeline Orchestration
+
+**Current** (`orchestration.rs:34-62`): `build_all_traces()` groups ALL chips by phase,
+dispatches them in phase order. Between Memory and Dependent phases (line 53), evaluates
+Phase 0+1 chip traces collectively for bus consumer dispatch.
+
+**Target**: Per-proof-instance orchestration. Each `ProofInstance` builds traces only
+for its own chips. Bus consumer dispatch (Poseidon/RC) happens within each proof
+instance, not globally.
+
+This is the second-largest change — the entire orchestration loop becomes per-instance.
+
+#### W9: Global Bus Balance Validation
+
+**Current** (`validation.rs:28-66`): `debug_validate_trace_map()` iterates all chips,
+evaluates constraints, checks global bus balance across all chips for every bus ID.
+
+**Target**: Two-level validation:
+1. Per-proof: internal buses must balance within each proof
+2. Cross-proof: external buses (ReadAccess, WriteAccess) export partial sums for
+   root proof verification
+
+#### W10: Flat BatchWitness Structure
+
+**Current** (`types.rs:85-115`):
+```rust
+pub struct BatchWitness<H> {
+    pub columns: Vec<ColumnWitness<H>>,    // flat list, all columns
+    pub column_metas: Vec<ColumnMeta>,      // flat list, sorted by (t,c)
+    pub old_state_root: NativeDigest,       // single global root
+    pub new_state_root: NativeDigest,       // single global root
+    pub key_routes: BTreeMap<CellKey, KeyRoute>,  // global routing map
+}
+```
+
+**Target**: Partitioned witness structure:
+```rust
+pub struct PartitionedWitness<H> {
+    pub execution: ExecutionWitness,           // instruction records, static tables
+    pub columns: BTreeMap<(TableId, ColId), ColumnWitness<H>>,  // per-column
+    pub root: RootWitness,                     // SMT paths, commitment values
+}
+```
+
+#### W11: Global Key Routing
+
+**Current** (`route.rs:60-84`): `route_keys()` collects ALL written keys into a global
+set, iterates all events globally, assigns `KeyRoute` per key.
+
+**Target**: Per-column routing (trivial in sharded model — each column has its own
+MemoryShard, so routing is implicit).
+
+### 7.5 Composition Gap
+
+#### G13: Sharded Implementations of Composition Traits
+
+**Current** (`composition.rs:38-224`): Only global implementations exist:
+```rust
+impl MemoryModel for GlobalSortedMemory {
+    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
+        vec![Box::new(InterTxOrderChip::<3>)]  // ONE chip for all columns
+    }
+}
+impl CommitmentScheme for SsmcScheme {
+    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
+        vec![Box::new(StateColumnChip::<3>)]   // ONE chip for all columns
+    }
+}
+```
+
+**Target**: New implementations that return per-column shard chips:
+```rust
+impl MemoryModel for ShardedMemory {
+    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
+        self.columns.iter().map(|(t, c)| {
+            Box::new(MemoryShardChip::<3>::new(self.alloc.next(), *t, *c))
+        }).collect()  // C chips, one per column
+    }
+}
+impl CommitmentScheme for ShardedSsmc {
+    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
+        self.columns.iter().map(|(t, c)| {
+            Box::new(StateShardChip::<3>::new(self.alloc.next(), *t, *c))
+        }).collect()  // C chips, one per column
+    }
+}
+```
+
+Note: the trait interfaces themselves are fine. Only new implementing structs are
+needed.
 
 ---
 
 ## 8. Implementation Roadmap
 
-### Phase A: Foundation (enables sharded proving)
+### Phase A: Proof Infrastructure
 
-| Task | Description | Depends On |
-|------|-------------|------------|
-| A1 | `ProofInstance` abstraction — encapsulates a subset of chips with independent PCS | — |
-| A2 | `ShardedProver` — orchestrates C+2 ProofInstances with sync point | A1 |
-| A3 | Global Fiat-Shamir transcript — collects all main commitments, derives shared (α, β) | A2 |
-| A4 | Public value cumsum export — split internal vs cross-proof cumsums | A1 |
-| A5 | `ShardedVerifier` — verifies C+2 proofs + cross-proof bus balance | A4 |
-| A6 | `ShardedTabulaProof` — aggregate proof envelope | A4 |
+| Task | Description | Gaps Addressed | Depends On |
+|------|-------------|----------------|------------|
+| A1 | `ProofInstance` — encapsulates chip subset + independent PCS + own keys | G1, G2, G10 | — |
+| A2 | `ShardedProver` — orchestrates C+2 ProofInstances with sync point | G1, G11 | A1 |
+| A3 | Global Fiat-Shamir — collects all main commitments, derives shared (α, β) | G5 | A2 |
+| A4 | Public value cumsum — split internal vs cross-proof cumsums | G3 | A1 |
+| A5 | `ShardedVerifier` — verifies C+2 proofs + cross-proof bus balance | G7, G12 | A4 |
+| A6 | `ShardedTabulaProof` — aggregate proof envelope | G3 | A4 |
 
-### Phase B: Column Proof Self-Containment
+### Phase B: Witness Pipeline Decomposition
 
-| Task | Description | Depends On |
-|------|-------------|------------|
-| B1 | `PoseidonLocal` — per-column Poseidon instance (same chip, different registration) | A1 |
-| B2 | `RangeCheckLocal` — per-column RangeCheck instance | A1 |
-| B3 | Witness partitioning — split WitnessStore into per-proof partitions | A2 |
-| B4 | Column proof integration test — single column proof E2E (prove + verify) | B1, B2, B3 |
+| Task | Description | Gaps Addressed | Depends On |
+|------|-------------|----------------|------------|
+| B1 | `PartitionedWitness` — replace flat `BatchWitness` with per-tier structure | W10 | — |
+| B2 | Per-column memory input — move `prepare_memory_inputs()` to per-column | W4, W6 | B1 |
+| B3 | Per-column hash chain — decouple `populate_state_chain_accumulators()` | W5 | B2 |
+| B4 | Per-column witness generator — partition `WitnessGenerator.generate()` | W1 | B1 |
+| B5 | SMT/state root → root tier — move `build_smt_paths()`, `compute_state_root()` | W2, W3 | B1 |
+| B6 | Per-proof orchestration — `build_all_traces()` dispatches per proof instance | W8 | B2, B5 |
+| B7 | Per-proof `prepare_inputs()` — partitioned `TraceBuilder` | W7 | B6 |
+| B8 | Key routing simplification — per-column routing (trivial) | W11 | B1 |
+| B9 | Two-level validation — per-proof + cross-proof bus balance debug check | W9 | B6 |
 
-### Phase C: Root Proof
+### Phase C: Column Proof Self-Containment
 
-| Task | Description | Depends On |
-|------|-------------|------------|
-| C1 | ColumnMeta decomposition — extract Com_old/Com_new as public values from StateShard | B4 |
-| C2 | SmtPath root proof — standalone proof for SMT path verification | C1 |
-| C3 | Bus balance verification in root — arithmetic check Σ cumsums = 0 | A4, C2 |
-| C4 | Root proof integration test — full root proof E2E | C3 |
+| Task | Description | Gaps Addressed | Depends On |
+|------|-------------|----------------|------------|
+| C1 | Per-column PoseidonLocal + RangeCheckLocal registration | G4 | A1 |
+| C2 | `ShardedMemory` + `ShardedSsmc` composition impls | G13 | C1 |
+| C3 | ColumnMeta → public values from StateShard + root proof SmtPath | G6 | B5 |
+| C4 | Column proof integration test — single column E2E (prove + verify) | — | B6, C1, C2, C3 |
 
-### Phase D: Parallel Execution
+### Phase D: Root Proof
 
-| Task | Description | Depends On |
-|------|-------------|------------|
-| D1 | Parallel main trace building — rayon/tokio for C+1 concurrent trace constructions | B3 |
-| D2 | Parallel PCS commit — concurrent Merkle tree construction | D1 |
-| D3 | Parallel FRI — concurrent FRI opening proof generation | D2 |
-| D4 | Parallel verification — concurrent proof verification | A5 |
+| Task | Description | Gaps Addressed | Depends On |
+|------|-------------|----------------|------------|
+| D1 | Root proof chip set — SmtColPath + SmtTablePath with commitment inputs | — | C3 |
+| D2 | Root proof bus balance — arithmetic Σ cumsums = 0 verification | G3 | A4, D1 |
+| D3 | Root proof integration test — full root proof E2E | — | D2 |
 
 ### Phase E: End-to-End Validation
 
 | Task | Description | Depends On |
 |------|-------------|------------|
-| E1 | Sharded E2E test — DSL → compile → execute → witness → shard → prove → verify | C4 |
+| E1 | Sharded E2E test — DSL → compile → execute → witness → shard → prove → verify | C4, D3 |
 | E2 | Equivalence test — sharded proof verifies same statement as global proof | E1 |
-| E3 | Benchmark — prover speedup measurement (global vs sharded, sequential vs parallel) | E1 |
+| E3 | Benchmark — prover speedup measurement (global vs sharded, seq vs parallel) | E1 |
 | E4 | Multi-column test — 10+ columns with uneven row distribution | E1 |
 
-### Phase F: Recursive Aggregation (future, optional)
+### Phase P: Parallel Execution (independent optimization track)
+
+| Task | Description | Depends On |
+|------|-------------|------------|
+| P1 | Parallel main trace building — rayon for C+1 concurrent trace constructions | B6 |
+| P2 | Parallel PCS commit — concurrent Merkle tree construction | P1 |
+| P3 | Parallel FRI — concurrent FRI opening proof generation | P2 |
+| P4 | Parallel verification — concurrent proof verification | A5 |
+
+### Phase F: Recursive Aggregation (future)
 
 | Task | Description | Depends On |
 |------|-------------|------------|
@@ -589,18 +774,45 @@ instance receives only its relevant partition.
 ### Dependency Graph
 
 ```
-A1 ──→ A2 ──→ A3
- │      │
- │      └──→ B3 ──→ B4 ──→ C1 ──→ C2 ──→ C3 ──→ C4 ──→ E1 ──→ E2
- │                    ↑                                    │      E3
- ├──→ A4 ──→ A5      │                                    │      E4
- │    │      A6      │                                    │
- ├──→ B1 ────────────┘                                    └──→ F1 → F2 → F3
- └──→ B2 ────────────┘
+Phase A (Proof Infrastructure)        Phase B (Witness Pipeline)
+A1 ──→ A2 ──→ A3                      B1 ──→ B2 ──→ B3
+ │      │                              │      │      │
+ │      └──────────────────────────────│──────┤      │
+ │                                     │      ▼      ▼
+ ├──→ A4 ──→ A5                        ├──→ B4    B5 ──→ B6 ──→ B7
+ │    │      │                         │              │      B8
+ │    │      A6                        │              B9
+ │    │                                │
+ ▼    ▼                                ▼
+Phase C (Column Proof)                Phase D (Root Proof)
+C1 ──→ C2                             D1
+ │      │                              │
+ └──→ C3 ←── B5                        D2 ←── A4
+       │                               │
+       ▼                               ▼
+      C4 ←── B6                        D3
+       │                               │
+       └───────────┬───────────────────┘
+                   ▼
+                  E1 ──→ E2, E3, E4
 
-D1 ──→ D2 ──→ D3 (parallel with C/E, independent optimization)
-A5 ──→ D4
+P1 ──→ P2 ──→ P3 (parallel track, after B6)
+A5 ──→ P4
+
+E1 ──→ F1 → F2 → F3 (future)
 ```
+
+### Effort Estimate
+
+| Phase | Scope | Estimated LOC |
+|-------|-------|---------------|
+| A | Proof infrastructure (G1-G5, G7, G10-G12) | ~1,200 |
+| B | Witness pipeline decomposition (W1-W11) | ~1,500 |
+| C | Column proof self-containment (G4, G6, G13) | ~600 |
+| D | Root proof | ~400 |
+| E | E2E validation + tests | ~500 |
+| P | Parallel execution | ~400 |
+| **Total (A-E)** | | **~4,200** |
 
 ---
 
@@ -611,7 +823,7 @@ A5 ──→ D4
 The sharded protocol does NOT replace the global protocol. Both coexist:
 
 ```rust
-// Global (current default, unchanged)
+// Global (current, unchanged)
 let machine = TabulaMachine::builder()
     .with_core_chips()
     .with_default_commitments()
@@ -633,18 +845,20 @@ Both protocols share:
 - All chip implementations (ExecutionChip, MemoryShard, StateShard, PoseidonChip, etc.)
 - AIR constraint definitions
 - LogUp fingerprint computation
-- WitnessStore data structures
 - FRI and PCS primitives from p3
+- Value encoding, IR, executor
 
 The difference is purely in **orchestration**: how chips are grouped into proofs and
 how bus balance is verified.
 
 ### 9.3 Migration Path
 
-1. Implement `ProofInstance` as a generalization of the current prover
+1. Implement `ProofInstance` as a generalization of the current prover (Phase A)
 2. Refactor `TabulaMachine::prove()` to use `ProofInstance` internally (1 instance)
-3. Add `ShardedProver` that creates C+2 `ProofInstance`s
-4. Both paths share the same underlying prover code
+3. Decompose witness pipeline into per-proof partitions (Phase B)
+4. Add `ShardedProver` that creates C+2 `ProofInstance`s (Phase A+C)
+5. Both paths share the same underlying prover code
+6. Validate equivalence: sharded proof verifies same statement as global (Phase E)
 
 ---
 
@@ -653,29 +867,35 @@ how bus balance is verified.
 | # | Question | Impact | Notes |
 |---|----------|--------|-------|
 | Q1 | Should execution proof embed its own Poseidon/RC, or export partial sums? | Proof independence | §4.2 proposes embedding. Needs validation. |
-| Q2 | Can per-proof alpha and zeta be derived independently? | Soundness | §G5 argues yes. Needs formal argument. |
+| Q2 | Can per-proof alpha and zeta be derived independently? | Soundness | §7.3 G5 argues yes. Needs formal argument. |
 | Q3 | What is the minimum viable recursive aggregation for production? | Proof size | Binary tree? Groth16 wrapping? |
 | Q4 | How should untouched columns be handled? | Efficiency | Skip column proof entirely? Empty proof? |
 | Q5 | Should the global protocol be deprecated or maintained long-term? | Maintenance | Both have valid use cases (small vs large C). |
-| Q6 | How does this interact with the Precompile framework (Phase 3b)? | Extensibility | Precompile chips could be per-column or global. |
+| Q6 | How does this interact with the Precompile framework? | Extensibility | Precompile chips could be per-column or global. |
+| Q7 | Should `BatchWitness` be replaced or extended? | Migration | `PartitionedWitness` (new) vs `BatchWitness::partition()` (adapter). |
 
 ---
 
 ## 11. Conclusion
 
 The fully sharded protocol transforms Tabula's proving from a sequential monolithic
-process to an embarrassingly parallel pipeline. The architecture change is significant
-(G1-G8) but builds on existing infrastructure:
+process to an embarrassingly parallel pipeline. The code-level audit identified
+**25 specific gaps** across three areas:
 
-- Shard chips (MemoryShard, StateShard, MetaShard) are already implemented and tested
-- The ColumnCommitment and CommitmentScheme traits provide the abstraction boundary
-- PoseidonChip and RangeCheckChip can be instantiated per-column without code changes
-- The bus protocol (LogUp) naturally supports cross-proof balance via public cumsums
+- **Machine crate** (G1-G7, G10-G12): Proof orchestration, PCS, Fiat-Shamir, keys,
+  verifier — 10 gaps, ~1,200 LOC
+- **Witness crate** (W1-W11): Pipeline decomposition, memory input, hash chain,
+  orchestration, validation — 11 gaps, ~1,500 LOC (most underestimated area)
+- **Composition** (G13): New sharded implementations of existing traits — 1 gap, ~600 LOC
 
-The main engineering effort is the **multi-proof orchestrator** (G1, G5, G7) and
-**proof structure redesign** (G2, G3, G6). These are infrastructure changes, not
-algorithmic ones.
+The good news: the **foundational layer is already sharding-ready**. ChipId, BusId,
+TraceMap, all chip implementations, LogUp, and the composition trait interfaces require
+zero changes. The work is entirely in orchestration and witness pipeline — infrastructure
+changes, not algorithmic ones.
 
-**Recommended next step**: Implement Phase A (ProofInstance + ShardedProver) as a
-proof-of-concept, then validate with a single-column E2E test before scaling to
-full parallelism.
+**Critical path**: Phase A (ProofInstance) → Phase B (witness decomposition) → Phase C
+(column proof) → Phase D (root proof) → Phase E (E2E validation).
+
+**Recommended next step**: Implement A1 (`ProofInstance`) and B1 (`PartitionedWitness`)
+in parallel as the two foundational abstractions, then converge at C4 (column proof
+integration test).

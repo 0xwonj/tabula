@@ -17,4 +17,6 @@
 ## Architecture
 
 - **No separate core/custom pipelines**: Core types are "pre-registered instances", not special-cased. One unified pipeline for everything.
+- **Full sharding IS the base architecture**: Not an optimization or future goal — it's the fundamental proof structure. Three tiers: Execution (1, global), Column proofs (C, parallel), Root proof (1, lightweight). All API design, extensibility traits, and optimization work must be built on the sharded model, not retrofitted onto global.
+- **Architectural decisions before API design**: Design extensibility APIs (commitment traits, composition framework, state traits) on the target architecture (sharded), not the interim one (global). Otherwise APIs need redesign after migration.
 - **Full sharding motivation is prover time, not custom types**: Custom type support is a side benefit. The primary driver is column width reduction + parallelism.

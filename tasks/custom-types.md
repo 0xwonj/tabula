@@ -1,59 +1,58 @@
-# Custom Type Extensibility
+# Type Foundation
 
-> Status: 🔬 Research (design decisions needed)
-> Depends: [composition.md](composition.md), design decision on bus width (see [sharding.md](sharding.md) or [optimization.md](optimization.md))
+> Status: 🔵 Ready (CT-1 and CT-2 have no blockers)
 > Design: [docs/design/custom-type-extensibility.md](../docs/design/custom-type-extensibility.md)
 > Related: [docs/design/extensibility-architecture.md](../docs/design/extensibility-architecture.md)
 
 ## Goal
 
-App developers can add custom types with arbitrary encoding width W without modifying Tabula. Core types (U64, I64, Bool, Bytes32) use the same mechanism — they are pre-registered instances, not special-cased.
+Open the closed type chain (ValueType → BabyBearCodec → exhaustive match) so custom types can register without modifying Tabula.
 
-## Open Design Decisions
+**With full sharding as base architecture**: Bus width (CT-5) is solved automatically — each column proof uses its own W. No MAX_W padding needed. CT-1 and CT-2 are still valuable as foundational infrastructure.
 
-Detailed analysis of each option: [custom-type-extensibility.md](../docs/design/custom-type-extensibility.md)
+## Tasks
 
-1. **Bus width strategy**: MAX_W padding (immediate, wasteful) vs full sharding (optimal, large effort). Depends on sharding adoption decision.
-2. **Value::Custom**: Needed only if custom types require executor arithmetic. Current recommendation: defer (Option B — storage-only custom types).
+### CT-1: TypeTag Open Identifier (~1 day)
 
-## Implementation Steps
-
-### CT-1: TypeTag open identifier
+> No blockers. Independent of sharding.
 
 - [ ] `ValueType` → `TypeTag(u16)` replacement
 - [ ] Well-known constants (U64=0, I64=1, BOOL=2, BYTES32=3)
+- [ ] `TypeTag::app(id)` for application-defined types
 - [ ] Update ~91 reference sites (mechanical)
 - [ ] Update `ColumnDef` schema type
 
-### CT-2: TypeEncoding trait
+### CT-2: TypeEncoding Trait (~1 day)
+
+> Depends: CT-1
 
 - [ ] Trait definition in `commitment/` or `stark/`
+  ```rust
+  pub trait TypeEncoding<F: PrimeField32>: Send + Sync {
+      fn type_tag(&self) -> TypeTag;
+      fn encoding_width(&self) -> EncodingWidth;
+      fn encode(&self, raw: &[u8]) -> Result<Vec<F>, TabulaError>;
+      fn decode(&self, fes: &[F]) -> Result<Vec<u8>, TabulaError>;
+      fn zero_encoding(&self) -> Vec<F>;
+  }
+  ```
 - [ ] Core type implementations (U64Encoding, I64Encoding, BoolEncoding, Bytes32Encoding)
 - [ ] `TypeEncodingRegistry` with pre-registered core types
 
-### CT-3: BabyBearCodec registry dispatch
+### CT-3: BabyBearCodec Registry Dispatch
+
+> Depends: CT-2
 
 - [ ] Replace 3 exhaustive matches with registry lookup
 - [ ] Backward compatible (core types pre-registered)
 
-### CT-4: Value::Custom variant (if needed)
+### CT-4: Value::Custom Variant (deferred)
 
-- [ ] Value enum extension
-- [ ] Copy → Clone migration (~251 sites)
+Deferred — custom types are storage-only. Types requiring computation use precompile pattern.
 
-### CT-5: Bus width unification
+### ~~CT-5: Bus Width Unification~~ (resolved by sharding)
 
-- [ ] Implement chosen approach (MAX_W padding or sharding)
-
-## Impact Summary
-
-| Change | Scope | Risk |
-|--------|-------|------|
-| TypeTag replacement | ~91 reference sites | Medium |
-| TypeEncoding trait + registry | New code, additive | Low |
-| BabyBearCodec refactor | 3 exhaustive matches | Low |
-| Value::Custom | ~251 sites, Copy lost | High |
-| Bus width | All chip send/receive | High |
+~~Implement MAX_W padding or sharding.~~ Full sharding resolves this: each column proof uses its column's native W. No global bus width coordination needed.
 
 ## Verification
 

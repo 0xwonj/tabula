@@ -1,9 +1,14 @@
 # Proof Optimization Architecture
 
 > Status: Design
-> Date: 2026-02-14
+> Date: 2026-02-14 (updated 2026-03-09)
 > Depends on: air-chip-architecture.md, proof-spec.md §4-§8
-> Scope: Phases 1-4 (excludes Phase 5 full circuit compiler)
+> Scope: Two-axis optimization (memory + execution layers)
+>
+> Related documents (extended optimization research, 2026-03-09):
+> - [constraint-compilation.md](constraint-compilation.md) — Constraint CSE via symbolic DAG extraction
+> - [prover-pipeline-acceleration.md](prover-pipeline-acceleration.md) — Infrastructure: BLAKE3, batch inversion, GPU, NTT
+> - [execution-chip-evolution.md](execution-chip-evolution.md) — ExecutionChip Level 0-4 evolution path
 
 ---
 

@@ -20,8 +20,27 @@
 | M1–M13 Foundation | All milestones complete. 9 core chips, 11 LogUp buses, 6 E2E STARK tests |
 | Machine Layer | TabulaMachine, ChipRegistry, shared PCS, two-round protocol, C1 soundness fix |
 | Foundation Refactoring | TracePhase open newtype, EncodingWidth, DEFAULT_VALUE_WIDTH, Composition buses, boundary audit |
+| Machine code quality | RAP folder encapsulation, error types, function extraction, directory structure |
 
 979 tests passing across workspace. Zero failures.
+
+---
+
+## Architecture Direction
+
+**Full sharding is the base architecture.** Per-column independent proofs are the target, not an optimization.
+
+- **Proof size**: solved by recursive aggregation (future Phase 5+)
+- **Custom types**: solved by per-column width polymorphism (natural in sharded)
+- **Bus width**: solved by per-column fingerprints (no MAX_W padding)
+- **SortedMem**: no global sorted memory; MemoryShard handles per-column
+
+Three-tier proof structure:
+- **Tier 1**: Execution proof (1, global) — ExecutionChip, StaticTableChip, PoseidonLocal, RCLocal
+- **Tier 2**: Column proofs (C, parallel) — MemoryShard\<W\>, StateShard\<W\>, PoseidonLocal, RCLocal
+- **Tier 3**: Root proof (1, lightweight) — SMT paths, cumsum balance
+
+See [docs/design/full-sharding-research.md](../docs/design/full-sharding-research.md) for the ideal protocol.
 
 ---
 
@@ -29,43 +48,44 @@
 
 | # | Goal | Status | Detail | Depends On |
 |---|------|--------|--------|------------|
-| 1 | Machine code quality | ✅ | [code-quality.md](code-quality.md) | — |
-| 2 | Commitment traits | 🔵 | [commitment-traits.md](commitment-traits.md) | — |
-| 3 | Composition framework | 🔵 | [composition.md](composition.md) | — |
-| 4 | Precompile framework | ⬜ | [precompile.md](precompile.md) | 3 |
-| 5 | State traits | 🔵 | [state-traits.md](state-traits.md) | — |
-| 6 | Custom type extensibility | 🔬 | [custom-types.md](custom-types.md) | 3, 7 or 8b |
-| 7 | Full sharding | 🔬 | [sharding.md](sharding.md) | Design decision |
-| 8 | Optimization | ⬜ | [optimization.md](optimization.md) | 2, 3, 5 |
-| 9 | Advanced research | 🔬 | [research.md](research.md) | Various |
+| 1 | Prover pipeline acceleration | 🔵 | [optimization.md](optimization.md) §Tier 1 | — |
+| 2 | Proving layer refactoring | 🔧 | [proving-layer.md](proving-layer.md) | — |
+| 3 | Sharding infrastructure (25 gaps: G1–G13, W1–W11) | ⬜ | [sharding.md](sharding.md) | 2 |
+| 4 | Sharding migration | ⬜ | [sharding.md](sharding.md) §Migration | 3 |
+| 5 | Type foundation (TypeTag) | 🔵 | [custom-types.md](custom-types.md) | — |
+| 6 | Extensibility API | ⬜ | [commitment-traits.md](commitment-traits.md), [composition.md](composition.md), [state-traits.md](state-traits.md) | 4 |
+| 7 | Precompile framework | ⬜ | [precompile.md](precompile.md) | 6 |
+| 8 | Execution templates | ⬜ | [execution-templates.md](execution-templates.md) | 6 |
+| 9 | Optimization (sharded) | ⬜ | [optimization.md](optimization.md) §Sharded | 4 |
+| 10 | Advanced research | 🔬 | [research.md](research.md) | Various |
 
 ---
 
 ## Dependency Graph
 
 ```
-Independent (start now)
-├── 1. Code Quality ──────────────── nearly done (uncommitted)
-├── 2. Commitment Traits ─────────── key infrastructure
-├── 3. Composition ───────────────── enables 4, 6
-│   └──→ 4. Precompile
-│   └──→ 6. Custom Types (+ design decision on bus width)
-├── 5. State Traits ──────────────── independent
-└── 7. Full Sharding ─────────────── research, design decision needed
-
-After 2 + 3 + 5 complete:
-└──→ 8. Optimization
+Independent (start now, in parallel)
+├── 1. Prover Pipeline ─────────── ~40% proving, ~50% memory, ~4 days
+├── 2. Proving Layer ──────────── protocol math → stark, ProofInstance, witness partition
+│   └──→ 3. Sharding Infra ───── G1-G7: THE critical path
+│         └──→ 4. Migration (sharded E2E → deprecate global)
+│               ├──→ 6. Extensibility API (on sharded architecture)
+│               │     ├──→ 7. Precompile
+│               │     └──→ 8. Execution Templates
+│               └──→ 9. Optimization on sharded (D1, CSE, coprocessors)
+└── 5. Type Foundation ─────────── TypeTag + TypeEncoding (small, independent)
 
 Future:
-└──→ 9. Research (depends on 8 for D1, independent for D4)
+└──→ 10. Research (D2+D3 accumulator, recursion, GPU, compiler redesign)
 ```
 
 ## Recommended Order
 
-1. **1** Code quality — finish and commit (nearly done)
-2. **2 + 3 + 5** — independent, can run in parallel
-3. **4** Precompile — after 3 (needs BusId)
-4. **6** Custom types — after design decision (depends on 7 vs 8b)
-5. **7** Sharding — design research, then implementation
-6. **8** Optimization — after extensibility framework (2+3+5)
-7. **9** Research — long-term
+1. **1 + 2** — in parallel: pipeline is independent, proving layer is sharding prerequisite
+2. **5** — TypeTag/TypeEncoding (small, independent, useful everywhere)
+3. **3** — sharding infrastructure on clean layer boundaries
+4. **4** — sharded E2E working → deprecate global chips
+5. **6** — extensibility on stable sharded architecture
+6. **7 + 8** — precompile + templates on sharded
+7. **9** — D1 per-column, constraint CSE, coprocessor factoring
+8. **10** — long-term research

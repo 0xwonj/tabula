@@ -1,12 +1,14 @@
 # Composition Framework
 
-> Status: 🔵 Ready
-> Depends: None
+> Status: ⬜ Blocked (Goal 6 — depends on sharding migration)
+> Depends: [sharding.md](sharding.md) §Migration (Goal 4) — design on sharded architecture
 > Design: [docs/design/extensibility-architecture.md](../docs/design/extensibility-architecture.md) §4 (Chip Composition), §5 (Trace Pipeline)
 
 ## Goal
 
 App developers can package chip + bus + witness as one distributable unit and register it with MachineBuilder. No Tabula code modification required.
+
+**Sharding context**: ChipExtension must be tier-aware. An extension chip belongs to a specific proof tier (Tier 1 execution, Tier 2 column, or Tier 3 root). Bus routing is proof-local within each tier. The registration API must specify which tier the extension targets.
 
 ## Tasks
 
@@ -45,6 +47,7 @@ Interface for app-provided chip packages.
   ```rust
   pub trait ChipExtension: Send + Sync {
       fn name(&self) -> &str;
+      fn proof_tier(&self) -> ProofTier; // Execution, Column, or Root
       fn chip_ids(&self) -> Vec<ChipId>;
       fn airs(&self) -> Vec<Box<dyn AnyRap>>;
       fn dyn_chips(&self) -> Vec<Box<dyn DynChip>>;

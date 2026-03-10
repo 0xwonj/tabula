@@ -1,12 +1,14 @@
 # State Traits
 
-> Status: 🔵 Ready
-> Depends: None
+> Status: ⬜ Blocked (Goal 6 — depends on sharding migration)
+> Depends: [sharding.md](sharding.md) §Migration (Goal 4) — design on sharded architecture
 > Design: [docs/design/extensibility-architecture.md](../docs/design/extensibility-architecture.md) §6 (VectorCommitment trait, §6.2-6.6) and §7 (PropertyOpening trait, §7.2-7.5)
 
 ## Goal
 
 Extract standard interfaces for state commitment and opening proofs from existing SSMC/SMT implementations. The VectorCommitment trait enables pluggable column-level commitment strategies; the PropertyOpening trait enables structural queries (min, max, successor) against committed state.
+
+**Sharding context**: VectorCommitment operates within Tier 2 column proofs. Each column proof independently runs its VC. The trait should be designed for the sharded model where commitment is per-column-proof, not global.
 
 Full design rationale, trait signatures, bus integration, and examples (including Orderbook Tree VC): see [extensibility-architecture.md §6-7](../docs/design/extensibility-architecture.md#6-axis-4-state-commitment-extension).
 

@@ -1,69 +1,78 @@
 # Optimization
 
-> Status: ⬜ Blocked on [commitment-traits.md](commitment-traits.md), [composition.md](composition.md), [state-traits.md](state-traits.md)
-> Design: [docs/design/proof-optimization-architecture.md](../docs/design/proof-optimization-architecture.md)
+> Status: 🔧 In Progress (Tier 1 unblocked)
+> Design: [docs/design/prover-pipeline-acceleration.md](../docs/design/prover-pipeline-acceleration.md), [docs/design/constraint-compilation.md](../docs/design/constraint-compilation.md), [docs/design/execution-chip-evolution.md](../docs/design/execution-chip-evolution.md), [docs/design/proof-optimization-architecture.md](../docs/design/proof-optimization-architecture.md)
 
 ## Goal
 
-Realize Tabula-native optimizations. Target: proving time < 50% of current, global width 261 → ~163 cols.
+Proving time < 50% of current baseline. Two categories: infrastructure (any architecture) and sharded-specific.
 
-## Tasks
+Current chip widths (post-M10): Execution 278, SSMC 66, Merge 74, SortedMem 67, ColumnMeta 56, Poseidon 93+19pp, RangeCheck 2 = 636 main cols total.
 
-### ShortRun Routing (KeyRoute)
+## Tier 1 — Prover Pipeline (Goal 1, no blockers)
 
-> Blocked on: extensibility framework
+Infrastructure optimizations below the chip/AIR layer. Independent of global vs sharded architecture.
 
-Route single-tx memory accesses to lightweight ShortRunChip instead of GlobalSortedMem.
+Combined effect: ~40% proving time + ~50% memory, ~4 days.
 
-- [ ] Activate `route_keys()` — produce `KeyRoute::ShortRun`
-- [ ] Implement `ShortRunChip<W>` (InitReadWrite, InitWrite patterns)
-- [ ] Wire Memory bus + MergeCompleteness bus
-- [ ] **Mandatory**: ShortRun = Full equivalence test
+- [ ] BLAKE3 Merkle hash — switch PCS commitment hash from Poseidon2 to BLAKE3 (~30% proving reduction, ~1 day)
+- [ ] Batch inversion — Montgomery batch inversion for LogUp permutation trace (~5% proving reduction, ~1 day)
+- [ ] Trace clone elimination — transfer ownership or `Arc<RowMajorMatrix>` instead of cloning (~50% memory reduction, ~1 day)
+- [ ] Quotient parallelism — `rayon::par_iter` over chips in quotient computation phase (~10% proving reduction, ~1 day)
 
-**Effect**: ~7% cell reduction
+## Tier 2 — Constraint CSE (no blockers)
 
-### Width Specialization
+> Design: [constraint-compilation.md](../docs/design/constraint-compilation.md)
 
-> Blocked on: extensibility framework
+Independent of architecture. Applies to any `eval()` function.
 
-Per-type optimal width chip instantiation. Currently all global chips use W=3.
+- [ ] Symbolic DAG extraction — extend SymbolicAirBuilder to collect constraint expressions into hash-consed DAG
+- [ ] CSE algorithm — topological sort + refcount-based extraction decision
+- [ ] Code generation — proc-macro2/quote to emit optimized `eval_cse()` functions
+- [ ] Integration — slot into quotient computation phase, correctness verification vs original `eval()`
 
-- [ ] ProofPlan schema type → W mapping
-- [ ] Instantiate `MemoryShard<1>`, `<3>`, `<8>`
-- [ ] Keygen deduplication for same-W variants
+**Effect**: 5-15x constraint evaluation speedup, 20-35% total proving time reduction.
 
-**Custom type foundation**: Establishes multi-W support. Custom types use the same path.
+## Sharded Architecture Optimizations (Goal 9, blocked on Goal 4)
+
+These apply to the sharded proof model. Depend on sharding migration completing.
+
+### D1: Poseidon Chain Delegation (per-column)
+
+> Design: [proof-optimization-architecture.md](../docs/design/proof-optimization-architecture.md)
+
+Move hash chain computation from StateShard into PoseidonLocal within each column proof.
+
+- [ ] PoseidonLocal chain tracking (+3 cols)
+- [ ] StateShard hash chain column removal
+- [ ] Per-column proof width: 236→~191 cols (19% reduction per column)
+
+### Coprocessor Factoring (Execution Tier 1)
+
+> Design: [execution-chip-evolution.md](../docs/design/execution-chip-evolution.md)
+
+Extract Mul/DivMod/Cmp/Hash into bus-linked coprocessor chips within the execution proof.
+
+- [ ] CmpChip — 6 sub-ops, StrictIneq, Limb2Bits
+- [ ] MulChip — carry chain
+- [ ] DivModChip — dual-slot write
+- [ ] Execution proof width: 278→~100 cols
 
 ### NF-Aware Constraint Elision
 
-> Blocked on: composition framework (BusId, ChipExtension)
+> Design: [execution-chip-evolution.md](../docs/design/execution-chip-evolution.md)
 
-Selectively remove AIR constraints that the compiler already guarantees via Normal Form rules.
+Remove AIR constraints guaranteed by compiler NF rules.
 
 - [ ] PreprocessedCatalog — batch-invariant data
 - [ ] ConstraintElision enum (NF-1 through NF-4 variants)
 - [ ] Program-specific preprocessed selectors (~15 cols saved)
 
-### D1: Poseidon Chain Delegation — core bottleneck
+### Column-Level Optimizations (sharding-native)
 
-> Blocked on: ShortRun + Width Spec + NF Elision
-
-Move hash chain computation from StateColumn into PoseidonChip. Largest single optimization.
-
-- [ ] PoseidonChip chain tracking (+3 cols)
-- [ ] StateColumnChip hash chain removal (-48 cols)
-- [ ] StateColumn reduction/elimination analysis
-- [ ] CommitmentVerification bus update
-
-**Effect**: 261 → ~163 cols (38% reduction)
-
-### Pipeline Parallelism
-
-> Blocked on: D1
-
-- [ ] Witness → trace parallel overlap
-- [ ] Level 0 independence (Execution/Poseidon/RangeCheck parallel)
-- [ ] Deterministic parallel framework
+- [ ] Untouched column skip — columns not accessed in batch require zero proving cost
+- [ ] Read-only column optimization — no MemoryShard needed, just value verification in execution proof
+- [ ] Dynamic `max_slot` — ExecutionChip column subsetting (278→~150 for typical programs)
 
 ## Verification
 

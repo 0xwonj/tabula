@@ -56,62 +56,68 @@ Six properties constrain the architecture:
 
 ---
 
-## Layered Composition Model
+## Three-Tier Proof Architecture
 
-The proof system is organized into three layers. Only Layer 1 is app-customizable.
+Full sharding is the base architecture. The proof system produces C+2 independent proofs per batch (1 execution + C column + 1 root).
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Layer 0: Core (fixed — Tabula's identity)                   │
+│  Tier 1: Execution Proof (1, global)                         │
 │                                                              │
-│  Execution:    ExecutionChip, StaticTableChip                 │
-│  Memory:       InterTxOrderChip  (internal MemoryModel trait) │
-│  Root Proof:   ColumnMetaChip, SmtColPathChip,               │
-│                SmtTablePathChip  (internal RootProof trait)    │
-│  Bus Consumers: PoseidonChip, RangeCheckChip (BusConsumer)   │
+│  ExecutionChip, StaticTableChip, PoseidonLocal, RCLocal      │
+│  Memory bus SENDS → cross-proof cumsum export                │
 ├──────────────────────────────────────────────────────────────┤
-│  Layer 1: Column Commitment (pluggable — app choice)         │
+│  Tier 2: Column Proofs (C, parallel — pluggable commitment)  │
 │                                                              │
-│  ColumnCommitment trait (batch API)                           │
-│    "ssmc" → SsmcCommitment → StateColumnChip (global)        │
-│    "smt"  → SmtCommitment  → (no extra chip)                 │
-│    "custom" → CustomCommitment → CustomChip (global or shard)│
+│  ColumnCommitment trait (per-column API)                      │
+│    "ssmc" → SsmcCommitment → MemoryShard<W> + StateShard<W>  │
+│    "smt"  → SmtCommitment  → (lightweight)                   │
+│    "custom" → CustomCommitment → user-defined chips           │
+│  + MetaShard, PoseidonLocal, RCLocal per column proof         │
+│  Memory bus RECEIVES → cross-proof cumsum export              │
 │                                                              │
-│  SSMC/SMT are default-provided plugins, not hardcoded core.  │
-│  Bus contract: Memory bus receive → CommitVerif bus send.     │
+│  Width polymorphism: each column proof uses its own W.        │
+│  SSMC/SMT are default-provided plugins, not hardcoded core.   │
 ├──────────────────────────────────────────────────────────────┤
-│  Layer 2: Bus Consumers (auto-collected)                     │
+│  Tier 3: Root Proof (1, lightweight)                         │
+│                                                              │
+│  Cumsum balance: cumsum_exec + Σ cumsum_col[i] = 0           │
+│  SMT paths: Com_old/Com_new inclusion → root transition      │
+│  (internal RootProof trait)                                   │
+├──────────────────────────────────────────────────────────────┤
+│  Bus Consumers (auto-collected, per proof instance)           │
 │                                                              │
 │  BusConsumer trait: declare consumed_buses(), collect()        │
-│  PoseidonChip, RangeCheckChip, ...extensible                  │
+│  PoseidonLocal, RangeCheckLocal, ...extensible                │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Key insight**: StateColumnChip is NOT core — it is the SSMC scheme's implementation detail. It registers via `with_commitment("ssmc", ...)` alongside custom schemes. ColumnMetaChip receives commitment values from ANY scheme via CommitVerif bus without knowing the source.
+**Key insight**: StateShard is NOT core — it is the SSMC scheme's implementation detail. It registers via `with_commitment("ssmc", ...)` alongside custom schemes. The root proof receives commitment values from ANY scheme via cumsum + public values without knowing the source.
 
 **Internal traits** (`pub(crate)`, not app-facing):
-- `MemoryModel` — currently `GlobalSortedMemory` (InterTxOrderChip). Enables future A/B benchmarking.
-- `RootProof` — currently `SmtRootProof` (ColumnMetaChip + SmtPath chips). Enables future replacement.
+- `RootProof` — currently `SmtRootProof` (SMT path chips + cumsum balance). Enables future replacement.
 
 ---
 
 ## Builder API
 
 ```rust
-// Default usage
+// Default usage (sharded prover)
 let machine = TabulaMachine::builder()
-    .with_core_chips()            // Layer 0 (memory + root proof)
-    .with_default_commitments()   // "ssmc" + "smt" plugins
+    .with_execution_chips()       // Tier 1 (ExecutionChip, StaticTable, PoseidonLocal, RCLocal)
+    .with_default_commitments()   // Tier 2: "ssmc" + "smt" plugins
+    .with_root_proof()            // Tier 3 (SMT paths, cumsum balance)
     .build();
 
 // App developer: add custom commitment
 let machine = TabulaMachine::builder()
-    .with_core_chips()
+    .with_execution_chips()
     .with_default_commitments()
     .with_commitment("accumulator", AccumulatorCommitment::new())
     .with_proof_plan(|plan| {
         plan.set_scheme(TableId(5), ColId(0), "accumulator");
     })
+    .with_root_proof()
     .build();
 ```
 
@@ -129,19 +135,22 @@ let machine = TabulaMachine::builder()
 
 ## Optimization Directions
 
-Four confirmed optimization directions, each derived from invariants:
+Confirmed optimization directions, each derived from invariants:
 
-| Direction | Derives From | Effect |
-|-----------|-------------|--------|
-| D1: Poseidon chain delegation | I6 (bus composition) | Eliminate StateColumn hash chains, 261→163 cols |
-| D2+D3: Algebraic accumulator | I6 (bus composition) | Replace hash chain with order-independent accumulator, 163→73 cols |
-| D4: Recursive composition | I2 (static addressing) | Per-column parallel proving, O(1) proof size |
-| KeyRoute (ShortRun) | I3 (SSA) + I4 (schema) | Lightweight chip for single-tx access patterns |
-| Template chips | I3 (SSA) | Specialized execution for known tx patterns, 278→~60 cols |
-| NF-aware constraint elision | I3 (SSA) + I5 (trusted compiler) | Remove redundant AIR constraints, ~15 cols saved |
-| Width specialization | I4 (schema typing) | Per-type chip instantiation (W=1, W=3, W=8) |
+| Direction | Derives From | Effect | Design Doc |
+|-----------|-------------|--------|------------|
+| D1: Poseidon chain delegation | I6 (bus composition) | Delegate SSMC hash chains to PoseidonChip, significant memory-layer col reduction | [proof-optimization-architecture.md](proof-optimization-architecture.md) |
+| D2+D3: Algebraic accumulator | I6 (bus composition) | Replace hash chain with order-independent accumulator | [proof-optimization-architecture.md](proof-optimization-architecture.md) |
+| D4: Recursive composition | I2 (static addressing) | Per-column parallel proving, O(1) proof size | [full-sharding-research.md](full-sharding-research.md) |
+| KeyRoute (ShortRun) | I3 (SSA) + I4 (schema) | Lightweight chip for single-tx access patterns | [proof-optimization-architecture.md](proof-optimization-architecture.md) |
+| Template chips / Level 4 AIR | I3 (SSA) + I5 (trusted compiler) | Specialized execution, 278→~60 cols | [execution-chip-evolution.md](execution-chip-evolution.md) |
+| NF-aware constraint elision | I3 (SSA) + I5 (trusted compiler) | Remove redundant AIR constraints, ~15 cols saved | [execution-chip-evolution.md](execution-chip-evolution.md) |
+| Width specialization | I4 (schema typing) | Per-type chip instantiation (W=1, W=3, W=8) | [execution-chip-evolution.md](execution-chip-evolution.md) |
+| Constraint CSE | — (infrastructure) | 5-15× constraint eval speedup | [constraint-compilation.md](constraint-compilation.md) |
+| Prover pipeline acceleration | — (infrastructure) | BLAKE3, batch inversion, GPU: 30-80% proving | [prover-pipeline-acceleration.md](prover-pipeline-acceleration.md) |
+| Coprocessor factoring | I6 (bus composition) | ExecutionChip 278→~100 cols | [execution-chip-evolution.md](execution-chip-evolution.md) |
 
-See [proof-optimization-architecture.md](proof-optimization-architecture.md) for detailed analysis. See [full-sharding-research.md](full-sharding-research.md) for sharding-specific research.
+See [proof-optimization-architecture.md](proof-optimization-architecture.md) for the two-axis model. See [full-sharding-research.md](full-sharding-research.md) for sharding-specific research.
 
 ---
 
@@ -153,7 +162,7 @@ See [proof-optimization-architecture.md](proof-optimization-architecture.md) for
 | C1 soundness resolved | Cumsums PCS-committed and verified |
 | Pluggable commitment schemes | ColumnCommitment trait with SSMC/SMT implementations |
 | Zero-modification extensibility | Example app crate compiles and proves with custom chip + bus + precompile |
-| D1 Poseidon delegation | Global width 261→163 cols |
+| D1 Poseidon delegation | Memory-layer chip width reduction via hash chain delegation |
 | Proving time < 50% of baseline | Performance benchmark |
 
 ---
@@ -165,7 +174,12 @@ See [proof-optimization-architecture.md](proof-optimization-architecture.md) for
 | [commitment-architecture-research.md](commitment-architecture-research.md) | Global vs shard quantitative analysis |
 | [full-sharding-research.md](full-sharding-research.md) | Per-column sharding research and ideal protocol |
 | [proof-optimization-architecture.md](proof-optimization-architecture.md) | Two orthogonal optimization axes (execution + memory layer) |
+| [constraint-compilation.md](constraint-compilation.md) | Constraint CSE via symbolic DAG extraction |
+| [prover-pipeline-acceleration.md](prover-pipeline-acceleration.md) | Infrastructure: BLAKE3, batch inversion, GPU, NTT |
+| [execution-chip-evolution.md](execution-chip-evolution.md) | ExecutionChip Level 0-4 evolution path |
 | [extensibility-architecture.md](extensibility-architecture.md) | Detailed API definitions for extensibility traits |
 | [custom-type-extensibility.md](custom-type-extensibility.md) | Type system extension: TypeTag, TypeEncoding, bus width |
 | [sharded-protocol-design.md](sharded-protocol-design.md) | Shard chip protocol design |
+| [proving-layer-architecture.md](proving-layer-architecture.md) | Protocol math migration + ProofInstance design |
+| [codebase-architecture-review.md](codebase-architecture-review.md) | Layer assessment, extension patterns, sharding readiness |
 | [architecture.md](architecture.md) | Workspace-level architecture specification |
