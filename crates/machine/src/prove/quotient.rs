@@ -22,7 +22,7 @@ use crate::config::{EF4, PcsDomain, TabulaStarkConfig};
 ///
 /// Groups the four scalar parameters that `compute_quotient_rap` needs
 /// per chip, reducing the function's argument count.
-pub(super) struct ChipQuotientInfo {
+pub(crate) struct ChipQuotientInfo {
     pub main_width: usize,
     pub inner_constraint_count: usize,
     pub total_constraint_count: usize,
@@ -33,7 +33,7 @@ pub(super) struct ChipQuotientInfo {
 ///
 /// Uses a single-phase `ProverConstraintFolder` over the full main trace.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn compute_quotient_standard<M: Matrix<BabyBear> + Sync>(
+pub(crate) fn compute_quotient_standard<M: Matrix<BabyBear> + Sync>(
     air: &ChipRef<'_>,
     main_on_q: &M,
     pp_on_q: Option<&M>,
@@ -114,7 +114,7 @@ pub(super) fn compute_quotient_standard<M: Matrix<BabyBear> + Sync>(
 /// Uses two-phase evaluation:
 /// - Phase 1: `ProverConstraintFolder` on truncated (main-only) view
 /// - Phase 2: `RapProverFolder` on full (main ∥ perm) view
-pub(super) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
+pub(crate) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
     air: &ChipRef<'_>,
     main_on_q: &M,
     perm_on_q: &M,

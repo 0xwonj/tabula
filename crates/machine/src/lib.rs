@@ -38,6 +38,7 @@ pub mod keys;
 mod machine;
 pub(crate) mod permutation;
 mod proof;
+mod proof_instance;
 mod prove;
 mod registry;
 mod verify;

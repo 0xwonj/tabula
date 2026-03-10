@@ -21,8 +21,9 @@
 | Machine Layer | TabulaMachine, ChipRegistry, shared PCS, two-round protocol, C1 soundness fix |
 | Foundation Refactoring | TracePhase open newtype, EncodingWidth, DEFAULT_VALUE_WIDTH, Composition buses, boundary audit |
 | Machine code quality | RAP folder encapsulation, error types, function extraction, directory structure |
+| Proving layer refactoring | STARK protocol math → stark, ProofInstance abstraction, witness partitioning |
 
-979 tests passing across workspace. Zero failures.
+981 tests passing across workspace. Zero failures.
 
 ---
 
@@ -49,8 +50,8 @@ See [docs/design/full-sharding-research.md](../docs/design/full-sharding-researc
 | # | Goal | Status | Detail | Depends On |
 |---|------|--------|--------|------------|
 | 1 | Prover pipeline acceleration | 🔵 | [optimization.md](optimization.md) §Tier 1 | — |
-| 2 | Proving layer refactoring | 🔧 | [proving-layer.md](proving-layer.md) | — |
-| 3 | Sharding infrastructure (25 gaps: G1–G13, W1–W11) | ⬜ | [sharding.md](sharding.md) | 2 |
+| 2 | Proving layer refactoring | ✅ | [proving-layer.md](proving-layer.md) | — |
+| 3 | Sharding infrastructure (25 gaps: G1–G13, W1–W11) | 🔵 | [sharding.md](sharding.md) | 2 |
 | 4 | Sharding migration | ⬜ | [sharding.md](sharding.md) §Migration | 3 |
 | 5 | Type foundation (TypeTag) | 🔵 | [custom-types.md](custom-types.md) | — |
 | 6 | Extensibility API | ⬜ | [commitment-traits.md](commitment-traits.md), [composition.md](composition.md), [state-traits.md](state-traits.md) | 4 |

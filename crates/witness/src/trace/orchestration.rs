@@ -16,6 +16,7 @@ use tabula_stark::debug::evaluate_chip_with_preprocessed_and_public_values;
 use tabula_stark::trace::{BusConsumer, DynChip, TracePhase, WitnessStore};
 
 use super::TraceMap;
+use super::partition::WitnessPartition;
 
 /// Build all chip traces into a [`TraceMap`] via [`DynChip`] dispatch.
 ///
@@ -32,6 +33,32 @@ use super::TraceMap;
 ///
 /// [`TabulaMachine::build_traces()`]: tabula_machine::TabulaMachine::build_traces
 pub fn build_all_traces(
+    chips: &[Box<dyn DynChip>],
+    bus_consumers: &[Box<dyn BusConsumer>],
+    store: WitnessStore,
+) -> Result<TraceMap, TabulaError> {
+    build_traces_core(chips, bus_consumers, store)
+}
+
+/// Build chip traces from a partition (chip subset + witness data).
+///
+/// Like [`build_all_traces()`], but accepts a [`WitnessPartition`] instead
+/// of a raw [`WitnessStore`]. The partition wraps the subset of witness data
+/// relevant to the given chips.
+///
+/// In the current monolithic prover, this is equivalent to `build_all_traces`
+/// with all chips. In sharded mode, each partition contains data for one
+/// proof instance's chip subset.
+pub fn build_traces_for(
+    chips: &[Box<dyn DynChip>],
+    bus_consumers: &[Box<dyn BusConsumer>],
+    partition: WitnessPartition,
+) -> Result<TraceMap, TabulaError> {
+    build_traces_core(chips, bus_consumers, partition.into_store())
+}
+
+/// Core trace building logic shared by `build_all_traces` and `build_traces_for`.
+fn build_traces_core(
     chips: &[Box<dyn DynChip>],
     bus_consumers: &[Box<dyn BusConsumer>],
     mut store: WitnessStore,
