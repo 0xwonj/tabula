@@ -1,6 +1,9 @@
 //! Expression lowering methods for TxLower.
 
-use super::*;
+use super::{
+    Binding, CompileError, ErrorKind, Instruction, LoweredExpr, TxLower, Value, ValueExpr,
+    ValueType, is_arithmetic,
+};
 
 use tabula_ir::{ArithOp, CmpOp, RowExpr};
 
@@ -202,10 +205,7 @@ impl<'a> TxLower<'a> {
                                 self.errors.push(CompileError::new(
                                     ErrorKind::TypeMismatch,
                                     expr.span,
-                                    format!(
-                                        "row key expression must have type u64, found {:?}",
-                                        ty
-                                    ),
+                                    format!("row key expression must have type u64, found {ty:?}"),
                                 ));
                                 return None;
                             }
@@ -216,10 +216,7 @@ impl<'a> TxLower<'a> {
                                 self.errors.push(CompileError::new(
                                     ErrorKind::TypeMismatch,
                                     expr.span,
-                                    format!(
-                                        "row key expression must have type u64, found {:?}",
-                                        ty
-                                    ),
+                                    format!("row key expression must have type u64, found {ty:?}"),
                                 ));
                                 return None;
                             }
@@ -230,10 +227,7 @@ impl<'a> TxLower<'a> {
                                 self.errors.push(CompileError::new(
                                     ErrorKind::TypeMismatch,
                                     expr.span,
-                                    format!(
-                                        "row key expression must have type u64, found {:?}",
-                                        ty
-                                    ),
+                                    format!("row key expression must have type u64, found {ty:?}"),
                                 ));
                                 return None;
                             }
@@ -262,7 +256,7 @@ impl<'a> TxLower<'a> {
                         self.errors.push(CompileError::new(
                             ErrorKind::TypeMismatch,
                             expr.span,
-                            format!("row key expression must have type u64, found {:?}", ty),
+                            format!("row key expression must have type u64, found {ty:?}"),
                         ));
                         return None;
                     }
@@ -271,7 +265,7 @@ impl<'a> TxLower<'a> {
                     self.errors.push(CompileError::new(
                         ErrorKind::UndefinedVariable,
                         expr.span,
-                        format!("undefined variable '{}'", name),
+                        format!("undefined variable '{name}'"),
                     ));
                     None
                 }

@@ -24,7 +24,7 @@ fn validate_params(params: &[Value], schema: &[ParamDef]) -> Result<(), TabulaEr
     for (i, (param, def)) in params.iter().zip(schema.iter()).enumerate() {
         if !param.matches_type(def.value_type) {
             return Err(TabulaError::ParamSchemaMismatch(format!(
-                "param {i}: expected {:?}, got {}",
+                "param {i}: expected {}, got {}",
                 def.value_type,
                 param.type_name()
             )));

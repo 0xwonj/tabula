@@ -3,12 +3,60 @@ use std::collections::{BTreeMap, BTreeSet};
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
+use tabula_chips::shards::state::trace::{EntrySource, StateShardRow};
 use tabula_commitment::{ColumnState, FieldHasher, NativeDigest};
 use tabula_core::RowKey;
 use tabula_core::error::TabulaError;
 
 use crate::witness::ColumnWitness;
-use tabula_chips::state_column::trace::{EntrySource, StateColumnRow};
+
+/// A single row for building state column data.
+///
+/// Pre-sorted by `(table_id, col_id, key)`.
+#[derive(Debug, Clone)]
+pub(crate) struct StateColumnRow {
+    /// Table identifier.
+    pub table_id: u32,
+    /// Column identifier.
+    pub col_id: u16,
+    /// Row key (u64).
+    pub key: u64,
+    /// True if this is a gap row (non-membership proof).
+    pub is_gap: bool,
+    /// Source type (meaningful only for entry rows).
+    pub source: EntrySource,
+    /// Old value (zeros for write_only/gap).
+    pub old_val: Vec<BabyBear>,
+    /// New value (zeros for delete/gap).
+    pub new_val: Vec<BabyBear>,
+    /// Per-segment: 1 if this column is touched in the batch.
+    pub segment_is_touched: bool,
+    /// Precomputed old hash chain accumulator.
+    pub old_hash_acc: [BabyBear; 8],
+    /// Precomputed new hash chain accumulator.
+    pub new_hash_acc: [BabyBear; 8],
+    /// Multiplicity for ReadAccess bus (C1 receive).
+    pub read_mult: bool,
+    /// Multiplicity for WriteAccess bus (C4 receive).
+    pub write_mult: bool,
+}
+
+impl From<StateColumnRow> for StateShardRow {
+    fn from(r: StateColumnRow) -> Self {
+        Self {
+            key: r.key,
+            is_gap: r.is_gap,
+            source: r.source,
+            old_val: r.old_val,
+            new_val: r.new_val,
+            segment_is_touched: r.segment_is_touched,
+            old_hash_acc: r.old_hash_acc,
+            new_hash_acc: r.new_hash_acc,
+            read_mult: r.read_mult,
+            write_mult: r.write_mult,
+        }
+    }
+}
 
 pub(super) fn build_state_rows<H, const W: usize>(
     column: &ColumnWitness<H>,

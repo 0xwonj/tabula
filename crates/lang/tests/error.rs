@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_lang::error::{CompileError, ErrorKind};
 use tabula_lang::span::Span;
 
@@ -66,6 +67,6 @@ fn test_rustc_style_zero_width_span() {
 fn test_display_without_source() {
     let err = CompileError::new(ErrorKind::TypeMismatch, Span::new(0, 5), "type mismatch");
     // Plain Display (no source context)
-    let display = format!("{}", err);
+    let display = format!("{err}");
     assert_eq!(display, "TypeMismatch: type mismatch");
 }

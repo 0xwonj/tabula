@@ -4,25 +4,35 @@ use std::collections::BTreeMap;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
-use tabula_commitment::{BabyBearCodec, HybridVC, PoseidonHasher};
+use tabula_commitment::{BabyBearCodec, ColumnMeta, HybridVC, PoseidonHasher, scheme_tags};
 use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
 use tabula_core::traits::ValueCodec;
 use tabula_core::{Batch, CellKey, ColId, RowKey, TableId, Transaction, TxTypeId, Value};
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_ir::Program;
 use tabula_lang::compile;
+use tabula_machine::{ColumnIdentity, ColumnSetupConfig, TabulaMachine};
 use tabula_stark::air::statement::PublicStatement;
-use tabula_witness::WitnessGenerator;
-use tabula_witness::TraceBuilder;
+use tabula_witness::trace::{partition_by_tier, prepare_shard_witness};
+use tabula_witness::{TraceBuilder, WitnessGenerator};
 
 type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<p3_baby_bear::BabyBear>)>>;
 
+/// Pipeline output for benchmarks.
+struct BenchPipeline {
+    machine: TabulaMachine,
+    traces: tabula_machine::ProofTraces,
+    column_identities: Vec<ColumnIdentity>,
+    statement: PublicStatement,
+}
+
 /// Build traces from source + initial state + transactions.
-fn build_traces(
+#[allow(clippy::needless_pass_by_value)]
+fn build_pipeline(
     source: &str,
     initial_cells: &[(TableId, ColId, RowKey, Value)],
     transactions: Vec<Transaction>,
-) -> (tabula_stark::trace::TraceMap, PublicStatement, tabula_machine::TabulaMachine) {
+) -> BenchPipeline {
     let compiled = compile(source).expect("DSL compilation");
     let mut program = Program::new();
     for schema in &compiled.schemas {
@@ -90,6 +100,24 @@ fn build_traces(
         new_root: witness.new_state_root,
     };
 
+    let column_metas: Vec<(TableId, ColId, ColumnMeta)> = witness
+        .columns
+        .iter()
+        .map(|col| (col.table, col.col, col.meta.clone()))
+        .collect();
+
+    let col_configs: Vec<ColumnSetupConfig> = column_metas
+        .iter()
+        .map(|(t, c, meta)| ColumnSetupConfig {
+            table_id: *t,
+            col_id: *c,
+            scheme_tag: meta.tag,
+            receives_commitment: meta.tag == scheme_tags::SSMC,
+        })
+        .collect();
+
+    let machine = TabulaMachine::new(&col_configs).expect("machine build");
+
     let store = TraceBuilder::<PoseidonHasher, 3>::new(&witness)
         .prepare_witness_store(
             &program,
@@ -101,15 +129,28 @@ fn build_traces(
         )
         .expect("witness store preparation");
 
-    // Build machine for trace assembly (also used by callers for prove/verify).
-    let machine = tabula_machine::TabulaMachine::builder()
-        .with_core_chips()
-        .with_default_commitments()
-        .build()
-        .expect("machine build");
-    let traces = machine.build_traces(store).expect("trace assembly");
+    let shard_witness =
+        prepare_shard_witness::<PoseidonHasher, 3>(&witness).expect("shard witness preparation");
 
-    (traces, statement, machine)
+    let stores = partition_by_tier(store, shard_witness);
+    let traces = machine.build_traces(stores).expect("trace assembly");
+
+    let column_identities: Vec<ColumnIdentity> = column_metas
+        .iter()
+        .map(|(t, c, meta)| ColumnIdentity {
+            table_id: t.0,
+            col_id: c.0,
+            com_old: meta.com_old.0,
+            com_new: meta.com_new.0,
+        })
+        .collect();
+
+    BenchPipeline {
+        machine,
+        traces,
+        column_identities,
+        statement,
+    }
 }
 
 fn make_tx(params: Vec<Value>) -> Transaction {
@@ -129,7 +170,7 @@ tx touch(id: u64) {
     let bal = accounts[id].balance
     accounts[id].balance = bal
 }";
-    let (traces, statement, machine) = build_traces(
+    let pipeline = build_pipeline(
         source,
         &[(TableId(0), ColId(0), RowKey(10), Value::U64(50))],
         vec![make_tx(vec![Value::U64(10)])],
@@ -137,7 +178,14 @@ tx touch(id: u64) {
 
     c.bench_function("prove_read_write", |b| {
         b.iter(|| {
-            machine.prove(&traces, statement.clone()).expect("proving");
+            pipeline
+                .machine
+                .prove(
+                    pipeline.traces.clone(),
+                    &pipeline.column_identities,
+                    pipeline.statement.clone(),
+                )
+                .expect("proving");
         });
     });
 }
@@ -149,16 +197,23 @@ tx touch(id: u64) {
     let bal = accounts[id].balance
     accounts[id].balance = bal
 }";
-    let (traces, statement, machine) = build_traces(
+    let pipeline = build_pipeline(
         source,
         &[(TableId(0), ColId(0), RowKey(10), Value::U64(50))],
         vec![make_tx(vec![Value::U64(10)])],
     );
-    let proof = machine.prove(&traces, statement).expect("proving");
+    let proof = pipeline
+        .machine
+        .prove(
+            pipeline.traces,
+            &pipeline.column_identities,
+            pipeline.statement,
+        )
+        .expect("proving");
 
     c.bench_function("verify_read_write", |b| {
         b.iter(|| {
-            machine.verify(&proof).expect("verification");
+            pipeline.machine.verify(&proof).expect("verification");
         });
     });
 }

@@ -76,7 +76,7 @@ impl<'a, S: StateSnapshot> ExecutionState<'a, S> {
     /// Buffer a write, recording the previous value in the undo log.
     pub(crate) fn write_buffered(&mut self, key: &CellKey, value: Option<Value>) {
         if !self.checkpoints.is_empty() {
-            let prev = self.write_buffer.get(key).cloned();
+            let prev = self.write_buffer.get(key).copied();
             self.undo_log.push(UndoEntry::Write { key: *key, prev });
         }
         self.write_buffer.insert(*key, value);

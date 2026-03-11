@@ -110,6 +110,7 @@ pub(crate) fn constrain_operand_value_linkage<AB: AirBuilder, const W: usize>(
 ///
 /// `is_real * op_write * (access_val[i] - src1_val[i]) = 0`
 /// `is_real * op_write * (access_is_null - src1_is_null) = 0`
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) fn constrain_write_operand<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -132,6 +133,7 @@ pub(crate) fn constrain_write_operand<AB: AirBuilder, const W: usize>(
 /// For each written slot s:
 ///   `is_real * op_read * slot_written[s] * (slots[s][i] - access_val[i]) = 0`
 ///   `is_real * op_read * slot_written[s] * (slot_is_null[s] - access_is_null) = 0`
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) fn constrain_read_destination<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;

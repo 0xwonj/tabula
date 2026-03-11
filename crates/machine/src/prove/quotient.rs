@@ -60,8 +60,7 @@ pub(crate) fn compute_quotient_standard<M: Matrix<BabyBear> + Sync>(
         sels.inv_vanishing.push(BabyBear::default());
     }
 
-    let (alpha_powers, decomposed_alpha_powers) =
-        build_alpha_powers(alpha, constraint_count);
+    let (alpha_powers, decomposed_alpha_powers) = build_alpha_powers(alpha, constraint_count);
 
     type PC = PackedChallenge<TabulaStarkConfig>;
     let mut result = Vec::with_capacity(quotient_size);
@@ -114,6 +113,7 @@ pub(crate) fn compute_quotient_standard<M: Matrix<BabyBear> + Sync>(
 /// Uses two-phase evaluation:
 /// - Phase 1: `ProverConstraintFolder` on truncated (main-only) view
 /// - Phase 2: `RapProverFolder` on full (main ∥ perm) view
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
     air: &ChipRef<'_>,
     main_on_q: &M,
@@ -148,8 +148,7 @@ pub(crate) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
         sels.inv_vanishing.push(BabyBear::default());
     }
 
-    let (alpha_powers, decomposed_alpha_powers) =
-        build_alpha_powers(alpha, total_count);
+    let (alpha_powers, decomposed_alpha_powers) = build_alpha_powers(alpha, total_count);
 
     type PC = PackedChallenge<TabulaStarkConfig>;
     let mut result = Vec::with_capacity(quotient_size);
@@ -248,4 +247,3 @@ pub(crate) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
 
     result
 }
-

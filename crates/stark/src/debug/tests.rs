@@ -73,11 +73,13 @@ fn make_trace(rows: &[[u32; 2]]) -> RowMajorMatrix<BabyBear> {
 }
 
 /// Helper: evaluate heterogeneous chips and check LogUp balance.
+#[allow(clippy::needless_pass_by_value)]
 fn assert_logup_balanced(records: Vec<ChipRecord<BabyBear>>) {
     check_logup_balance(&records).expect("LogUp should balance");
 }
 
 /// Helper: evaluate heterogeneous chips and assert LogUp imbalance.
+#[allow(clippy::needless_pass_by_value)]
 fn assert_logup_imbalanced(records: Vec<ChipRecord<BabyBear>>) {
     let err = check_logup_balance(&records).unwrap_err();
     assert!(

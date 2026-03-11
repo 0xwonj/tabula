@@ -12,7 +12,7 @@ pub struct ColumnDef {
     pub id: ColId,
     /// Human-readable name.
     pub name: String,
-    /// The type of values in this column.
+    /// The value type for this column.
     pub value_type: ValueType,
 }
 

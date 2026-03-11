@@ -12,9 +12,7 @@ pub mod dyn_chip;
 pub mod generator;
 pub mod trace_map;
 
-pub use column_commitment::{
-    BusConsumer, ColumnCommitment, ColumnPlan, EncodingWidth, ProofPlan,
-};
+pub use column_commitment::{BusConsumer, ColumnCommitment, ColumnPlan, EncodingWidth, ProofPlan};
 pub use contributor::{TraceContributor, TracePhase, WitnessKey, WitnessStore, witness_labels};
 pub use dyn_chip::DynChip;
 pub use generator::TraceGenerator;

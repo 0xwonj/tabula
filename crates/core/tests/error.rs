@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_core::TableId;
 use tabula_core::error::TabulaError;
 

@@ -14,6 +14,10 @@
 - **Use LSP over Grep** for symbol-based queries (definitions, references, implementations)
 - **Use Grep for text-based queries** (string literals, comments, config values, TODOs)
 
+## Technical Judgment
+
+- **SubAir trait (OpenVM pattern)**: The column struct vs Air struct split (using GATs) solves the `AB::Var` type parameter issue. Previous incorrect conclusion: "Rust's type system prevents it." Actual answer: use a separate zero-sized Air type. However, the trait is only worthwhile at scale (dozens of composable sub-circuits). For <10 gadgets, free functions are cleaner.
+
 ## Architecture
 
 - **No separate core/custom pipelines**: Core types are "pre-registered instances", not special-cased. One unified pipeline for everything.

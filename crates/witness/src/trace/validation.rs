@@ -36,7 +36,7 @@ pub fn debug_validate_trace_map(
         let chip_id = chip.chip_id();
         let entry = map.get(chip_id).ok_or_else(|| TabulaError::ProofError {
             phase: "trace_validation",
-            detail: format!("{} trace must exist", chip_id),
+            detail: format!("{chip_id} trace must exist"),
         })?;
 
         let record = evaluate_chip_with_preprocessed_and_public_values(
@@ -48,7 +48,7 @@ pub fn debug_validate_trace_map(
         )
         .map_err(|e| TabulaError::ProofError {
             phase: "trace_validation",
-            detail: format!("{} validation failed: {e}", chip_id),
+            detail: format!("{chip_id} validation failed: {e}"),
         })?;
 
         records.push(record);
@@ -58,7 +58,7 @@ pub fn debug_validate_trace_map(
     for &bus in buses {
         check_bus_balance(&records, bus).map_err(|e| TabulaError::ProofError {
             phase: "trace_validation",
-            detail: format!("bus {} imbalance: {e}", bus),
+            detail: format!("bus {bus} imbalance: {e}"),
         })?;
     }
 

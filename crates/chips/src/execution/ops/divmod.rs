@@ -53,14 +53,18 @@ pub struct DivModWitness<T, const S: usize> {
 ///
 /// Uses `divmod.q_sel` one-hot selector to identify the quotient slot.
 /// Remainder slot is derived: `r_sel[s] = slot_written[s] - q_sel[s]`.
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) fn constrain_divmod<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    if W < 3 {
-        return;
-    }
+    const {
+        assert!(
+            W >= 3,
+            "DivMod constraints require W >= 3 (3-limb value encoding)"
+        );
+    };
 
     let gate: AB::Expr = is_real.clone() * local.op_divmod.clone().into();
     let shift_30: AB::Expr = expr_from_u32::<AB>(SHIFT_30_U32);

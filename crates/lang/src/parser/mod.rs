@@ -5,7 +5,7 @@
 mod expr;
 mod stmt;
 
-use crate::ast::*;
+use crate::ast::{ColumnDecl, ParamDecl, Program, TableDecl, TxDecl, TypeName};
 use crate::error::{CompileError, ErrorKind};
 use crate::span::Span;
 use crate::token::Token;

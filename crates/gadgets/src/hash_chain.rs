@@ -81,6 +81,8 @@ impl HashChainInput<BabyBear> {
 /// Does NOT constrain the transition linking (perm_input[0..8] = prev hash_acc).
 /// Use [`constrain_hash_chain_transition`] for that.
 #[allow(clippy::too_many_arguments)]
+// AB::Var is Copy and AB::Expr is cloned repeatedly; by-value avoids one clone on last use.
+#[allow(clippy::needless_pass_by_value)]
 pub fn constrain_hash_chain_input<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     hash_chain: &HashChainInput<AB::Var>,
@@ -155,6 +157,8 @@ pub fn constrain_hash_chain_input<AB: AirBuilder, const W: usize>(
 /// `trans_gate` should be:
 /// - SSMC: `both_real * (1 - next.is_first)`
 /// - Merge: `both_real * (1 - tc_changed) * next.in_new * (1 - next.is_first_in_new)`
+// AB::Expr is cloned in a loop; by-value avoids one clone on the last iteration.
+#[allow(clippy::needless_pass_by_value)]
 pub fn constrain_hash_chain_transition<AB: AirBuilder>(
     builder: &mut AB,
     next_perm_input: &[AB::Var; 16],

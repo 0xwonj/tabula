@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 #[cfg(target_arch = "wasm32")]
 mod api;
 #[cfg(target_arch = "wasm32")]

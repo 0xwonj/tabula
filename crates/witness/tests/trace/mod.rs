@@ -3,15 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
-use tabula_chips::column_meta::air::ColumnMetaChip;
 use tabula_chips::execution::{InstructionRecord, Opcode};
-use tabula_chips::inter_tx_order::air::InterTxOrderChip;
 use tabula_chips::poseidon::constants::poseidon2_permutation;
 use tabula_chips::smt_path::trace::{SmtPathWitness, SmtTablePathWitness};
-use tabula_chips::state_column::air::StateColumnChip;
 use tabula_commitment::{
-    BabyBearCodec, ColumnMeta, scheme_tags, DOMAIN_COL, DOMAIN_TABLE, HybridVC,
-    MockFieldHasher, NativeDigest, PoseidonHasher, SparseMerkleTree,
+    BabyBearCodec, ColumnMeta, DOMAIN_COL, DOMAIN_TABLE, HybridVC, MockFieldHasher, NativeDigest,
+    PoseidonHasher, SparseMerkleTree, scheme_tags,
 };
 use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
 use tabula_core::traits::ValueCodec;
@@ -21,7 +18,6 @@ use tabula_core::{
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_ir::Program;
 use tabula_lang::compile;
-use tabula_stark::debug::debug_check;
 use tabula_witness::WitnessGenerator;
 use tabula_witness::trace::{
     AllTraceInputs, TraceBuilder, lower_execution_records, lower_program_batch,
@@ -144,49 +140,30 @@ pub(super) fn build_smt_paths_from_metas(
         let mut new_tree = SparseMerkleTree::new(hasher.clone(), COL_DEPTH, DOMAIN_COL);
 
         for meta in metas_for_table {
-            let old_leaf = compute_leaf_digest(
-                meta.table.0,
-                meta.col.0,
-                meta.tag as u32,
-                &meta.com_old,
-            );
-            let new_leaf = compute_leaf_digest(
-                meta.table.0,
-                meta.col.0,
-                meta.tag as u32,
-                &meta.com_new,
-            );
+            let old_leaf =
+                compute_leaf_digest(meta.table.0, meta.col.0, meta.tag as u32, &meta.com_old);
+            let new_leaf =
+                compute_leaf_digest(meta.table.0, meta.col.0, meta.tag as u32, &meta.com_new);
 
             old_tree.insert(meta.col.0 as u64, old_leaf);
             new_tree.insert(meta.col.0 as u64, new_leaf);
         }
 
         for meta in metas_for_table {
-            let old_leaf = compute_leaf_digest(
-                meta.table.0,
-                meta.col.0,
-                meta.tag as u32,
-                &meta.com_old,
-            );
-            let new_leaf = compute_leaf_digest(
-                meta.table.0,
-                meta.col.0,
-                meta.tag as u32,
-                &meta.com_new,
-            );
+            let old_leaf =
+                compute_leaf_digest(meta.table.0, meta.col.0, meta.tag as u32, &meta.com_old);
+            let new_leaf =
+                compute_leaf_digest(meta.table.0, meta.col.0, meta.tag as u32, &meta.com_new);
 
             let old_proof = old_tree.prove(meta.col.0 as u64);
             let new_proof = new_tree.prove(meta.col.0 as u64);
-            assert_eq!(
-                old_proof.siblings, new_proof.siblings,
-                "old/new sibling vectors must match for SmtColPath witness"
-            );
             col_paths.push(SmtPathWitness {
                 table_id: table.0,
                 key: meta.col.0 as u32,
                 old_leaf,
                 new_leaf,
-                siblings: old_proof.siblings,
+                old_siblings: old_proof.siblings,
+                new_siblings: new_proof.siblings,
                 path_bits: path_bits_from_key(meta.col.0 as u64, COL_DEPTH),
             });
         }
@@ -222,17 +199,14 @@ pub(super) fn build_smt_paths_from_metas(
         let new_leaf = new_table_roots[&table];
         let old_proof = old_state_tree.prove(table.0 as u64);
         let new_proof = new_state_tree.prove(table.0 as u64);
-        assert_eq!(
-            old_proof.siblings, new_proof.siblings,
-            "old/new sibling vectors must match for SmtTablePath witness"
-        );
         table_paths.push(SmtTablePathWitness {
             path: SmtPathWitness {
                 table_id: table.0,
                 key: table.0,
                 old_leaf,
                 new_leaf,
-                siblings: old_proof.siblings,
+                old_siblings: old_proof.siblings,
+                new_siblings: new_proof.siblings,
                 path_bits: path_bits_from_key(table.0 as u64, TABLE_DEPTH),
             },
             root_mult,

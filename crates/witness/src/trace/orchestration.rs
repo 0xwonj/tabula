@@ -16,7 +16,6 @@ use tabula_stark::debug::evaluate_chip_with_preprocessed_and_public_values;
 use tabula_stark::trace::{BusConsumer, DynChip, TracePhase, WitnessStore};
 
 use super::TraceMap;
-use super::partition::WitnessPartition;
 
 /// Build all chip traces into a [`TraceMap`] via [`DynChip`] dispatch.
 ///
@@ -38,23 +37,6 @@ pub fn build_all_traces(
     store: WitnessStore,
 ) -> Result<TraceMap, TabulaError> {
     build_traces_core(chips, bus_consumers, store)
-}
-
-/// Build chip traces from a partition (chip subset + witness data).
-///
-/// Like [`build_all_traces()`], but accepts a [`WitnessPartition`] instead
-/// of a raw [`WitnessStore`]. The partition wraps the subset of witness data
-/// relevant to the given chips.
-///
-/// In the current monolithic prover, this is equivalent to `build_all_traces`
-/// with all chips. In sharded mode, each partition contains data for one
-/// proof instance's chip subset.
-pub fn build_traces_for(
-    chips: &[Box<dyn DynChip>],
-    bus_consumers: &[Box<dyn BusConsumer>],
-    partition: WitnessPartition,
-) -> Result<TraceMap, TabulaError> {
-    build_traces_core(chips, bus_consumers, partition.into_store())
 }
 
 /// Core trace building logic shared by `build_all_traces` and `build_traces_for`.
@@ -108,10 +90,7 @@ fn collect_via_bus_consumers(
         let chip_id = chip.chip_id();
         let entry = map.get(chip_id).ok_or_else(|| TabulaError::ProofError {
             phase: "trace_build",
-            detail: format!(
-                "chip '{}' trace must exist for interaction collection",
-                chip_id
-            ),
+            detail: format!("chip '{chip_id}' trace must exist for interaction collection"),
         })?;
 
         let record = evaluate_chip_with_preprocessed_and_public_values(
@@ -123,7 +102,7 @@ fn collect_via_bus_consumers(
         )
         .map_err(|e| TabulaError::ProofError {
             phase: "trace_build",
-            detail: format!("{} trace invalid: {e}", chip_id),
+            detail: format!("{chip_id} trace invalid: {e}"),
         })?;
 
         all_interactions.extend(record.interactions);

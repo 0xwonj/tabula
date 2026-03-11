@@ -1,6 +1,3 @@
-#![warn(missing_docs)]
-#![deny(unused)]
-
 //! Witness pipeline and trace builder for the Tabula proof system.
 //!
 //! Transforms executor output (`BatchWitness`) into canonical chip traces

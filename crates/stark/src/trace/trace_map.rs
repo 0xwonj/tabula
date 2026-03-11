@@ -86,8 +86,7 @@ impl TraceMap {
     pub fn set_public_values(&mut self, id: ChipId, pvs: Vec<BabyBear>) {
         debug_assert!(
             self.entries.contains_key(&id),
-            "set_public_values: chip '{}' not found in TraceMap",
-            id
+            "set_public_values: chip '{id}' not found in TraceMap"
         );
         if let Some(entry) = self.entries.get_mut(&id) {
             entry.public_values = pvs;
@@ -102,6 +101,11 @@ impl TraceMap {
     /// Insert a complete [`TraceEntry`] for a chip.
     pub fn insert_entry(&mut self, id: ChipId, entry: TraceEntry) {
         self.entries.insert(id, entry);
+    }
+
+    /// Remove and return a chip's trace entry, transferring ownership.
+    pub fn remove(&mut self, id: ChipId) -> Option<TraceEntry> {
+        self.entries.remove(&id)
     }
 
     /// All chip IDs present in the map, in sorted order.

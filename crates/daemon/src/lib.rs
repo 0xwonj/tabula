@@ -2,8 +2,6 @@
 //!
 //! Client-neutral local API control plane for Tabula engine operations.
 
-#![warn(missing_docs)]
-
 mod api;
 mod protocol;
 pub mod runtime;
@@ -28,7 +26,7 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
     let engine = Arc::new(LocalEngine::new(file_policy));
     let state = Arc::new(AppState::new(config, engine));
 
-    let app = api::router::build_router(state.clone());
+    let app = api::router::build_router(&state);
     let listener = tokio::net::TcpListener::bind(state.bind_addr())
         .await
         .with_context(|| format!("failed to bind {}", state.bind_addr()))?;

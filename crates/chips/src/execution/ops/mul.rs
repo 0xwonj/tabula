@@ -36,9 +36,12 @@ pub(crate) fn constrain_arith_mul<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    if W < 3 {
-        return;
-    }
+    const {
+        assert!(
+            W >= 3,
+            "Mul constraints require W >= 3 (3-limb value encoding)"
+        );
+    };
 
     let op_mul: AB::Expr = local.op_arith.clone().into() * local.arith_is_mul.clone().into();
     let shift_30: AB::Expr = expr_from_u32::<AB>(SHIFT_30_U32);

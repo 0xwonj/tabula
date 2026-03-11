@@ -90,7 +90,7 @@ pub fn cmd_execute(
     println!("Write set: {} entries", write_set.len());
     println!(
         "Events:    {} total",
-        trace.as_ref().map(|t| t.len()).unwrap_or(0)
+        trace.as_ref().map_or(0, std::vec::Vec::len)
     );
     println!("Emitted:   {} total", executed.emitted.len());
     println!();
@@ -107,7 +107,7 @@ pub fn cmd_execute(
     match &executed.consistency {
         tabula_core::ExecutionConsistencyStatus::Passed => println!("Consistency check: PASSED"),
         tabula_core::ExecutionConsistencyStatus::Failed { reason } => {
-            println!("Consistency check: FAILED ({reason})")
+            println!("Consistency check: FAILED ({reason})");
         }
     }
 

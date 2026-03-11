@@ -241,7 +241,7 @@ impl<'a> Lexer<'a> {
             return;
         }
         // Left-pad to 64 hex chars (32 bytes).
-        let padded = format!("{:0>64}", hex_str);
+        let padded = format!("{hex_str:0>64}");
         let mut bytes = [0u8; 32];
         for (i, chunk) in padded.as_bytes().chunks(2).enumerate() {
             let s = std::str::from_utf8(chunk).expect("valid hex chars");
@@ -263,7 +263,7 @@ impl<'a> Lexer<'a> {
             Err(_) => self.errors.push(CompileError::new(
                 ErrorKind::IntegerOverflow,
                 Span::new(start, self.pos),
-                format!("integer literal '{}' overflows u64", text),
+                format!("integer literal '{text}' overflows u64"),
             )),
         }
     }

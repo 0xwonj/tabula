@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 tabula-core = { workspace = true }
+tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-stark = { workspace = true }
 tabula-witness = { workspace = true }
 tabula-chips = { workspace = true }
@@ -22,6 +23,8 @@ p3-dft = { workspace = true }
 p3-merkle-tree = { workspace = true }
 p3-symmetric = { workspace = true }
 p3-poseidon2 = { workspace = true }
+blake3 = { workspace = true }
+rayon = { workspace = true }
 
 [dev-dependencies]
 tabula-core = { workspace = true, features = ["test-utils"] }
@@ -38,3 +41,6 @@ criterion = { workspace = true }
 [[bench]]
 name = "prover"
 harness = false
+
+[lints]
+workspace = true

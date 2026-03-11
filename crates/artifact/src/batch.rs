@@ -49,7 +49,7 @@ pub fn parse_hex_32(s: &str) -> Result<[u8; 32], ArtifactError> {
         return Ok([0u8; 32]);
     }
 
-    let padded = format!("{:0>64}", s);
+    let padded = format!("{s:0>64}");
     if padded.len() != 64 {
         return Err(ArtifactError::InvalidSenderHex {
             context: "length",

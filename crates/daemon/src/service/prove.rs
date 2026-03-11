@@ -1,6 +1,6 @@
 //! STARK proving pipeline for daemon-side proof generation.
 //!
-//! Mirrors the E2E test pipeline: execute → witness → traces → prove → verify.
+//! Mirrors the E2E test pipeline: execute → witness → shard → traces → prove → verify.
 //! Returns a serializable [`StarkProofSummary`] (the actual p3 proof is not serializable).
 //!
 //! Gated behind the `stark` feature — see `mod.rs`.
@@ -10,14 +10,16 @@ use std::collections::BTreeMap;
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use tabula_artifact::{ChipSummary, StarkProofSummary};
-use tabula_commitment::{BabyBearCodec, ColumnState, HybridVC, NativeDigest, PoseidonHasher};
+use tabula_commitment::{
+    BabyBearCodec, ColumnState, HybridVC, NativeDigest, PoseidonHasher, scheme_tags,
+};
 use tabula_core::mock::InMemoryStaticTables;
 use tabula_core::traits::ValueCodec;
 use tabula_core::{Batch, ColId, RowKey, TableId, TableSchema};
 use tabula_driver::RegisteredProgram;
-use tabula_machine::{PublicStatement, TabulaMachine};
-use tabula_witness::WitnessGenerator;
-use tabula_witness::TraceBuilder;
+use tabula_machine::{ColumnIdentity, ColumnSetupConfig, PublicStatement, TabulaMachine};
+use tabula_witness::trace::{partition_by_tier, prepare_shard_witness};
+use tabula_witness::{TraceBuilder, WitnessGenerator};
 
 use super::error::{ServiceError, ServiceResult};
 use super::execute::ExecutedBatch;
@@ -74,15 +76,28 @@ pub fn prove_batch(
             ServiceError::internal(ErrorCode::InternalError, format!("witness gen: {e}"))
         })?;
 
-    // 4. Build machine and trace map.
-    let machine = TabulaMachine::builder()
-        .with_core_chips()
-        .with_default_commitments()
-        .build()
-        .map_err(|e| {
-            ServiceError::internal(ErrorCode::InternalError, format!("machine build: {e}"))
-        })?;
+    // 4. Build column configs and machine from witness metadata.
+    let column_metas: Vec<(TableId, ColId, tabula_commitment::ColumnMeta)> = witness
+        .columns
+        .iter()
+        .map(|col| (col.table, col.col, col.meta.clone()))
+        .collect();
 
+    let col_configs: Vec<ColumnSetupConfig> = column_metas
+        .iter()
+        .map(|(t, c, meta)| ColumnSetupConfig {
+            table_id: *t,
+            col_id: *c,
+            scheme_tag: meta.tag,
+            receives_commitment: meta.tag == scheme_tags::SSMC,
+        })
+        .collect();
+
+    let machine = TabulaMachine::new(&col_configs).map_err(|e| {
+        ServiceError::internal(ErrorCode::InternalError, format!("machine build: {e}"))
+    })?;
+
+    // 5. Build witness store + shard witness → partitioned stores → traces.
     let store = TraceBuilder::<PoseidonHasher, 3>::new(&witness)
         .prepare_witness_store(
             &registered.program,
@@ -92,11 +107,31 @@ pub fn prove_batch(
             &InMemoryStaticTables::new(),
             PoseidonHasher::new(),
         )
-        .map_err(|e| ServiceError::internal(ErrorCode::InternalError, format!("witness store: {e}")))?;
-    let traces = machine.build_traces(store)
-        .map_err(|e| ServiceError::internal(ErrorCode::InternalError, format!("trace build: {e}")))?;
+        .map_err(|e| {
+            ServiceError::internal(ErrorCode::InternalError, format!("witness store: {e}"))
+        })?;
 
-    // 5. Prove (timed).
+    let shard_witness = prepare_shard_witness::<PoseidonHasher, 3>(&witness).map_err(|e| {
+        ServiceError::internal(ErrorCode::InternalError, format!("shard witness: {e}"))
+    })?;
+
+    let stores = partition_by_tier(store, shard_witness);
+    let traces = machine.build_traces(stores).map_err(|e| {
+        ServiceError::internal(ErrorCode::InternalError, format!("trace build: {e}"))
+    })?;
+
+    // 6. Build column identities for proving.
+    let column_identities: Vec<ColumnIdentity> = column_metas
+        .iter()
+        .map(|(t, c, meta)| ColumnIdentity {
+            table_id: t.0,
+            col_id: c.0,
+            com_old: meta.com_old.0,
+            com_new: meta.com_new.0,
+        })
+        .collect();
+
+    // 7. Prove (timed).
     let statement = PublicStatement {
         old_root: witness.old_state_root,
         new_root: witness.new_state_root,
@@ -104,24 +139,37 @@ pub fn prove_batch(
 
     let prove_start = std::time::Instant::now();
     let proof = machine
-        .prove(&traces, statement)
+        .prove(traces, &column_identities, statement)
         .map_err(|e| ServiceError::internal(ErrorCode::InternalError, format!("proving: {e}")))?;
     let prove_time_ms = prove_start.elapsed().as_millis() as u64;
 
-    // 6. Verify (timed).
+    // 8. Verify (timed).
     let verify_start = std::time::Instant::now();
     let verified = machine.verify(&proof).is_ok();
     let verify_time_ms = verify_start.elapsed().as_millis() as u64;
 
-    // 8. Assemble summary.
-    let chips: Vec<ChipSummary> = proof
-        .chip_openings
-        .iter()
-        .map(|entry| ChipSummary {
-            name: entry.chip_id.to_string(),
-            trace_height: 1 << entry.degree_bits,
-        })
-        .collect();
+    // 9. Assemble summary from all sub-proofs.
+    let mut chips: Vec<ChipSummary> = Vec::new();
+    for opening in &proof.execution.chip_openings {
+        chips.push(ChipSummary {
+            name: opening.chip_id.to_string(),
+            trace_height: 1 << opening.degree_bits,
+        });
+    }
+    for col in &proof.columns {
+        for opening in &col.proof.chip_openings {
+            chips.push(ChipSummary {
+                name: opening.chip_id.to_string(),
+                trace_height: 1 << opening.degree_bits,
+            });
+        }
+    }
+    for opening in &proof.root.chip_openings {
+        chips.push(ChipSummary {
+            name: opening.chip_id.to_string(),
+            trace_height: 1 << opening.degree_bits,
+        });
+    }
 
     Ok(StarkProofSummary {
         scheme: "stark_v1".to_string(),

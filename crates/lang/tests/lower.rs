@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_core::{ColId, TableId, TxTypeId, Value, ValueType};
 use tabula_ir::{ArithOp, CmpOp, Instruction, Program, RowExpr, ValueExpr};
 use tabula_lang::error::ErrorKind;

@@ -200,6 +200,7 @@ fn constrain_clock<AB: AirBuilder, const W: usize>(
 /// 6. Empty column flag semantics.
 ///
 /// `is_empty_col = 1` implies `op_read = 1` and `access_is_null = 1`.
+#[allow(clippy::needless_pass_by_value)]
 fn constrain_empty_col<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -224,6 +225,7 @@ fn constrain_access_log<AB: AirBuilder, const W: usize>(
 }
 
 /// 8. SSA slot carry: slots not written by the NEXT instruction carry forward.
+#[allow(clippy::needless_pass_by_value)]
 fn constrain_slot_carry<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -309,6 +311,7 @@ fn constrain_slot_written_count<AB: AirBuilder, const W: usize>(
 }
 
 /// Arithmetic result null constraint: written slots must not be null.
+#[allow(clippy::needless_pass_by_value)]
 fn constrain_arith_result_not_null<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,

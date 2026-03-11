@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_stark::air::{borrow_cols, num_cols};
 
 #[repr(C)]

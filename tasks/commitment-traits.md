@@ -78,7 +78,7 @@ Tier 3: Root Proof (fixed)
 
 ### Internal traits (pub(crate))
 
-- [ ] RootProof — abstraction over ColumnMeta + SmtPath (single impl: SmtRootProof)
+- [ ] RootProof — abstraction over ColumnMeta + SmtPath (single impl: GlobalSmtRootProof)
 
 ### Builder API extensions
 

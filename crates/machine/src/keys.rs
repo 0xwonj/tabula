@@ -6,8 +6,9 @@
 //! [`TabulaVerifyingKey`] stores the minimal per-chip metadata sufficient for
 //! standalone verification without a machine instance.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use tabula_stark::air::interaction::BusId;
 use tabula_stark::air::keygen::{ChipKeygenInfo, keygen_chip};
 use tabula_stark::chips::ChipId;
 
@@ -45,6 +46,30 @@ impl TabulaProvingKey {
     /// All chip IDs in this proving key.
     pub fn chip_ids(&self) -> Vec<ChipId> {
         self.chip_info.keys().copied().collect()
+    }
+
+    /// Buses that are unbalanced in this tier (only sends or only receives).
+    ///
+    /// A bus is unbalanced if the chips in this proving key collectively
+    /// only send on it (no receivers) or only receive on it (no senders).
+    /// Unbalanced buses cannot balance within a single proof and must be
+    /// balanced across proof instances (i.e., they are "external" buses).
+    pub fn unbalanced_buses(&self) -> BTreeSet<BusId> {
+        let mut send_buses = BTreeSet::new();
+        let mut recv_buses = BTreeSet::new();
+
+        for info in self.chip_info.values() {
+            for interaction in &info.interactions.sends {
+                send_buses.insert(interaction.bus);
+            }
+            for interaction in &info.interactions.receives {
+                recv_buses.insert(interaction.bus);
+            }
+        }
+
+        let send_only = send_buses.difference(&recv_buses).copied();
+        let recv_only = recv_buses.difference(&send_buses).copied();
+        send_only.chain(recv_only).collect()
     }
 }
 
@@ -115,6 +140,19 @@ impl TabulaVerifyingKey {
     }
 }
 
+/// Compute the set of external buses across multiple proof tiers.
+///
+/// A bus is external if it is unbalanced (only sends or only receives)
+/// in any tier. External buses require cross-proof balance verification.
+pub fn compute_external_buses<'a>(
+    tiers: impl IntoIterator<Item = &'a TabulaProvingKey>,
+) -> BTreeSet<BusId> {
+    tiers
+        .into_iter()
+        .flat_map(TabulaProvingKey::unbalanced_buses)
+        .collect()
+}
+
 /// Number of RAP constraints for a given interaction count.
 ///
 /// Each interaction contributes 4 constraints (phi·f = m decomposed into EF4 components).
@@ -125,60 +163,41 @@ pub(crate) fn rap_constraint_count(interactions_per_row: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    /// Compute the permutation trace width for a chip.
-    ///
-    /// Layout: `N` phi values (one EF4 per interaction) + 1 running cumsum.
-    /// Each EF4 value is stored as 4 BabyBear field elements.
-    ///
-    /// Returns 0 if the chip has no interactions.
-    fn perm_trace_width(info: &super::ChipKeygenInfo) -> usize {
-        let n = info.interactions.num_sends_per_row + info.interactions.num_receives_per_row;
-        if n == 0 { 0 } else { 4 * (n + 1) }
-    }
     use super::*;
     use tabula_stark::chips::core_chips;
 
+    fn perm_trace_width(info: &ChipKeygenInfo) -> usize {
+        let n = info.interactions.num_sends_per_row + info.interactions.num_receives_per_row;
+        if n == 0 { 0 } else { 4 * (n + 1) }
+    }
+
     #[test]
-    fn proving_key_from_registry() {
-        let machine = crate::TabulaMachine::builder()
-            .with_core_chips()
-            .with_default_commitments()
-            .build()
-            .expect("build");
-        let pk = machine.proving_key();
+    fn proving_key_from_execution_tier() {
+        let setup = crate::setup::execution_tier_setup().unwrap();
+        let pk = &setup.proving_key;
         assert!(pk.get(core_chips::EXECUTION).is_some());
         assert!(pk.get(core_chips::RANGE_CHECK).is_some());
         assert!(pk.get(core_chips::POSEIDON).is_some());
-        assert_eq!(pk.chip_ids().len(), 9);
+        assert_eq!(pk.chip_ids().len(), 4);
     }
 
     #[test]
     fn verifying_key_from_proving_key() {
-        let machine = crate::TabulaMachine::builder()
-            .with_core_chips()
-            .with_default_commitments()
-            .build()
-            .expect("build");
-        let vk = machine.verifying_key();
-        assert_eq!(vk.chip_ids().len(), 9);
+        let setup = crate::setup::execution_tier_setup().unwrap();
+        let vk = &setup.verifying_key;
 
         let exec = vk.get(core_chips::EXECUTION).unwrap();
         assert!(exec.interactions_per_row > 0);
 
         let rc = vk.get(core_chips::RANGE_CHECK).unwrap();
-        // RangeCheck has 1 receive interaction per row (bus receive).
         assert_eq!(rc.interactions_per_row, 1);
     }
 
     #[test]
     fn verify_info_widths_match_keygen() {
-        let machine = crate::TabulaMachine::builder()
-            .with_core_chips()
-            .with_default_commitments()
-            .build()
-            .expect("build");
-        let pk = machine.proving_key();
-        let vk = machine.verifying_key();
+        let setup = crate::setup::execution_tier_setup().unwrap();
+        let pk = &setup.proving_key;
+        let vk = &setup.verifying_key;
 
         for (&id, keygen) in &pk.chip_info {
             let verify_info = vk.get(id).expect("chip should be in vk");
@@ -222,21 +241,45 @@ mod tests {
                 num_receives_per_row: 2,
             },
         };
-        // 5 interactions + 1 cumsum = 6, each 4 BabyBear = 24
         assert_eq!(perm_trace_width(&info), 24);
     }
 
     #[test]
     fn execution_chip_has_nonzero_perm_width() {
-        let machine = crate::TabulaMachine::builder()
-            .with_core_chips()
-            .with_default_commitments()
-            .build()
-            .expect("build");
-        let pk = machine.proving_key();
-        let exec_info = pk.get(core_chips::EXECUTION).unwrap();
+        let setup = crate::setup::execution_tier_setup().unwrap();
+        let exec_info = setup.proving_key.get(core_chips::EXECUTION).unwrap();
         let width = perm_trace_width(exec_info);
         assert!(width > 0, "ExecutionChip must have interactions");
         assert_eq!(width % 4, 0, "perm width must be multiple of 4");
+    }
+
+    #[test]
+    fn external_buses_derived_from_tier_metadata() {
+        use crate::setup::{column_tier_setup, execution_tier_setup, root_tier_setup};
+        use tabula_core::{ColId, TableId};
+        use tabula_stark::air::interaction::core_buses;
+
+        let exec = execution_tier_setup().unwrap();
+        let col = column_tier_setup::<3>(
+            TableId(1),
+            ColId(1),
+            tabula_commitment::scheme_tags::SSMC,
+            true,
+        )
+        .unwrap();
+        let root = root_tier_setup(&crate::composition::SmtRootProof).unwrap();
+
+        let external =
+            compute_external_buses([&exec.proving_key, &col.proving_key, &root.proving_key]);
+
+        assert!(external.contains(&core_buses::READ_ACCESS));
+        assert!(external.contains(&core_buses::WRITE_ACCESS));
+        assert!(external.contains(&core_buses::EMPTY_COL_READ));
+        assert!(external.contains(&core_buses::SMT_LEAF_DIGEST));
+        assert!(external.contains(&core_buses::RANGE_CHECK));
+
+        assert!(!external.contains(&core_buses::POSEIDON_PERM));
+        assert!(!external.contains(&core_buses::STATIC_TABLE_LOOKUP));
+        assert!(!external.contains(&core_buses::SMT_TABLE_ROOT));
     }
 }

@@ -48,17 +48,17 @@ impl ExecutedBatch {
 /// Execute a batch against a registered program and state.
 pub fn execute_registered_batch(
     artifact: RegisteredProgram,
-    state_file: StateFile,
+    state_file: &StateFile,
     batch_file: BatchFile,
     hasher: &dyn Hasher,
 ) -> ServiceResult<ExecutedBatch> {
     let inner = tabula_driver::run_batch(&BatchInput {
         program: &artifact.program,
-        state: &state_file,
+        state: state_file,
         batch: &batch_file,
         hasher,
     })
-    .map_err(map_driver_execution_error)?;
+    .map_err(|e| map_driver_execution_error(&e))?;
 
     Ok(ExecutedBatch {
         artifact,
@@ -67,8 +67,8 @@ pub fn execute_registered_batch(
     })
 }
 
-fn map_driver_execution_error(err: tabula_driver::DriverError) -> ServiceError {
-    match &err {
+fn map_driver_execution_error(err: &tabula_driver::DriverError) -> ServiceError {
+    match err {
         tabula_driver::DriverError::InvalidState(source) => {
             ServiceError::bad_request(ErrorCode::InvalidStateCell, source.to_string())
         }

@@ -174,7 +174,7 @@ pub fn execute<S: StateSnapshot>(
                     let r = resolve_value_expr(rhs, &slots, params)?;
                     match (&l, &r) {
                         (Value::Bool(a), Value::Bool(b)) => {
-                            set_slot(&mut slots, *dst, Value::Bool(*a && *b))?
+                            set_slot(&mut slots, *dst, Value::Bool(*a && *b))?;
                         }
                         (Value::Bool(_), _) => {
                             return Err(TabulaError::TypeMismatch {
@@ -196,7 +196,7 @@ pub fn execute<S: StateSnapshot>(
                     let r = resolve_value_expr(rhs, &slots, params)?;
                     match (&l, &r) {
                         (Value::Bool(a), Value::Bool(b)) => {
-                            set_slot(&mut slots, *dst, Value::Bool(*a || *b))?
+                            set_slot(&mut slots, *dst, Value::Bool(*a || *b))?;
                         }
                         (Value::Bool(_), _) => {
                             return Err(TabulaError::TypeMismatch {
@@ -316,8 +316,7 @@ fn lookup_col_type(
         .map(|c| c.value_type)
         .ok_or_else(|| {
             TabulaError::InvalidIr(format!(
-                "column {:?} not found in schema for table {:?}",
-                col, table
+                "column {col:?} not found in schema for table {table:?}"
             ))
         })
 }

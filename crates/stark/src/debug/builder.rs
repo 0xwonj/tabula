@@ -59,7 +59,7 @@ impl<'a, F: Field> AirBuilder for DebugConstraintBuilder<'a, F> {
             self.first_failure = Some(ConstraintError {
                 row: self.row_index,
                 constraint_index: self.constraint_index,
-                value: format!("{:?}", val),
+                value: format!("{val:?}"),
             });
         }
         self.constraint_index += 1;

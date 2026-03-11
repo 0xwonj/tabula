@@ -129,10 +129,7 @@ where
 /// is in reverse order (highest power first) for Horner's method accumulation,
 /// and `decomposed_alpha_powers` splits each EF4 into its 4 BabyBear basis
 /// components (required by p3's `ProverConstraintFolder`).
-pub fn build_alpha_powers(
-    alpha: EF4,
-    count: usize,
-) -> (Vec<EF4>, Vec<Vec<BabyBear>>) {
+pub fn build_alpha_powers(alpha: EF4, count: usize) -> (Vec<EF4>, Vec<Vec<BabyBear>>) {
     use p3_field::BasedVectorSpace;
 
     let mut alpha_powers = Vec::with_capacity(count);
@@ -143,15 +140,14 @@ pub fn build_alpha_powers(
     }
     alpha_powers.reverse();
 
-    let decomposed: Vec<Vec<BabyBear>> =
-        (0..<EF4 as BasedVectorSpace<BabyBear>>::DIMENSION)
-            .map(|i| {
-                alpha_powers
-                    .iter()
-                    .map(|x| <EF4 as BasedVectorSpace<BabyBear>>::as_basis_coefficients_slice(x)[i])
-                    .collect()
-            })
-            .collect();
+    let decomposed: Vec<Vec<BabyBear>> = (0..<EF4 as BasedVectorSpace<BabyBear>>::DIMENSION)
+        .map(|i| {
+            alpha_powers
+                .iter()
+                .map(|x| <EF4 as BasedVectorSpace<BabyBear>>::as_basis_coefficients_slice(x)[i])
+                .collect()
+        })
+        .collect();
 
     (alpha_powers, decomposed)
 }

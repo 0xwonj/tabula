@@ -14,6 +14,7 @@ use crate::execution::air::{HASH_INSTRUCTION_DOMAIN_TAG, HASH_INSTRUCTION_INPUT_
 /// - `hash_perm_input[2+W..2+2W] = src2_val[0..W]`
 /// - `hash_perm_input[8..16] = 0` (capacity zero for fresh sponge)
 /// - Result: `perm_output[0..W] -> dst slot`, not null
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) fn constrain_hash<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,

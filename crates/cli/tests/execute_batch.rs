@@ -158,7 +158,7 @@ fn test_multi_tx_mixed_outcomes() {
     assert_eq!(result.tx_outcomes[2], TxOutcome::Success);
 
     // Final: Alice = 700, Bob = 700, Charlie = 300
-    let ws: std::collections::BTreeMap<_, _> = result.write_set_final.iter().cloned().collect();
+    let ws: std::collections::BTreeMap<_, _> = result.write_set_final.iter().copied().collect();
     assert_eq!(
         ws[&CellKey {
             table: TableId(1),

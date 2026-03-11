@@ -57,7 +57,7 @@ pub fn decode_trace(
     let expected = trace_width(codec, value_type);
     if fes.len() != expected {
         return Err(TabulaError::FieldEncodingError(format!(
-            "trace decode: expected {expected} FEs for {value_type:?}, got {}",
+            "trace decode: expected {expected} FEs for {value_type}, got {}",
             fes.len()
         )));
     }
@@ -114,7 +114,7 @@ impl ValueCodec for BabyBearCodec {
         let expected = self.field_elements_per(target_type);
         if field_elements.len() != expected {
             return Err(TabulaError::FieldEncodingError(format!(
-                "expected {expected} FEs for {target_type:?}, got {}",
+                "expected {expected} FEs for {target_type}, got {}",
                 field_elements.len()
             )));
         }

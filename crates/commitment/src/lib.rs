@@ -1,6 +1,3 @@
-#![warn(missing_docs)]
-#![deny(unused)]
-
 //! Protocol-level cryptographic primitives for the Tabula kernel (out-of-circuit).
 //!
 //! This crate computes cryptographic commitments to state: Poseidon hashing,

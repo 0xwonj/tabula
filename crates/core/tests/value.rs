@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use std::cmp::Ordering;
 
 use proptest::prelude::*;
@@ -309,6 +310,8 @@ fn display_value() {
 #[test]
 fn display_value_type() {
     assert_eq!(format!("{}", ValueType::U64), "U64");
+    assert_eq!(format!("{}", ValueType::I64), "I64");
+    assert_eq!(format!("{}", ValueType::Bool), "Bool");
     assert_eq!(format!("{}", ValueType::Bytes32), "Bytes32");
 }
 

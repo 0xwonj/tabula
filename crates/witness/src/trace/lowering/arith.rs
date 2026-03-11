@@ -8,7 +8,7 @@ use super::context::LoweringContext;
 pub(super) fn lower_arith<const W: usize>(
     ctx: &mut LoweringContext<'_, W>,
     dst: u16,
-    op: &tabula_ir::ArithOp,
+    op: tabula_ir::ArithOp,
     lhs: &ValueExpr,
     rhs: &ValueExpr,
 ) -> Result<(), TabulaError> {

@@ -8,7 +8,10 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use crate::error::TabulaError;
-use crate::traits::*;
+use crate::traits::{
+    BatchDigester, Hasher, MembershipScheme, NoncePolicy, SigVerifier, StateSnapshot,
+    StaticTableProvider, ValueCodec,
+};
 use crate::{Batch, CellKey, ColId, Digest, RowKey, TableId, Value, ValueType};
 
 // ---------------------------------------------------------------------------
@@ -124,7 +127,7 @@ impl StaticTableProvider for InMemoryStaticTables {
     fn lookup(&self, table: TableId, key: RowKey, col: ColId) -> Result<Value, TabulaError> {
         self.data
             .get(&(table, key, col))
-            .cloned()
+            .copied()
             .ok_or(TabulaError::CellNotFound(CellKey {
                 table,
                 col,
@@ -179,7 +182,7 @@ impl Default for InMemoryState {
 
 impl StateSnapshot for InMemoryState {
     fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
-        Ok(self.data.get(key).cloned())
+        Ok(self.data.get(key).copied())
     }
 
     fn table_exists(&self, table: TableId) -> bool {

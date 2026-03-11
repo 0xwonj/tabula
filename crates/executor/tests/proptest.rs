@@ -51,8 +51,7 @@ proptest! {
         let expected: Option<Value> = writes.iter()
             .rev()
             .find(|(r, _)| *r == read_row)
-            .map(|(_, v)| *v)
-            .unwrap_or(None);
+            .and_then(|(_, v)| *v);
 
         prop_assert_eq!(result, expected);
     }

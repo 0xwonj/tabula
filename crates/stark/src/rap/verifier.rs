@@ -186,7 +186,12 @@ impl<'a> RapVerifierFolder<'a> {
 
 /// Read 4 consecutive values from a row slice as an EF4-component array.
 fn read_ef4_components<T: Copy>(row: &[T], offset: usize) -> [T; 4] {
-    [row[offset], row[offset + 1], row[offset + 2], row[offset + 3]]
+    [
+        row[offset],
+        row[offset + 1],
+        row[offset + 2],
+        row[offset + 3],
+    ]
 }
 
 type VF4View<'a> =

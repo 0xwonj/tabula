@@ -43,7 +43,7 @@ pub struct ChipRecord<F> {
 /// A chip with its name and trace, for homogeneous multi-chip checking.
 ///
 /// For heterogeneous chips, use [`evaluate_chip`] + [`check_logup_balance`] directly.
-pub struct ChipTrace<'a, F: Field, A> {
+pub struct ChipTrace<'a, F: Field, A: ?Sized> {
     /// Human-readable chip name (for error messages).
     pub name: &'a str,
     /// The AIR chip.
@@ -59,20 +59,20 @@ pub struct ChipTrace<'a, F: Field, A> {
 /// Checks local constraints row-by-row. Returns a [`ChipRecord`] containing
 /// all interactions emitted during evaluation. Fails early on the first
 /// constraint violation.
-pub fn evaluate_chip<F, A: ?Sized>(
+pub fn evaluate_chip<F, A>(
     name: &str,
     air: &A,
     trace: &RowMajorMatrix<F>,
 ) -> Result<ChipRecord<F>, MultiChipError>
 where
     F: Field,
-    A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
+    A: ?Sized + for<'a> Air<DebugConstraintBuilder<'a, F>>,
 {
     evaluate_chip_with_preprocessed_and_public_values(name, air, trace, None, &[])
 }
 
 /// Like [`evaluate_chip`] but with explicit public values.
-pub fn evaluate_chip_with_public_values<F, A: ?Sized>(
+pub fn evaluate_chip_with_public_values<F, A>(
     name: &str,
     air: &A,
     trace: &RowMajorMatrix<F>,
@@ -80,13 +80,13 @@ pub fn evaluate_chip_with_public_values<F, A: ?Sized>(
 ) -> Result<ChipRecord<F>, MultiChipError>
 where
     F: Field,
-    A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
+    A: ?Sized + for<'a> Air<DebugConstraintBuilder<'a, F>>,
 {
     evaluate_chip_with_preprocessed_and_public_values(name, air, trace, None, public_values)
 }
 
 /// Like [`evaluate_chip`] but with an optional preprocessed trace.
-pub fn evaluate_chip_with_preprocessed<F, A: ?Sized>(
+pub fn evaluate_chip_with_preprocessed<F, A>(
     name: &str,
     air: &A,
     trace: &RowMajorMatrix<F>,
@@ -94,13 +94,13 @@ pub fn evaluate_chip_with_preprocessed<F, A: ?Sized>(
 ) -> Result<ChipRecord<F>, MultiChipError>
 where
     F: Field,
-    A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
+    A: ?Sized + for<'a> Air<DebugConstraintBuilder<'a, F>>,
 {
     evaluate_chip_with_preprocessed_and_public_values(name, air, trace, preprocessed, &[])
 }
 
 /// Like [`evaluate_chip_with_preprocessed`] but also binds public values.
-pub fn evaluate_chip_with_preprocessed_and_public_values<F, A: ?Sized>(
+pub fn evaluate_chip_with_preprocessed_and_public_values<F, A>(
     name: &str,
     air: &A,
     trace: &RowMajorMatrix<F>,
@@ -109,7 +109,7 @@ pub fn evaluate_chip_with_preprocessed_and_public_values<F, A: ?Sized>(
 ) -> Result<ChipRecord<F>, MultiChipError>
 where
     F: Field,
-    A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
+    A: ?Sized + for<'a> Air<DebugConstraintBuilder<'a, F>>,
 {
     let height = trace.height();
     let mut all_interactions = Vec::new();
@@ -175,7 +175,7 @@ where
 ///
 /// Used by keygen column-scanning, which needs interaction metadata even when
 /// a probe trace violates AIR constraints.
-pub fn evaluate_chip_interactions_only<F, A: ?Sized>(
+pub fn evaluate_chip_interactions_only<F, A>(
     air: &A,
     trace: &RowMajorMatrix<F>,
     preprocessed: Option<&RowMajorMatrix<F>>,
@@ -183,7 +183,7 @@ pub fn evaluate_chip_interactions_only<F, A: ?Sized>(
 ) -> ChipRecord<F>
 where
     F: Field,
-    A: for<'a> Air<DebugConstraintBuilder<'a, F>>,
+    A: ?Sized + for<'a> Air<DebugConstraintBuilder<'a, F>>,
 {
     let height = trace.height();
     let mut all_interactions = Vec::new();

@@ -129,12 +129,12 @@ fn validate_schema_coverage(schemas: &[TableSchema], tx_types: &[TxTypeDef]) -> 
             match instr {
                 tabula_ir::Instruction::Read { table, col, .. }
                 | tabula_ir::Instruction::Write { table, col, .. } => {
-                    ensure_table_col_exists(&columns_by_table, tx, instr_idx, *table, *col)?
+                    ensure_table_col_exists(&columns_by_table, tx, instr_idx, *table, *col)?;
                 }
                 tabula_ir::Instruction::Lookup {
                     static_table, col, ..
                 } => {
-                    ensure_table_col_exists(&columns_by_table, tx, instr_idx, *static_table, *col)?
+                    ensure_table_col_exists(&columns_by_table, tx, instr_idx, *static_table, *col)?;
                 }
                 _ => {}
             }

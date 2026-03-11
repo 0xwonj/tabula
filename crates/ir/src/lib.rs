@@ -1,6 +1,3 @@
-#![warn(missing_docs)]
-#![deny(unused)]
-
 //! IR definitions for the Tabula kernel: instructions, tx types, and program validation.
 
 pub mod instruction;

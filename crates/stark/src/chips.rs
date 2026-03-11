@@ -45,12 +45,6 @@ pub mod core_chips {
 
     /// Execution chip (instruction interpreter).
     pub const EXECUTION: ChipId = ChipId(0);
-    /// Inter-transaction ordering chip.
-    pub const INTER_TX_ORDER: ChipId = ChipId(1);
-    /// State column chip (per-column sorted memory).
-    pub const STATE_COLUMN: ChipId = ChipId(2);
-    /// Column metadata chip (commitment wiring).
-    pub const COLUMN_META: ChipId = ChipId(3);
     /// Poseidon2 permutation chip.
     pub const POSEIDON: ChipId = ChipId(4);
     /// Range check preprocessed table.
@@ -62,31 +56,12 @@ pub mod core_chips {
     /// SMT table-level path chip.
     pub const SMT_TABLE_PATH: ChipId = ChipId(8);
 
-    /// Layer 0 core chip IDs (fixed identity of Tabula).
-    ///
-    /// Registered by [`MachineBuilder::with_core_chips()`]:
-    /// Execution, Memory, RootProof, BusConsumers.
-    /// Commitment-layer chips (e.g., [`STATE_COLUMN`]) are registered separately
-    /// via [`MachineBuilder::with_default_commitments()`].
+    /// Core chip IDs (execution + root + bus consumers), for iteration and validation.
     ///
     /// Note: ordering is canonical (by chip ID), not registration order.
-    pub const LAYER0: [ChipId; 8] = [
+    /// Shard chip IDs (100+) are allocated dynamically per column proof.
+    pub const ALL: [ChipId; 6] = [
         EXECUTION,
-        INTER_TX_ORDER,
-        COLUMN_META,
-        POSEIDON,
-        RANGE_CHECK,
-        STATIC_TABLE,
-        SMT_COL_PATH,
-        SMT_TABLE_PATH,
-    ];
-
-    /// All core chip IDs (Layer 0 + default commitments), for iteration and validation.
-    pub const ALL: [ChipId; 9] = [
-        EXECUTION,
-        INTER_TX_ORDER,
-        STATE_COLUMN,
-        COLUMN_META,
         POSEIDON,
         RANGE_CHECK,
         STATIC_TABLE,
@@ -98,9 +73,6 @@ pub mod core_chips {
     pub const fn name(id: &ChipId) -> Option<&'static str> {
         match id.0 {
             0 => Some("Execution"),
-            1 => Some("InterTxOrder"),
-            2 => Some("StateColumn"),
-            3 => Some("ColumnMeta"),
             4 => Some("Poseidon"),
             5 => Some("RangeCheck"),
             6 => Some("StaticTable"),
@@ -144,6 +116,7 @@ impl ChipIdAllocator {
     }
 
     /// Allocate the next available [`ChipId`].
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> ChipId {
         let id = ChipId(self.next_id);
         self.next_id += 1;

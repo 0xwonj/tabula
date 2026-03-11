@@ -135,10 +135,7 @@ impl<const W: usize> ColumnCommitment for SmtCommitment<W> {
                     .get(col.table, col.col)
                     .ok_or_else(|| TabulaError::ProofError {
                         phase: "smt_build_traces",
-                        detail: format!(
-                            "no SMT witness data for ({}, {})",
-                            col.table.0, col.col.0
-                        ),
+                        detail: format!("no SMT witness data for ({}, {})", col.table.0, col.col.0),
                     })?;
 
             let t = col.table.0;

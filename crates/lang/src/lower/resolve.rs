@@ -1,6 +1,9 @@
 //! Name resolution and type inference helpers for TxLower.
 
-use super::*;
+use super::{
+    ColumnInfo, CompileError, ErrorKind, Instruction, Span, TableId, TxLower, Value, ValueExpr,
+    ValueType, is_arithmetic,
+};
 
 use crate::ast::{Expr, ExprKind, UnaryOp};
 
@@ -15,7 +18,7 @@ impl<'a> TxLower<'a> {
             self.errors.push(CompileError::new(
                 ErrorKind::UndefinedVariable,
                 span,
-                format!("undefined variable '{}'", name),
+                format!("undefined variable '{name}'"),
             ));
             None
         }
@@ -61,7 +64,7 @@ impl<'a> TxLower<'a> {
             self.errors.push(CompileError::new(
                 ErrorKind::UndefinedTable,
                 span,
-                format!("undefined table '{}'", table_name),
+                format!("undefined table '{table_name}'"),
             ));
             return None;
         };
@@ -69,7 +72,7 @@ impl<'a> TxLower<'a> {
             self.errors.push(CompileError::new(
                 ErrorKind::UndefinedColumn,
                 span,
-                format!("undefined column '{}' in table '{}'", col_name, table_name),
+                format!("undefined column '{col_name}' in table '{table_name}'"),
             ));
             return None;
         };

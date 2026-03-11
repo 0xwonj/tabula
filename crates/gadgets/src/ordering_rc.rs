@@ -73,10 +73,25 @@ pub fn constrain_ordering_halves<AB: AirBuilder>(
     );
 }
 
+/// Emit all constraints and bus interactions for an OrderingRangeChecked gadget.
+///
+/// Combines [`constrain_ordering_halves`] + [`send_ordering_range_checks`] in one call.
+/// Use this to ensure both structural constraints and bus sends are always applied together.
+pub fn eval_ordering_range_checked<AB: InteractionAirBuilder>(
+    builder: &mut AB,
+    ordering: &OrderingRangeChecked<AB::Var>,
+    mult: AB::Expr,
+) {
+    constrain_ordering_halves(builder, ordering);
+    send_ordering_range_checks(builder, ordering, mult);
+}
+
 /// Send 4 range checks for an OrderingRangeChecked value.
 ///
 /// Sends: diff0_lo, diff0_hi, diff1_lo, diff1_hi.
 /// Note: diff2 is proven ∈ [0, 16) by Limb2Bits boolean decomposition, no RC send needed.
+// AB::Expr is cloned for each bus send; by-value avoids one clone on the last send.
+#[allow(clippy::needless_pass_by_value)]
 pub fn send_ordering_range_checks<AB: InteractionAirBuilder>(
     builder: &mut AB,
     ordering: &OrderingRangeChecked<AB::Var>,

@@ -54,10 +54,25 @@ pub fn constrain_key_halves<AB: AirBuilder>(builder: &mut AB, key: &KeyRangeChec
     constrain_limb2_bits(builder, key.limbs.limb2.clone().into(), &key.limb2_bits);
 }
 
+/// Emit all constraints and bus interactions for a KeyRangeChecked gadget.
+///
+/// Combines [`constrain_key_halves`] + [`send_key_range_checks`] in one call.
+/// Use this to ensure both structural constraints and bus sends are always applied together.
+pub fn eval_key_range_checked<AB: InteractionAirBuilder>(
+    builder: &mut AB,
+    key: &KeyRangeChecked<AB::Var>,
+    mult: AB::Expr,
+) {
+    constrain_key_halves(builder, key);
+    send_key_range_checks(builder, key, mult);
+}
+
 /// Send 4 range checks for a KeyRangeChecked value.
 ///
 /// Sends: l0_lo, l0_hi, l1_lo, l1_hi.
 /// Note: limb2 is proven ∈ [0, 16) by Limb2Bits boolean decomposition, no RC send needed.
+// AB::Expr is cloned for each bus send; by-value avoids one clone on the last send.
+#[allow(clippy::needless_pass_by_value)]
 pub fn send_key_range_checks<AB: InteractionAirBuilder>(
     builder: &mut AB,
     key: &KeyRangeChecked<AB::Var>,

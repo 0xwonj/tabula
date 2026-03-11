@@ -1,6 +1,3 @@
-#![warn(missing_docs)]
-#![deny(unused)]
-
 //! Core types, traits, and error definitions for the Tabula kernel.
 
 pub mod error;

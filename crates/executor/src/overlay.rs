@@ -196,7 +196,7 @@ mod tests {
     impl StateSnapshot for CountingSnapshot {
         fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
             self.call_count.fetch_add(1, Ordering::Relaxed);
-            Ok(self.data.get(key).cloned())
+            Ok(self.data.get(key).copied())
         }
 
         fn table_exists(&self, _: TableId) -> bool {

@@ -8,3 +8,6 @@ license.workspace = true
 tabula-core = { workspace = true }
 borsh = { workspace = true }
 serde = { workspace = true }
+
+[lints]
+workspace = true

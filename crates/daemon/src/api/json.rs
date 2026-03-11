@@ -22,12 +22,12 @@ where
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         match Json::<T>::from_request(req, state).await {
             Ok(Json(value)) => Ok(Self(value)),
-            Err(rej) => Err(map_json_rejection(rej)),
+            Err(rej) => Err(map_json_rejection(&rej)),
         }
     }
 }
 
-fn map_json_rejection(rej: JsonRejection) -> ApiError {
+fn map_json_rejection(rej: &JsonRejection) -> ApiError {
     let status = rej.status();
     let message = rej.body_text();
 

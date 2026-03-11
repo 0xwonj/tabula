@@ -59,7 +59,6 @@ pub fn source_line(source: &str, offset: usize) -> (usize, &str) {
     }
     let line_end = source[line_start..]
         .find('\n')
-        .map(|pos| line_start + pos)
-        .unwrap_or(source.len());
+        .map_or(source.len(), |pos| line_start + pos);
     (line_num, &source[line_start..line_end])
 }

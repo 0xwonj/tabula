@@ -16,3 +16,6 @@ blake3 = { workspace = true, optional = true }
 [dev-dependencies]
 proptest = { workspace = true }
 blake3 = { workspace = true }
+
+[lints]
+workspace = true

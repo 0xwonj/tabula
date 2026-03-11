@@ -70,7 +70,7 @@ pub fn check(
                 row,
             } => {
                 check_row_expr(row, param_count, &param_types, &slot_types, i)?;
-                let ty = schema_col_type(schemas, table, col);
+                let ty = schema_col_type(schemas, *table, *col);
                 assign_slot(
                     *dst_val,
                     ty,
@@ -99,7 +99,7 @@ pub fn check(
                 check_row_expr(row, param_count, &param_types, &slot_types, i)?;
                 check_value_expr(src_val, param_count, &slot_types, i)?;
                 check_value_expr(src_is_null, param_count, &slot_types, i)?;
-                if let Some(expected) = schema_col_type(schemas, table, col)
+                if let Some(expected) = schema_col_type(schemas, *table, *col)
                     && let Some(actual) = expr_type(src_val, &param_types, &slot_types)
                     && actual != expected
                 {
@@ -124,7 +124,7 @@ pub fn check(
                 row,
             } => {
                 check_row_expr(row, param_count, &param_types, &slot_types, i)?;
-                let ty = schema_col_type(schemas, static_table, col);
+                let ty = schema_col_type(schemas, *static_table, *col);
                 assign_slot(
                     *dst,
                     ty,
@@ -388,12 +388,12 @@ fn check_slot_defined(
 
 fn schema_col_type(
     schemas: &BTreeMap<TableId, TableSchema>,
-    table: &TableId,
-    col: &ColId,
+    table: TableId,
+    col: ColId,
 ) -> Option<ValueType> {
     schemas
-        .get(table)
-        .and_then(|s| s.columns.iter().find(|c| c.id == *col))
+        .get(&table)
+        .and_then(|s| s.columns.iter().find(|c| c.id == col))
         .map(|c| c.value_type)
 }
 

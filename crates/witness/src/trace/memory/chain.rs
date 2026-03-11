@@ -1,8 +1,8 @@
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
+use super::state::StateColumnRow;
 use tabula_chips::poseidon::constants::poseidon2_permutation;
-use tabula_chips::state_column::trace::StateColumnRow;
 
 pub(super) fn populate_state_chain_accumulators<const W: usize>(rows: &mut [StateColumnRow]) {
     let mut i = 0;

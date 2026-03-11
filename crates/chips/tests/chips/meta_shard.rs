@@ -12,7 +12,9 @@ use tabula_chips::shards::meta::trace::{MetaShardRow, generate_meta_shard_trace}
 use tabula_stark::chips::ChipId;
 use tabula_stark::debug::debug_check;
 
-use tabula_chips::test_utils::builders::{ms_both_empty, ms_empty_to_nonempty, ms_touched, ms_untouched};
+use tabula_chips::test_utils::builders::{
+    ms_both_empty, ms_empty_to_nonempty, ms_touched, ms_untouched,
+};
 use tabula_chips::test_utils::values::{com_empty, distinct_digest};
 
 fn chip() -> MetaShardChip {
@@ -121,8 +123,7 @@ fn invalid_empty_stays_empty_when_touched() {
         is_touched: true,
         empty_read_count: 0,
     };
-    debug_check(&chip(), &trace(Some(&r)))
-        .expect_err("empty_old=1 ∧ touched=1 ⟹ empty_new=0");
+    debug_check(&chip(), &trace(Some(&r))).expect_err("empty_old=1 ∧ touched=1 ⟹ empty_new=0");
 }
 
 #[test]

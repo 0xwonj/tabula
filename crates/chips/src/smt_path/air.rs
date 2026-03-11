@@ -98,26 +98,26 @@ fn constrain_smt_path_core<AB: InteractionAirBuilder>(
         for i in 0..DIGEST_WIDTH {
             // Old tree left = perm_input[i]
             let expected_left_old: AB::Expr = not_bit.clone() * local.old_node[i].clone().into()
-                + bit.clone() * local.sibling[i].clone().into();
+                + bit.clone() * local.old_sibling[i].clone().into();
             builder.assert_zero(
                 is_real.clone() * (local.old_perm_input[i].clone().into() - expected_left_old),
             );
             // Old tree right = perm_input[8+i]
             let expected_right_old: AB::Expr = bit.clone() * local.old_node[i].clone().into()
-                + not_bit.clone() * local.sibling[i].clone().into();
+                + not_bit.clone() * local.old_sibling[i].clone().into();
             builder.assert_zero(
                 is_real.clone() * (local.old_perm_input[8 + i].clone().into() - expected_right_old),
             );
 
             // New tree left = perm_input[i]
             let expected_left_new: AB::Expr = not_bit.clone() * local.new_node[i].clone().into()
-                + bit.clone() * local.sibling[i].clone().into();
+                + bit.clone() * local.new_sibling[i].clone().into();
             builder.assert_zero(
                 is_real.clone() * (local.new_perm_input[i].clone().into() - expected_left_new),
             );
             // New tree right = perm_input[8+i]
             let expected_right_new: AB::Expr = bit.clone() * local.new_node[i].clone().into()
-                + not_bit.clone() * local.sibling[i].clone().into();
+                + not_bit.clone() * local.new_sibling[i].clone().into();
             builder.assert_zero(
                 is_real.clone() * (local.new_perm_input[8 + i].clone().into() - expected_right_new),
             );

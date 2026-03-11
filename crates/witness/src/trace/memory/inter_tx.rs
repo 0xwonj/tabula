@@ -3,12 +3,54 @@ use std::collections::{BTreeMap, BTreeSet};
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
+use tabula_chips::shards::memory::trace::MemoryShardRow;
 use tabula_commitment::{FieldHasher, NativeDigest};
 use tabula_core::RowKey;
 use tabula_core::error::TabulaError;
 
 use crate::witness::ColumnWitness;
-use tabula_chips::inter_tx_order::trace::InterTxOrderRow;
+
+/// A single row for building inter-tx ordering data.
+///
+/// Pre-sorted by `(table_id, col_id, key, tx_index)`.
+/// Init rows have `is_init=true` and appear first for each key.
+#[derive(Debug, Clone)]
+pub(crate) struct InterTxOrderRow {
+    /// Row key (u64).
+    pub key: u64,
+    /// Transaction index within the batch (0 for init rows).
+    pub tx_index: u32,
+    /// True if this is an init row (base state seed).
+    pub is_init: bool,
+    /// True if this tx read the key.
+    pub has_read: bool,
+    /// True if this tx wrote the key.
+    pub has_write: bool,
+    /// Input value (base state for init; previous output for access).
+    pub input_val: Vec<BabyBear>,
+    /// Input is-null flag.
+    pub input_is_null: bool,
+    /// Output value (same as input for init/read-only; written value for write).
+    pub output_val: Vec<BabyBear>,
+    /// Output is-null flag.
+    pub output_is_null: bool,
+}
+
+impl From<InterTxOrderRow> for MemoryShardRow {
+    fn from(r: InterTxOrderRow) -> Self {
+        Self {
+            key: r.key,
+            tx_index: r.tx_index,
+            is_init: r.is_init,
+            has_read: r.has_read,
+            has_write: r.has_write,
+            input_val: r.input_val,
+            input_is_null: r.input_is_null,
+            output_val: r.output_val,
+            output_is_null: r.output_is_null,
+        }
+    }
+}
 
 pub(super) fn build_inter_tx_rows<H, const W: usize>(
     column: &ColumnWitness<H>,
@@ -70,8 +112,6 @@ where
             .unwrap_or_else(|| (zero.clone(), true));
 
         rows.push(InterTxOrderRow {
-            table_id: column.table.0,
-            col_id: column.col.0,
             key: key.0,
             tx_index: 0,
             is_init: true,
@@ -109,8 +149,6 @@ where
                     };
 
                 rows.push(InterTxOrderRow {
-                    table_id: column.table.0,
-                    col_id: column.col.0,
                     key: key.0,
                     tx_index: *tx_index,
                     is_init: false,
@@ -129,14 +167,4 @@ where
     }
 
     Ok(rows)
-}
-
-pub(super) fn sort_inter_tx_rows(rows: &mut [InterTxOrderRow]) {
-    rows.sort_by(|a, b| {
-        (a.table_id, a.col_id, a.key)
-            .cmp(&(b.table_id, b.col_id, b.key))
-            .then_with(|| a.tx_index.cmp(&b.tx_index))
-            // For same (t,c,key,tx), init must come first.
-            .then_with(|| b.is_init.cmp(&a.is_init))
-    });
 }

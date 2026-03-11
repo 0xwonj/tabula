@@ -119,8 +119,7 @@ pub fn lower_execution_records<const W: usize>(
                     return Err(TabulaError::ProofError {
                         phase: "trace_lowering",
                         detail: format!(
-                            "execution lowering exhausted {} slots at event {} (full instruction witness required)",
-                            MAX_SLOTS, idx
+                            "execution lowering exhausted {MAX_SLOTS} slots at event {idx} (full instruction witness required)"
                         ),
                     });
                 };

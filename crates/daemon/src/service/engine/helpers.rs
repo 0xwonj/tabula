@@ -51,11 +51,12 @@ pub(super) fn next_id(counter: &AtomicU64, prefix: &str) -> String {
 pub(super) fn register_resolved_program(
     input: &ResolvedProgramInput,
 ) -> ServiceResult<RegisteredProgram> {
-    register_program_sources(&input.sources, input.metadata_policy).map_err(map_driver_error)
+    register_program_sources(&input.sources, input.metadata_policy)
+        .map_err(|e| map_driver_error(&e))
 }
 
-pub(super) fn map_driver_error(err: DriverError) -> ServiceError {
-    match &err {
+pub(super) fn map_driver_error(err: &DriverError) -> ServiceError {
+    match err {
         DriverError::ReadFile { .. } => {
             ServiceError::bad_request(ErrorCode::FileIoError, err.to_string())
         }
@@ -114,7 +115,7 @@ impl super::LocalEngine {
                             sources,
                             metadata_policy: MetadataPolicy::Optional,
                         })
-                        .map_err(map_driver_error)
+                        .map_err(|e| map_driver_error(&e))
                 }
                 ProgramInline::Program(program) => Ok(ResolvedProgramInput {
                     sources: program.clone(),
@@ -146,7 +147,7 @@ impl super::LocalEngine {
                 sources,
                 metadata_policy,
             })
-            .map_err(map_driver_error)
+            .map_err(|e| map_driver_error(&e))
     }
 }
 

@@ -53,14 +53,18 @@ pub struct CmpWitness<T> {
 ///
 /// Sub-selector one-hot, equality via IsZero on combined diff,
 /// ordering via StrictIneq, result binding per sub-operation.
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) fn constrain_cmp<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    if W < 3 {
-        return;
-    }
+    const {
+        assert!(
+            W >= 3,
+            "CMP constraints require W >= 3 (3-limb value encoding)"
+        );
+    };
 
     let op_cmp: AB::Expr = local.op_cmp.clone().into();
     let gate: AB::Expr = is_real.clone() * op_cmp.clone();

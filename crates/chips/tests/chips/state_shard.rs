@@ -10,9 +10,7 @@ use tabula_chips::shards::state::trace::{EntrySource, StateShardRow, generate_st
 use tabula_stark::chips::ChipId;
 use tabula_stark::debug::debug_check;
 
-use tabula_chips::test_utils::builders::{
-    ss_both, ss_delete, ss_gap, ss_old_only, ss_write_only,
-};
+use tabula_chips::test_utils::builders::{ss_both, ss_delete, ss_gap, ss_old_only, ss_write_only};
 
 fn chip() -> StateShardChip<3> {
     StateShardChip::new(ChipId(100), 0, 0)
@@ -65,19 +63,13 @@ fn valid_gap() {
 
 #[test]
 fn valid_two_old_only() {
-    let rows = vec![
-        ss_old_only(100, [50, 0, 0]),
-        ss_old_only(200, [30, 0, 0]),
-    ];
+    let rows = vec![ss_old_only(100, [50, 0, 0]), ss_old_only(200, [30, 0, 0])];
     debug_check(&chip(), &trace(&rows)).expect("two old_only should pass");
 }
 
 #[test]
 fn valid_old_and_write() {
-    let mut rows = vec![
-        ss_old_only(100, [50, 0, 0]),
-        ss_write_only(200, [75, 0, 0]),
-    ];
+    let mut rows = vec![ss_old_only(100, [50, 0, 0]), ss_write_only(200, [75, 0, 0])];
     // write_only makes segment touched
     rows[0].segment_is_touched = true;
     debug_check(&chip(), &trace(&rows)).expect("old+write should pass");

@@ -17,3 +17,6 @@ tabula-ir = { workspace = true }
 tabula-lang = { workspace = true }
 tabula-artifact = { workspace = true }
 tabula-executor = { workspace = true }
+
+[lints]
+workspace = true

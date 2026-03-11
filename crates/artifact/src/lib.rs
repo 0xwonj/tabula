@@ -1,6 +1,3 @@
-#![warn(missing_docs)]
-#![deny(unused)]
-
 //! Canonical artifact models and helpers shared by adapters and orchestration.
 
 mod batch;

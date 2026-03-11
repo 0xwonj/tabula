@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_core::{ColId, RowKey, TableId, Value};
 use tabula_ir::{ArithOp, CmpOp, Instruction, RowExpr, Slot, ValueExpr};
 

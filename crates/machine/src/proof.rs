@@ -1,41 +1,128 @@
-//! Proof types for the batched multi-chip Tabula STARK.
+//! Proof types for the multi-proof Tabula STARK.
 //!
-//! A [`TabulaProof`] contains shared PCS commitments across all chips
-//! with a single FRI opening proof, plus per-chip OOD evaluations.
+//! A [`TabulaProof`] contains C+2 independent sub-proofs:
+//! one execution proof, C column proofs, and one root proof.
+//! Each sub-proof has its own PCS commitments and FRI opening proof.
+//!
+//! Cross-proof soundness is ensured by:
+//! 1. Shared LogUp challenges (α, β) derived from all main commitments
+//! 2. Per-bus cumsum exports verified by the root proof
+
+use std::collections::BTreeMap;
 
 use p3_baby_bear::BabyBear;
+use p3_field::PrimeCharacteristicRing;
 
+use tabula_stark::air::interaction::BusId;
 use tabula_stark::air::statement::PublicStatement;
 use tabula_stark::chips::ChipId;
 
 use crate::config::{EF4, PcsCommitment, PcsOpeningProof};
 
-/// A complete Tabula batch proof with shared PCS.
+// ── Proof Tier ───────────────────────────────────────────────────────────────
+
+/// Proof tier identifier for canonical ordering.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProofTier {
+    /// Tier 1: Execution proof (global, processes all instructions).
+    Execution,
+    /// Tier 2: Column proof for a specific `(table_id, col_id)`.
+    Column {
+        /// Table identifier.
+        table_id: u32,
+        /// Column identifier.
+        col_id: u16,
+    },
+    /// Tier 3: Root proof (verifies cumsum balance + SMT paths).
+    Root,
+}
+
+impl std::fmt::Display for ProofTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProofTier::Execution => write!(f, "execution"),
+            ProofTier::Column { table_id, col_id } => {
+                write!(f, "column({table_id},{col_id})")
+            }
+            ProofTier::Root => write!(f, "root"),
+        }
+    }
+}
+
+// ── Column Identity ──────────────────────────────────────────────────────────
+
+/// Column identity and commitment data for a column proof.
 ///
-/// Uses a 3-round protocol:
-/// 1. **Round 1**: Commit all main traces → sample LogUp challenges
-/// 2. **Round 2**: Commit all permutation traces → sample alpha
-/// 3. **Round 3**: Commit all quotient polynomials → sample zeta
+/// Pairs a `(table_id, col_id)` with old/new commitment digests.
+/// Used during proving to tag each column sub-proof with its identity.
+#[derive(Clone, Copy)]
+pub struct ColumnIdentity {
+    /// Table identifier.
+    pub table_id: u32,
+    /// Column identifier.
+    pub col_id: u16,
+    /// Old commitment digest.
+    pub com_old: [BabyBear; 8],
+    /// New commitment digest.
+    pub com_new: [BabyBear; 8],
+}
+
+// ── Sub-Proof Types ──────────────────────────────────────────────────────────
+
+/// A single sub-proof within a multi-proof.
 ///
-/// A single FRI opening proof covers all committed data.
-pub struct TabulaProof {
-    /// Commitment to preprocessed traces (e.g., Poseidon round constants).
-    /// `None` if no chip requires preprocessing.
+/// Contains the standard STARK proof data (PCS commitments, opening proof,
+/// per-chip evaluations) plus per-bus cumsum exports for cross-proof
+/// verification.
+pub struct SubProofEnvelope {
+    /// Which tier this sub-proof belongs to.
+    pub tier: ProofTier,
+    /// Commitment to preprocessed traces (if any).
     pub preprocessed_commitment: Option<PcsCommitment>,
-    /// Round 1: shared commitment to all chip main traces.
+    /// Commitment to main traces.
     pub main_commitment: PcsCommitment,
-    /// Round 2: shared commitment to all chip permutation traces.
-    /// `None` if no chip has LogUp interactions (unlikely in practice).
+    /// Commitment to permutation traces (if any).
     pub perm_commitment: Option<PcsCommitment>,
-    /// Round 3: shared commitment to all quotient polynomial chunks.
+    /// Commitment to quotient polynomial chunks.
     pub quotient_commitment: PcsCommitment,
-    /// Single FRI opening proof for all commitments.
+    /// FRI opening proof for this sub-proof's commitments.
     pub opening_proof: PcsOpeningProof,
-    /// Per-chip OOD evaluations and metadata.
+    /// Per-chip OOD evaluations.
     pub chip_openings: Vec<ChipOpening>,
+    /// Per-bus cumulative sums exported from this sub-proof.
+    ///
+    /// Internal buses (balanced within this proof) are not included.
+    /// Only external buses (ReadAccess, WriteAccess) appear here.
+    pub exported_cumsums: BTreeMap<BusId, EF4>,
+}
+
+/// Column proof entry (wraps a [`SubProofEnvelope`] with column identity).
+pub struct ColumnProofEntry {
+    /// Column identity and commitment data.
+    pub identity: ColumnIdentity,
+    /// The sub-proof for this column.
+    pub proof: SubProofEnvelope,
+}
+
+// ── Tabula Proof ─────────────────────────────────────────────────────────────
+
+/// A complete Tabula proof: C+2 independent sub-proofs.
+///
+/// The verifier reconstructs shared LogUp challenges from all main
+/// commitments, verifies each sub-proof independently, then checks
+/// cross-proof bus balance via the root proof.
+pub struct TabulaProof {
+    /// Tier 1: Execution proof.
+    pub execution: SubProofEnvelope,
+    /// Tier 2: Column proofs (one per `(table_id, col_id)`).
+    pub columns: Vec<ColumnProofEntry>,
+    /// Tier 3: Root proof.
+    pub root: SubProofEnvelope,
     /// The public statement this proof attests to.
     pub statement: PublicStatement,
 }
+
+// ── Per-Chip Openings ────────────────────────────────────────────────────────
 
 /// Per-chip out-of-domain evaluations and metadata.
 ///
@@ -72,6 +159,31 @@ pub struct ChipOpening {
     pub public_values: Vec<BabyBear>,
 }
 
+// ── Cross-Proof Balance ──────────────────────────────────────────────────────
+
+/// Check that cross-proof bus cumsums balance to zero.
+///
+/// Accumulates cumsums from all tiers and verifies each bus total is zero.
+/// Returns the first imbalanced `(BusId, coefficients)` if any.
+pub(crate) fn check_cross_proof_bus_balance<'a>(
+    cumsum_maps: impl Iterator<Item = &'a BTreeMap<BusId, EF4>>,
+) -> Result<(), (BusId, [BabyBear; 4])> {
+    let mut totals: BTreeMap<BusId, EF4> = BTreeMap::new();
+    for map in cumsum_maps {
+        for (&bus, &cs) in map {
+            *totals.entry(bus).or_insert(EF4::ZERO) += cs;
+        }
+    }
+    for (&bus_id, &total) in &totals {
+        if total != EF4::ZERO {
+            return Err((bus_id, tabula_stark::rap::ef4::ef4_coeffs(total)));
+        }
+    }
+    Ok(())
+}
+
+// ── Errors ───────────────────────────────────────────────────────────────────
+
 /// Errors during proof generation.
 #[derive(Debug, thiserror::Error)]
 pub enum ProveError {
@@ -92,12 +204,6 @@ pub enum ProveError {
     /// No chip traces were provided to the prover.
     #[error("no chip traces to prove")]
     NoChips,
-    /// Cross-chip LogUp cumulative sums do not balance to zero.
-    #[error("LogUp imbalance during proving: cumsum total = {total:?}")]
-    LogUpImbalance {
-        /// The nonzero total cumsum (4 BabyBear coefficients).
-        total: [BabyBear; 4],
-    },
     /// LogUp fingerprint evaluated to zero (division by zero).
     ///
     /// Probability ~2^{-124} with random challenges. If this occurs, retry
@@ -108,6 +214,24 @@ pub enum ProveError {
         row: usize,
         /// Interaction index within that row.
         interaction: usize,
+    },
+    /// An internal bus (should balance within one proof) has nonzero cumsum.
+    #[error("internal bus imbalance in {tier} proof: {bus_id}, cumsum = {cumsum:?}")]
+    InternalBusImbalance {
+        /// Which proof tier has the imbalance.
+        tier: ProofTier,
+        /// Which bus has the imbalance.
+        bus_id: BusId,
+        /// The nonzero cumsum coefficients.
+        cumsum: [BabyBear; 4],
+    },
+    /// Cross-proof bus cumsum does not balance across all proof instances.
+    #[error("cross-proof bus imbalance: {bus_id}, total = {total:?}")]
+    CrossProofBusImbalance {
+        /// Which bus has the imbalance.
+        bus_id: BusId,
+        /// The nonzero total cumsum.
+        total: [BabyBear; 4],
     },
 }
 
@@ -132,12 +256,6 @@ pub enum VerificationError {
         /// The underlying verification error message.
         detail: String,
     },
-    /// The cross-chip LogUp cumulative sums do not sum to zero.
-    #[error("LogUp imbalance: cumsum total = {total:?} (expected zero)")]
-    LogUpImbalance {
-        /// The nonzero total cumsum.
-        total: [BabyBear; 4],
-    },
     /// The proof's chip manifest is invalid (missing, extra, or duplicate chips).
     #[error("invalid chip manifest: {detail}")]
     InvalidChipManifest {
@@ -149,5 +267,33 @@ pub enum VerificationError {
     PcsVerificationFailed {
         /// Error from the PCS verify call.
         detail: String,
+    },
+    /// Column proof identity does not match any verifier setup.
+    #[error("column proof at index {index} has unknown identity ({proof_table},{proof_col})")]
+    ColumnIdentityMismatch {
+        /// Column proof index.
+        index: usize,
+        /// Table ID from the proof.
+        proof_table: u32,
+        /// Column ID from the proof.
+        proof_col: u16,
+    },
+    /// Cross-proof bus cumsums do not balance.
+    #[error("cross-proof bus imbalance: {bus_id}, total = {total:?}")]
+    CrossProofBusImbalance {
+        /// Which bus has the imbalance.
+        bus_id: BusId,
+        /// The nonzero total cumsum.
+        total: [BabyBear; 4],
+    },
+    /// Internal bus within a sub-proof does not balance.
+    #[error("internal bus imbalance in {tier}: {bus_id}, cumsum = {cumsum:?}")]
+    InternalBusImbalance {
+        /// Which proof tier has the imbalance.
+        tier: ProofTier,
+        /// Which bus has the imbalance.
+        bus_id: BusId,
+        /// The nonzero cumsum.
+        cumsum: [BabyBear; 4],
     },
 }

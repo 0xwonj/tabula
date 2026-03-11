@@ -95,7 +95,7 @@ Full sharding is the base architecture. The proof system produces C+2 independen
 **Key insight**: StateShard is NOT core — it is the SSMC scheme's implementation detail. It registers via `with_commitment("ssmc", ...)` alongside custom schemes. The root proof receives commitment values from ANY scheme via cumsum + public values without knowing the source.
 
 **Internal traits** (`pub(crate)`, not app-facing):
-- `RootProof` — currently `SmtRootProof` (SMT path chips + cumsum balance). Enables future replacement.
+- `RootProof` — currently `GlobalSmtRootProof` (SMT path chips + cumsum balance). Enables future replacement.
 
 ---
 

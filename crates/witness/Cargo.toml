@@ -31,3 +31,6 @@ criterion = { workspace = true }
 [[bench]]
 name = "trace_builder"
 harness = false
+
+[lints]
+workspace = true

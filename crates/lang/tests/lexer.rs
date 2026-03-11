@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_lang::error::ErrorKind;
 use tabula_lang::lexer::lex;
 use tabula_lang::span::Span;

@@ -67,6 +67,10 @@ p3-fri = "0.4"
 p3-challenger = "0.4"
 p3-dft = "0.4"
 p3-merkle-tree = "0.4"
+p3-blake3 = "0.4"
+
+# Parallelism
+rayon = "1.10"
 
 # Error handling
 thiserror = "2"
@@ -83,12 +87,47 @@ clap = { version = "4", features = ["derive"] }
 proptest = "1"
 criterion = { version = "0.8", features = ["html_reports"] }
 
-# Build profiles
+# ── Workspace-level lints ─────────────────────────────────────────────────────
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unused = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+# style
+cloned_instead_of_copied = "warn"
+explicit_into_iter_loop = "warn"
+implicit_clone = "warn"
+inconsistent_struct_constructor = "warn"
+inefficient_to_string = "warn"
+manual_let_else = "warn"
+redundant_closure_for_method_calls = "warn"
+semicolon_if_nothing_returned = "warn"
+uninlined_format_args = "warn"
+unnested_or_patterns = "warn"
+flat_map_option = "warn"
+manual_assert = "warn"
+map_unwrap_or = "warn"
+needless_for_each = "warn"
+# performance
+needless_pass_by_value = "warn"
+trivially_copy_pass_by_ref = "warn"
+large_enum_variant = "warn"
+unused_self = "warn"
+# namespace hygiene
+wildcard_imports = "warn"
+enum_glob_use = "warn"
+
+# ── Build profiles ────────────────────────────────────────────────────────────
+
 [profile.dev]
 opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+[profile.test]
+opt-level = 2
 
 [profile.release]
 lto = "thin"

@@ -90,7 +90,7 @@ Removed:
 | 1.4 ProvingKey / VerifyingKey | **Done** | `TabulaProvingKey`, `TabulaVerifyingKey`, `verify_with_key()`. Keys cached at `TabulaMachine::build()`. |
 | 1.5 Directory Structure Cleanup | **Done** | `permutation/` (mod, challenges, trace, tests), `prove/` (mod, quotient, rap_folder), `verify/` (mod, rap_folder). |
 | 1.6 RAP Phase Abstraction | **Dropped** | Single RAP implementation (LogUp) with no second consumer planned. Trait abstraction would add indirection without value. Prover/verifier construct `RapProverFolder`/`RapVerifierFolder` directly. |
-| 1.7 Shared PCS + Single FRI | **Done** | 3-round batched protocol: commit main → sample LogUp challenges → commit perm → sample alpha → commit quotients → sample zeta → single FRI open. `TabulaProof` with shared commitments. |
+| 1.7 Shared PCS + Single FRI | **Done** | 3-round batched protocol: commit main → sample LogUp challenges → commit perm → sample alpha → commit quotients → sample zeta → single FRI open. `MonolithicProof` with shared commitments. |
 | 1.8 Dependent Chip Collection | **→ Moved to 2.4** | Deferred to Phase 2 where witness pipeline is redesigned. Generalized as `BusConsumer` trait in 2.4 (Bus-Driven Collection). |
 
 **Completion gate results:**
@@ -169,7 +169,7 @@ pub trait RootProof: Send + Sync {
     fn airs(&self) -> Vec<Box<dyn AnyRap>>;
     fn dyn_chips(&self) -> Vec<Box<dyn DynChip>>;
 }
-// Impl: SmtRootProof (ColumnMetaChip + SmtColPathChip + SmtTablePathChip)
+// Impl: GlobalSmtRootProof (ColumnMetaChip + SmtColPathChip + SmtTablePathChip)
 
 // Stark-level (tabula-stark/src/trace/column_commitment.rs) — shard-style trace building
 // ColumnCommitment trait (pre-existing, for per-column batch trace building)
@@ -196,7 +196,7 @@ let machine = TabulaMachine::builder()
 let machine = TabulaMachine::builder()
     .with_execution()                       // ExecutionChip + StaticTableChip
     .with_memory_model(&GlobalSortedMemory) // InterTxOrderChip
-    .with_root_proof(&SmtRootProof)         // ColumnMeta + SmtPath chips
+    .with_root_proof(&GlobalSmtRootProof)         // ColumnMeta + SmtPath chips
     .with_bus_consumers()                   // Poseidon + RangeCheck
     .with_commitment(&SsmcScheme)
     .build()?;
@@ -219,7 +219,7 @@ No revert was necessary.
 | 2.1.1 | **Done** (pre-existing) | `ColumnCommitment` trait already in `tabula-stark::trace::column_commitment`. |
 | 2.1.2 | **Done** (pre-existing) | `BusConsumer` trait already in `tabula-stark::trace`. |
 | 2.1.3 | **Done** | `MemoryModel` trait in `machine/src/composition.rs`. Impl: `GlobalSortedMemory` wrapping InterTxOrderChip. |
-| 2.1.4 | **Done** | `RootProof` trait in `machine/src/composition.rs`. Impl: `SmtRootProof` wrapping ColumnMeta + SmtPath chips. |
+| 2.1.4 | **Done** | `RootProof` trait in `machine/src/composition.rs`. Impl: `GlobalSmtRootProof` wrapping ColumnMeta + SmtPath chips. |
 | 2.1.5 | **Deferred** | `ColumnPlan` exists in `tabula-stark` but not yet used by machine builder. Not needed for Phase 2 gate. |
 | 2.1.6 | **Deferred** | `ProofPlan` dispatch deferred to Phase 3/4. Current default: all columns use SSMC. |
 
@@ -253,7 +253,7 @@ building. This avoids circular deps (`AnyRap` is in tabula-machine, can't be ref
 
 | Task | Status | Notes |
 |------|--------|-------|
-| 2.4.1 | **Done** | `ProveError` enum in `proof.rs`. Prover returns `Result<TabulaProof, ProveError>`. |
+| 2.4.1 | **Done** | `ProveError` enum in `proof.rs`. Prover returns `Result<MonolithicProof, ProveError>`. |
 | 2.4.2 | **Done** | RAP folder fields encapsulated — private fields + getters in `prove/rap_folder.rs` and `verify/rap_folder.rs`. |
 | 2.4.3 | **Done** | PCS ceremony extracted into `pcs_commit_and_open()` and `pcs_verify_and_recompose()`. |
 | 2.4.4 | **Done** | `prove/` (mod, quotient, rap_folder) and `verify/` (mod, rap_folder) modules. |
@@ -455,7 +455,7 @@ Per-column inner STARK proofs + recursive tree aggregation → fixed-size final 
 | 1.4 | `TabulaProvingKey` / `TabulaVerifyingKey` with keygen caching | **Done** |
 | 1.5 | Directory reorganization: `prove/`, `verify/`, `permutation/` modules | **Done** |
 | 1.6 | RAP Phase Abstraction — **dropped** (YAGNI: single LogUp impl, no second consumer) | **Dropped** |
-| 1.7 | Batched 3-round PCS protocol, single FRI opening proof, `TabulaProof` rewrite | **Done** |
+| 1.7 | Batched 3-round PCS protocol, single FRI opening proof, `MonolithicProof` rewrite | **Done** |
 | 1.8 | Dependent chip collection — **moved to 2.4** (generalized as `BusConsumer` trait) | **→ 2.4** |
 
 **Verification**: 36 tests passing (17 unit + 2 any_rap + 11 machine + 6 E2E), zero clippy warnings.
@@ -467,7 +467,7 @@ Per-column inner STARK proofs + recursive tree aggregation → fixed-size final 
 | 2.0 | Witness pipeline — confirmed working, no revert needed | **Skipped** |
 | 2.1.1–2 | `ColumnCommitment` + `BusConsumer` traits (pre-existing in `tabula-stark`) | **Done** |
 | 2.1.3 | `MemoryModel` trait + `GlobalSortedMemory` impl (`composition.rs`) | **Done** |
-| 2.1.4 | `RootProof` trait + `SmtRootProof` impl (`composition.rs`) | **Done** |
+| 2.1.4 | `RootProof` trait + `GlobalSmtRootProof` impl (`composition.rs`) | **Done** |
 | 2.1.5–6 | `ColumnPlan`/`ProofPlan` dispatch — deferred to Phase 3/4 | **Deferred** |
 | 2.2 | `CommitmentScheme` trait + `SsmcScheme`/`SmtScheme` + `with_commitment()` builder API | **Done** |
 | 2.3 | `BusConsumer` wired for PoseidonChip + RangeCheckChip + `with_bus_consumer()` API | **Done** |

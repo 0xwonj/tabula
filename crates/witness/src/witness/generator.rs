@@ -139,8 +139,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
             let (new_state, _runtime_com_new, merge_trace) = if is_touched {
                 let writes = writes_by_col
                     .get(&(table, col))
-                    .map(|w| w.as_slice())
-                    .unwrap_or(&[]);
+                    .map_or(&[][..], Vec::as_slice);
                 self.vc.apply_column_writes(old_state, table, col, writes)
             } else {
                 (old_state.clone(), com_old, None)
@@ -207,12 +206,12 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
         for &(table, col) in all_columns {
             let schema = schemas.get(&table).ok_or_else(|| TabulaError::ProofError {
                 phase: "witness",
-                detail: format!("no schema for table {:?}", table),
+                detail: format!("no schema for table {table:?}"),
             })?;
             let col_def = schema.columns.iter().find(|c| c.id == col).ok_or_else(|| {
                 TabulaError::ProofError {
                     phase: "witness",
-                    detail: format!("no column {:?} in table {:?}", col, table),
+                    detail: format!("no column {col:?} in table {table:?}"),
                 }
             })?;
             type_map.insert((table, col), col_def.value_type);

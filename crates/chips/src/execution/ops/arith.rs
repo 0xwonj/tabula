@@ -12,14 +12,18 @@ use tabula_gadgets::integer::{SHIFT_30_U32, expr_from_u32};
 ///   slots[s][0] + carry0 * 2^30 = src1_val[0] + src2_val[0]
 ///   slots[s][1] + carry1 * 2^30 = src1_val[1] + src2_val[1] + carry0
 ///   slots[s][2]                  = src1_val[2] + src2_val[2] + carry1
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) fn constrain_arith_add<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    if W < 3 {
-        return;
-    }
+    const {
+        assert!(
+            W >= 3,
+            "Add constraints require W >= 3 (3-limb value encoding)"
+        );
+    };
 
     let op_add: AB::Expr = local.op_arith.clone().into()
         * (AB::Expr::ONE - local.arith_is_sub.clone().into())
@@ -62,14 +66,18 @@ pub(crate) fn constrain_arith_add<AB: AirBuilder, const W: usize>(
 ///   slots[s][2] = src1_val[2] - src2_val[2] - carry1
 ///
 /// Here carry0/carry1 are borrow flags.
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) fn constrain_arith_sub<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    if W < 3 {
-        return;
-    }
+    const {
+        assert!(
+            W >= 3,
+            "Sub constraints require W >= 3 (3-limb value encoding)"
+        );
+    };
 
     let op_sub: AB::Expr = local.op_arith.clone().into() * local.arith_is_sub.clone().into();
     let shift_30: AB::Expr = expr_from_u32::<AB>(SHIFT_30_U32);

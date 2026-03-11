@@ -7,7 +7,7 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
-use tabula_commitment::NativeDigest;
+use tabula_commitment::{DOMAIN_LEAF, NativeDigest};
 use tabula_gadgets::bool_fe;
 use tabula_stark::air::columns::borrow_cols_mut;
 
@@ -83,7 +83,7 @@ pub fn generate_meta_shard_trace(
 
             // Old leaf: [0x10, t, c, tag, 0,0,0,0, com_old[8]]
             let mut leaf_input_old = [BabyBear::ZERO; 16];
-            leaf_input_old[0] = BabyBear::new(0x10);
+            leaf_input_old[0] = BabyBear::new(DOMAIN_LEAF);
             leaf_input_old[1] = BabyBear::new(table_id);
             leaf_input_old[2] = BabyBear::new(col_id as u32);
             leaf_input_old[3] = tag_fe;
@@ -94,7 +94,7 @@ pub fn generate_meta_shard_trace(
 
             // New leaf: [0x10, t, c, tag, 0,0,0,0, com_new[8]]
             let mut leaf_input_new = [BabyBear::ZERO; 16];
-            leaf_input_new[0] = BabyBear::new(0x10);
+            leaf_input_new[0] = BabyBear::new(DOMAIN_LEAF);
             leaf_input_new[1] = BabyBear::new(table_id);
             leaf_input_new[2] = BabyBear::new(col_id as u32);
             leaf_input_new[3] = tag_fe;
@@ -129,10 +129,11 @@ impl TraceGenerator for super::air::MetaShardChip {
 
 use crate::ChipSpec;
 use tabula_core::error::TabulaError;
-use tabula_stark::trace::contributor::{
-    TraceContributor, TracePhase, WitnessStore, witness_labels,
-};
+use tabula_core::{ColId, TableId};
+use tabula_stark::trace::contributor::{TraceContributor, TracePhase, WitnessStore};
 use tabula_stark::trace::trace_map::TraceMap;
+
+use super::super::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
 
 impl TraceContributor for super::air::MetaShardChip {
     fn phase(&self) -> TracePhase {
@@ -140,9 +141,17 @@ impl TraceContributor for super::air::MetaShardChip {
     }
 
     fn contribute(&self, store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {
-        let input = store.get::<Option<MetaShardRow>>(witness_labels::COLUMN_META_INPUT)?;
-        let entry = self.build_entry(input);
-        map.insert_entry(self.chip_id(), entry);
+        let witness = store.get::<SsmcWitness>(SSMC_WITNESS_LABEL)?;
+        let meta_row = witness
+            .get(TableId(self.table_id()), ColId(self.col_id()))
+            .and_then(|data| data.meta_row.clone());
+        let trace = generate_meta_shard_trace(
+            self.table_id(),
+            self.col_id(),
+            self.scheme_tag(),
+            meta_row.as_ref(),
+        );
+        map.insert(self.chip_id(), trace);
         Ok(())
     }
 }

@@ -1,7 +1,7 @@
 # Prover Pipeline Acceleration
 
-> Status: Design
-> Date: 2026-03-09
+> Status: BLAKE3 + Trace Ownership implemented. Parallelization + Batch Inversion next.
+> Date: 2026-03-11
 > Depends on: tabula-machine-architecture.md, proof-optimization-architecture.md
 > Scope: Infrastructure below the chip/AIR layer — how the prover pipeline runs, not what it proves
 
@@ -24,6 +24,12 @@ Poseidon2 is required for in-circuit hashing — the PoseidonChip constrains Pos
 Switching the commitment hash from Poseidon2 to BLAKE3 yields approximately 10x faster hashing on CPU and approximately 5x net commitment speedup (accounting for the unchanged NTT cost). Plonky3 supports configurable hash backends via the `Compress` and `CryptographicHasher` traits — the PCS configuration specifies the Merkle hash independently of the field arithmetic.
 
 Expected impact: ~30% total proving time reduction. This is a configuration change, not a structural modification.
+
+### Implementation
+
+`Blake3FieldHasher` and `Blake3FieldCompressor` in `machine/src/blake3_pcs.rs` wrap BLAKE3 to operate in BabyBear field-element space, producing `[BabyBear; 8]` digests. Each 4-byte chunk of the 32-byte BLAKE3 output is read as little-endian `u32` and reduced mod p. This keeps compatibility with `DuplexChallenger<Perm16, 16, 4>` which only observes `Hash<F, F, N>` commitments.
+
+The MMCS type uses scalar `BabyBear` packing (not `PackedBabyBear`) — BLAKE3's native speed compensates for the loss of SIMD leaf hashing. Poseidon2 remains for Fiat-Shamir (DuplexChallenger) and in-circuit hashing (PoseidonChip).
 
 ---
 
@@ -49,6 +55,10 @@ The solution is to transfer ownership of trace matrices into the proving pipelin
 
 Expected impact: 50% peak memory reduction.
 
+### Implementation
+
+`ProofInstance::new()` takes `TraceMap` by value. `collect_chip_infos()` calls `traces.remove(chip_id)` to transfer ownership of each `TraceEntry` (main trace, preprocessed, public values) into `ChipProveInfo` without cloning. `TabulaMachine::prove()` takes `ProofTraces` by value and destructures it into per-tier `TraceMap`s that are moved into each `ProofInstance`. `ProofTraces` derives `Clone` for benchmark use cases that need repeated proving.
+
 ---
 
 ## FRI Configuration Tuning
@@ -67,13 +77,43 @@ Expected impact: ~7% total proving time reduction from fold-by-4. Proof size at 
 
 ---
 
-## Quotient Computation Parallelism
+## Pipeline Parallelization
 
-Quotient polynomial computation (Phase 8 of the proving pipeline) iterates over chips sequentially. Each chip's quotient is independent: it depends only on that chip's committed trace, the constraint evaluations, and the random challenge point.
+The proving pipeline has parallelism opportunities at two levels: cross-proof (C+2 sub-proofs) and within-proof (per-chip operations). Both use rayon with adaptive work-stealing, which automatically scales to available cores without manual thread management.
 
-Parallelization via `rayon::par_iter` over chips is straightforward. The quotient computation for each chip evaluates constraints at every coset point of the LDE domain, which is already row-parallel within a single chip. Cross-chip parallelism adds a second dimension of concurrency.
+### Cross-Proof Parallelism
 
-Expected impact: 2-3x speedup on Phase 8, which constitutes approximately 35% of proving time after the Merkle hash optimization.
+The C+2 proof architecture (1 execution + C column + 1 root) creates natural parallelism. A hard synchronization barrier exists at Fiat-Shamir challenge sampling (Phase 4): all main trace commitments must be observed before sampling LogUp challenges (alpha, beta). After that barrier, all subsequent phases are independent across sub-proofs.
+
+Parallelizable phases after challenge sampling:
+- Phase 5: Permutation trace generation (exec || cols || root)
+- Phases 6-11: Sub-proof execution (exec || cols || root) — the dominant cost
+
+### Within-Proof Chip-Level Parallelism
+
+Within each ProofInstance, several per-chip loops are parallelizable:
+
+**Quotient computation** (`compute_chip_quotients`, Phase 8): Each chip's quotient polynomial is independent — depends only on that chip's committed trace, constraint evaluations, and challenge point. This is the highest-ROI parallelization target: Phase 8 constitutes approximately 35% of proving time after BLAKE3.
+
+**Interaction evaluation** (Phase 1): Each chip's interaction evaluation reads only its own trace rows. Parallelizable via `par_iter_mut` over chips.
+
+**Permutation trace generation** (Phase 5): Each chip's perm trace is independent given shared challenges. The per-chip cumulative sums are computed independently, then aggregated.
+
+### Synergy Between Levels
+
+Cross-proof and chip-level parallelism are complementary, not competing. With rayon's work-stealing scheduler:
+- Cross-proof parallelism uses C+2 threads (typically 2-10)
+- Each thread spawns chip-level parallelism for 4-5 chips
+- Total effective parallelism: (C+2) × chips_per_proof
+- Rayon automatically balances load across all available cores
+
+### Trace Building Parallelism
+
+Before proving, `build_proof_traces()` builds per-tier traces sequentially. Each tier's traces are built from independent witness stores — per-column trace building is naturally parallel. This is orthogonal to proving parallelism.
+
+### Verification Parallelism
+
+`verify_impl()` verifies C+2 sub-proofs sequentially after reconstructing shared challenges. Since verification uses the same pre-computed challenges, all sub-proof verifications are independent and parallelizable.
 
 ---
 
@@ -138,30 +178,61 @@ Expected impact: 5-20x on PCS phases.
 
 ## GKR for LogUp
 
-The current LogUp implementation accumulates permutation sums via committed polynomial traces — each chip has permutation columns (phi, cumulative sum) that are NTT'd and Merkle-committed alongside the main trace. This adds O(N log N) prover cost for the NTT and O(N) commitment cost for the additional columns.
+The current LogUp implementation accumulates permutation sums via committed polynomial traces — each chip has permutation columns (phi, cumulative sum) that are NTT'd and Merkle-committed alongside the main trace. Per-chip permutation width is `4 × (interactions + 1)` BabyBear columns (EF4 representation). This adds O(N log N) prover cost for the NTT and O(N) commitment cost for the additional columns.
 
 The GKR (Goldwasser-Kalai-Rothblum) sum-check protocol replaces committed accumulation with an interactive proof of the multilinear sum. The prover cost drops to O(N) (linear scan, no NTT), and the permutation trace commitment is eliminated entirely.
 
-GKR-based LogUp is used by Stwo (StarkWare) and is being adopted by several Plonky3-based projects. The protocol change is significant:
+### Protocol change
 
-- The permutation trace (phi, cumulative sum columns) is removed from PCS commitment.
-- A sum-check sub-protocol is added to the proof transcript.
-- The verifier performs O(log N) field operations for the sum-check instead of reading committed permutation evaluations.
+| Aspect | Current (committed LogUp) | GKR-LogUp |
+|--------|--------------------------|-----------|
+| Prover cost | O(N log N) NTT + O(N) Merkle | O(N) linear scan |
+| Permutation columns | 4 × (interactions + 1) per chip | None |
+| PCS commitment | Main + Perm + Quotient | Main + Quotient only |
+| Proof transcript | — | Sum-check rounds (O(log N)) |
+| Verifier cost | O(k) field ops (cumsum check) | O(log N) field ops (sum-check) |
 
-Expected impact: 20-30% reduction in PCS cost (fewer columns to commit). Requires protocol-level changes to the proof format, verifier, and transcript structure.
+### Ecosystem status
+
+GKR-based LogUp is used by Stwo (StarkWare) on Circle STARKs with M31 field. However, **no FRI+BabyBear production implementation exists**. OpenVM and SP1 (the two major Plonky3-based systems) still use committed permutation traces. Plonky3 v0.4 has no built-in sum-check or GKR support — custom implementation required.
+
+### Code impact
+
+The change removes more code than it adds (~700 LOC removed, ~500 LOC added):
+- **Removed**: `permutation/trace.rs` (perm trace generation), `rap/prover.rs` and `rap/verifier.rs` (cumsum constraints), `perm_commitment` from proof structure
+- **Added**: `sumcheck/` module (protocol prover + verifier), sum-check proof in transcript
+- **Unchanged**: All chip `eval()` implementations, `InteractionAirBuilder` trait, bus topology, fingerprint formula
+
+### Decision gate
+
+GKR implementation is deferred until after parallelization + batch inversion (Tier 1b). After those optimizations, permutation cost fraction should be re-measured. If permutation phases still exceed 10% of total proving time, GKR proceeds. OpenVM v2 (SWIRL + multilinear) may also provide a reference implementation by that point.
+
+### Interaction with recursive aggregation
+
+GKR's sum-check protocol adds verifier complexity. For future recursive proof aggregation (D4), the STARK verifier circuit must include sum-check verification logic — approximately O(log N) additional field operations per sub-proof verification. This is tractable but should be considered in the verifier circuit design.
+
+Expected impact: 20-30% reduction in PCS cost. Estimated effort: 4-5 weeks.
 
 ---
 
 ## Priority Ranking
 
-**Tier 1** — Immediate, no structural dependency:
+**Tier 1a** — Complete:
 
-| Optimization | Proving Time Impact | Memory Impact | Effort |
-|---|---|---|---|
-| BLAKE3 Merkle hash | ~30% proving reduction | None | ~1 day |
-| Batch inversion | ~5% proving reduction | None | ~1 day |
-| Trace clone elimination | None | ~50% memory reduction | ~1 day |
-| Quotient parallelism | ~10% proving reduction | None | ~1 day |
+| Optimization | Impact | Status |
+|---|---|---|
+| BLAKE3 Merkle hash | ~30% proving reduction | **Done** |
+| Trace ownership transfer | ~50% memory reduction | **Done** |
+
+**Tier 1b** — Next (rayon parallelization + batch inversion):
+
+| Optimization | Proving Time Impact | Effort |
+|---|---|---|
+| Quotient parallelism (per-chip) | ~10% proving reduction | ~50 LOC |
+| Cross-proof parallelism (C+2) | ~C× speedup on sub-proofs | ~100 LOC |
+| Perm trace / trace building parallelism | ~2-3× on affected phases | ~90 LOC |
+| Verification parallelism | ~C× on verification | ~30 LOC |
+| Batch inversion (Montgomery) | ~6× on perm trace generation | ~1 day |
 
 **Tier 2** — Medium-term, moderate complexity:
 
@@ -170,14 +241,14 @@ Expected impact: 20-30% reduction in PCS cost (fewer columns to commit). Require
 | FRI fold-by-4 | ~7% proving reduction | ~3 days |
 | Permutation trace SIMD | ~5% proving reduction | ~1 week |
 
-**Tier 3** — Long-term, significant engineering:
+**Tier 3** — Long-term, protocol-level:
 
-| Optimization | PCS Impact | Effort |
-|---|---|---|
-| GPU offloading (ICICLE) | 50-80% PCS reduction | ~1 month |
-| GKR for LogUp | 20-30% PCS reduction | ~2 months |
+| Optimization | PCS Impact | Effort | Gate |
+|---|---|---|---|
+| GKR for LogUp | 20-30% PCS reduction | ~4-5 weeks | Perm cost >10% after Tier 1b |
+| GPU offloading (ICICLE) | 50-80% PCS reduction | ~1 month | Mature prover pipeline |
 
-Tier 1 optimizations are independent and composable. Their combined effect is approximately 40% proving time reduction and 50% memory reduction with roughly 4 days of engineering effort.
+Tier 1a + 1b combined effect: approximately 40% proving time reduction, 50% memory reduction, and C× speedup on parallelizable phases.
 
 ---
 

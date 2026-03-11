@@ -68,7 +68,7 @@ pub async fn list_instances(
 ) -> ApiResult<Json<ApiResponse<InstanceListResponse>>> {
     let engine = state.engine();
     let out = run_blocking(&state, "list_instances", move || {
-        engine.list_instances(query)
+        engine.list_instances(&query)
     })
     .await?;
     Ok(Json(ApiResponse::ok(InstanceListResponse {
@@ -93,7 +93,7 @@ pub async fn submit_run(
     JsonBody(req): JsonBody<SubmitRunCommand>,
 ) -> ApiResult<Json<ApiResponse<RunResponse>>> {
     let engine = state.engine();
-    let out = run_blocking(&state, "submit_run", move || engine.submit_run(req)).await?;
+    let out = run_blocking(&state, "submit_run", move || engine.submit_run(&req)).await?;
     Ok(Json(ApiResponse::ok(RunResponse { run: out })))
 }
 
@@ -102,7 +102,7 @@ pub async fn list_runs(
     Query(query): Query<ListRunsCommand>,
 ) -> ApiResult<Json<ApiResponse<RunListResponse>>> {
     let engine = state.engine();
-    let out = run_blocking(&state, "list_runs", move || engine.list_runs(query)).await?;
+    let out = run_blocking(&state, "list_runs", move || engine.list_runs(&query)).await?;
     Ok(Json(ApiResponse::ok(RunListResponse { runs: out })))
 }
 

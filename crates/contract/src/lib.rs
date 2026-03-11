@@ -2,8 +2,6 @@
 //!
 //! This module is the M11 "Contract Spine V1" source of truth.
 
-#![warn(missing_docs)]
-
 mod binding;
 mod envelope;
 mod policy;

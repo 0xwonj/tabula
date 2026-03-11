@@ -15,7 +15,7 @@ use tower_http::{
 use crate::api::handlers;
 use crate::runtime::state::AppState;
 
-pub fn build_router(state: Arc<AppState>) -> Router {
+pub fn build_router(state: &Arc<AppState>) -> Router {
     let allow_origins = AllowOrigin::list(state.allow_origins().iter().cloned());
     let cors = CorsLayer::new()
         .allow_origin(allow_origins)

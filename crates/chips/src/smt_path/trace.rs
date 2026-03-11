@@ -24,8 +24,10 @@ pub struct SmtPathWitness {
     pub old_leaf: NativeDigest,
     /// New leaf digest (at level 0).
     pub new_leaf: NativeDigest,
-    /// Sibling digests from leaf to root (length = depth).
-    pub siblings: Vec<NativeDigest>,
+    /// Sibling digests from leaf to root in the old tree (length = depth).
+    pub old_siblings: Vec<NativeDigest>,
+    /// Sibling digests from leaf to root in the new tree (length = depth).
+    pub new_siblings: Vec<NativeDigest>,
     /// Path bits from leaf to root (length = depth). bit_i = (key >> i) & 1.
     pub path_bits: Vec<bool>,
 }
@@ -68,8 +70,10 @@ fn populate_path_row(
     cols.bind_table_id = BabyBear::new(witness.table_id);
     cols.bind_key = BabyBear::new(witness.key);
 
-    let sib = witness.siblings[level];
-    cols.sibling = sib.0;
+    let old_sib = witness.old_siblings[level];
+    let new_sib = witness.new_siblings[level];
+    cols.old_sibling = old_sib.0;
+    cols.new_sibling = new_sib.0;
     cols.old_node = old_node.0;
     cols.new_node = new_node.0;
 
@@ -79,11 +83,11 @@ fn populate_path_row(
     let mut old_perm_input = [BabyBear::ZERO; 16];
     for i in 0..DIGEST_WIDTH {
         if bit {
-            old_perm_input[i] = sib.0[i]; // left = sibling
+            old_perm_input[i] = old_sib.0[i]; // left = sibling
             old_perm_input[8 + i] = old_node.0[i]; // right = node
         } else {
             old_perm_input[i] = old_node.0[i]; // left = node
-            old_perm_input[8 + i] = sib.0[i]; // right = sibling
+            old_perm_input[8 + i] = old_sib.0[i]; // right = sibling
         }
     }
     cols.old_perm_input = old_perm_input;
@@ -96,11 +100,11 @@ fn populate_path_row(
     let mut new_perm_input = [BabyBear::ZERO; 16];
     for i in 0..DIGEST_WIDTH {
         if bit {
-            new_perm_input[i] = sib.0[i];
+            new_perm_input[i] = new_sib.0[i];
             new_perm_input[8 + i] = new_node.0[i];
         } else {
             new_perm_input[i] = new_node.0[i];
-            new_perm_input[8 + i] = sib.0[i];
+            new_perm_input[8 + i] = new_sib.0[i];
         }
     }
     cols.new_perm_input = new_perm_input;
@@ -138,13 +142,14 @@ pub fn generate_smt_col_path_trace(witnesses: &[SmtPathWitness]) -> RowMajorMatr
     let width = SMT_COL_PATH_WIDTH;
 
     // Total real rows = sum of depths
-    let num_real: usize = witnesses.iter().map(|w| w.siblings.len()).sum();
+    let num_real: usize = witnesses.iter().map(|w| w.old_siblings.len()).sum();
     let num_rows = (num_real + 1).next_power_of_two().max(2);
     let mut values = vec![BabyBear::ZERO; num_rows * width];
 
     let mut row_idx = 0;
     for witness in witnesses {
-        let depth = witness.siblings.len();
+        let depth = witness.old_siblings.len();
+        assert_eq!(witness.new_siblings.len(), depth);
         assert_eq!(witness.path_bits.len(), depth);
 
         let mut old_node = witness.old_leaf;
@@ -183,13 +188,14 @@ pub fn generate_smt_table_path_trace(
 ) -> RowMajorMatrix<BabyBear> {
     let width = SMT_TABLE_PATH_WIDTH;
 
-    let num_real: usize = witnesses.iter().map(|w| w.path.siblings.len()).sum();
+    let num_real: usize = witnesses.iter().map(|w| w.path.old_siblings.len()).sum();
     let num_rows = (num_real + 1).next_power_of_two().max(2);
     let mut values = vec![BabyBear::ZERO; num_rows * width];
 
     let mut row_idx = 0;
     for witness in witnesses {
-        let depth = witness.path.siblings.len();
+        let depth = witness.path.old_siblings.len();
+        assert_eq!(witness.path.new_siblings.len(), depth);
         assert_eq!(witness.path.path_bits.len(), depth);
 
         let mut old_node = witness.path.old_leaf;

@@ -46,7 +46,7 @@ pub fn resolve_value_expr(
 fn get_slot(slots: &[Value], idx: Slot) -> Result<Value, TabulaError> {
     slots
         .get(idx as usize)
-        .cloned()
+        .copied()
         .ok_or(TabulaError::SlotOutOfBounds {
             index: idx,
             max: slots.len().saturating_sub(1) as u16,
@@ -56,7 +56,7 @@ fn get_slot(slots: &[Value], idx: Slot) -> Result<Value, TabulaError> {
 fn get_param(params: &[Value], idx: u16) -> Result<Value, TabulaError> {
     params
         .get(idx as usize)
-        .cloned()
+        .copied()
         .ok_or(TabulaError::ParamOutOfBounds {
             index: idx,
             max: params.len().saturating_sub(1) as u16,

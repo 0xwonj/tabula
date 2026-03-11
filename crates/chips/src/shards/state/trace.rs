@@ -14,8 +14,45 @@ use tabula_stark::trace::generator::TraceGenerator;
 use super::air::StateShardChip;
 use super::columns::{StateShardCols, state_shard_width};
 
-// Re-export from canonical location to avoid type duplication.
-pub use crate::state_column::trace::EntrySource;
+/// Source type for a state column entry row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntrySource {
+    /// Key exists only in old state: (s1,s0) = (0,0).
+    OldOnly,
+    /// Key exists only in write set: (s1,s0) = (0,1).
+    WriteOnly,
+    /// Key exists in both old state and write set: (s1,s0) = (1,0).
+    Both,
+    /// Key deleted (write null): (s1,s0) = (1,1).
+    Delete,
+}
+
+impl EntrySource {
+    /// Encode as (s1, s0) pair.
+    pub fn encode(self) -> (bool, bool) {
+        match self {
+            Self::OldOnly => (false, false),
+            Self::WriteOnly => (false, true),
+            Self::Both => (true, false),
+            Self::Delete => (true, true),
+        }
+    }
+
+    /// Whether this entry is in the old set.
+    pub fn in_old(self) -> bool {
+        matches!(self, Self::OldOnly | Self::Both | Self::Delete)
+    }
+
+    /// Whether this entry is in the new set.
+    pub fn in_new(self) -> bool {
+        matches!(self, Self::OldOnly | Self::WriteOnly | Self::Both)
+    }
+
+    /// Whether this entry is a write (write_only, both, or delete).
+    pub fn in_write(self) -> bool {
+        matches!(self, Self::WriteOnly | Self::Both | Self::Delete)
+    }
+}
 
 /// A single row for building the StateShard trace.
 ///
@@ -130,12 +167,8 @@ fn populate_base_and_chains<const W: usize>(
         cols.has_prev_old_entry = bool_fe(seen_old);
         if in_old {
             if !seen_old {
-                cols.old_hash_chain.populate_first(
-                    table_id,
-                    col_id as u32,
-                    row.key,
-                    &row.old_val,
-                );
+                cols.old_hash_chain
+                    .populate_first(table_id, col_id as u32, row.key, &row.old_val);
             } else {
                 cols.old_hash_chain.populate_continuation(
                     prev_old_hash_acc
@@ -153,12 +186,8 @@ fn populate_base_and_chains<const W: usize>(
         cols.has_prev_new_entry = bool_fe(seen_new);
         if in_new {
             if !seen_new {
-                cols.new_hash_chain.populate_first(
-                    table_id,
-                    col_id as u32,
-                    row.key,
-                    &row.new_val,
-                );
+                cols.new_hash_chain
+                    .populate_first(table_id, col_id as u32, row.key, &row.new_val);
             } else {
                 cols.new_hash_chain.populate_continuation(
                     prev_new_hash_acc
@@ -257,5 +286,39 @@ impl<const W: usize> TraceGenerator for StateShardChip<W> {
 
     fn generate_trace(&self, input: &StateShardInput) -> RowMajorMatrix<BabyBear> {
         generate_state_shard_trace::<W>(self.table_id(), self.col_id(), &input.rows)
+    }
+}
+
+// ── TraceContributor impl ──────────────────────────────────────────────────
+
+use crate::ChipSpec;
+use tabula_core::error::TabulaError;
+use tabula_core::{ColId, TableId};
+use tabula_stark::trace::contributor::{TraceContributor, TracePhase, WitnessStore};
+use tabula_stark::trace::trace_map::TraceMap;
+
+use super::super::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
+
+impl<const W: usize> TraceContributor for StateShardChip<W> {
+    fn phase(&self) -> TracePhase {
+        TracePhase::MEMORY
+    }
+
+    fn contribute(&self, store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {
+        let witness = store.get::<SsmcWitness>(SSMC_WITNESS_LABEL)?;
+        let col_data = witness
+            .get(TableId(self.table_id()), ColId(self.col_id()))
+            .ok_or_else(|| TabulaError::ProofError {
+                phase: "state_shard_trace",
+                detail: format!(
+                    "no SSMC witness data for ({}, {})",
+                    self.table_id(),
+                    self.col_id()
+                ),
+            })?;
+        let trace =
+            generate_state_shard_trace::<W>(self.table_id(), self.col_id(), &col_data.state_rows);
+        map.insert(self.chip_id(), trace);
+        Ok(())
     }
 }

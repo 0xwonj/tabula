@@ -34,19 +34,16 @@ use crate::trace::contributor::TraceContributor;
 /// | Independent | StaticTableChip | `STATIC_TABLE_ROWS` |
 /// | Independent | SmtColPathChip | `SMT_COL_PATHS` |
 /// | Independent | SmtTablePathChip | `SMT_TABLE_PATHS`, `SMT_TABLE_PVS` |
-/// | Memory | InterTxOrderChip | `INTER_TX_ROWS` |
-/// | Memory | StateColumnChip | `STATE_ROWS` |
-/// | Memory | ColumnMetaChip | `COLUMN_META_INPUT` |
+/// | Memory | MemoryShardChip | `SSMC_WITNESS_LABEL` (per-column) |
+/// | Memory | StateShardChip | `SSMC_WITNESS_LABEL` (per-column) |
+/// | Memory | MetaShardChip | `SSMC_WITNESS_LABEL` (per-column) |
 /// | Dependent | PoseidonChip | `POSEIDON_INPUTS` (populated by `BusConsumer`) |
 /// | Dependent | RangeCheckChip | `RANGE_CHECK_MULTS` (populated by `BusConsumer`) |
 ///
 /// Labels for Dependent-phase chips are populated automatically by the
 /// orchestrator's [`BusConsumer::collect()`] step between Phase 1 and Phase 2.
 pub trait DynChip:
-    ChipSpec
-    + TraceContributor
-    + BaseAir<BabyBear>
-    + for<'a> Air<DebugConstraintBuilder<'a, BabyBear>>
+    ChipSpec + TraceContributor + BaseAir<BabyBear> + for<'a> Air<DebugConstraintBuilder<'a, BabyBear>>
 {
 }
 

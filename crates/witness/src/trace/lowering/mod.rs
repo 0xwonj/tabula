@@ -124,8 +124,7 @@ fn pre_materialize_params<const W: usize>(
         .iter()
         .filter_map(max_dst_slot)
         .max()
-        .map(|m| m + 1)
-        .unwrap_or(0);
+        .map_or(0, |m| m + 1);
     ctx.max_slot = ctx.max_slot.max(ir_max);
 
     // Reserve a zero-valued slot (never written) for the src2 operand of synthetic loads.
@@ -149,8 +148,7 @@ fn pre_materialize_params<const W: usize>(
             return Err(TabulaError::ProofError {
                 phase: "trace_lowering",
                 detail: format!(
-                    "cannot pre-materialize param: slot {} >= MAX_SLOTS ({})",
-                    slot, MAX_SLOTS
+                    "cannot pre-materialize param: slot {slot} >= MAX_SLOTS ({MAX_SLOTS})"
                 ),
             });
         }
@@ -202,7 +200,7 @@ fn lower_tx_body<const W: usize>(
             } => access::lower_write(ctx, *table, *col, row, src_val, instr_idx)?,
 
             Instruction::Arith { dst, op, lhs, rhs } => {
-                arith::lower_arith(ctx, *dst, op, lhs, rhs)?;
+                arith::lower_arith(ctx, *dst, *op, lhs, rhs)?;
             }
 
             Instruction::DivMod {
@@ -213,7 +211,7 @@ fn lower_tx_body<const W: usize>(
             } => divmod::lower_divmod(ctx, *dst_q, *dst_r, lhs, rhs)?,
 
             Instruction::Cmp { dst, op, lhs, rhs } => {
-                cmp::lower_cmp(ctx, *dst, op, lhs, rhs)?;
+                cmp::lower_cmp(ctx, *dst, *op, lhs, rhs)?;
             }
 
             Instruction::Not { dst, src } => logic::lower_not(ctx, *dst, src)?,

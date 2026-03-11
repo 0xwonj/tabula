@@ -27,8 +27,9 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
 use tabula_gadgets::{
-    constrain_hash_chain_input, constrain_hash_chain_transition, constrain_is_real_prefix,
-    constrain_key_halves, constrain_ordering_halves, constrain_strict_ineq,
+    constrain_constant_identity, constrain_hash_chain_input, constrain_hash_chain_transition,
+    constrain_is_real_prefix, constrain_key_halves, constrain_ordering_halves,
+    constrain_strict_ineq,
 };
 use tabula_stark::air::builder::InteractionAirBuilder;
 use tabula_stark::air::columns::borrow_cols;
@@ -107,7 +108,14 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for StateShardChip<W> {
         constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
 
         // 3. Constant identity
-        constrain_constant_identity(builder, local, next, both_real.clone());
+        constrain_constant_identity(
+            builder,
+            local.table_id.clone(),
+            next.table_id.clone(),
+            local.col_id.clone(),
+            next.col_id.clone(),
+            both_real.clone(),
+        );
 
         // 4. Gap row canonicality
         constrain_gap_rows(builder, local, is_real.clone());
@@ -161,23 +169,6 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder.assert_bool(local.write_seen_prefix.clone());
     builder.assert_bool(local.read_mult_witness.clone());
     builder.assert_bool(local.write_mult_witness.clone());
-}
-
-/// Constant identity: table_id and col_id must be the same across all real rows.
-fn constrain_constant_identity<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &StateShardCols<AB::Var, W>,
-    next: &StateShardCols<AB::Var, W>,
-    both_real: AB::Expr,
-) {
-    let table_diff: AB::Expr = next.table_id.clone().into() - local.table_id.clone().into();
-    let col_diff: AB::Expr = next.col_id.clone().into() - local.col_id.clone().into();
-    builder
-        .when_transition()
-        .assert_zero(both_real.clone() * table_diff);
-    builder
-        .when_transition()
-        .assert_zero(both_real * col_diff);
 }
 
 /// Gap row canonicality: gap → source/values zero.
@@ -353,6 +344,7 @@ fn constrain_key_ordering<AB: AirBuilder, const W: usize>(
 }
 
 /// Chain tracking flag propagation.
+#[allow(clippy::needless_pass_by_value)]
 fn constrain_chain_tracking<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &StateShardCols<AB::Var, W>,
@@ -381,16 +373,14 @@ fn constrain_chain_tracking<AB: AirBuilder, const W: usize>(
     let expected_has_prev_old: AB::Expr = local.has_prev_old_entry.clone().into() + in_old.clone()
         - local.has_prev_old_entry.clone().into() * in_old.clone();
     builder.when_transition().assert_zero(
-        both_real.clone()
-            * (next.has_prev_old_entry.clone().into() - expected_has_prev_old),
+        both_real.clone() * (next.has_prev_old_entry.clone().into() - expected_has_prev_old),
     );
 
     // has_prev_new_entry propagation
     let expected_has_prev_new: AB::Expr = local.has_prev_new_entry.clone().into() + in_new.clone()
         - local.has_prev_new_entry.clone().into() * in_new.clone();
     builder.when_transition().assert_zero(
-        both_real.clone()
-            * (next.has_prev_new_entry.clone().into() - expected_has_prev_new),
+        both_real.clone() * (next.has_prev_new_entry.clone().into() - expected_has_prev_new),
     );
 
     // is_last_old_entry implies in_old
@@ -408,8 +398,7 @@ fn constrain_chain_tracking<AB: AirBuilder, const W: usize>(
         + local.is_last_old_entry.clone().into()
         - local.past_last_old_entry.clone().into() * local.is_last_old_entry.clone().into();
     builder.when_transition().assert_zero(
-        both_real.clone()
-            * (next.past_last_old_entry.clone().into() - expected_past_last),
+        both_real.clone() * (next.past_last_old_entry.clone().into() - expected_past_last),
     );
 
     // past_last_old → no more in_old
@@ -449,8 +438,7 @@ fn constrain_write_seen_prefix<AB: AirBuilder, const W: usize>(
         .assert_zero(local_seen.clone() - local_write);
 
     // Propagation: next_seen = local_seen OR next_write
-    let seen_or_next: AB::Expr =
-        local_seen.clone() + next_write.clone() - local_seen * next_write;
+    let seen_or_next: AB::Expr = local_seen.clone() + next_write.clone() - local_seen * next_write;
     builder
         .when_transition()
         .assert_zero(both_real * (next_seen - seen_or_next));
@@ -465,9 +453,7 @@ fn constrain_segment_is_touched<AB: AirBuilder, const W: usize>(
 ) {
     let diff: AB::Expr =
         next.segment_is_touched.clone().into() - local.segment_is_touched.clone().into();
-    builder
-        .when_transition()
-        .assert_zero(both_real * diff);
+    builder.when_transition().assert_zero(both_real * diff);
 }
 
 /// Touched-write closure at end of real rows.

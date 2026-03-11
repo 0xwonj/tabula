@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_lang::span::{Span, line_col, source_line};
 
 #[test]

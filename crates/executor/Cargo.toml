@@ -16,3 +16,6 @@ criterion = { workspace = true }
 [[bench]]
 name = "interpreter"
 harness = false
+
+[lints]
+workspace = true

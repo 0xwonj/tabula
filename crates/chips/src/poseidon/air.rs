@@ -131,6 +131,7 @@ fn constrain_sbox_full_round<AB: AirBuilder>(
 /// where sbox_out[i] = sbox_y3[i] * sbox_y2[i]^2 = y^7.
 ///
 /// `gate` = `is_real * is_full * (1 - is_last_round)`.
+#[allow(clippy::needless_pass_by_value)]
 fn constrain_linear_layer_full<AB: AirBuilder>(
     builder: &mut AB,
     local: &PoseidonCols<AB::Var>,
@@ -161,6 +162,7 @@ fn constrain_linear_layer_full<AB: AirBuilder>(
 /// where sbox_out[0] = y[0]^7, sbox_out[i] = state[i] + rc[i] for i > 0.
 ///
 /// `gate` = `is_real * (1 - is_full) * (1 - is_last_round)`.
+#[allow(clippy::needless_pass_by_value)]
 fn constrain_linear_layer_partial<AB: AirBuilder>(
     builder: &mut AB,
     local: &PoseidonCols<AB::Var>,
@@ -225,6 +227,7 @@ fn constrain_round_control<AB: AirBuilder>(
 /// Apply the circ(2,3,1,1) MDS matrix to 4 expressions.
 ///
 /// Returns [2a+3b+c+d, a+2b+3c+d, a+b+2c+3d, 3a+b+c+2d].
+#[allow(clippy::needless_pass_by_value)]
 fn apply_mat4_exprs<AB: AirBuilder>(x: [AB::Expr; 4]) -> [AB::Expr; 4] {
     let t01 = x[0].clone() + x[1].clone();
     let t23 = x[2].clone() + x[3].clone();
@@ -307,6 +310,7 @@ fn internal_diag_exprs<AB: AirBuilder>() -> [AB::F; WIDTH] {
 /// Internal linear layer in expression form.
 ///
 /// Computes `out[i] = input[i] * diag[i] + sum(input)`.
+#[allow(clippy::needless_pass_by_value)]
 fn internal_linear_exprs<AB: AirBuilder>(
     input: [AB::Expr; WIDTH],
     diag: &[AB::F; WIDTH],

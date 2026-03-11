@@ -73,7 +73,11 @@ pub(crate) fn insert_alias_guards(body: Vec<Instruction>) -> Vec<Instruction> {
     }
 
     // 3. Allocate slots and generate guard instructions.
-    let max_slot = body.iter().flat_map(|i| i.dst_slots()).max().unwrap_or(0);
+    let max_slot = body
+        .iter()
+        .flat_map(crate::instruction::Instruction::dst_slots)
+        .max()
+        .unwrap_or(0);
     let mut next_slot: Slot = max_slot + 1;
     let mut guards: Vec<(usize, Instruction, Instruction)> = Vec::new();
 

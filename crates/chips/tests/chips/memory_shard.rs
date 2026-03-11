@@ -9,8 +9,8 @@ use tabula_chips::shards::memory::columns::{
     MEMORY_SHARD_STANDARD_WIDTH, MemoryShardCols, memory_shard_width,
 };
 use tabula_chips::shards::memory::trace::{MemoryShardRow, generate_memory_shard_trace};
-use tabula_stark::chips::ChipId;
 use tabula_stark::air::borrow_cols_mut;
+use tabula_stark::chips::ChipId;
 use tabula_stark::debug::debug_check;
 
 use tabula_chips::test_utils::builders::{ms_init, ms_read, ms_read_write, ms_write};
@@ -278,8 +278,7 @@ fn invalid_forged_has_ever_written() {
 
     // Corrupt: set has_ever_written=1 on the read row (row 1)
     let width = memory_shard_width::<3>();
-    let cols: &mut MemoryShardCols<BabyBear, 3> =
-        borrow_cols_mut(&mut t.values[width..2 * width]);
+    let cols: &mut MemoryShardCols<BabyBear, 3> = borrow_cols_mut(&mut t.values[width..2 * width]);
     cols.has_ever_written = BabyBear::ONE;
 
     debug_check(&chip(), &t).expect_err("forged has_ever_written should fail");
@@ -333,8 +332,7 @@ fn invalid_table_id_change() {
             - BabyBear::new((cur_key & 0x3FFF_FFFF) as u32);
         let diff1 = BabyBear::new(((next_key >> 30) & 0x3FFF_FFFF) as u32)
             - BabyBear::new(((cur_key >> 30) & 0x3FFF_FFFF) as u32);
-        let diff2 =
-            BabyBear::new((next_key >> 60) as u32) - BabyBear::new((cur_key >> 60) as u32);
+        let diff2 = BabyBear::new((next_key >> 60) as u32) - BabyBear::new((cur_key >> 60) as u32);
         cols.r_limb0_iz.populate(diff0);
         cols.r_limb1_iz.populate(diff1);
         cols.r_limb2_iz.populate(diff2);
@@ -410,8 +408,7 @@ fn build_manual_key_ordering_violation() -> RowMajorMatrix<BabyBear> {
             - BabyBear::new((cur_key & 0x3FFF_FFFF) as u32);
         let diff1 = BabyBear::new(((next_key >> 30) & 0x3FFF_FFFF) as u32)
             - BabyBear::new(((cur_key >> 30) & 0x3FFF_FFFF) as u32);
-        let diff2 =
-            BabyBear::new((next_key >> 60) as u32) - BabyBear::new((cur_key >> 60) as u32);
+        let diff2 = BabyBear::new((next_key >> 60) as u32) - BabyBear::new((cur_key >> 60) as u32);
         cols.r_limb0_iz.populate(diff0);
         cols.r_limb1_iz.populate(diff1);
         cols.r_limb2_iz.populate(diff2);

@@ -21,7 +21,7 @@ pub struct TestSnapshot(pub BTreeMap<CellKey, Value>);
 
 impl StateSnapshot for TestSnapshot {
     fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
-        Ok(self.0.get(key).cloned())
+        Ok(self.0.get(key).copied())
     }
 
     fn table_exists(&self, _: TableId) -> bool {
@@ -51,7 +51,7 @@ impl CountingSnapshot {
 impl StateSnapshot for CountingSnapshot {
     fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
         self.call_count.fetch_add(1, Ordering::Relaxed);
-        Ok(self.data.get(key).cloned())
+        Ok(self.data.get(key).copied())
     }
 
     fn table_exists(&self, _: TableId) -> bool {
@@ -214,6 +214,7 @@ pub fn run(instrs: Vec<Instruction>) -> (TxExecutionOutput, OverlayResult) {
 }
 
 /// Execute instructions with custom params and initial state.
+#[allow(clippy::needless_pass_by_value)]
 pub fn run_with(
     instrs: Vec<Instruction>,
     params: &[Value],
@@ -237,6 +238,7 @@ pub fn run_err(instrs: Vec<Instruction>) -> InterpreterError {
 }
 
 /// Execute instructions with custom params/state, expecting failure.
+#[allow(clippy::needless_pass_by_value)]
 pub fn run_err_with(
     instrs: Vec<Instruction>,
     params: &[Value],

@@ -56,7 +56,7 @@ pub struct ApiError {
 
 #[allow(missing_docs)]
 impl ApiError {
-    pub fn from_service(err: ServiceError) -> Self {
+    pub fn from_service(err: &ServiceError) -> Self {
         let code = err.code();
         let mut out = match err.kind() {
             ErrorKind::BadRequest => Self::bad_request(code, err.message()),
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn service_not_found_maps_to_404() {
         let service_err = ServiceError::not_found(ErrorCode::ProgramNotFound, "missing program");
-        let response = ApiError::from_service(service_err).into_response();
+        let response = ApiError::from_service(&service_err).into_response();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
@@ -256,7 +256,7 @@ mod tests {
     fn service_conflict_maps_to_409() {
         let service_err =
             ServiceError::conflict(ErrorCode::InstanceVersionMismatch, "version mismatch");
-        let response = ApiError::from_service(service_err).into_response();
+        let response = ApiError::from_service(&service_err).into_response();
         assert_eq!(response.status(), StatusCode::CONFLICT);
     }
 }

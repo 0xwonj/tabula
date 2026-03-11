@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use std::collections::BTreeMap;
 
 use tabula_contract::{
@@ -12,7 +13,7 @@ fn to_hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         use std::fmt::Write as _;
-        let _ = write!(out, "{:02x}", b);
+        let _ = write!(out, "{b:02x}");
     }
     out
 }
@@ -98,8 +99,7 @@ fn binding_registry_is_complete() {
     for field in PUBLIC_INPUT_FIELDS {
         assert!(
             registry.bindings.contains_key(&field),
-            "missing field in default binding registry: {:?}",
-            field
+            "missing field in default binding registry: {field:?}"
         );
     }
 }

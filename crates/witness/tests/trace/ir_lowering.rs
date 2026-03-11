@@ -100,16 +100,29 @@ pub(super) fn lower_build_validate(
 
     let builder = TraceBuilder::<PoseidonHasher, 3>::new(witness);
     let store = builder
-        .prepare_witness_store(program, batch, result, schemas, &static_tables, PoseidonHasher::new())
+        .prepare_witness_store(
+            program,
+            batch,
+            result,
+            schemas,
+            &static_tables,
+            PoseidonHasher::new(),
+        )
         .expect("witness store preparation");
 
     let chips = tabula_chips::core_dyn_chips();
     let consumers = tabula_chips::core_bus_consumers();
-    let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)
-        .expect("trace assembly");
+    let trace_map =
+        tabula_witness::trace::build_all_traces(&chips, &consumers, store).expect("trace assembly");
 
-    let buses = tabula_stark::air::interaction::core_buses::ALL.to_vec();
-    tabula_witness::trace::debug_validate_trace_map(&chips, &buses, &trace_map)
+    // Only validate intra-tier buses. Cross-tier buses (ReadAccess, WriteAccess,
+    // etc.) balance across execution+column+root tiers in the sharded architecture.
+    let intra_tier_buses = vec![
+        tabula_stark::air::interaction::core_buses::POSEIDON_PERM,
+        tabula_stark::air::interaction::core_buses::RANGE_CHECK,
+        tabula_stark::air::interaction::core_buses::STATIC_TABLE_LOOKUP,
+    ];
+    tabula_witness::trace::debug_validate_trace_map(&chips, &intra_tier_buses, &trace_map)
         .expect("constraint + bus validation");
 }
 
@@ -185,11 +198,15 @@ tx touch(id: u64) {
 
     let chips = tabula_chips::core_dyn_chips();
     let consumers = tabula_chips::core_bus_consumers();
-    let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)
-        .expect("trace assembly");
+    let trace_map =
+        tabula_witness::trace::build_all_traces(&chips, &consumers, store).expect("trace assembly");
 
-    let buses = tabula_stark::air::interaction::core_buses::ALL.to_vec();
-    tabula_witness::trace::debug_validate_trace_map(&chips, &buses, &trace_map)
+    let intra_tier_buses = vec![
+        tabula_stark::air::interaction::core_buses::POSEIDON_PERM,
+        tabula_stark::air::interaction::core_buses::RANGE_CHECK,
+        tabula_stark::air::interaction::core_buses::STATIC_TABLE_LOOKUP,
+    ];
+    tabula_witness::trace::debug_validate_trace_map(&chips, &intra_tier_buses, &trace_map)
         .expect("unified pipeline must satisfy all constraints");
 }
 

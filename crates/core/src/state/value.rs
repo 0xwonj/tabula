@@ -7,6 +7,50 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::TabulaError;
 
+// ── Type identifier ────────────────────────────────────────────────────
+
+/// Describes the type of a column or parameter value.
+///
+/// Intentionally a closed enum — exhaustive matching ensures all types
+/// are handled in encoding, decoding, and constraint generation.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub enum ValueType {
+    /// Unsigned 64-bit integer.
+    U64,
+    /// Signed 64-bit integer.
+    I64,
+    /// Boolean.
+    Bool,
+    /// 32-byte blob.
+    Bytes32,
+}
+
+impl std::fmt::Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValueType::U64 => write!(f, "U64"),
+            ValueType::I64 => write!(f, "I64"),
+            ValueType::Bool => write!(f, "Bool"),
+            ValueType::Bytes32 => write!(f, "Bytes32"),
+        }
+    }
+}
+
+// ── Value ───────────────────────────────────────────────────────────────
+
 /// A typed value stored in a table cell.
 ///
 /// Application-level only — field element encoding is handled by `ValueCodec`.
@@ -35,15 +79,19 @@ pub enum Value {
 }
 
 impl Value {
-    /// Check whether this value matches the given type descriptor.
+    /// Returns the `ValueType` for this value's variant.
+    pub fn value_type(&self) -> ValueType {
+        match self {
+            Value::U64(_) => ValueType::U64,
+            Value::I64(_) => ValueType::I64,
+            Value::Bool(_) => ValueType::Bool,
+            Value::Bytes32(_) => ValueType::Bytes32,
+        }
+    }
+
+    /// Check whether this value matches the given type.
     pub fn matches_type(&self, ty: ValueType) -> bool {
-        matches!(
-            (self, ty),
-            (Value::U64(_), ValueType::U64)
-                | (Value::I64(_), ValueType::I64)
-                | (Value::Bool(_), ValueType::Bool)
-                | (Value::Bytes32(_), ValueType::Bytes32)
-        )
+        self.value_type() == ty
     }
 
     /// Returns the variant name as a static string.
@@ -171,16 +219,7 @@ impl std::fmt::Display for Value {
     }
 }
 
-impl std::fmt::Display for ValueType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ValueType::U64 => write!(f, "U64"),
-            ValueType::I64 => write!(f, "I64"),
-            ValueType::Bool => write!(f, "Bool"),
-            ValueType::Bytes32 => write!(f, "Bytes32"),
-        }
-    }
-}
+// ── Zero values ─────────────────────────────────────────────────────────
 
 /// Return the canonical zero value for a given type.
 ///
@@ -192,19 +231,4 @@ pub fn zero_value(ty: ValueType) -> Value {
         ValueType::Bool => Value::Bool(false),
         ValueType::Bytes32 => Value::Bytes32([0; 32]),
     }
-}
-
-/// Describes the type of a column or parameter.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
-pub enum ValueType {
-    /// Unsigned 64-bit integer.
-    U64,
-    /// Signed 64-bit integer.
-    I64,
-    /// Boolean.
-    Bool,
-    /// 32-byte blob.
-    Bytes32,
 }

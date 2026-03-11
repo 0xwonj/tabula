@@ -23,7 +23,7 @@ pub fn check_consistency(
     check_etrace_identity(events)?;
 
     // Build initial value map from read_set_old
-    let initial: BTreeMap<CellKey, Option<Value>> = read_set_old.iter().cloned().collect();
+    let initial: BTreeMap<CellKey, Option<Value>> = read_set_old.iter().copied().collect();
 
     // Group events by cell key, preserving time order
     let mut by_key: BTreeMap<CellKey, Vec<&ExecutionEvent>> = BTreeMap::new();
@@ -46,12 +46,11 @@ pub fn check_consistency(
         // Assert ordering rather than silently sorting (sorting would mask bugs).
         debug_assert!(
             key_events.windows(2).all(|w| w[0].time <= w[1].time),
-            "events for key {:?} are not in time order",
-            key
+            "events for key {key:?} are not in time order"
         );
 
         // Current value for this key: starts at the initial/snapshot value
-        let mut current_opt = initial.get(key).cloned().unwrap_or(None);
+        let mut current_opt = initial.get(key).copied().unwrap_or(None);
 
         for event in key_events {
             match event.op {

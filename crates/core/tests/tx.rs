@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_core::{Batch, Transaction, TxTypeId, Value};
 
 #[test]

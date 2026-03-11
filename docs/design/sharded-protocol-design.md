@@ -345,7 +345,7 @@ struct RootProof {
 ### 5.4 Aggregate Proof Envelope
 
 ```rust
-struct ShardedTabulaProof {
+struct TabulaProof {
     execution: ExecutionProof,
     columns: Vec<ColumnProof>,        // C column proofs
     root: RootProof,
@@ -712,7 +712,7 @@ needed.
 | A3 | Global Fiat-Shamir — collects all main commitments, derives shared (α, β) | G5 | A2 |
 | A4 | Public value cumsum — split internal vs cross-proof cumsums | G3 | A1 |
 | A5 | `ShardedVerifier` — verifies C+2 proofs + cross-proof bus balance | G7, G12 | A4 |
-| A6 | `ShardedTabulaProof` — aggregate proof envelope | G3 | A4 |
+| A6 | `TabulaProof` — aggregate proof envelope | G3 | A4 |
 
 ### Phase B: Witness Pipeline Decomposition
 
@@ -828,15 +828,15 @@ let machine = TabulaMachine::builder()
     .with_core_chips()
     .with_default_commitments()
     .build();
-let proof: TabulaProof = machine.prove(&traces, &statement);
+let proof: MonolithicProof = machine.prove(&traces, &statement);
 
-// Sharded (new)
+// Sharded (new, default)
 let sharded = ShardedProver::builder()
     .with_execution_chips()
     .with_column_chips()
     .with_root_chips()
     .build();
-let proof: ShardedTabulaProof = sharded.prove(&witness, &statement);
+let proof: TabulaProof = sharded.prove(&witness, &statement);
 ```
 
 ### 9.2 Shared Components

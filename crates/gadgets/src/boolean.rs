@@ -24,3 +24,24 @@ pub fn constrain_is_real_prefix<AB: AirBuilder>(
         .when_transition()
         .assert_zero(next_is_real.into() * (AB::Expr::ONE - is_real.into()));
 }
+
+/// Constant identity constraint: `table_id` and `col_id` must remain unchanged
+/// across consecutive real rows.
+///
+/// Gated by `both_real` (typically `local.is_real * next.is_real`) so that
+/// transitions into or out of padding rows are unconstrained.
+pub fn constrain_constant_identity<AB: AirBuilder>(
+    builder: &mut AB,
+    local_table_id: AB::Var,
+    next_table_id: AB::Var,
+    local_col_id: AB::Var,
+    next_col_id: AB::Var,
+    both_real: AB::Expr,
+) {
+    let table_diff: AB::Expr = next_table_id.into() - local_table_id.into();
+    let col_diff: AB::Expr = next_col_id.into() - local_col_id.into();
+    builder
+        .when_transition()
+        .assert_zero(both_real.clone() * table_diff);
+    builder.when_transition().assert_zero(both_real * col_diff);
+}

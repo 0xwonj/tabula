@@ -3,10 +3,10 @@
 use p3_matrix::Matrix;
 use tabula_core::{ColId, TableId};
 
+use tabula_chips::shards::ChipIdAllocator;
 use tabula_chips::shards::ssmc::{
     SSMC_WITNESS_LABEL, SsmcColumnWitness, SsmcCommitment, SsmcWitness,
 };
-use tabula_chips::shards::ChipIdAllocator;
 use tabula_chips::test_utils::builders::{ms_init, ms_touched, ss_old_only};
 use tabula_chips::test_utils::values::distinct_digest;
 

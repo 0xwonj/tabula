@@ -1,6 +1,3 @@
-#![warn(missing_docs)]
-#![deny(unused)]
-
 //! Deterministic execution engine for the Tabula kernel.
 //!
 //! # Primary API

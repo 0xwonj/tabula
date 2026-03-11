@@ -29,7 +29,7 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
-use tabula_gadgets::constrain_is_real_prefix;
+use tabula_gadgets::{constrain_constant_identity, constrain_is_real_prefix};
 use tabula_stark::air::builder::InteractionAirBuilder;
 use tabula_stark::air::bus::{
     CommitmentAirBuilder, EmptyColReadAirBuilder, PoseidonAirBuilder, SmtLeafDigestAirBuilder,
@@ -143,7 +143,17 @@ impl<AB: InteractionAirBuilder> Air<AB> for MetaShardChip {
         constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
 
         // ── 3. Constant identity ──
-        constrain_constant_identity(builder, local, next);
+        {
+            let both_real: AB::Expr = local.is_real.clone().into() * next.is_real.clone().into();
+            constrain_constant_identity(
+                builder,
+                local.table_id.clone(),
+                next.table_id.clone(),
+                local.col_id.clone(),
+                next.col_id.clone(),
+                both_real,
+            );
+        }
 
         // ── 4. Untouched binding: is_touched=0 ⟹ com_new = com_old ──
         constrain_untouched_binding(builder, local);
@@ -200,9 +210,7 @@ impl<AB: InteractionAirBuilder> Air<AB> for MetaShardChip {
                     AB::Expr::ONE, // comm_type = 1 (Com_new)
                     local.is_touched.clone().into(),
                     &local.com_new,
-                    local.is_real.clone().into()
-                        * local.is_touched.clone().into()
-                        * non_empty_new,
+                    local.is_real.clone().into() * local.is_touched.clone().into() * non_empty_new,
                 );
             }
         }
@@ -248,28 +256,8 @@ fn constrain_booleans<AB: AirBuilder>(builder: &mut AB, local: &MetaShardCols<AB
     builder.assert_bool(local.is_touched.clone());
 }
 
-/// 3. Constant identity: table_id and col_id must not change between real rows.
-fn constrain_constant_identity<AB: AirBuilder>(
-    builder: &mut AB,
-    local: &MetaShardCols<AB::Var>,
-    next: &MetaShardCols<AB::Var>,
-) {
-    let both_real: AB::Expr = local.is_real.clone().into() * next.is_real.clone().into();
-    let table_diff: AB::Expr = next.table_id.clone().into() - local.table_id.clone().into();
-    let col_diff: AB::Expr = next.col_id.clone().into() - local.col_id.clone().into();
-    builder
-        .when_transition()
-        .assert_zero(both_real.clone() * table_diff);
-    builder
-        .when_transition()
-        .assert_zero(both_real * col_diff);
-}
-
 /// 4. Untouched binding: `is_touched=0 ⟹ com_new = com_old`.
-fn constrain_untouched_binding<AB: AirBuilder>(
-    builder: &mut AB,
-    local: &MetaShardCols<AB::Var>,
-) {
+fn constrain_untouched_binding<AB: AirBuilder>(builder: &mut AB, local: &MetaShardCols<AB::Var>) {
     let not_touched: AB::Expr = AB::Expr::ONE - local.is_touched.clone().into();
     for i in 0..DIGEST_WIDTH {
         builder
@@ -280,10 +268,7 @@ fn constrain_untouched_binding<AB: AirBuilder>(
 }
 
 /// 5. Touched consistency: `is_touched=0 ⟹ is_empty_new = is_empty_old`.
-fn constrain_touched_consistency<AB: AirBuilder>(
-    builder: &mut AB,
-    local: &MetaShardCols<AB::Var>,
-) {
+fn constrain_touched_consistency<AB: AirBuilder>(builder: &mut AB, local: &MetaShardCols<AB::Var>) {
     let not_touched: AB::Expr = AB::Expr::ONE - local.is_touched.clone().into();
     let empty_diff: AB::Expr =
         local.is_empty_new.clone().into() - local.is_empty_old.clone().into();
@@ -397,9 +382,7 @@ fn constrain_leaf_digest<AB: AirBuilder>(
         is_real.clone()
             * (local.leaf_perm_input_new[2].clone().into() - local.col_id.clone().into()),
     );
-    builder.assert_zero(
-        is_real.clone() * (local.leaf_perm_input_new[3].clone().into() - tag_expr),
-    );
+    builder.assert_zero(is_real.clone() * (local.leaf_perm_input_new[3].clone().into() - tag_expr));
     for i in 4..8 {
         builder.assert_zero(is_real.clone() * local.leaf_perm_input_new[i].clone().into());
     }

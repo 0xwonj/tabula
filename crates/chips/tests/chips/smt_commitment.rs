@@ -3,10 +3,8 @@
 use p3_matrix::Matrix;
 use tabula_core::{ColId, TableId};
 
-use tabula_chips::shards::smt::{
-    SMT_WITNESS_LABEL, SmtColumnWitness, SmtCommitment, SmtWitness,
-};
 use tabula_chips::shards::ChipIdAllocator;
+use tabula_chips::shards::smt::{SMT_WITNESS_LABEL, SmtColumnWitness, SmtCommitment, SmtWitness};
 use tabula_chips::test_utils::builders::{ms_init, ms_touched};
 use tabula_chips::test_utils::values::distinct_digest;
 

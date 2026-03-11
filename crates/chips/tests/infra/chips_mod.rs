@@ -1,16 +1,7 @@
-use tabula_chips::column_meta::ColumnMetaChip;
 use tabula_chips::execution::ExecutionChip;
 use tabula_chips::poseidon::PoseidonChip;
 use tabula_chips::range_check::RangeCheckChip;
-use tabula_chips::state_column::StateColumnChip;
 use tabula_chips::{ChipSpec, core_chips, core_dyn_chips};
-
-#[test]
-fn chip_meta_id() {
-    let chip = ColumnMetaChip;
-    assert_eq!(chip.chip_id(), core_chips::COLUMN_META);
-    assert_eq!(chip.chip_name(), "ColumnMeta");
-}
 
 #[test]
 fn chip_spec_delegates() {
@@ -22,18 +13,12 @@ fn chip_spec_delegates() {
 
     let pos = PoseidonChip;
     assert_eq!(pos.chip_id(), core_chips::POSEIDON);
-
-    let sc = StateColumnChip::<3>;
-    assert_eq!(sc.chip_id(), core_chips::STATE_COLUMN);
-
-    let cm = ColumnMetaChip;
-    assert_eq!(cm.chip_id(), core_chips::COLUMN_META);
 }
 
 #[test]
-fn core_dyn_chips_returns_nine() {
+fn core_dyn_chips_returns_six() {
     let chips = core_dyn_chips();
-    assert_eq!(chips.len(), 9);
+    assert_eq!(chips.len(), 6);
 }
 
 #[test]

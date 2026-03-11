@@ -97,7 +97,7 @@ impl WitnessStore {
             .and_then(|v| v.downcast_ref::<T>())
             .ok_or_else(|| TabulaError::ProofError {
                 phase: "witness_store",
-                detail: format!("missing or type-mismatched entry for key '{}'", label),
+                detail: format!("missing or type-mismatched entry for key '{label}'"),
             })
     }
 
@@ -105,6 +105,26 @@ impl WitnessStore {
     pub fn contains<T: 'static>(&self, label: &'static str) -> bool {
         let key = WitnessKey::of::<T>(label);
         self.entries.contains_key(&key)
+    }
+
+    /// Drain all entries whose label matches one of the given labels into a new store.
+    ///
+    /// Entries are moved (removed from `self`, inserted into the result).
+    /// This allows type-erased partitioning without knowing concrete types.
+    pub fn drain_labels(&mut self, labels: &[&str]) -> WitnessStore {
+        let mut result = WitnessStore::new();
+        let keys: Vec<WitnessKey> = self
+            .entries
+            .keys()
+            .filter(|k| labels.contains(&k.label))
+            .copied()
+            .collect();
+        for key in keys {
+            if let Some(value) = self.entries.remove(&key) {
+                result.entries.insert(key, value);
+            }
+        }
+        result
     }
 }
 
@@ -133,12 +153,6 @@ impl Default for WitnessStore {
 pub mod witness_labels {
     /// `Vec<InstructionRecord>` — execution instruction trace input.
     pub const EXECUTION_RECORDS: &str = "execution_records";
-    /// `Vec<InterTxOrderRow>` — pre-sorted inter-tx ordering rows.
-    pub const INTER_TX_ROWS: &str = "inter_tx_rows";
-    /// `Vec<StateColumnRow>` — pre-sorted state column rows.
-    pub const STATE_ROWS: &str = "state_rows";
-    /// `ColumnMetaInput` — column metadata + empty-read counts.
-    pub const COLUMN_META_INPUT: &str = "column_meta_input";
     /// `Vec<StaticTableRow>` — static table lookup rows.
     pub const STATIC_TABLE_ROWS: &str = "static_table_rows";
     /// `Vec<SmtPathWitness>` — SMT column-level path witnesses.
@@ -151,4 +165,39 @@ pub mod witness_labels {
     pub const POSEIDON_INPUTS: &str = "poseidon_inputs";
     /// `Box<[u32; RANGE_CHECK_SIZE]>` — range check multiplicities (collected from Phase 0+1).
     pub const RANGE_CHECK_MULTS: &str = "range_check_mults";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drain_labels_moves_matching_entries() {
+        let mut store = WitnessStore::new();
+        store.put("alpha", 1u32);
+        store.put("beta", 2u64);
+        store.put("gamma", 3i32);
+
+        let drained = store.drain_labels(&["alpha", "gamma"]);
+
+        // Drained store has the matching entries.
+        assert!(drained.contains::<u32>("alpha"));
+        assert!(drained.contains::<i32>("gamma"));
+        // Source store no longer has them.
+        assert!(!store.contains::<u32>("alpha"));
+        assert!(!store.contains::<i32>("gamma"));
+        // Unmatched entry remains in source.
+        assert!(store.contains::<u64>("beta"));
+    }
+
+    #[test]
+    fn drain_labels_empty_on_no_match() {
+        let mut store = WitnessStore::new();
+        store.put("alpha", 1u32);
+
+        let drained = store.drain_labels(&["nonexistent"]);
+        assert!(!drained.contains::<u32>("nonexistent"));
+        // Original untouched.
+        assert!(store.contains::<u32>("alpha"));
+    }
 }

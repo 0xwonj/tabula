@@ -1,9 +1,11 @@
 //! ProofInstance: phased STARK prover abstraction.
 //!
 //! Encapsulates a chip set with independent PCS, providing phase-level
-//! methods for the batched proving protocol. The current monolithic prover
-//! creates a single `ProofInstance` with all chips; future sharded provers
-//! create multiple instances sharing a synchronized Fiat-Shamir transcript.
+//! methods for the batched proving protocol. Each proof instance owns its
+//! own chip subset; the multi-proof orchestrator creates C+2 instances
+//! sharing a synchronized Fiat-Shamir transcript.
+
+use std::collections::BTreeMap;
 
 use p3_baby_bear::BabyBear;
 use p3_challenger::{CanObserve, FieldChallenger};
@@ -12,8 +14,9 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{StarkGenericConfig, get_log_num_quotient_chunks, get_symbolic_constraints};
+use rayon::prelude::*;
 
-use tabula_stark::air::statement::PublicStatement;
+use tabula_stark::air::interaction::BusId;
 use tabula_stark::debug::evaluate_chip_interactions_only;
 use tabula_witness::trace::TraceMap;
 
@@ -22,10 +25,10 @@ use crate::config::{
     Challenger, EF4, PcsCommitment, PcsOpeningProof, TabulaPcs, TabulaStarkConfig,
 };
 use crate::keys::TabulaProvingKey;
-use crate::permutation::generate_permutation_trace_from_interactions;
-use crate::proof::{ChipOpening, ProveError, TabulaProof};
+use crate::proof::{ChipOpening, ProveError};
 use crate::prove::quotient;
 use crate::registry::ChipRegistry;
+use tabula_stark::permutation::generate_permutation_trace_from_interactions;
 
 /// PCS prover data type alias.
 type PcsProverData = <TabulaPcs as Pcs<EF4, Challenger>>::ProverData;
@@ -46,8 +49,7 @@ pub(crate) struct MainCommitment {
 /// Output of a completed proof instance.
 ///
 /// Contains all PCS commitments, opening proof, and per-chip evaluations
-/// for one proof instance. Add a [`PublicStatement`] to produce a
-/// [`TabulaProof`].
+/// for one proof instance.
 pub(crate) struct SubProof {
     pub preprocessed_commitment: Option<PcsCommitment>,
     pub main_commitment: PcsCommitment,
@@ -55,21 +57,6 @@ pub(crate) struct SubProof {
     pub quotient_commitment: PcsCommitment,
     pub opening_proof: PcsOpeningProof,
     pub chip_openings: Vec<ChipOpening>,
-}
-
-impl SubProof {
-    /// Attach a public statement to produce a complete [`TabulaProof`].
-    pub fn into_tabula_proof(self, statement: PublicStatement) -> TabulaProof {
-        TabulaProof {
-            preprocessed_commitment: self.preprocessed_commitment,
-            main_commitment: self.main_commitment,
-            perm_commitment: self.perm_commitment,
-            quotient_commitment: self.quotient_commitment,
-            opening_proof: self.opening_proof,
-            chip_openings: self.chip_openings,
-            statement,
-        }
-    }
 }
 
 // ─── ProofInstance ─────────────────────────────────────────────────────────
@@ -106,6 +93,14 @@ pub(crate) struct ProofInstance<'a> {
     logup_challenges: Option<[EF4; 2]>,
 }
 
+// Compile-time assertion: ProofInstance must be Send for rayon parallelism.
+const _: () = {
+    fn _assert_send() {
+        fn check<T: Send>() {}
+        check::<ProofInstance<'_>>();
+    }
+};
+
 impl<'a> ProofInstance<'a> {
     /// Phase 0-1: Collect per-chip metadata and evaluate interactions.
     ///
@@ -115,9 +110,9 @@ impl<'a> ProofInstance<'a> {
         config: &'a TabulaStarkConfig,
         registry: &'a ChipRegistry,
         pk: &TabulaProvingKey,
-        traces: &TraceMap,
+        mut traces: TraceMap,
     ) -> Result<Self, ProveError> {
-        let mut chip_infos = collect_chip_infos(registry, pk, traces)?;
+        let mut chip_infos = collect_chip_infos(registry, pk, &mut traces)?;
         if chip_infos.is_empty() {
             return Err(ProveError::NoChips);
         }
@@ -172,10 +167,8 @@ impl<'a> ProofInstance<'a> {
                 .iter()
                 .map(|&i| {
                     let info = &mut self.chip_infos[i];
-                    let domain = <P as Pcs<EF4, C>>::natural_domain_for_degree(
-                        pcs,
-                        1 << info.degree_bits,
-                    );
+                    let domain =
+                        <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << info.degree_bits);
                     (
                         domain,
                         info.preprocessed
@@ -195,15 +188,11 @@ impl<'a> ProofInstance<'a> {
             .chip_infos
             .iter_mut()
             .map(|info| {
-                let domain = <P as Pcs<EF4, C>>::natural_domain_for_degree(
-                    pcs,
-                    1 << info.degree_bits,
-                );
+                let domain =
+                    <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << info.degree_bits);
                 (
                     domain,
-                    info.main_trace
-                        .take()
-                        .expect("main trace already consumed"),
+                    info.main_trace.take().expect("main trace already consumed"),
                 )
             })
             .collect();
@@ -228,24 +217,48 @@ impl<'a> ProofInstance<'a> {
     pub fn build_perm_traces(&mut self, challenges: [EF4; 2]) -> Result<EF4, ProveError> {
         self.logup_challenges = Some(challenges);
 
-        let mut cumsum_total = EF4::ZERO;
-        for info in &mut self.chip_infos {
-            if info.interactions_per_row == 0 {
-                continue;
-            }
-            let height = 1 << info.degree_bits;
-            let (perm_trace, cumsum) = generate_permutation_trace_from_interactions(
-                &info.recorded_interactions,
-                height,
-                challenges,
-            )?;
-            info.perm_width = perm_trace.width();
-            info.perm_trace = Some(perm_trace);
-            info.cumsum = cumsum;
-            cumsum_total += cumsum;
-        }
+        // Parallelize per-chip perm trace generation (each chip is independent).
+        self.chip_infos
+            .par_iter_mut()
+            .try_for_each(|info| -> Result<(), ProveError> {
+                if info.interactions_per_row == 0 {
+                    return Ok(());
+                }
+                let height = 1 << info.degree_bits;
+                let output = generate_permutation_trace_from_interactions(
+                    &info.recorded_interactions,
+                    height,
+                    challenges,
+                )?;
+                info.perm_width = output.trace.width();
+                info.perm_trace = Some(output.trace);
+                info.cumsum = output.cumsum;
+                info.cumsums_by_bus = output.cumsums_by_bus;
+                Ok(())
+            })?;
+
+        // Aggregate cumsums sequentially (cheap summation).
+        let cumsum_total = self
+            .chip_infos
+            .iter()
+            .map(|info| info.cumsum)
+            .fold(EF4::ZERO, |acc, c| acc + c);
 
         Ok(cumsum_total)
+    }
+
+    /// Per-bus cumulative sums aggregated across all chips in this instance.
+    ///
+    /// Available after [`build_perm_traces()`]. Used by the sharded prover to
+    /// classify internal (must be zero) vs external (exported) bus cumsums.
+    pub fn cumsums_by_bus(&self) -> BTreeMap<BusId, EF4> {
+        let mut totals: BTreeMap<BusId, EF4> = BTreeMap::new();
+        for info in &self.chip_infos {
+            for (&bus, &cs) in &info.cumsums_by_bus {
+                *totals.entry(bus).or_insert(EF4::ZERO) += cs;
+            }
+        }
+        totals
     }
 
     /// Phases 6-11: Commit perm traces, compute quotients, open all.
@@ -283,15 +296,11 @@ impl<'a> ProofInstance<'a> {
                 .iter()
                 .map(|&i| {
                     let info = &mut self.chip_infos[i];
-                    let domain = <P as Pcs<EF4, C>>::natural_domain_for_degree(
-                        pcs,
-                        1 << info.degree_bits,
-                    );
+                    let domain =
+                        <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << info.degree_bits);
                     (
                         domain,
-                        info.perm_trace
-                            .take()
-                            .expect("perm trace already consumed"),
+                        info.perm_trace.take().expect("perm trace already consumed"),
                     )
                 })
                 .collect();
@@ -310,20 +319,24 @@ impl<'a> ProofInstance<'a> {
 
         // ── Phase 8: Per-chip quotient computation ──────────────────────
 
-        let perm_idx_map = build_index_map(self.chip_infos.len(), &rap_chip_indices);
-        let pp_idx_map = build_index_map(self.chip_infos.len(), &self.pp_chip_indices);
+        let num_chips = self.chip_infos.len();
+        let perm_idx_map = build_index_map(num_chips, &rap_chip_indices);
+        let pp_idx_map = build_index_map(num_chips, &self.pp_chip_indices);
+        let pp_chip_indices = std::mem::take(&mut self.pp_chip_indices);
 
-        let (all_quotient_ldes, quotient_chunk_map) = compute_chip_quotients(
+        let committed = CommittedData {
             pcs,
-            &self.chip_infos,
-            &main_data,
-            perm_data.as_ref(),
-            self.preprocessed_data.as_ref(),
-            &perm_idx_map,
-            &pp_idx_map,
-            alpha,
-            logup_challenges,
-        );
+            main_data: &main_data,
+            perm_data: perm_data.as_ref(),
+            preprocessed_data: self.preprocessed_data.as_ref(),
+            rap_chip_indices,
+            pp_chip_indices,
+            perm_idx_map,
+            pp_idx_map,
+        };
+
+        let (all_quotient_ldes, quotient_chunk_map) =
+            compute_chip_quotients(&committed, &self.chip_infos, alpha, logup_challenges);
 
         // ── Phase 9: Commit quotient LDEs ───────────────────────────────
 
@@ -336,17 +349,10 @@ impl<'a> ProofInstance<'a> {
         let zeta: EF4 = challenger.sample_algebra_element();
 
         let (chip_openings, opening_proof) = open_and_extract(
-            pcs,
+            &committed,
             challenger,
             &self.chip_infos,
-            &main_data,
             &quotient_data,
-            perm_data.as_ref(),
-            self.preprocessed_data.as_ref(),
-            &rap_chip_indices,
-            &self.pp_chip_indices,
-            &perm_idx_map,
-            &pp_idx_map,
             &quotient_chunk_map,
             zeta,
         );
@@ -363,6 +369,25 @@ impl<'a> ProofInstance<'a> {
 }
 
 // ─── Internal Types ────────────────────────────────────────────────────────
+
+/// Committed PCS state shared between quotient computation and FRI opening.
+///
+/// Bundles PCS prover data with chip-to-matrix index maps, avoiding
+/// parameter proliferation across proving phases 8-11.
+struct CommittedData<'a> {
+    pcs: &'a TabulaPcs,
+    main_data: &'a PcsProverData,
+    perm_data: Option<&'a PcsProverData>,
+    preprocessed_data: Option<&'a PcsProverData>,
+    /// Which chips have permutation traces (indices into chip_infos).
+    rap_chip_indices: Vec<usize>,
+    /// Which chips have preprocessed traces (indices into chip_infos).
+    pp_chip_indices: Vec<usize>,
+    /// Maps chip index → committed perm matrix index.
+    perm_idx_map: Vec<Option<usize>>,
+    /// Maps chip index → committed preprocessed matrix index.
+    pp_idx_map: Vec<Option<usize>>,
+}
 
 /// Per-chip metadata collected before the batched PCS ceremony.
 ///
@@ -386,27 +411,30 @@ struct ChipProveInfo<'a> {
     perm_trace: Option<RowMajorMatrix<BabyBear>>,
     perm_width: usize,
     cumsum: EF4,
+    /// Per-bus cumulative sums for sharding: maps BusId → cumsum contribution.
+    cumsums_by_bus: BTreeMap<BusId, EF4>,
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /// Collect per-chip metadata from registry, proving key, and traces.
+///
+/// Drains matching entries from `traces`, transferring ownership of trace
+/// matrices into `ChipProveInfo` without cloning.
 fn collect_chip_infos<'a>(
     registry: &'a ChipRegistry,
     pk: &TabulaProvingKey,
-    traces: &TraceMap,
+    traces: &mut TraceMap,
 ) -> Result<Vec<ChipProveInfo<'a>>, ProveError> {
     let mut infos = Vec::new();
 
     for chip in registry.chips() {
         let chip_id = chip.chip_id();
-        let entry = match traces.get(chip_id) {
-            Some(e) => e,
-            None => continue,
+        let Some(entry) = traces.remove(chip_id) else {
+            continue;
         };
 
-        let main_trace = &entry.main;
-        let height = main_trace.height();
+        let height = entry.main.height();
         if height == 0 {
             continue;
         }
@@ -418,7 +446,7 @@ fn collect_chip_infos<'a>(
             .get(chip_id)
             .ok_or(ProveError::MissingKeygenInfo { chip_id })?;
         let degree_bits = height.trailing_zeros() as usize;
-        let main_width = main_trace.width();
+        let main_width = entry.main.width();
         let interactions_per_row =
             keygen.interactions.num_sends_per_row + keygen.interactions.num_receives_per_row;
 
@@ -448,16 +476,16 @@ fn collect_chip_infos<'a>(
         };
 
         let mut cr = ChipRef::new(chip.air());
-        if let Some(pp) = &entry.preprocessed {
+        if let Some(ref pp) = entry.preprocessed {
             cr = cr.with_preprocessed(pp.clone());
         }
 
         infos.push(ChipProveInfo {
             chip_ref: cr,
             chip_id,
-            main_trace: Some(main_trace.clone()),
-            public_values: entry.public_values.clone(),
-            preprocessed: entry.preprocessed.clone(),
+            main_trace: Some(entry.main),
+            public_values: entry.public_values,
+            preprocessed: entry.preprocessed,
             degree_bits,
             main_width,
             interactions_per_row,
@@ -468,6 +496,7 @@ fn collect_chip_infos<'a>(
             perm_trace: None,
             perm_width: 0,
             cumsum: EF4::ZERO,
+            cumsums_by_bus: BTreeMap::new(),
         });
     }
 
@@ -490,97 +519,99 @@ fn build_index_map(num_chips: usize, committed_indices: &[usize]) -> Vec<Option<
 ///
 /// Returns the flat list of quotient LDE matrices and a per-chip map
 /// of `(start_index, chunk_count)` into that list.
-#[allow(clippy::too_many_arguments)]
 fn compute_chip_quotients(
-    pcs: &TabulaPcs,
+    ctx: &CommittedData<'_>,
     chip_infos: &[ChipProveInfo<'_>],
-    main_data: &PcsProverData,
-    perm_data: Option<&PcsProverData>,
-    preprocessed_data: Option<&PcsProverData>,
-    perm_idx_map: &[Option<usize>],
-    pp_idx_map: &[Option<usize>],
     alpha: EF4,
     logup_challenges: [EF4; 2],
 ) -> (Vec<RowMajorMatrix<BabyBear>>, Vec<(usize, usize)>) {
+    let pcs = ctx.pcs;
     type P = TabulaPcs;
     type C = Challenger;
 
+    // Compute per-chip quotient LDEs in parallel.
+    let per_chip: Vec<Vec<RowMajorMatrix<BabyBear>>> = chip_infos
+        .par_iter()
+        .enumerate()
+        .map(|(i, info)| {
+            let degree_bits = info.degree_bits;
+            let trace_domain = <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << degree_bits);
+            let log_q = info.log_quotient_chunks;
+            let num_q_chunks = 1 << log_q;
+            let q_domain = trace_domain.create_disjoint_domain(1 << (degree_bits + log_q));
+
+            let main_on_q =
+                <P as Pcs<EF4, C>>::get_evaluations_on_domain(pcs, ctx.main_data, i, q_domain);
+
+            let perm_on_q = ctx.perm_idx_map[i].map(|idx| {
+                <P as Pcs<EF4, C>>::get_evaluations_on_domain(
+                    pcs,
+                    ctx.perm_data
+                        .expect("perm data missing for chip with perm index"),
+                    idx,
+                    q_domain,
+                )
+            });
+
+            let pp_on_q = ctx.pp_idx_map[i].map(|idx| {
+                <P as Pcs<EF4, C>>::get_evaluations_on_domain_no_random(
+                    pcs,
+                    ctx.preprocessed_data
+                        .expect("preprocessed data missing for chip with pp index"),
+                    idx,
+                    q_domain,
+                )
+            });
+
+            let quotient_values = if info.interactions_per_row > 0 {
+                let chip_qi = quotient::ChipQuotientInfo {
+                    main_width: info.main_width,
+                    inner_constraint_count: info.inner_constraint_count,
+                    total_constraint_count: info.total_constraint_count,
+                    cumsum_final: info.cumsum,
+                };
+                quotient::compute_quotient_rap(
+                    &info.chip_ref,
+                    &main_on_q,
+                    perm_on_q
+                        .as_ref()
+                        .expect("perm trace missing for chip with interactions"),
+                    pp_on_q.as_ref(),
+                    &info.public_values,
+                    trace_domain,
+                    q_domain,
+                    alpha,
+                    logup_challenges,
+                    &chip_qi,
+                )
+            } else {
+                quotient::compute_quotient_standard(
+                    &info.chip_ref,
+                    &main_on_q,
+                    pp_on_q.as_ref(),
+                    &info.public_values,
+                    trace_domain,
+                    q_domain,
+                    alpha,
+                    info.inner_constraint_count,
+                )
+            };
+
+            let flat = RowMajorMatrix::new_col(quotient_values).flatten_to_base();
+            let sub_evals = q_domain.split_evals(num_q_chunks, flat);
+            let sub_domains = q_domain.split_domains(num_q_chunks);
+            <P as Pcs<EF4, C>>::get_quotient_ldes(
+                pcs,
+                sub_domains.into_iter().zip(sub_evals),
+                num_q_chunks,
+            )
+        })
+        .collect();
+
+    // Sequential assembly: start indices depend on previous chunks.
     let mut all_quotient_ldes: Vec<RowMajorMatrix<BabyBear>> = Vec::new();
     let mut quotient_chunk_map: Vec<(usize, usize)> = Vec::new();
-
-    for (i, info) in chip_infos.iter().enumerate() {
-        let degree_bits = info.degree_bits;
-        let trace_domain =
-            <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << degree_bits);
-        let log_q = info.log_quotient_chunks;
-        let num_q_chunks = 1 << log_q;
-        let q_domain =
-            trace_domain.create_disjoint_domain(1 << (degree_bits + log_q));
-
-        let main_on_q =
-            <P as Pcs<EF4, C>>::get_evaluations_on_domain(pcs, main_data, i, q_domain);
-
-        let perm_on_q = perm_idx_map[i].map(|idx| {
-            <P as Pcs<EF4, C>>::get_evaluations_on_domain(
-                pcs,
-                perm_data.expect("perm data missing for chip with perm index"),
-                idx,
-                q_domain,
-            )
-        });
-
-        let pp_on_q = pp_idx_map[i].map(|idx| {
-            <P as Pcs<EF4, C>>::get_evaluations_on_domain_no_random(
-                pcs,
-                preprocessed_data.expect("preprocessed data missing for chip with pp index"),
-                idx,
-                q_domain,
-            )
-        });
-
-        let quotient_values = if info.interactions_per_row > 0 {
-            let chip_qi = quotient::ChipQuotientInfo {
-                main_width: info.main_width,
-                inner_constraint_count: info.inner_constraint_count,
-                total_constraint_count: info.total_constraint_count,
-                cumsum_final: info.cumsum,
-            };
-            quotient::compute_quotient_rap(
-                &info.chip_ref,
-                &main_on_q,
-                perm_on_q
-                    .as_ref()
-                    .expect("perm trace missing for chip with interactions"),
-                pp_on_q.as_ref(),
-                &info.public_values,
-                trace_domain,
-                q_domain,
-                alpha,
-                logup_challenges,
-                &chip_qi,
-            )
-        } else {
-            quotient::compute_quotient_standard(
-                &info.chip_ref,
-                &main_on_q,
-                pp_on_q.as_ref(),
-                &info.public_values,
-                trace_domain,
-                q_domain,
-                alpha,
-                info.inner_constraint_count,
-            )
-        };
-
-        let flat = RowMajorMatrix::new_col(quotient_values).flatten_to_base();
-        let sub_evals = q_domain.split_evals(num_q_chunks, flat);
-        let sub_domains = q_domain.split_domains(num_q_chunks);
-        let ldes = <P as Pcs<EF4, C>>::get_quotient_ldes(
-            pcs,
-            sub_domains.into_iter().zip(sub_evals),
-            num_q_chunks,
-        );
-
+    for ldes in per_chip {
         let start = all_quotient_ldes.len();
         let count = ldes.len();
         all_quotient_ldes.extend(ldes);
@@ -593,22 +624,15 @@ fn compute_chip_quotients(
 /// Phases 10-11: Build PCS opening rounds, run FRI, and extract per-chip openings.
 ///
 /// Returns the per-chip `ChipOpening` list and the single FRI opening proof.
-#[allow(clippy::too_many_arguments)]
 fn open_and_extract(
-    pcs: &TabulaPcs,
+    ctx: &CommittedData<'_>,
     challenger: &mut Challenger,
     chip_infos: &[ChipProveInfo<'_>],
-    main_data: &PcsProverData,
     quotient_data: &PcsProverData,
-    perm_data: Option<&PcsProverData>,
-    preprocessed_data: Option<&PcsProverData>,
-    rap_chip_indices: &[usize],
-    pp_chip_indices: &[usize],
-    perm_idx_map: &[Option<usize>],
-    pp_idx_map: &[Option<usize>],
     quotient_chunk_map: &[(usize, usize)],
     zeta: EF4,
 ) -> (Vec<ChipOpening>, PcsOpeningProof) {
+    let pcs = ctx.pcs;
     type P = TabulaPcs;
     type C = Challenger;
 
@@ -625,17 +649,20 @@ fn open_and_extract(
     let mut rounds = Vec::new();
 
     // Round 0: main traces — each matrix opened at [zeta, zeta_next]
-    let main_points: Vec<Vec<EF4>> =
-        chip_infos.iter().map(|i| zeta_pair(i.degree_bits)).collect();
-    rounds.push((main_data, main_points));
+    let main_points: Vec<Vec<EF4>> = chip_infos
+        .iter()
+        .map(|i| zeta_pair(i.degree_bits))
+        .collect();
+    rounds.push((ctx.main_data, main_points));
 
     // Round 1: quotient chunks — each matrix opened at [zeta]
     let total_q_matrices: usize = quotient_chunk_map.iter().map(|(_, n)| n).sum();
     rounds.push((quotient_data, vec![vec![zeta]; total_q_matrices]));
 
     // Round 2: perm traces — each matrix opened at [zeta, zeta_next]
-    if let Some(perm_d) = perm_data {
-        let pts: Vec<Vec<EF4>> = rap_chip_indices
+    if let Some(perm_d) = ctx.perm_data {
+        let pts: Vec<Vec<EF4>> = ctx
+            .rap_chip_indices
             .iter()
             .map(|&i| zeta_pair(chip_infos[i].degree_bits))
             .collect();
@@ -643,24 +670,28 @@ fn open_and_extract(
     }
 
     // Round 3: preprocessed traces — each matrix opened at [zeta, zeta_next]
-    if let Some(pp_d) = preprocessed_data {
-        let pts: Vec<Vec<EF4>> = pp_chip_indices
+    if let Some(pp_d) = ctx.preprocessed_data {
+        let pts: Vec<Vec<EF4>> = ctx
+            .pp_chip_indices
             .iter()
             .map(|&i| zeta_pair(chip_infos[i].degree_bits))
             .collect();
         rounds.push((pp_d, pts));
     }
 
-    let (opened_values, opening_proof) =
-        <P as Pcs<EF4, C>>::open(pcs, rounds, challenger);
+    let (opened_values, opening_proof) = <P as Pcs<EF4, C>>::open(pcs, rounds, challenger);
 
     // ── Phase 11: Extract per-chip openings ─────────────────────────────
     // opened_values[round][matrix][point] = Vec<EF4>
     let main_ov = &opened_values[0];
     let quot_ov = &opened_values[1];
-    let perm_round_idx = if perm_data.is_some() { Some(2) } else { None };
-    let pp_round_idx = if preprocessed_data.is_some() {
-        Some(if perm_data.is_some() { 3 } else { 2 })
+    let perm_round_idx = if ctx.perm_data.is_some() {
+        Some(2)
+    } else {
+        None
+    };
+    let pp_round_idx = if ctx.preprocessed_data.is_some() {
+        Some(if ctx.perm_data.is_some() { 3 } else { 2 })
     } else {
         None
     };
@@ -669,21 +700,20 @@ fn open_and_extract(
         .iter()
         .enumerate()
         .map(|(i, info)| {
-            let (perm_local, perm_next) = match (perm_idx_map[i], perm_round_idx) {
+            let (perm_local, perm_next) = match (ctx.perm_idx_map[i], perm_round_idx) {
                 (Some(idx), Some(r)) => (
                     opened_values[r][idx][0].clone(),
                     opened_values[r][idx][1].clone(),
                 ),
                 _ => (vec![], vec![]),
             };
-            let (preprocessed_local, preprocessed_next) =
-                match (pp_idx_map[i], pp_round_idx) {
-                    (Some(idx), Some(r)) => (
-                        Some(opened_values[r][idx][0].clone()),
-                        Some(opened_values[r][idx][1].clone()),
-                    ),
-                    _ => (None, None),
-                };
+            let (preprocessed_local, preprocessed_next) = match (ctx.pp_idx_map[i], pp_round_idx) {
+                (Some(idx), Some(r)) => (
+                    Some(opened_values[r][idx][0].clone()),
+                    Some(opened_values[r][idx][1].clone()),
+                ),
+                _ => (None, None),
+            };
             let (q_start, q_count) = quotient_chunk_map[i];
             ChipOpening {
                 chip_id: info.chip_id,

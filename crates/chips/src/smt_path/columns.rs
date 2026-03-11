@@ -30,9 +30,11 @@ pub struct SmtPathCols<T> {
     /// Key being proven (col_id for col-level, table_id for table-level).
     pub bind_key: T,
 
-    // ── Sibling (8) ──
-    /// Sibling node at this level.
-    pub sibling: [T; DIGEST_WIDTH],
+    // ── Siblings (16) ──
+    /// Sibling node at this level in the old tree.
+    pub old_sibling: [T; DIGEST_WIDTH],
+    /// Sibling node at this level in the new tree.
+    pub new_sibling: [T; DIGEST_WIDTH],
 
     // ── Old tree (16) ──
     /// Old node at this level.
@@ -48,8 +50,8 @@ pub struct SmtPathCols<T> {
 
     // ── Poseidon mux witnesses (32) ──
     // path_bit selects left/right ordering for Poseidon compress.
-    // Constrained: left[i] = (1-bit)*node[i] + bit*sib[i]
-    //              right[i] = bit*node[i] + (1-bit)*sib[i]
+    // Old: left[i] = (1-bit)*old_node[i] + bit*old_sib[i]
+    // New: left[i] = (1-bit)*new_node[i] + bit*new_sib[i]
     /// Poseidon input for old tree: `[left[8], right[8]]`.
     pub old_perm_input: [T; 16],
     /// Poseidon input for new tree: `[left[8], right[8]]`.

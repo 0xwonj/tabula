@@ -20,7 +20,7 @@ use super::helpers::write_guard;
 
 impl super::LocalEngine {
     /// Submit a batch run against an instance.
-    pub fn submit_run(&self, req: SubmitRunCommand) -> ServiceResult<RunRecord> {
+    pub fn submit_run(&self, req: &SubmitRunCommand) -> ServiceResult<RunRecord> {
         let snapshot = self.get_instance_record(req.instance_id.as_str())?;
         check_version(&snapshot, req.expected_instance_version)?;
 
@@ -45,7 +45,7 @@ impl super::LocalEngine {
                     let poseidon_hasher = tabula_commitment::PoseidonHasher::new();
                     let exec = execute_registered_batch(
                         program.registered.clone(),
-                        state_before,
+                        &state_before,
                         batch_file,
                         &poseidon_hasher,
                     )?;
@@ -68,7 +68,12 @@ impl super::LocalEngine {
                 {
                     stark_proof_summary = None;
                 }
-                execute_registered_batch(program.registered, state_before, batch_file, &MockHasher)?
+                execute_registered_batch(
+                    program.registered,
+                    &state_before,
+                    batch_file,
+                    &MockHasher,
+                )?
             }
         };
 
@@ -109,10 +114,7 @@ impl super::LocalEngine {
 
         let verification_message = if req.verify {
             if has_stark_proof {
-                let verified = stark_proof_summary
-                    .as_ref()
-                    .map(|s| s.verified)
-                    .unwrap_or(false);
+                let verified = stark_proof_summary.as_ref().is_some_and(|s| s.verified);
                 if !verified {
                     return Err(ServiceError::unprocessable(
                         ErrorCode::ExecutionError,

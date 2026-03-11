@@ -18,6 +18,6 @@ pub trait ValueCodec: Send + Sync {
         target_type: ValueType,
     ) -> Result<Value, TabulaError>;
 
-    /// How many field elements a given ValueType requires.
+    /// How many field elements a given type requires.
     fn field_elements_per(&self, value_type: ValueType) -> usize;
 }

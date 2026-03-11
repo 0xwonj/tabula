@@ -1,6 +1,3 @@
-#![warn(missing_docs)]
-#![deny(unused)]
-
 //! STARK foundation crate for the Tabula proof system.
 //!
 //! Defines the core AIR constraint framework, chip identification types,

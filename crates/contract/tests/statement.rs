@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_contract::PublicInputs;
 use tabula_core::ProgramBudgets;
 

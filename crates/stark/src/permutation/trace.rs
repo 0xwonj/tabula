@@ -1,7 +1,9 @@
 //! Permutation trace generation and EF4 fingerprint computation.
 
+use std::collections::BTreeMap;
+
 use p3_baby_bear::BabyBear;
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::EF4;
@@ -10,15 +12,20 @@ use crate::debug::RecordedInteraction;
 
 use super::PermutationError;
 
+/// Output of permutation trace generation.
+pub struct PermutationTraceOutput {
+    /// The permutation trace matrix.
+    pub trace: RowMajorMatrix<BabyBear>,
+    /// Total cumulative sum across all interactions.
+    pub cumsum: EF4,
+    /// Per-bus cumulative sums (for cross-proof bus balance).
+    pub cumsums_by_bus: BTreeMap<BusId, EF4>,
+}
+
 /// Compute an RLC fingerprint in the extension field EF4.
 ///
 /// `f = α + kind_tag + β · values[0] + β² · values[1] + …`
-pub fn compute_fingerprint_ef4(
-    values: &[BabyBear],
-    bus: BusId,
-    alpha: EF4,
-    beta: EF4,
-) -> EF4 {
+pub fn compute_fingerprint_ef4(values: &[BabyBear], bus: BusId, alpha: EF4, beta: EF4) -> EF4 {
     let mut result = alpha + EF4::from(BabyBear::from_u64(bus.tag() as u64));
     let mut beta_power = beta;
     for &val in values {
@@ -51,7 +58,7 @@ fn write_ef4(row: &mut [BabyBear], offset: usize, val: EF4) {
 ///
 /// # Returns
 ///
-/// `Ok((permutation_trace, cumsum_final))` on success.
+/// `Ok(PermutationTraceOutput { trace, cumsum, cumsums_by_bus })` on success.
 ///
 /// # Errors
 ///
@@ -61,7 +68,7 @@ pub fn generate_permutation_trace_from_interactions(
     recorded: &[RecordedInteraction<BabyBear>],
     height: usize,
     challenges: [EF4; 2],
-) -> Result<(RowMajorMatrix<BabyBear>, EF4), PermutationError> {
+) -> Result<PermutationTraceOutput, PermutationError> {
     let [alpha, beta] = challenges;
 
     assert!(
@@ -80,7 +87,39 @@ pub fn generate_permutation_trace_from_interactions(
     let perm_width = 4 * (interactions_per_row + 1); // N phis + 1 cumsum
     let mut perm_values = vec![BabyBear::ZERO; height * perm_width];
 
+    // ── Pass 1: Compute fingerprints for non-zero interactions ──────────
+    let mut multiplicities: Vec<BabyBear> = Vec::new();
+    let mut fingerprints: Vec<EF4> = Vec::new();
+
+    for row_idx in 0..height {
+        let row_start = row_idx * interactions_per_row;
+        let row_interactions = &recorded[row_start..row_start + interactions_per_row];
+
+        for (j, interaction) in row_interactions.iter().enumerate() {
+            if interaction.multiplicity == BabyBear::ZERO {
+                continue;
+            }
+
+            let fp = compute_fingerprint_ef4(&interaction.values, interaction.bus, alpha, beta);
+            if fp == EF4::ZERO {
+                return Err(PermutationError::FingerprintZero {
+                    row: row_idx,
+                    interaction: j,
+                });
+            }
+
+            fingerprints.push(fp);
+            multiplicities.push(interaction.multiplicity);
+        }
+    }
+
+    // ── Montgomery batch inversion ──────────────────────────────────────
+    let inverses = batch_inverse_ef4(&fingerprints);
+
+    // ── Pass 2: Write phi values and accumulate cumsums (order-preserving) ─
     let mut cumsum = EF4::ZERO;
+    let mut cumsums_by_bus: BTreeMap<BusId, EF4> = BTreeMap::new();
+    let mut cursor = 0;
 
     for row_idx in 0..height {
         let perm_row_start = row_idx * perm_width;
@@ -90,41 +129,70 @@ pub fn generate_permutation_trace_from_interactions(
         let row_interactions = &recorded[row_start..row_start + interactions_per_row];
 
         for (j, interaction) in row_interactions.iter().enumerate() {
-            let mult = interaction.multiplicity;
-
-            if mult == BabyBear::ZERO {
-                // phi = 0 when multiplicity is zero. Already zero-initialized.
+            if interaction.multiplicity == BabyBear::ZERO {
                 continue;
             }
 
-            let fingerprint =
-                compute_fingerprint_ef4(&interaction.values, interaction.bus, alpha, beta);
+            let phi = EF4::from(multiplicities[cursor]) * inverses[cursor];
+            cursor += 1;
 
-            if fingerprint == EF4::ZERO {
-                return Err(PermutationError::FingerprintZero {
-                    row: row_idx,
-                    interaction: j,
-                });
-            }
-
-            let phi = EF4::from(mult) / fingerprint;
-
-            // Write phi into perm trace.
             write_ef4(perm_row, j * 4, phi);
 
-            // Accumulate into running cumsum.
+            let bus_entry = cumsums_by_bus.entry(interaction.bus).or_insert(EF4::ZERO);
             match interaction.direction {
-                InteractionDirection::Send => cumsum += phi,
-                InteractionDirection::Receive => cumsum -= phi,
+                InteractionDirection::Send => {
+                    cumsum += phi;
+                    *bus_entry += phi;
+                }
+                InteractionDirection::Receive => {
+                    cumsum -= phi;
+                    *bus_entry -= phi;
+                }
             }
         }
 
-        // Write cumsum at the end of the row.
         write_ef4(perm_row, interactions_per_row * 4, cumsum);
     }
 
-    let perm_trace = RowMajorMatrix::new(perm_values, perm_width);
-    Ok((perm_trace, cumsum))
+    let trace = RowMajorMatrix::new(perm_values, perm_width);
+    Ok(PermutationTraceOutput {
+        trace,
+        cumsum,
+        cumsums_by_bus,
+    })
+}
+
+/// Montgomery batch inversion: invert N field elements with 1 inversion + 3(N-1) multiplications.
+///
+/// Returns `inverses[i] = elements[i]^{-1}` for all i.
+/// Assumes no element is zero (caller must check beforehand).
+fn batch_inverse_ef4(elements: &[EF4]) -> Vec<EF4> {
+    if elements.is_empty() {
+        return vec![];
+    }
+    if elements.len() == 1 {
+        return vec![elements[0].inverse()];
+    }
+
+    // Prefix products: prefix[i] = elements[0] * elements[1] * ... * elements[i]
+    let mut prefix = Vec::with_capacity(elements.len());
+    prefix.push(elements[0]);
+    for i in 1..elements.len() {
+        prefix.push(prefix[i - 1] * elements[i]);
+    }
+
+    // Invert the total product
+    let mut inv_acc = prefix[elements.len() - 1].inverse();
+
+    // Backtrack to recover individual inverses
+    let mut inverses = vec![EF4::ZERO; elements.len()];
+    for i in (1..elements.len()).rev() {
+        inverses[i] = inv_acc * prefix[i - 1];
+        inv_acc *= elements[i];
+    }
+    inverses[0] = inv_acc;
+
+    inverses
 }
 
 /// Horizontally concatenate main and permutation traces (test only).

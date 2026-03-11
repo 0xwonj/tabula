@@ -36,14 +36,11 @@ pub(super) fn lower_select<const W: usize>(
     if_false: &ValueExpr,
 ) -> Result<(), TabulaError> {
     let cond_val = ctx.resolve_val(cond)?;
-    let cond_bool = match cond_val {
-        Value::Bool(b) => b,
-        _ => {
-            return Err(TabulaError::TypeMismatch {
-                expected: "Bool",
-                actual: cond_val.type_name(),
-            });
-        }
+    let Value::Bool(cond_bool) = cond_val else {
+        return Err(TabulaError::TypeMismatch {
+            expected: "Bool",
+            actual: cond_val.type_name(),
+        });
     };
     let t_val = ctx.resolve_val(if_true)?;
     let f_val = ctx.resolve_val(if_false)?;

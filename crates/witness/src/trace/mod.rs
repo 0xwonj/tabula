@@ -5,7 +5,7 @@
 
 mod builder;
 mod lowering;
-mod memory;
+pub mod memory;
 pub mod orchestration;
 pub mod partition;
 mod smt;
@@ -19,7 +19,8 @@ pub use tabula_stark::trace::{
 
 pub use builder::{AllTraceInputs, TraceBuilder};
 pub use lowering::{LoweringOutput, lower_execution_records, lower_program_batch};
-pub use orchestration::{build_all_traces, build_traces_for};
-pub use partition::{WitnessPartition, single_partition};
+pub use memory::prepare_shard_witness;
+pub use orchestration::build_all_traces;
+pub use partition::{PartitionedStores, partition_by_tier};
 pub use smt::build_smt_paths;
 pub use validation::debug_validate_trace_map;

@@ -1,63 +1,53 @@
 # Type Foundation
 
-> Status: 🔵 Ready (CT-1 and CT-2 have no blockers)
+> Status: ✅ Complete
 > Design: [docs/design/custom-type-extensibility.md](../docs/design/custom-type-extensibility.md)
-> Related: [docs/design/extensibility-architecture.md](../docs/design/extensibility-architecture.md)
 
 ## Goal
 
-Open the closed type chain (ValueType → BabyBearCodec → exhaustive match) so custom types can register without modifying Tabula.
+Establish a sound, minimal type system for Tabula's state layer.
 
-**With full sharding as base architecture**: Bus width (CT-5) is solved automatically — each column proof uses its own W. No MAX_W padding needed. CT-1 and CT-2 are still valuable as foundational infrastructure.
+**Decision**: Closed type system with `ValueType` enum. No custom type extensibility.
 
-## Tasks
+**Rationale**:
+- U64/I64/Bool/Bytes32 covers all practical state needs
+- `bytes32` serves as escape hatch for complex data (Ethereum-proven pattern)
+- Each type requires AIR constraints — open extensibility risks soundness
+- Adding a new built-in type is ~100 lines; extensibility infrastructure was 425+ lines with zero callers
+- Exhaustive matching at compile time is safer than runtime registry dispatch
 
-### CT-1: TypeTag Open Identifier (~1 day)
+## Completed
 
-> No blockers. Independent of sharding.
+### ValueType as Sole Identifier
 
-- [ ] `ValueType` → `TypeTag(u16)` replacement
-- [ ] Well-known constants (U64=0, I64=1, BOOL=2, BYTES32=3)
-- [ ] `TypeTag::app(id)` for application-defined types
-- [ ] Update ~91 reference sites (mechanical)
-- [ ] Update `ColumnDef` schema type
+- [x] `ValueType` enum (U64, I64, Bool, Bytes32) — closed, with Hash/Ord
+- [x] `ColumnDef.value_type: ValueType`
+- [x] `ParamDef.value_type: ValueType`
+- [x] `ColumnWitness.value_type: ValueType`
+- [x] `ValueCodec` trait: `decode()` and `field_elements_per()` take `ValueType`
+- [x] `zero_value(ValueType)` — infallible, no panic path
+- [x] `BabyBearCodec`: direct exhaustive matching, no indirection
 
-### CT-2: TypeEncoding Trait (~1 day)
+### Soundness Fixes
 
-> Depends: CT-1
+- [x] Boolean input constraints added to NOT, AND, OR in `chips/execution/ops/logic.rs`
+  - NOT: `src1_val[0] * (src1_val[0] - 1) = 0` (1 constraint)
+  - AND: `src1_val[0], src2_val[0] ∈ {0,1}` (2 constraints)
+  - OR: `src1_val[0], src2_val[0] ∈ {0,1}` (2 constraints)
+- [x] `const { assert!(W >= 3) }` in Add, Sub, Mul, Cmp, DivMod
+- [x] Null encoding: literal zeros consistently (encode_trace + witness pipeline)
+- [x] `SSMC_MAX_VALUE_FES=5` const extracted in `witness/encoding.rs`
 
-- [ ] Trait definition in `commitment/` or `stark/`
-  ```rust
-  pub trait TypeEncoding<F: PrimeField32>: Send + Sync {
-      fn type_tag(&self) -> TypeTag;
-      fn encoding_width(&self) -> EncodingWidth;
-      fn encode(&self, raw: &[u8]) -> Result<Vec<F>, TabulaError>;
-      fn decode(&self, fes: &[F]) -> Result<Vec<u8>, TabulaError>;
-      fn zero_encoding(&self) -> Vec<F>;
-  }
-  ```
-- [ ] Core type implementations (U64Encoding, I64Encoding, BoolEncoding, Bytes32Encoding)
-- [ ] `TypeEncodingRegistry` with pre-registered core types
+### Removed (over-engineered without custom types)
 
-### CT-3: BabyBearCodec Registry Dispatch
-
-> Depends: CT-2
-
-- [ ] Replace 3 exhaustive matches with registry lookup
-- [ ] Backward compatible (core types pre-registered)
-
-### CT-4: Value::Custom Variant (deferred)
-
-Deferred — custom types are storage-only. Types requiring computation use precompile pattern.
-
-### ~~CT-5: Bus Width Unification~~ (resolved by sharding)
-
-~~Implement MAX_W padding or sharding.~~ Full sharding resolves this: each column proof uses its column's native W. No global bus width coordination needed.
+- [x] `TypeTag(u16)` — open newtype, removed entirely
+- [x] `TypeEncoding` trait + `TypeEncodingRegistry` — deleted (425 lines, zero callers)
+- [x] `type_encoding.rs` — deleted from `commitment/src/`
 
 ## Verification
 
-```bash
-cargo check --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets
+```
+cargo check --workspace --all-targets  ✅
+cargo test --workspace                 ✅ 857 tests, 0 failures
+cargo clippy --workspace --all-targets ✅ 0 warnings
 ```

@@ -7,9 +7,7 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::EF4;
 use crate::air::descriptor::InteractionDescriptor;
-use crate::air::interaction::{
-    Interaction, InteractionDirection, VirtualPairCol, core_buses,
-};
+use crate::air::interaction::{Interaction, InteractionDirection, VirtualPairCol, core_buses};
 use crate::debug::RecordedInteraction;
 
 use super::challenges::{ChipTraceInfo, derive_challenges_from_main};
@@ -117,11 +115,7 @@ fn fingerprint_ef4_different_bus() {
 }
 
 /// Compute a single chip's cumsum from debug recorded interactions.
-fn debug_chip_cumsum(
-    interactions: &[RecordedInteraction<BabyBear>],
-    alpha: EF4,
-    beta: EF4,
-) -> EF4 {
+fn debug_chip_cumsum(interactions: &[RecordedInteraction<BabyBear>], alpha: EF4, beta: EF4) -> EF4 {
     let mut sum = EF4::ZERO;
     for i in interactions {
         if i.multiplicity == BabyBear::ZERO {
@@ -211,16 +205,7 @@ fn perm_trace_balanced_pair_sums_to_zero() {
     let challenges = [EF4::from(bb(12345)), EF4::from(bb(67890))];
 
     let sender_trace = RowMajorMatrix::new(
-        vec![
-            bb(42),
-            bb(1),
-            bb(99),
-            bb(1),
-            bb(0),
-            bb(0),
-            bb(0),
-            bb(0),
-        ],
+        vec![bb(42), bb(1), bb(99), bb(1), bb(0), bb(0), bb(0), bb(0)],
         2,
     );
 
@@ -269,16 +254,7 @@ fn perm_trace_zero_mult_rows_contribute_nothing() {
     let challenges = [EF4::from(bb(111)), EF4::from(bb(222))];
 
     let trace = RowMajorMatrix::new(
-        vec![
-            bb(42),
-            bb(1),
-            bb(0),
-            bb(0),
-            bb(0),
-            bb(0),
-            bb(0),
-            bb(0),
-        ],
+        vec![bb(42), bb(1), bb(0), bb(0), bb(0), bb(0), bb(0), bb(0)],
         2,
     );
 

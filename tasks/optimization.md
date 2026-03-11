@@ -1,6 +1,6 @@
 # Optimization
 
-> Status: 🔧 In Progress (Tier 1 unblocked)
+> Status: 🔧 In Progress
 > Design: [docs/design/prover-pipeline-acceleration.md](../docs/design/prover-pipeline-acceleration.md), [docs/design/constraint-compilation.md](../docs/design/constraint-compilation.md), [docs/design/execution-chip-evolution.md](../docs/design/execution-chip-evolution.md), [docs/design/proof-optimization-architecture.md](../docs/design/proof-optimization-architecture.md)
 
 ## Goal
@@ -9,16 +9,34 @@ Proving time < 50% of current baseline. Two categories: infrastructure (any arch
 
 Current chip widths (post-M10): Execution 278, SSMC 66, Merge 74, SortedMem 67, ColumnMeta 56, Poseidon 93+19pp, RangeCheck 2 = 636 main cols total.
 
-## Tier 1 — Prover Pipeline (Goal 1, no blockers)
+## Tier 1a — Prover Pipeline (Goal 1) ✅
 
-Infrastructure optimizations below the chip/AIR layer. Independent of global vs sharded architecture.
+Infrastructure optimizations below the chip/AIR layer. Independent of architecture.
 
-Combined effect: ~40% proving time + ~50% memory, ~4 days.
+- [x] BLAKE3 Merkle hash — PCS commitment hash Poseidon2 → BLAKE3 (~30% proving reduction)
+  - `machine/src/blake3_pcs.rs`: `Blake3FieldHasher`, `Blake3FieldCompressor`
+  - MMCS uses scalar `BabyBear` packing; Poseidon2 remains for Fiat-Shamir + in-circuit
+- [x] Trace ownership transfer — `ProofInstance::new()` takes `TraceMap` by value (~50% memory reduction)
+  - `collect_chip_infos()` uses `traces.remove()` instead of `get()` + clone
+  - `TabulaMachine::prove()` takes `ProofTraces` by value, destructures into per-tier TraceMaps
 
-- [ ] BLAKE3 Merkle hash — switch PCS commitment hash from Poseidon2 to BLAKE3 (~30% proving reduction, ~1 day)
-- [ ] Batch inversion — Montgomery batch inversion for LogUp permutation trace (~5% proving reduction, ~1 day)
-- [ ] Trace clone elimination — transfer ownership or `Arc<RowMajorMatrix>` instead of cloning (~50% memory reduction, ~1 day)
-- [ ] Quotient parallelism — `rayon::par_iter` over chips in quotient computation phase (~10% proving reduction, ~1 day)
+## Tier 1b — Parallelization + Batch Inversion (Goal 1 continuation) ✅
+
+> Design: [prover-pipeline-acceleration.md](../docs/design/prover-pipeline-acceleration.md) §Parallelization, §Batch Inversion
+
+All items use rayon for adaptive work-stealing.
+
+### Parallelization
+
+- [x] P-1: `compute_chip_quotients()` — chip-level `par_iter` in `proof_instance.rs`
+- [x] P-2: `prove_impl()` — cross-proof sub-proof parallelism via `into_par_iter` in `machine.rs`
+- [x] P-3: `build_perm_traces()` — chip-level `par_iter_mut` in `proof_instance.rs`
+- [x] P-4: `build_proof_traces()` — column-level `into_par_iter` in `setup.rs`
+- [x] P-5: `verify_impl()` — column sub-proof parallel verification via `par_iter` in `machine.rs`
+
+### Batch Inversion
+
+- [x] Montgomery batch inversion in `stark/src/permutation/trace.rs` — prefix-product algorithm replaces N independent EF4 divisions with 1 inversion + 3(N-1) multiplications
 
 ## Tier 2 — Constraint CSE (no blockers)
 
@@ -33,9 +51,22 @@ Independent of architecture. Applies to any `eval()` function.
 
 **Effect**: 5-15x constraint evaluation speedup, 20-35% total proving time reduction.
 
-## Sharded Architecture Optimizations (Goal 9, blocked on Goal 4)
+## Tier 3 — GKR for LogUp (protocol-level, deferred)
 
-These apply to the sharded proof model. Depend on sharding migration completing.
+> Design: [prover-pipeline-acceleration.md](../docs/design/prover-pipeline-acceleration.md) §GKR
+> Detail: [research.md](research.md) §GKR
+
+Replace committed permutation trace with GKR sum-check protocol. Eliminates permutation trace NTT + Merkle commit entirely.
+
+**Status**: Deferred. Apply Tier 1b first (parallelization + batch inversion), then re-measure perm cost fraction. If still >10% of proving time, proceed with GKR. Also monitoring ecosystem (OpenVM v2, Plonky3 sum-check support).
+
+**Blocker**: No FRI+BabyBear GKR-LogUp production implementation exists. Stwo uses Circle STARKs (different backend). Would require custom sum-check implementation with soundness risk.
+
+**Effect**: 20-30% PCS cost reduction. **Effort**: ~4-5 weeks.
+
+## Sharded Architecture Optimizations (Goal 9)
+
+These apply to the sharded proof model. Depend on sharding migration completing (✅ done).
 
 ### D1: Poseidon Chain Delegation (per-column)
 

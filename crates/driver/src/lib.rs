@@ -4,8 +4,6 @@
 //! CLI commands and daemon service should call this crate instead of
 //! duplicating semantic checks and execution pipeline assembly.
 
-#![warn(missing_docs)]
-
 mod compile;
 mod error;
 mod example;

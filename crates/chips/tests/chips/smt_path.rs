@@ -26,12 +26,12 @@ use tabula_stark::debug::{
 
 #[test]
 fn smt_col_path_width() {
-    assert_eq!(SMT_COL_PATH_WIDTH, 82);
+    assert_eq!(SMT_COL_PATH_WIDTH, 90);
 }
 
 #[test]
 fn smt_table_path_width() {
-    assert_eq!(SMT_TABLE_PATH_WIDTH, 83);
+    assert_eq!(SMT_TABLE_PATH_WIDTH, 91);
 }
 
 // ── Helpers ──
@@ -73,7 +73,8 @@ fn col_path_single_path_depth_4() {
         key: 3, // binary: 11 → bits[0]=1, bits[1]=1, bits[2]=0, bits[3]=0
         old_leaf: nonzero_digest(10),
         new_leaf: nonzero_digest(20),
-        siblings: zero_siblings(4),
+        old_siblings: zero_siblings(4),
+        new_siblings: zero_siblings(4),
         path_bits: make_path_bits(3, 4),
     };
     let trace = generate_smt_col_path_trace(&[witness]);
@@ -87,7 +88,8 @@ fn col_path_two_paths_same_table() {
         key: 0,
         old_leaf: nonzero_digest(10),
         new_leaf: nonzero_digest(20),
-        siblings: zero_siblings(3),
+        old_siblings: zero_siblings(3),
+        new_siblings: zero_siblings(3),
         path_bits: make_path_bits(0, 3),
     };
     let w2 = SmtPathWitness {
@@ -95,7 +97,8 @@ fn col_path_two_paths_same_table() {
         key: 5,
         old_leaf: nonzero_digest(30),
         new_leaf: nonzero_digest(40),
-        siblings: zero_siblings(3),
+        old_siblings: zero_siblings(3),
+        new_siblings: zero_siblings(3),
         path_bits: make_path_bits(5, 3),
     };
     let trace = generate_smt_col_path_trace(&[w1, w2]);
@@ -109,7 +112,8 @@ fn col_path_different_tables() {
         key: 0,
         old_leaf: nonzero_digest(10),
         new_leaf: nonzero_digest(20),
-        siblings: zero_siblings(3),
+        old_siblings: zero_siblings(3),
+        new_siblings: zero_siblings(3),
         path_bits: make_path_bits(0, 3),
     };
     let w2 = SmtPathWitness {
@@ -117,7 +121,8 @@ fn col_path_different_tables() {
         key: 1,
         old_leaf: nonzero_digest(30),
         new_leaf: nonzero_digest(40),
-        siblings: zero_siblings(3),
+        old_siblings: zero_siblings(3),
+        new_siblings: zero_siblings(3),
         path_bits: make_path_bits(1, 3),
     };
     let trace = generate_smt_col_path_trace(&[w1, w2]);
@@ -137,7 +142,8 @@ fn col_path_records_c15_and_c16_interactions() {
         key: 0,
         old_leaf: nonzero_digest(10),
         new_leaf: nonzero_digest(20),
-        siblings: zero_siblings(3),
+        old_siblings: zero_siblings(3),
+        new_siblings: zero_siblings(3),
         path_bits: make_path_bits(0, 3),
     };
     let trace = generate_smt_col_path_trace(&[witness]);
@@ -192,7 +198,8 @@ fn table_path_single_path() {
             key: 1,
             old_leaf: nonzero_digest(10),
             new_leaf: nonzero_digest(20),
-            siblings: zero_siblings(4),
+            old_siblings: zero_siblings(4),
+            new_siblings: zero_siblings(4),
             path_bits: make_path_bits(1, 4),
         },
         root_mult: 2, // 2 columns in this table
@@ -211,7 +218,8 @@ fn table_path_invalid_public_root_binding() {
             key: 1,
             old_leaf: nonzero_digest(10),
             new_leaf: nonzero_digest(20),
-            siblings: zero_siblings(4),
+            old_siblings: zero_siblings(4),
+            new_siblings: zero_siblings(4),
             path_bits: make_path_bits(1, 4),
         },
         root_mult: 1,
@@ -232,7 +240,8 @@ fn table_path_records_c16_receive() {
             key: 1,
             old_leaf: nonzero_digest(10),
             new_leaf: nonzero_digest(20),
-            siblings: zero_siblings(3),
+            old_siblings: zero_siblings(3),
+            new_siblings: zero_siblings(3),
             path_bits: make_path_bits(1, 3),
         },
         root_mult: 3,
@@ -277,7 +286,8 @@ fn col_path_invalid_cannot_disable_root_send_on_last_real_row() {
         key: 1,
         old_leaf: nonzero_digest(10),
         new_leaf: nonzero_digest(20),
-        siblings: zero_siblings(1),
+        old_siblings: zero_siblings(1),
+        new_siblings: zero_siblings(1),
         path_bits: vec![true],
     };
     let mut trace = generate_smt_col_path_trace(&[witness]);
@@ -297,7 +307,8 @@ fn table_path_invalid_cannot_disable_leaf_receive() {
             key: 1,
             old_leaf: nonzero_digest(10),
             new_leaf: nonzero_digest(20),
-            siblings: zero_siblings(1),
+            old_siblings: zero_siblings(1),
+            new_siblings: zero_siblings(1),
             path_bits: vec![true],
         },
         root_mult: 1,

@@ -18,7 +18,7 @@ struct BenchSnapshot(BTreeMap<CellKey, Value>);
 
 impl StateSnapshot for BenchSnapshot {
     fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
-        Ok(self.0.get(key).cloned())
+        Ok(self.0.get(key).copied())
     }
     fn table_exists(&self, _: TableId) -> bool {
         true

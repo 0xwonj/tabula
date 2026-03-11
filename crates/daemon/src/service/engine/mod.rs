@@ -145,7 +145,7 @@ impl LocalEngine {
     }
 
     /// List stateful instances.
-    pub fn list_instances(&self, req: ListInstancesCommand) -> ServiceResult<Vec<InstanceRecord>> {
+    pub fn list_instances(&self, req: &ListInstancesCommand) -> ServiceResult<Vec<InstanceRecord>> {
         Ok(read_guard(&self.instances, "instance")?
             .values()
             .filter(|instance| {
@@ -166,7 +166,7 @@ impl LocalEngine {
     }
 
     /// List runs.
-    pub fn list_runs(&self, req: ListRunsCommand) -> ServiceResult<Vec<RunRecord>> {
+    pub fn list_runs(&self, req: &ListRunsCommand) -> ServiceResult<Vec<RunRecord>> {
         let mut runs: Vec<_> = read_guard(&self.runs, "run")?
             .values()
             .filter(|run| {
@@ -322,7 +322,7 @@ mod tests {
         assert_eq!(created.version, 0);
 
         let submitted = engine
-            .submit_run(SubmitRunCommand {
+            .submit_run(&SubmitRunCommand {
                 instance_id: created.instance_id.clone(),
                 batch: InputRef::inline(bundle.batch.clone()),
                 include_trace: false,
@@ -387,7 +387,7 @@ mod tests {
             .expect("create instance");
 
         let err = engine
-            .submit_run(SubmitRunCommand {
+            .submit_run(&SubmitRunCommand {
                 instance_id: created.instance_id,
                 batch: InputRef::inline(bundle.batch),
                 include_trace: false,
@@ -421,7 +421,7 @@ mod tests {
             })
             .expect("create instance");
         let submitted = engine
-            .submit_run(SubmitRunCommand {
+            .submit_run(&SubmitRunCommand {
                 instance_id: created.instance_id,
                 batch: InputRef::inline(bundle.batch),
                 include_trace: false,

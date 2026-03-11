@@ -1,6 +1,6 @@
 //! Statement parsing methods for Parser.
 
-use crate::ast::*;
+use crate::ast::{Stmt, StmtKind};
 use crate::error::{CompileError, ErrorKind};
 use crate::span::Span;
 use crate::token::Token;

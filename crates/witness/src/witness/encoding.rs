@@ -15,14 +15,22 @@ use tabula_commitment::{
 };
 use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
-use tabula_core::{ColId, TableId, Value, ValueType, zero_value};
+use tabula_core::{ColId, TableId, Value, ValueType};
 
 use tabula_chips::poseidon::constants::poseidon2_permutation;
 
-/// Encode a value as Tier 1 ComEnc field elements, using canonical zero when null.
+/// Maximum number of value field elements that fit in an SSMC continuation row.
 ///
-/// Unified null-encoding logic: when `is_null` is true, encodes the canonical
-/// zero for the given `value_type` regardless of the `value` argument.
+/// Poseidon width is 16. Continuation layout: `[prev_hash(8), key(3), value(..)]`.
+/// So at most `16 - 8 - 3 = 5` FEs per value. This limits SSMC to types with
+/// encoding width ≤ 5 (Bool=1, U64=3, I64=3 all fit; Bytes32=8 requires SMT).
+pub(crate) const SSMC_MAX_VALUE_FES: usize = 5;
+
+/// Encode a value as Tier 1 ComEnc field elements, with null handling.
+///
+/// When `is_null` is true, produces literal zeros (`[0; w]`) matching
+/// the `encode_trace` convention — the null flag gates the value, so
+/// the actual FE content is irrelevant.
 pub(crate) fn encode_value_with_null_flag(
     codec: &impl ValueCodec<FieldRepr = BabyBear>,
     value: &Value,
@@ -30,9 +38,8 @@ pub(crate) fn encode_value_with_null_flag(
     value_type: ValueType,
 ) -> Result<(Vec<BabyBear>, bool), TabulaError> {
     if is_null {
-        let zero = zero_value(value_type);
-        let fes = codec.encode(&zero)?;
-        Ok((fes, true))
+        let w = codec.field_elements_per(value_type);
+        Ok((vec![BabyBear::ZERO; w], true))
     } else {
         let fes = codec.encode(value)?;
         Ok((fes, false))
@@ -41,7 +48,7 @@ pub(crate) fn encode_value_with_null_flag(
 
 /// Encode an `Option<Value>` as Tier 1 ComEnc field elements.
 ///
-/// `None` maps to canonical zero (null). Delegates to `encode_value_with_null_flag`.
+/// `None` maps to null (literal zeros). Delegates to `encode_value_with_null_flag`.
 pub(crate) fn encode_value(
     codec: &impl ValueCodec<FieldRepr = BabyBear>,
     value: &Option<Value>,
@@ -50,9 +57,8 @@ pub(crate) fn encode_value(
     match value {
         Some(v) => encode_value_with_null_flag(codec, v, false, value_type),
         None => {
-            // Value content is irrelevant when null — zero_value is used inside.
-            let placeholder = zero_value(value_type);
-            encode_value_with_null_flag(codec, &placeholder, true, value_type)
+            let w = codec.field_elements_per(value_type);
+            Ok((vec![BabyBear::ZERO; w], true))
         }
     }
 }
@@ -129,11 +135,11 @@ pub(crate) fn proof_column_commitment<H: FieldHasher<F = BabyBear, Digest = Nati
 
             let mut prev: Option<NativeDigest> = None;
             for entry in list.entries() {
-                if entry.value.len() > 5 {
+                if entry.value.len() > SSMC_MAX_VALUE_FES {
                     return Err(TabulaError::ProofError {
                         phase: "witness",
                         detail: format!(
-                            "value width {} is unsupported by proof hash-chain layout (max 5)",
+                            "value width {} exceeds SSMC continuation limit (max {SSMC_MAX_VALUE_FES})",
                             entry.value.len()
                         ),
                     });

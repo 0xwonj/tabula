@@ -26,7 +26,7 @@ pub(super) fn lower_read<const W: usize>(
         .get(&(table, col))
         .ok_or_else(|| TabulaError::ProofError {
             phase: "trace_lowering",
-            detail: format!("missing schema type for ({:?}, {:?})", table, col),
+            detail: format!("missing schema type for ({table:?}, {col:?})"),
         })?;
 
     let encoded = if event.val_is_null {
@@ -39,7 +39,7 @@ pub(super) fn lower_read<const W: usize>(
     if slot >= MAX_SLOTS {
         return Err(TabulaError::ProofError {
             phase: "trace_lowering",
-            detail: format!("slot {} >= MAX_SLOTS at instruction {}", slot, instr_idx),
+            detail: format!("slot {slot} >= MAX_SLOTS at instruction {instr_idx}"),
         });
     }
 

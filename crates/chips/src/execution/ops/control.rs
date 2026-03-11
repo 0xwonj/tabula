@@ -23,6 +23,7 @@ pub(crate) fn constrain_assert<AB: AirBuilder, const W: usize>(
 ///   slots[s][i] = cond * src1_val[i] + (1 - cond) * src2_val[i]
 ///
 /// Simplified: slots[s][i] = src2_val[i] + cond * (src1_val[i] - src2_val[i])
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) fn constrain_select<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,

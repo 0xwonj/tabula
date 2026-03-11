@@ -52,9 +52,12 @@ pub struct ChipKeygenInfo {
 /// Accepts any type implementing the required bounds (including `dyn AnyRap`
 /// via `?Sized`). Uses column-scanning extraction wrapped in a soundness
 /// assertion against a random trace.
-pub fn keygen_chip<A: ?Sized>(chip: &A) -> ChipKeygenInfo
+pub fn keygen_chip<A>(chip: &A) -> ChipKeygenInfo
 where
-    A: ChipSpec + BaseAir<BabyBear> + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized
+        + ChipSpec
+        + BaseAir<BabyBear>
+        + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     let chip_id = chip.chip_id();
     let main_width = chip.width();
@@ -70,8 +73,7 @@ where
         None
     };
 
-    let (sends, receives) =
-        extract_interactions(chip, main_width, preprocessed.as_ref(), num_pvs);
+    let (sends, receives) = extract_interactions(chip, main_width, preprocessed.as_ref(), num_pvs);
 
     let num_sends_per_row = sends.len();
     let num_receives_per_row = receives.len();
@@ -110,14 +112,14 @@ const PROBE_HEIGHT: usize = 2;
 /// in turn to determine its contribution to each interaction field.
 ///
 /// Returns `(sends, receives)` as static [`Interaction<BabyBear>`] descriptors.
-pub fn extract_interactions<A: ?Sized>(
+pub fn extract_interactions<A>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
     num_public_values: usize,
 ) -> (Vec<Interaction<BabyBear>>, Vec<Interaction<BabyBear>>)
 where
-    A: for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     let pvs = vec![BabyBear::ZERO; num_public_values];
 
@@ -153,14 +155,14 @@ where
 /// Count the number of send and receive interactions per row for a chip.
 ///
 /// Uses a minimal 2-row zero trace. Cheaper than full extraction.
-pub fn count_interactions<A: ?Sized>(
+pub fn count_interactions<A>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
     num_public_values: usize,
 ) -> (usize, usize)
 where
-    A: for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     let zero_trace =
         RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * PROBE_HEIGHT], main_width);
@@ -188,7 +190,7 @@ where
 ///
 /// This catches any non-affine interaction that the column-scanning technique
 /// would miss.
-fn verify_extraction_soundness<A: ?Sized>(
+fn verify_extraction_soundness<A>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
@@ -196,23 +198,22 @@ fn verify_extraction_soundness<A: ?Sized>(
     sends: &[Interaction<BabyBear>],
     receives: &[Interaction<BabyBear>],
 ) where
-    A: for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     // Use deterministic "random" values so tests are reproducible.
     let random_trace = generate_deterministic_trace(main_width, PROBE_HEIGHT);
     let pvs = vec![BabyBear::ZERO; num_public_values];
 
-    let record = match evaluate_chip_with_preprocessed_and_public_values(
+    // If the chip fails on this trace (constraint violation), skip soundness check.
+    // Column-scanning correctness is still ensured by the zero+probe evaluations.
+    let Ok(record) = evaluate_chip_with_preprocessed_and_public_values(
         "_soundness",
         air,
         &random_trace,
         preprocessed,
         &pvs,
-    ) {
-        Ok(r) => r,
-        // If the chip fails on this trace (constraint violation), skip soundness check.
-        // Column-scanning correctness is still ensured by the zero+probe evaluations.
-        Err(_) => return,
+    ) else {
+        return;
     };
 
     let (recorded_sends, recorded_receives) = partition_per_row(&record);
@@ -285,14 +286,14 @@ fn generate_deterministic_trace(width: usize, height: usize) -> RowMajorMatrix<B
 ///
 /// Uses interaction-only evaluation to capture interactions even when the
 /// zero trace violates AIR constraints (which is common for most chips).
-fn eval_baseline<A: ?Sized>(
+fn eval_baseline<A>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
     pvs: &[BabyBear],
 ) -> Option<BaselineResult>
 where
-    A: for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     let zero_trace =
         RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * PROBE_HEIGHT], main_width);
@@ -336,7 +337,8 @@ fn build_initial_descriptors(
 }
 
 /// Phase 3: Probe each column to determine its linear contribution to each interaction.
-fn scan_column_contributions<A: ?Sized>(
+#[allow(clippy::too_many_arguments)]
+fn scan_column_contributions<A>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
@@ -346,7 +348,7 @@ fn scan_column_contributions<A: ?Sized>(
     send_descriptors: &mut [Interaction<BabyBear>],
     recv_descriptors: &mut [Interaction<BabyBear>],
 ) where
-    A: for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     // Scan local columns (row 0).
     for col in 0..main_width {
@@ -386,7 +388,8 @@ fn scan_column_contributions<A: ?Sized>(
 }
 
 /// Probe a single column: set it to `1` in the probe trace, evaluate, and update descriptors.
-fn probe_single_column<A: ?Sized>(
+#[allow(clippy::too_many_arguments)]
+fn probe_single_column<A>(
     air: &A,
     main_width: usize,
     preprocessed: Option<&RowMajorMatrix<BabyBear>>,
@@ -398,7 +401,7 @@ fn probe_single_column<A: ?Sized>(
     send_descriptors: &mut [Interaction<BabyBear>],
     recv_descriptors: &mut [Interaction<BabyBear>],
 ) where
-    A: for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
 {
     let mut probe_data = vec![BabyBear::ZERO; main_width * PROBE_HEIGHT];
     probe_data[probe_index] = BabyBear::ONE;

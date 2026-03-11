@@ -60,7 +60,10 @@ fn apply_slot_aliases(
 /// Collects all defined (destination) slots, sorts them, and builds
 /// an old→new mapping. Then rewrites all references.
 fn renumber_slots(body: Vec<Instruction>) -> Vec<Instruction> {
-    let defined: Vec<Slot> = body.iter().flat_map(|i| i.dst_slots()).collect();
+    let defined: Vec<Slot> = body
+        .iter()
+        .flat_map(super::super::instruction::Instruction::dst_slots)
+        .collect();
 
     // Check if already contiguous — skip rewrite if so.
     let is_contiguous = defined.iter().enumerate().all(|(i, &s)| s as usize == i);

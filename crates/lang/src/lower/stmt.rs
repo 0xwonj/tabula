@@ -1,6 +1,9 @@
 //! Statement lowering methods for TxLower.
 
-use super::*;
+use super::{
+    Binding, CompileError, ErrorKind, Instruction, LoweredExpr, Span, TxLower, Value, ValueExpr,
+    ValueType, ast,
+};
 
 use crate::ast::{Expr, ExprKind, StmtKind};
 
@@ -30,7 +33,7 @@ impl<'a> TxLower<'a> {
             self.errors.push(CompileError::new(
                 ErrorKind::DuplicateBinding,
                 span,
-                format!("'{}' is already defined", name),
+                format!("'{name}' is already defined"),
             ));
             return;
         }
@@ -155,7 +158,7 @@ impl<'a> TxLower<'a> {
                 self.errors.push(CompileError::new(
                     ErrorKind::DuplicateBinding,
                     span,
-                    format!("'{}' is already defined", name),
+                    format!("'{name}' is already defined"),
                 ));
                 return;
             }
@@ -164,7 +167,7 @@ impl<'a> TxLower<'a> {
             self.errors.push(CompileError::new(
                 ErrorKind::DuplicateBinding,
                 span,
-                format!("destructuring binds '{}' twice", first),
+                format!("destructuring binds '{first}' twice"),
             ));
             return;
         }

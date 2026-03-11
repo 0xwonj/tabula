@@ -30,8 +30,9 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
 use tabula_gadgets::{
-    constrain_is_real_prefix, constrain_is_zero, constrain_key_halves, constrain_ordering_halves,
-    constrain_strict_ineq, send_key_range_checks, send_ordering_range_checks,
+    constrain_constant_identity, constrain_is_real_prefix, constrain_is_zero, constrain_key_halves,
+    constrain_ordering_halves, constrain_strict_ineq, send_key_range_checks,
+    send_ordering_range_checks,
 };
 use tabula_stark::air::builder::InteractionAirBuilder;
 use tabula_stark::air::bus::{
@@ -119,7 +120,14 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for MemoryShardChip<W> {
         constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
 
         // 3. Constant identity: table_id and col_id must not change between real rows
-        constrain_constant_identity(builder, local, next, both_real.clone());
+        constrain_constant_identity(
+            builder,
+            local.table_id.clone(),
+            next.table_id.clone(),
+            local.col_id.clone(),
+            next.col_id.clone(),
+            both_real.clone(),
+        );
 
         // 4. Init first
         constrain_init_first(builder, local, next, both_real.clone(), same_key.clone());
@@ -191,11 +199,7 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for MemoryShardChip<W> {
         send_key_range_checks(builder, &local.key, is_real.clone());
         {
             let diff_key: AB::Expr = AB::Expr::ONE - same_key.clone();
-            send_ordering_range_checks(
-                builder,
-                &local.key_ordering,
-                both_real.clone() * diff_key,
-            );
+            send_ordering_range_checks(builder, &local.key_ordering, both_real.clone() * diff_key);
         }
         // tx_diff range check (u16)
         {
@@ -227,23 +231,6 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder.assert_bool(local.has_ever_written.clone());
     builder.assert_bool(local.input_is_null.clone());
     builder.assert_bool(local.output_is_null.clone());
-}
-
-/// 3. Constant identity: table_id and col_id must be the same across all real rows.
-fn constrain_constant_identity<AB: AirBuilder, const W: usize>(
-    builder: &mut AB,
-    local: &MemoryShardCols<AB::Var, W>,
-    next: &MemoryShardCols<AB::Var, W>,
-    both_real: AB::Expr,
-) {
-    let table_diff: AB::Expr = next.table_id.clone().into() - local.table_id.clone().into();
-    let col_diff: AB::Expr = next.col_id.clone().into() - local.col_id.clone().into();
-    builder
-        .when_transition()
-        .assert_zero(both_real.clone() * table_diff);
-    builder
-        .when_transition()
-        .assert_zero(both_real * col_diff);
 }
 
 /// 4. Init first: when key changes, next row must be init. First real row must be init.

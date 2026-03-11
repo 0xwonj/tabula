@@ -8,7 +8,7 @@ use super::context::LoweringContext;
 pub(super) fn lower_cmp<const W: usize>(
     ctx: &mut LoweringContext<'_, W>,
     dst: u16,
-    op: &tabula_ir::CmpOp,
+    op: tabula_ir::CmpOp,
     lhs: &ValueExpr,
     rhs: &ValueExpr,
 ) -> Result<(), TabulaError> {
@@ -40,7 +40,7 @@ pub(super) fn lower_cmp<const W: usize>(
     Ok(())
 }
 
-fn map_ir_cmp_op(op: &tabula_ir::CmpOp) -> CmpOp {
+fn map_ir_cmp_op(op: tabula_ir::CmpOp) -> CmpOp {
     match op {
         tabula_ir::CmpOp::Eq => CmpOp::Eq,
         tabula_ir::CmpOp::Ne => CmpOp::Ne,

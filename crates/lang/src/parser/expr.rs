@@ -1,6 +1,6 @@
 //! Expression parsing methods for Parser (Pratt parser).
 
-use crate::ast::*;
+use crate::ast::{BinOp, Expr, ExprKind, UnaryOp};
 use crate::error::{CompileError, ErrorKind};
 use crate::token::Token;
 
@@ -239,9 +239,7 @@ impl Parser {
     /// Parse an identifier that may be followed by `[row].col` (cell read).
     fn parse_ident_or_cell_read(&mut self) -> Option<Expr> {
         let (tok, start) = self.advance();
-        let name = if let Token::Ident(name) = tok {
-            name
-        } else {
+        let Token::Ident(name) = tok else {
             unreachable!()
         };
 

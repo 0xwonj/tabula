@@ -118,7 +118,7 @@ impl BusConsumer for RangeCheckChip {
             if value >= RANGE_CHECK_SIZE {
                 return Err(TabulaError::ProofError {
                     phase: "bus_consumer",
-                    detail: format!("range_check value out of domain: {}", value),
+                    detail: format!("range_check value out of domain: {value}"),
                 });
             }
             mults[value] =
@@ -126,10 +126,7 @@ impl BusConsumer for RangeCheckChip {
                     .checked_add(mult)
                     .ok_or_else(|| TabulaError::ProofError {
                         phase: "bus_consumer",
-                        detail: format!(
-                            "range_check multiplicity overflow at value {}",
-                            value
-                        ),
+                        detail: format!("range_check multiplicity overflow at value {value}"),
                     })?;
         }
         store.put(witness_labels::RANGE_CHECK_MULTS, Box::new(mults));

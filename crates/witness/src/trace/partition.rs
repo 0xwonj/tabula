@@ -1,87 +1,134 @@
 //! Witness partitioning for multi-proof architectures.
 //!
-//! A [`WitnessPartition`] wraps a [`WitnessStore`] containing the subset
-//! of witness data needed by one proof instance. In the current monolithic
-//! prover, a single partition contains all data; future sharded provers
-//! create per-tier partitions (execution, per-column, root).
+//! [`partition_by_tier()`] splits a global [`WitnessStore`] into per-tier
+//! partitions (execution, per-column, root) for the C+2 sharded proof
+//! architecture.
+//!
+//! Partitioning is label-based: entries are drained from the global store by
+//! their [`witness_labels`] key, without requiring knowledge of concrete chip
+//! types. This keeps the witness layer decoupled from chip implementations.
 
-use tabula_stark::trace::WitnessStore;
+use tabula_core::{ColId, TableId};
 
-/// A partition of witness data for a single proof instance.
+use tabula_chips::shards::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
+
+use tabula_stark::trace::{WitnessStore, witness_labels};
+
+// ── Sharded partitioning ──────────────────────────────────────────────────
+
+/// Per-tier witness stores for the proof architecture.
 ///
-/// Thin wrapper around [`WitnessStore`], representing the witness data
-/// subset for one [`ProofInstance`]. The current monolithic prover uses
-/// a single partition with all data. Sharded provers (Goal 3) will create
-/// multiple partitions via tier-based splitting.
-///
-/// [`ProofInstance`]: tabula_machine::ProofInstance
-pub struct WitnessPartition {
-    store: WitnessStore,
+/// Contains one store per proof instance in the C+2 architecture:
+/// - 1 execution store
+/// - C column stores (one per `(table, col)`)
+/// - 1 root store
+pub struct PartitionedStores {
+    /// Execution tier: instruction records + static table rows.
+    pub execution: WitnessStore,
+    /// Column tiers: per-(table, col) shard witness data.
+    ///
+    /// Each store contains a single-column [`SsmcWitness`] for its
+    /// shard chips (MemoryShardChip, StateShardChip, MetaShardChip).
+    pub columns: Vec<((TableId, ColId), WitnessStore)>,
+    /// Root tier: column metadata + SMT paths.
+    pub root: WitnessStore,
 }
 
-impl WitnessPartition {
-    /// Create a partition from a [`WitnessStore`].
-    pub fn from_store(store: WitnessStore) -> Self {
-        Self { store }
-    }
+/// Labels belonging to the execution tier.
+const EXECUTION_LABELS: &[&str] = &[
+    witness_labels::EXECUTION_RECORDS,
+    witness_labels::STATIC_TABLE_ROWS,
+];
 
-    /// Consume the partition, returning the underlying [`WitnessStore`].
-    pub fn into_store(self) -> WitnessStore {
-        self.store
-    }
+/// Labels belonging to the root tier.
+const ROOT_LABELS: &[&str] = &[
+    witness_labels::SMT_COL_PATHS,
+    witness_labels::SMT_TABLE_PATHS,
+    witness_labels::SMT_TABLE_PVS,
+];
 
-    /// Borrow the underlying store.
-    pub fn store(&self) -> &WitnessStore {
-        &self.store
-    }
-}
-
-/// Create a single partition containing all witness data (no splitting).
+/// Split witness data into per-tier stores.
 ///
-/// This is the default partitioning strategy for the monolithic prover.
-/// Equivalent to `WitnessPartition::from_store(store)`.
+/// Takes a global [`WitnessStore`] (as populated by
+/// [`TraceBuilder::prepare_witness_store()`]) plus per-column shard data
+/// (from [`prepare_shard_witness()`]) and produces separate stores for
+/// each proof tier.
 ///
-/// Future sharded provers will use tier-based partitioning that splits
-/// the store by proof tier:
-/// - **Execution**: `InstructionRecords`, `StaticTableRows`
-/// - **Column [i]**: per-(t,c) memory accesses, SSMC witness, SMT paths
-/// - **Root**: `ColumnMetaInput`, SMT table paths
-pub fn single_partition(store: WitnessStore) -> WitnessPartition {
-    WitnessPartition::from_store(store)
+/// Entries are **drained** (moved) from the global store by label, so
+/// no concrete chip types need to be imported. Each tier's store is
+/// self-contained for trace building.
+///
+/// [`prepare_shard_witness()`]: super::memory::prepare_shard_witness
+/// [`TraceBuilder::prepare_witness_store()`]: super::builder::TraceBuilder::prepare_witness_store
+pub fn partition_by_tier(
+    mut global_store: WitnessStore,
+    shard_witness: SsmcWitness,
+) -> PartitionedStores {
+    let exec_store = global_store.drain_labels(EXECUTION_LABELS);
+
+    let columns: Vec<((TableId, ColId), WitnessStore)> = shard_witness
+        .take_columns()
+        .into_iter()
+        .map(|((table, col), col_data)| {
+            let mut col_store = WitnessStore::new();
+            let mut single_witness = SsmcWitness::default();
+            single_witness.insert(table, col, col_data);
+            col_store.put(SSMC_WITNESS_LABEL, single_witness);
+            ((table, col), col_store)
+        })
+        .collect();
+
+    let root_store = global_store.drain_labels(ROOT_LABELS);
+
+    PartitionedStores {
+        execution: exec_store,
+        columns,
+        root: root_store,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tabula_chips::shards::ssmc::SsmcWitness;
 
     #[test]
-    fn partition_round_trip() {
-        let mut store = WitnessStore::new();
-        store.put("test_data", vec![1u32, 2, 3]);
-        store.put("other_data", 42u64);
-
-        let partition = WitnessPartition::from_store(store);
-
-        // Verify store is accessible through partition.
-        assert!(partition.store().contains::<Vec<u32>>("test_data"));
-        assert!(partition.store().contains::<u64>("other_data"));
-
-        // Round-trip: partition → store → partition.
-        let store = partition.into_store();
-        assert!(store.get::<Vec<u32>>("test_data").is_ok());
-        assert_eq!(*store.get::<u64>("other_data").unwrap(), 42);
+    fn partition_by_tier_creates_per_tier_stores() {
+        let global = WitnessStore::new();
+        let shard_witness = SsmcWitness::default();
+        let stores = partition_by_tier(global, shard_witness);
+        // Execution store exists (may be empty).
+        assert!(stores.columns.is_empty());
+        // Root store exists.
+        let _ = &stores.root;
     }
 
     #[test]
-    fn single_partition_preserves_all_data() {
-        let mut store = WitnessStore::new();
-        store.put("alpha", vec![10u32, 20]);
-        store.put("beta", String::from("hello"));
+    fn partition_drains_labels_to_correct_tiers() {
+        let mut global = WitnessStore::new();
+        global.put(witness_labels::EXECUTION_RECORDS, vec![1u32, 2, 3]);
+        global.put(witness_labels::SMT_COL_PATHS, vec![10u32, 20]);
 
-        let partition = single_partition(store);
-        let store = partition.into_store();
+        let shard_witness = SsmcWitness::default();
+        let stores = partition_by_tier(global, shard_witness);
 
-        assert_eq!(store.get::<Vec<u32>>("alpha").unwrap(), &vec![10, 20]);
-        assert_eq!(store.get::<String>("beta").unwrap(), "hello");
+        // Execution tier got its label.
+        assert!(
+            stores
+                .execution
+                .contains::<Vec<u32>>(witness_labels::EXECUTION_RECORDS)
+        );
+        // Root tier got its label.
+        assert!(
+            stores
+                .root
+                .contains::<Vec<u32>>(witness_labels::SMT_COL_PATHS)
+        );
+        // Cross-check: execution doesn't have root labels.
+        assert!(
+            !stores
+                .execution
+                .contains::<Vec<u32>>(witness_labels::SMT_COL_PATHS)
+        );
     }
 }

@@ -10,6 +10,8 @@ use p3_air::AirBuilder;
 /// Emits W constraints: `val_is_null * val[i] = 0` for each i in 0..W.
 ///
 /// Callers must separately assert `val_is_null ∈ {0, 1}`.
+// AB::Expr is cloned per value limb; by-value avoids one clone on the last limb.
+#[allow(clippy::needless_pass_by_value)]
 pub fn constrain_null_canon<AB: AirBuilder>(
     builder: &mut AB,
     val_is_null: AB::Expr,

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, ColumnDef, RowKey, TableSchema, Value, ValueType};
 use tabula_core::{TableId, TxTypeId};

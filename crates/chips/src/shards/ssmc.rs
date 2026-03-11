@@ -41,6 +41,11 @@ impl SsmcWitness {
     pub fn get(&self, table: TableId, col: ColId) -> Option<&SsmcColumnWitness> {
         self.columns.get(&(table, col))
     }
+
+    /// Consume the witness and return the per-column data.
+    pub fn take_columns(self) -> BTreeMap<(TableId, ColId), SsmcColumnWitness> {
+        self.columns
+    }
 }
 
 /// Witness data for a single SSMC column.

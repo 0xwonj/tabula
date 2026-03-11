@@ -14,7 +14,9 @@
 
 mod trace;
 
-pub use trace::{compute_fingerprint_ef4, generate_permutation_trace_from_interactions};
+pub use trace::{
+    PermutationTraceOutput, compute_fingerprint_ef4, generate_permutation_trace_from_interactions,
+};
 
 #[cfg(test)]
 mod challenges;

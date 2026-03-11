@@ -16,7 +16,6 @@ use tabula_chips::static_table::trace::StaticTableRow;
 use tabula_stark::trace::{WitnessStore, witness_labels};
 
 use super::lowering::lower_program_batch;
-use super::memory::prepare_memory_inputs;
 use super::smt::validate_smt_path_shapes;
 
 /// Input bundle for all-chip trace construction.
@@ -96,7 +95,6 @@ where
     /// static table rows, and SMT paths (e.g. chip-level tests).
     /// For the full IR-based pipeline, use [`prepare_witness_store`](Self::prepare_witness_store).
     pub fn populate_store(&self, inputs: AllTraceInputs<'_>) -> Result<WitnessStore, TabulaError> {
-        let memory = prepare_memory_inputs::<H, W>(self.witness)?;
         let statement = super::smt::smt_table_public_statement(self.witness);
         let smt_table_pvs = statement.to_field_elements();
 
@@ -118,11 +116,9 @@ where
         );
         store.put(witness_labels::SMT_TABLE_PVS, smt_table_pvs);
 
-        // Phase 1 (Memory) chip inputs — pre-built from BatchWitness.
-        store.put(witness_labels::INTER_TX_ROWS, memory.inter_tx_rows);
-        store.put(witness_labels::STATE_ROWS, memory.state_rows);
-        store.put(witness_labels::COLUMN_META_INPUT, memory.column_meta_input);
-
+        // Phase 1 (Memory) inputs are handled per-column via shard witness
+        // preparation (prepare_shard_witness). No global memory chip inputs.
+        //
         // Phase 2 (Dependent) inputs are collected by the orchestrator
         // via BusConsumer dispatch between Phase 1 and Phase 2.
 

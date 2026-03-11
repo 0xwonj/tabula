@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 
 use p3_baby_bear::BabyBear;
-use p3_field::PrimeCharacteristicRing;
 
 use tabula_commitment::{
-    ColumnMeta, DOMAIN_COL, DOMAIN_LEAF, DOMAIN_TABLE, FieldHasher,
-    NativeDigest, SparseMerkleTree,
+    COL_STATE_SMT_DEPTH, ColumnMeta, DOMAIN_COL, DOMAIN_TABLE, FieldHasher, NativeDigest,
+    SparseMerkleTree, TABLE_STATE_SMT_DEPTH, compute_leaf,
 };
 use tabula_core::TableId;
 use tabula_core::error::TabulaError;
@@ -19,25 +18,45 @@ pub(super) fn validate_smt_path_shapes(
     smt_table_paths: &[SmtTablePathWitness],
 ) -> Result<(), TabulaError> {
     for (idx, w) in smt_col_paths.iter().enumerate() {
-        if w.path_bits.len() != w.siblings.len() {
+        if w.path_bits.len() != w.old_siblings.len() {
             return Err(TabulaError::ProofError {
                 phase: "smt",
                 detail: format!(
-                    "smt_col_paths[{idx}] shape mismatch: path_bits={}, siblings={}",
+                    "smt_col_paths[{idx}] shape mismatch: path_bits={}, old_siblings={}",
                     w.path_bits.len(),
-                    w.siblings.len()
+                    w.old_siblings.len()
+                ),
+            });
+        }
+        if w.path_bits.len() != w.new_siblings.len() {
+            return Err(TabulaError::ProofError {
+                phase: "smt",
+                detail: format!(
+                    "smt_col_paths[{idx}] shape mismatch: path_bits={}, new_siblings={}",
+                    w.path_bits.len(),
+                    w.new_siblings.len()
                 ),
             });
         }
     }
     for (idx, w) in smt_table_paths.iter().enumerate() {
-        if w.path.path_bits.len() != w.path.siblings.len() {
+        if w.path.path_bits.len() != w.path.old_siblings.len() {
             return Err(TabulaError::ProofError {
                 phase: "smt",
                 detail: format!(
-                    "smt_table_paths[{idx}] shape mismatch: path_bits={}, siblings={}",
+                    "smt_table_paths[{idx}] shape mismatch: path_bits={}, old_siblings={}",
                     w.path.path_bits.len(),
-                    w.path.siblings.len()
+                    w.path.old_siblings.len()
+                ),
+            });
+        }
+        if w.path.path_bits.len() != w.path.new_siblings.len() {
+            return Err(TabulaError::ProofError {
+                phase: "smt",
+                detail: format!(
+                    "smt_table_paths[{idx}] shape mismatch: path_bits={}, new_siblings={}",
+                    w.path.path_bits.len(),
+                    w.path.new_siblings.len()
                 ),
             });
         }
@@ -57,11 +76,6 @@ where
 }
 
 // ── Public library function ─────────────────────────────────────────────────
-
-/// SMT column-level depth (bits used for column ID within a table).
-const COL_DEPTH: usize = 16;
-/// SMT table-level depth (bits used for table ID in the global state tree).
-const TABLE_DEPTH: usize = 30;
 
 /// Build SMT inclusion-proof witnesses from batch witness metadata.
 ///
@@ -89,55 +103,52 @@ where
     let mut root_mults = BTreeMap::new();
 
     for (table, metas_for_table) in &by_table {
-        let mut old_tree = SparseMerkleTree::new(hasher.clone(), COL_DEPTH, DOMAIN_COL);
-        let mut new_tree = SparseMerkleTree::new(hasher.clone(), COL_DEPTH, DOMAIN_COL);
+        let mut old_tree = SparseMerkleTree::new(hasher.clone(), COL_STATE_SMT_DEPTH, DOMAIN_COL);
+        let mut new_tree = SparseMerkleTree::new(hasher.clone(), COL_STATE_SMT_DEPTH, DOMAIN_COL);
 
         // Insert all leaves.
         for meta in metas_for_table {
-            let tag = commitment_tag(meta.tag);
-            let old_leaf = compute_leaf_digest(meta.table.0, meta.col.0, tag, &meta.com_old);
-            let new_leaf = compute_leaf_digest(meta.table.0, meta.col.0, tag, &meta.com_new);
+            let old_leaf = compute_leaf(&hasher, meta.table, meta.col, meta.tag, &meta.com_old);
+            let new_leaf = compute_leaf(&hasher, meta.table, meta.col, meta.tag, &meta.com_new);
             old_tree.insert(meta.col.0 as u64, old_leaf);
             new_tree.insert(meta.col.0 as u64, new_leaf);
         }
 
-        // Generate proofs.
+        // Generate proofs only for touched columns.
+        // Untouched columns' leaf digests are captured as SMT siblings.
+        let mut touched_count = 0u32;
         for meta in metas_for_table {
-            let tag = commitment_tag(meta.tag);
-            let old_leaf = compute_leaf_digest(meta.table.0, meta.col.0, tag, &meta.com_old);
-            let new_leaf = compute_leaf_digest(meta.table.0, meta.col.0, tag, &meta.com_new);
+            if !meta.is_touched {
+                continue;
+            }
+            touched_count += 1;
+
+            let old_leaf = compute_leaf(&hasher, meta.table, meta.col, meta.tag, &meta.com_old);
+            let new_leaf = compute_leaf(&hasher, meta.table, meta.col, meta.tag, &meta.com_new);
 
             let old_proof = old_tree.prove(meta.col.0 as u64);
             let new_proof = new_tree.prove(meta.col.0 as u64);
-
-            if old_proof.siblings != new_proof.siblings {
-                return Err(TabulaError::ProofError {
-                    phase: "smt",
-                    detail: format!(
-                        "old/new sibling vectors differ for column ({:?}, {:?})",
-                        meta.table, meta.col
-                    ),
-                });
-            }
 
             col_paths.push(SmtPathWitness {
                 table_id: table.0,
                 key: meta.col.0 as u32,
                 old_leaf,
                 new_leaf,
-                siblings: old_proof.siblings,
-                path_bits: path_bits_from_key(meta.col.0 as u64, COL_DEPTH),
+                old_siblings: old_proof.siblings,
+                new_siblings: new_proof.siblings,
+                path_bits: path_bits_from_key(meta.col.0 as u64, COL_STATE_SMT_DEPTH),
             });
         }
 
         old_table_roots.insert(*table, old_tree.root());
         new_table_roots.insert(*table, new_tree.root());
-        root_mults.insert(*table, metas_for_table.len() as u32);
+        root_mults.insert(*table, touched_count);
     }
 
     // Build table-level SMT.
-    let mut old_state_tree = SparseMerkleTree::new(hasher.clone(), TABLE_DEPTH, DOMAIN_TABLE);
-    let mut new_state_tree = SparseMerkleTree::new(hasher, TABLE_DEPTH, DOMAIN_TABLE);
+    let mut old_state_tree =
+        SparseMerkleTree::new(hasher.clone(), TABLE_STATE_SMT_DEPTH, DOMAIN_TABLE);
+    let mut new_state_tree = SparseMerkleTree::new(hasher, TABLE_STATE_SMT_DEPTH, DOMAIN_TABLE);
     for (&table, &root) in &old_table_roots {
         old_state_tree.insert(table.0 as u64, root);
     }
@@ -173,43 +184,21 @@ where
         let old_proof = old_state_tree.prove(table.0 as u64);
         let new_proof = new_state_tree.prove(table.0 as u64);
 
-        if old_proof.siblings != new_proof.siblings {
-            return Err(TabulaError::ProofError {
-                phase: "smt",
-                detail: format!("old/new sibling vectors differ for table {:?}", table),
-            });
-        }
-
         table_paths.push(SmtTablePathWitness {
             path: SmtPathWitness {
                 table_id: table.0,
                 key: table.0,
                 old_leaf,
                 new_leaf,
-                siblings: old_proof.siblings,
-                path_bits: path_bits_from_key(table.0 as u64, TABLE_DEPTH),
+                old_siblings: old_proof.siblings,
+                new_siblings: new_proof.siblings,
+                path_bits: path_bits_from_key(table.0 as u64, TABLE_STATE_SMT_DEPTH),
             },
             root_mult,
         });
     }
 
     Ok((col_paths, table_paths))
-}
-
-fn commitment_tag(tag: u16) -> u32 {
-    tag as u32
-}
-
-fn compute_leaf_digest(table: u32, col: u16, tag: u32, com: &NativeDigest) -> NativeDigest {
-    use tabula_chips::poseidon::constants::poseidon2_permutation;
-    let mut perm_input = [BabyBear::ZERO; 16];
-    perm_input[0] = BabyBear::new(DOMAIN_LEAF);
-    perm_input[1] = BabyBear::new(table);
-    perm_input[2] = BabyBear::new(col as u32);
-    perm_input[3] = BabyBear::new(tag);
-    perm_input[8..16].copy_from_slice(&com.0);
-    let (_rounds, out) = poseidon2_permutation(perm_input);
-    NativeDigest(core::array::from_fn(|i| out[i]))
 }
 
 fn path_bits_from_key(key: u64, depth: usize) -> Vec<bool> {

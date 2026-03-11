@@ -71,7 +71,7 @@ impl fmt::Display for ErrorDisplay<'_> {
         writeln!(f, "{:>width$} |", "", width = gutter_width)?;
 
         // Source line
-        writeln!(f, "{} | {}", line_num, line_text)?;
+        writeln!(f, "{line_num} | {line_text}")?;
 
         // Caret underline
         // col is 1-indexed; compute underline width (clamp to current line)

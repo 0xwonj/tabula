@@ -196,7 +196,7 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         if slot >= MAX_SLOTS {
             return Err(TabulaError::ProofError {
                 phase: "trace_lowering",
-                detail: format!("slot {} >= MAX_SLOTS ({})", slot, MAX_SLOTS),
+                detail: format!("slot {slot} >= MAX_SLOTS ({MAX_SLOTS})"),
             });
         }
         self.slots[slot] = Some(value);
@@ -255,8 +255,7 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
             .ok_or_else(|| TabulaError::ProofError {
                 phase: "trace_lowering",
                 detail: format!(
-                    "no event found for tx={} effect_ordinal={} at instruction {}",
-                    tx_index, effect_ordinal, instr_idx
+                    "no event found for tx={tx_index} effect_ordinal={effect_ordinal} at instruction {instr_idx}"
                 ),
             })
     }

@@ -39,3 +39,6 @@ sha2 = { workspace = true }
 [features]
 default = []
 stark = ["dep:tabula-chips", "dep:tabula-machine", "dep:tabula-witness", "dep:tabula-commitment", "tabula-commitment/stark", "dep:tabula-lang", "dep:p3-baby-bear", "dep:p3-field"]
+
+[lints]
+workspace = true

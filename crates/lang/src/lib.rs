@@ -2,9 +2,6 @@
 //!
 //! Compiles `.tab` source files into Tabula IR (`Vec<TableSchema>` + `Vec<TxTypeDef>`).
 
-#![deny(unused)]
-#![warn(missing_docs)]
-
 pub mod ast;
 pub mod error;
 pub mod lexer;

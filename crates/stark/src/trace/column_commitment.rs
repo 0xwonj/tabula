@@ -34,8 +34,8 @@ use crate::air::interaction::BusId;
 use crate::chips::ChipId;
 use crate::debug::RecordedInteraction;
 
-use super::trace_map::TraceEntry;
 use super::contributor::WitnessStore;
+use super::trace_map::TraceEntry;
 
 // ── Column Plan ──────────────────────────────────────────────────
 

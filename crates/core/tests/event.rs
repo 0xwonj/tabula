@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_core::{
     CellKey, ColId, ExecutionEvent, ExecutionResult, OpKind, RowKey, TableId, TxOutcome, Value,
 };

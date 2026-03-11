@@ -48,7 +48,7 @@ where
             })?
             .map_err(|e| {
                 error!(operation = op, code = ?e.code(), message = %e.message(), "service error");
-                ApiError::from_service(e)
+                ApiError::from_service(&e)
             })
         }
         _ = &mut sleep => {

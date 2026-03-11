@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tabula_core::{CellKey, ColId, RowKey, StateRoot, TableId, TxTypeId};
 
 #[test]
