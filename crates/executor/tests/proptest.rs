@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use proptest::prelude::*;
 
 use tabula_core::{
-    Batch, ColId, ColumnDef, AccessEvent, OpKind, RowKey, TableId, TableSchema, Transaction,
+    Batch, ColId, ColumnDef, OpKind, RowKey, TableId, TableSchema, Transaction,
     TxTypeId, Value, ValueType,
 };
 use tabula_ir::{ArithOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
@@ -227,7 +227,7 @@ proptest! {
         ).unwrap();
 
         let events: Vec<_> = result.successful_events().cloned().collect();
-        let check = check_consistency(&events, &result.read_set_old);
+        let check = check_consistency(&events, &result.read_set_old, &result.txs);
         prop_assert!(check.is_ok(), "consistency check failed: {:?}", check.err());
     }
 }
@@ -237,20 +237,24 @@ proptest! {
     fn prop_tampered_trace_fails(
         tamper_idx in 0usize..5,
     ) {
+        use tabula_core::{AccessEvent, TxResult};
+
         let k = pcell(0);
         let mut events = vec![
-            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(100), val_is_null: false, time: 0, tx_index: 0, effect_ordinal_in_tx: 0 },
-            AccessEvent { key: k, op: OpKind::Write, value: Value::U64(80), val_is_null: false, time: 1, tx_index: 0, effect_ordinal_in_tx: 1 },
-            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(80), val_is_null: false, time: 2, tx_index: 0, effect_ordinal_in_tx: 2 },
-            AccessEvent { key: k, op: OpKind::Write, value: Value::U64(60), val_is_null: false, time: 3, tx_index: 0, effect_ordinal_in_tx: 3 },
-            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(60), val_is_null: false, time: 4, tx_index: 0, effect_ordinal_in_tx: 4 },
+            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(100), val_is_null: false, time: 0, effect_ordinal_in_tx: 0 },
+            AccessEvent { key: k, op: OpKind::Write, value: Value::U64(80), val_is_null: false, time: 1, effect_ordinal_in_tx: 1 },
+            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(80), val_is_null: false, time: 2, effect_ordinal_in_tx: 2 },
+            AccessEvent { key: k, op: OpKind::Write, value: Value::U64(60), val_is_null: false, time: 3, effect_ordinal_in_tx: 3 },
+            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(60), val_is_null: false, time: 4, effect_ordinal_in_tx: 4 },
         ];
         let read_set_old = vec![(k, Some(Value::U64(100)))];
 
         let idx = tamper_idx % events.len();
         events[idx].value = Value::U64(999);
 
-        let check = check_consistency(&events, &read_set_old);
+        // Wrap events in a single TxResult for etrace identity check
+        let txs = vec![TxResult::Success { emitted: vec![], access_trace: events.clone() }];
+        let check = check_consistency(&events, &read_set_old, &txs);
         prop_assert!(check.is_err(), "tampered trace should fail consistency check");
     }
 }

@@ -95,7 +95,7 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, DriverError> {
 
     // 5. Consistency check.
     let all_events: Vec<_> = result.successful_events().cloned().collect();
-    let consistency = check_consistency_status(&all_events, &result.read_set_old);
+    let consistency = check_consistency_status(&all_events, &result.read_set_old, &result.txs);
 
     // 6. Merge output state.
     let state_after = StateFile {

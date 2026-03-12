@@ -277,5 +277,5 @@ fn test_consistency_passes_for_valid_batch() {
 
     assert!(result.txs.iter().all(|tx| tx.is_success()));
     let all_events: Vec<_> = result.successful_events().cloned().collect();
-    assert!(check_consistency(&all_events, &result.read_set_old).is_ok());
+    assert!(check_consistency(&all_events, &result.read_set_old, &result.txs).is_ok());
 }

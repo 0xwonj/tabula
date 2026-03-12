@@ -260,7 +260,6 @@ fn column_witness_delete() {
                     value: Value::U64(0),
                     val_is_null: true,
                     time: 2,
-                    tx_index: 0,
                     effect_ordinal_in_tx: 1,
                 },
             ],

@@ -91,7 +91,7 @@ pub(super) fn read_event(
     row: u64,
     val: u64,
     time: u64,
-    tx: u32,
+    _tx: u32,
 ) -> AccessEvent {
     AccessEvent {
         key: ck(table, col, row),
@@ -99,7 +99,6 @@ pub(super) fn read_event(
         value: Value::U64(val),
         val_is_null: false,
         time,
-        tx_index: tx,
         effect_ordinal_in_tx: time as u32,
     }
 }
@@ -110,7 +109,7 @@ pub(super) fn write_event(
     row: u64,
     val: u64,
     time: u64,
-    tx: u32,
+    _tx: u32,
 ) -> AccessEvent {
     AccessEvent {
         key: ck(table, col, row),
@@ -118,7 +117,6 @@ pub(super) fn write_event(
         value: Value::U64(val),
         val_is_null: false,
         time,
-        tx_index: tx,
         effect_ordinal_in_tx: time as u32,
     }
 }
@@ -128,7 +126,7 @@ pub(super) fn null_read_event(
     col: u16,
     row: u64,
     time: u64,
-    tx: u32,
+    _tx: u32,
 ) -> AccessEvent {
     AccessEvent {
         key: ck(table, col, row),
@@ -136,7 +134,6 @@ pub(super) fn null_read_event(
         value: Value::U64(0),
         val_is_null: true,
         time,
-        tx_index: tx,
         effect_ordinal_in_tx: time as u32,
     }
 }

@@ -343,7 +343,7 @@ fn events_carry_correct_tx_index() {
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    let indices: Vec<u32> = result.successful_events().map(|e| e.tx_index).collect();
+    let indices: Vec<u32> = result.successful_events_with_tx().map(|(tx_idx, _)| tx_idx).collect();
     assert_eq!(indices, vec![0, 1, 2]);
 }
 

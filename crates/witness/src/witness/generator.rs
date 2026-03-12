@@ -257,7 +257,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
     ) -> Result<BTreeMap<(TableId, ColId), Vec<AccessRow>>, TabulaError> {
         let mut grouped: BTreeMap<(TableId, ColId), Vec<AccessRow>> = BTreeMap::new();
 
-        for event in result.successful_events() {
+        for (tx_index, event) in result.successful_events_with_tx() {
             let tc = (event.key.table, event.key.col);
             let value_type = *type_map.get(&tc).ok_or_else(|| TabulaError::ProofError {
                 phase: "witness",
@@ -280,7 +280,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
                 is_write: event.op == OpKind::Write,
                 value_fes: fes,
                 val_is_null: is_null,
-                tx_index: event.tx_index,
+                tx_index,
                 effect_ordinal_in_tx: event.effect_ordinal_in_tx,
             });
         }

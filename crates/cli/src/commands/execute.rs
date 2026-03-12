@@ -128,23 +128,27 @@ pub fn cmd_execute(
         }
     }
 
-    if include_trace && let Some(trace) = &trace {
+    if include_trace {
         println!("\n--- Execution Trace ---");
-        for event in trace {
-            let op = match event.op {
-                tabula_core::OpKind::Read => "READ ",
-                tabula_core::OpKind::Write => "WRITE",
-            };
-            println!(
-                "  t={:<3} tx={} {} table={} row={} col={} -> {:?}",
-                event.time,
-                event.tx_index,
-                op,
-                event.key.table.0,
-                event.key.row.0,
-                event.key.col.0,
-                event.value
-            );
+        for (tx_idx, tx) in executed.txs.iter().enumerate() {
+            if let tabula_core::TxResult::Success { access_trace, .. } = tx {
+                for event in access_trace {
+                    let op = match event.op {
+                        tabula_core::OpKind::Read => "READ ",
+                        tabula_core::OpKind::Write => "WRITE",
+                    };
+                    println!(
+                        "  t={:<3} tx={} {} table={} row={} col={} -> {:?}",
+                        event.time,
+                        tx_idx,
+                        op,
+                        event.key.table.0,
+                        event.key.row.0,
+                        event.key.col.0,
+                        event.value
+                    );
+                }
+            }
         }
     }
 

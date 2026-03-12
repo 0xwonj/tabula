@@ -273,13 +273,16 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         }
     }
 
-    /// Find the event matching the current tx_index and effect ordinal.
+    /// Find the event matching the current effect ordinal.
+    ///
+    /// `tx_events` is already scoped to the current transaction, so we only
+    /// need to match on `effect_ordinal_in_tx`.
     pub(super) fn find_event(&self, instr_idx: usize) -> Result<&'a AccessEvent, TabulaError> {
         let tx_index = self.tx_index;
         let effect_ordinal = self.effect_ordinal;
         self.tx_events
             .iter()
-            .find(|e| e.tx_index == tx_index && e.effect_ordinal_in_tx == effect_ordinal)
+            .find(|e| e.effect_ordinal_in_tx == effect_ordinal)
             .copied()
             .ok_or_else(|| TabulaError::ProofError {
                 phase: "trace_lowering",

@@ -18,7 +18,6 @@ fn read_ev(key: CellKey, time: u64) -> AccessEvent {
         value: Value::U64(0),
         val_is_null: false,
         time,
-        tx_index: 0,
         effect_ordinal_in_tx: time as u32,
     }
 }
@@ -30,7 +29,6 @@ fn write_ev(key: CellKey, time: u64) -> AccessEvent {
         value: Value::U64(0),
         val_is_null: false,
         time,
-        tx_index: 0,
         effect_ordinal_in_tx: time as u32,
     }
 }
@@ -152,10 +150,8 @@ fn read_of_written_key_is_sorted_memory() {
 fn multi_tx_read_only_same_key() {
     // Same key read by two different txs, no writes -> still ReadOnly.
     let k = ck(1, 0, 1);
-    let mut ev0 = read_ev(k, 1);
-    ev0.tx_index = 0;
-    let mut ev1 = read_ev(k, 3);
-    ev1.tx_index = 1;
+    let ev0 = read_ev(k, 1);
+    let ev1 = read_ev(k, 3);
     let result = BatchResult {
         txs: vec![
             TxResult::Success {

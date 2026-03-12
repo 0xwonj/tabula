@@ -2,7 +2,7 @@
 
 mod common;
 
-use tabula_core::{CellKey, AccessEvent, OpKind, Value};
+use tabula_core::{CellKey, AccessEvent, OpKind, TxResult, Value};
 
 use tabula_executor::consistency::check_consistency;
 
@@ -17,7 +17,6 @@ fn read_event(key: CellKey, value: Value, time: u64) -> AccessEvent {
         value,
         val_is_null: false,
         time,
-        tx_index: 0,
         effect_ordinal_in_tx: time as u32,
     }
 }
@@ -29,7 +28,6 @@ fn write_event(key: CellKey, value: Value, time: u64) -> AccessEvent {
         value,
         val_is_null: false,
         time,
-        tx_index: 0,
         effect_ordinal_in_tx: time as u32,
     }
 }
@@ -41,7 +39,6 @@ fn null_write_event(key: CellKey, zero: Value, time: u64) -> AccessEvent {
         value: zero,
         val_is_null: true,
         time,
-        tx_index: 0,
         effect_ordinal_in_tx: time as u32,
     }
 }
@@ -53,9 +50,16 @@ fn null_read_event(key: CellKey, zero: Value, time: u64) -> AccessEvent {
         value: zero,
         val_is_null: true,
         time,
-        tx_index: 0,
         effect_ordinal_in_tx: time as u32,
     }
+}
+
+/// Wrap a flat event slice into a single-tx TxResult for etrace identity checks.
+fn single_tx(events: &[AccessEvent]) -> Vec<TxResult> {
+    vec![TxResult::Success {
+        emitted: vec![],
+        access_trace: events.to_vec(),
+    }]
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -69,7 +73,7 @@ fn valid_trace() {
         read_event(k, Value::U64(80), 2),
     ];
     let read_set_old = vec![(k, Some(Value::U64(100)))];
-    assert!(check_consistency(&events, &read_set_old).is_ok());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
 #[test]
@@ -80,7 +84,7 @@ fn stale_read_fails() {
         read_event(k, Value::U64(100), 1),
     ];
     let read_set_old = vec![(k, Some(Value::U64(100)))];
-    assert!(check_consistency(&events, &read_set_old).is_err());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_err());
 }
 
 #[test]
@@ -90,7 +94,7 @@ fn write_only_key() {
         write_event(k, Value::U64(42), 0),
         write_event(k, Value::U64(99), 1),
     ];
-    assert!(check_consistency(&events, &[]).is_ok());
+    assert!(check_consistency(&events, &[], &single_tx(&events)).is_ok());
 }
 
 #[test]
@@ -106,12 +110,12 @@ fn multiple_interleaved_keys() {
         read_event(k2, Value::U64(25), 5),
     ];
     let read_set_old = vec![(k1, Some(Value::U64(10))), (k2, Some(Value::U64(20)))];
-    assert!(check_consistency(&events, &read_set_old).is_ok());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
 #[test]
 fn empty_events() {
-    assert!(check_consistency(&[], &[]).is_ok());
+    assert!(check_consistency(&[], &[], &[]).is_ok());
 }
 
 #[test]
@@ -124,7 +128,6 @@ fn invalid_etrace_identity_fails() {
             value: Value::U64(10),
             val_is_null: false,
             time: 0,
-            tx_index: 0,
             effect_ordinal_in_tx: 0,
         },
         AccessEvent {
@@ -133,12 +136,11 @@ fn invalid_etrace_identity_fails() {
             value: Value::U64(11),
             val_is_null: false,
             time: 1,
-            tx_index: 0,
             effect_ordinal_in_tx: 2, // skipped 1
         },
     ];
     let read_set_old = vec![(k, Some(Value::U64(10)))];
-    assert!(check_consistency(&events, &read_set_old).is_err());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_err());
 }
 
 #[test]
@@ -150,7 +152,7 @@ fn null_write_then_null_read() {
         null_read_event(k, Value::U64(0), 2),
     ];
     let read_set_old = vec![(k, Some(Value::U64(100)))];
-    assert!(check_consistency(&events, &read_set_old).is_ok());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
 #[test]
@@ -161,7 +163,7 @@ fn null_write_then_present_read_fails() {
         read_event(k, Value::U64(42), 1),
     ];
     let read_set_old = vec![(k, Some(Value::U64(100)))];
-    assert!(check_consistency(&events, &read_set_old).is_err());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_err());
 }
 
 #[test]
@@ -173,7 +175,7 @@ fn initially_absent_then_write_then_read() {
         read_event(k, Value::U64(42), 2),
     ];
     let read_set_old = vec![(k, None)];
-    assert!(check_consistency(&events, &read_set_old).is_ok());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
 // ── Type diversity ──────────────────────────────────────────────────────
@@ -187,7 +189,7 @@ fn bool_value_consistency() {
         read_event(k, Value::Bool(false), 2),
     ];
     let read_set_old = vec![(k, Some(Value::Bool(true)))];
-    assert!(check_consistency(&events, &read_set_old).is_ok());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
 #[test]
@@ -199,7 +201,7 @@ fn i64_value_consistency() {
         read_event(k, Value::I64(50), 2),
     ];
     let read_set_old = vec![(k, Some(Value::I64(-100)))];
-    assert!(check_consistency(&events, &read_set_old).is_ok());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
 #[test]
@@ -213,7 +215,7 @@ fn bytes32_value_consistency() {
         read_event(k, v2, 2),
     ];
     let read_set_old = vec![(k, Some(v1))];
-    assert!(check_consistency(&events, &read_set_old).is_ok());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
 #[test]
@@ -227,7 +229,7 @@ fn null_write_value_null_read_value_sequence() {
         read_event(k, Value::U64(200), 4),
     ];
     let read_set_old = vec![(k, Some(Value::U64(100)))];
-    assert!(check_consistency(&events, &read_set_old).is_ok());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
 #[test]
@@ -238,5 +240,5 @@ fn stale_read_i64_fails() {
         read_event(k, Value::I64(-50), 1),
     ];
     let read_set_old = vec![(k, Some(Value::I64(0)))];
-    assert!(check_consistency(&events, &read_set_old).is_err());
+    assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_err());
 }

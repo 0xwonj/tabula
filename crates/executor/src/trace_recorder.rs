@@ -54,7 +54,6 @@ impl TraceRecorder {
             value,
             val_is_null,
             time: self.time,
-            tx_index: self.current_tx_index,
             effect_ordinal_in_tx: self.current_effect_ordinal_in_tx,
         });
         self.current_effect_ordinal_in_tx += 1;

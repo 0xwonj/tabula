@@ -41,6 +41,9 @@ pub enum OpKind {
 }
 
 /// A single state-access event (read or write) recorded during execution.
+///
+/// The tx index is implicit — determined by the event's position within
+/// `TxResult::Success { access_trace }` inside `BatchResult.txs`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct AccessEvent {
     /// The cell being accessed.
@@ -54,26 +57,9 @@ pub struct AccessEvent {
     pub val_is_null: bool,
     /// Logical time of the operation.
     pub time: LogicalTime,
-    /// Index of the transaction within the batch (0-based).
-    #[serde(default)]
-    pub tx_index: u32,
     /// Ordinal of the effect within the transaction (0-based).
-    ///
-    /// Canonical identity for M12:
-    /// - `tx_index`
-    /// - `effect_ordinal_in_tx`
     #[serde(default)]
     pub effect_ordinal_in_tx: u32,
-}
-
-impl AccessEvent {
-    /// Canonical identity of this event in E-Trace.
-    pub fn etrace_id(&self) -> ETraceEventId {
-        ETraceEventId {
-            tx_index: self.tx_index,
-            effect_ordinal_in_tx: self.effect_ordinal_in_tx,
-        }
-    }
 }
 
 /// Per-transaction execution result.
@@ -163,6 +149,20 @@ impl BatchResult {
             .iter()
             .filter_map(|tx| match tx {
                 TxResult::Success { access_trace, .. } => Some(access_trace.iter()),
+                TxResult::Failed { .. } => None,
+            })
+            .flatten()
+    }
+
+    /// Iterate access events from all successful transactions with tx index.
+    pub fn successful_events_with_tx(&self) -> impl Iterator<Item = (u32, &AccessEvent)> + '_ {
+        self.txs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, tx)| match tx {
+                TxResult::Success { access_trace, .. } => {
+                    Some(access_trace.iter().map(move |e| (i as u32, e)))
+                }
                 TxResult::Failed { .. } => None,
             })
             .flatten()

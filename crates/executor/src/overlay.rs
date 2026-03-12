@@ -325,7 +325,7 @@ mod tests {
 
         let recent = rec.events_since(since);
         assert_eq!(recent.len(), 1);
-        assert_eq!(recent[0].tx_index, 1);
+        assert_eq!(recent[0].effect_ordinal_in_tx, 0);
     }
 
     #[test]

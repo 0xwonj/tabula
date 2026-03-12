@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::{CellKey, ExecutionConsistencyStatus, AccessEvent, OpKind, Value};
+use tabula_core::{CellKey, ExecutionConsistencyStatus, AccessEvent, OpKind, TxResult, Value};
 
 /// Check that the execution trace is consistent with last-write semantics.
 ///
@@ -19,8 +19,9 @@ use tabula_core::{CellKey, ExecutionConsistencyStatus, AccessEvent, OpKind, Valu
 pub fn check_consistency(
     events: &[AccessEvent],
     read_set_old: &[(CellKey, Option<Value>)],
+    txs: &[TxResult],
 ) -> Result<(), TabulaError> {
-    check_etrace_identity(events)?;
+    check_etrace_identity(txs)?;
 
     // Build initial value map from read_set_old
     let initial: BTreeMap<CellKey, Option<Value>> = read_set_old.iter().copied().collect();
@@ -75,20 +76,21 @@ pub fn check_consistency(
 
 /// Validate canonical E-Trace identity constraints.
 ///
-/// For each transaction:
+/// For each successful transaction:
 /// - first event has `effect_ordinal_in_tx = 0`
 /// - ordinals increase contiguously by 1 in event order
-pub fn check_etrace_identity(events: &[AccessEvent]) -> Result<(), TabulaError> {
-    let mut expected_by_tx: BTreeMap<u32, u32> = BTreeMap::new();
-    for event in events {
-        let expected = expected_by_tx.entry(event.tx_index).or_insert(0);
-        if event.effect_ordinal_in_tx != *expected {
-            return Err(TabulaError::ConsistencyError(format!(
-                "invalid E-Trace identity for tx {} at time {}: expected effect ordinal {}, got {}",
-                event.tx_index, event.time, expected, event.effect_ordinal_in_tx
-            )));
+pub fn check_etrace_identity(txs: &[TxResult]) -> Result<(), TabulaError> {
+    for (tx_idx, tx) in txs.iter().enumerate() {
+        if let TxResult::Success { access_trace, .. } = tx {
+            for (i, event) in access_trace.iter().enumerate() {
+                if event.effect_ordinal_in_tx != i as u32 {
+                    return Err(TabulaError::ConsistencyError(format!(
+                        "invalid E-Trace identity for tx {} at time {}: expected effect ordinal {}, got {}",
+                        tx_idx, event.time, i, event.effect_ordinal_in_tx
+                    )));
+                }
+            }
         }
-        *expected += 1;
     }
     Ok(())
 }
@@ -97,8 +99,9 @@ pub fn check_etrace_identity(events: &[AccessEvent]) -> Result<(), TabulaError> 
 pub fn check_consistency_status(
     events: &[AccessEvent],
     read_set_old: &[(CellKey, Option<Value>)],
+    txs: &[TxResult],
 ) -> ExecutionConsistencyStatus {
-    match check_consistency(events, read_set_old) {
+    match check_consistency(events, read_set_old, txs) {
         Ok(()) => ExecutionConsistencyStatus::Passed,
         Err(e) => ExecutionConsistencyStatus::Failed {
             reason: e.to_string(),

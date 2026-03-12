@@ -15,7 +15,6 @@ fn test_execution_event_borsh_round_trip() {
         value: Value::U64(100),
         val_is_null: false,
         time: 1,
-        tx_index: 0,
         effect_ordinal_in_tx: 0,
     };
     let bytes = borsh::to_vec(&event).unwrap();
@@ -49,7 +48,6 @@ fn test_batch_result_successful_events() {
         value: Value::U64(42),
         val_is_null: false,
         time: 1,
-        tx_index: 0,
         effect_ordinal_in_tx: 0,
     };
     let result = BatchResult {
