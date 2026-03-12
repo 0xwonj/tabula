@@ -21,6 +21,6 @@ pub use tx::{Batch, ProgramBudgets, Transaction};
 
 // ── Execution output ──
 pub use event::{
-    AccessEvent, ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, ExecutionResult,
-    LogicalTime, OpKind, TxOutcome,
+    AccessEvent, BatchResult, ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, LogicalTime,
+    OpKind, TxResult,
 };

@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use tabula_core::{CellKey, ExecutionResult};
+use tabula_core::{BatchResult, CellKey};
 
 /// Access pattern for keys on a short-run proof path.
 ///
@@ -34,7 +34,7 @@ pub enum KeyRoute {
     SortedMemory,
 }
 
-/// Route every accessed key in an `ExecutionResult` to its proof path.
+/// Route every accessed key in a `BatchResult` to its proof path.
 ///
 /// A key is `SortedMemory` if it appears in `write_set_final`, regardless of
 /// whether it was also read. A key is `ReadOnly` if it was accessed
@@ -49,15 +49,13 @@ pub enum KeyRoute {
 /// are currently routed to `SortedMemory`. Phase 2 will add heuristics
 /// to promote eligible keys to `ShortRun(AccessPattern)`.
 ///
-/// # Invariant assumption
+/// # Invariant
 ///
-/// This function assumes `result.events` contains only events from
-/// **successful** transactions. Failed-tx events live in
-/// `TxOutcome::Failed.partial_events` and are excluded by the executor's
-/// rollback. If this invariant were violated (failed-tx write events in
-/// `result.events`), a key with a rolled-back write could be mis-routed
-/// as `ReadOnly` despite having a write access row in the execution trace.
-pub fn route_keys(result: &ExecutionResult) -> BTreeMap<CellKey, KeyRoute> {
+/// Only events from successful transactions are considered. Failed-tx events
+/// live in `TxResult::Failed { partial_events, .. }` and are excluded by
+/// `successful_events()`. This ensures a key with a rolled-back write
+/// is not mis-routed.
+pub fn route_keys(result: &BatchResult) -> BTreeMap<CellKey, KeyRoute> {
     let written: BTreeSet<CellKey> = result.write_set_final.iter().map(|(key, _)| *key).collect();
 
     let mut routes = BTreeMap::new();
@@ -65,7 +63,7 @@ pub fn route_keys(result: &ExecutionResult) -> BTreeMap<CellKey, KeyRoute> {
     // All event keys: ReadOnly unless overridden by write_set_final.
     // `or_insert` is correct: every event for the same key produces the same route
     // because routing is determined solely by write_set_final membership, not event type.
-    for event in &result.events {
+    for event in result.successful_events() {
         routes
             .entry(event.key)
             .or_insert(if written.contains(&event.key) {

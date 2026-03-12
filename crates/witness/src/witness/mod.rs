@@ -1,7 +1,7 @@
 //! Witness pipeline: transforms executor output into structured proof witness data.
 //!
 //! - [`types`]: Data structures (`InitRow`, `AccessRow`, `ColumnWitness`, `BatchWitness`)
-//! - [`generator`]: `WitnessGenerator` — orchestrates ExecutionResult → BatchWitness
+//! - [`generator`]: `WitnessGenerator` — orchestrates BatchResult → BatchWitness
 //! - [`encoding`]: Value encoding, SSMC hash-chain, column commitments, state root
 //! - [`route`]: `KeyRoute` — classifies keys for memory-layer proof path selection
 //! - [`program_info`]: `ProgramInfo` — per-program metadata for proof optimization

@@ -226,7 +226,8 @@ proptest! {
             &batch, &prog, &snap, &env, &BTreeMap::new(),
         ).unwrap();
 
-        let check = check_consistency(&result.events, &result.read_set_old);
+        let events: Vec<_> = result.successful_events().cloned().collect();
+        let check = check_consistency(&events, &result.read_set_old);
         prop_assert!(check.is_ok(), "consistency check failed: {:?}", check.err());
     }
 }

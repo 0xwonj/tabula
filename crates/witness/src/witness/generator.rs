@@ -1,4 +1,4 @@
-//! Witness generation: transforms `ExecutionResult` into `BatchWitness`.
+//! Witness generation: transforms `BatchResult` into `BatchWitness`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -9,7 +9,7 @@ use tabula_commitment::{
 };
 use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
-use tabula_core::{ColId, ExecutionResult, OpKind, RowKey, TableId, TableSchema, ValueType};
+use tabula_core::{BatchResult, ColId, OpKind, RowKey, TableId, TableSchema, ValueType};
 
 use super::encoding::{
     compute_state_root, encode_value, encode_value_with_null_flag, proof_column_commitment,
@@ -30,7 +30,7 @@ type ColumnWitnessResult<H> = (
 
 /// Generates structured witness data from execution results.
 ///
-/// Bridges the executor's `ExecutionResult` to proof-system trace tables
+/// Bridges the executor's `BatchResult` to proof-system trace tables
 /// by encoding values into field elements and computing state transitions.
 pub struct WitnessGenerator<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> {
     vc: HybridVC<H>,
@@ -54,7 +54,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
     /// - `old_column_states`: Pre-batch column states for all columns referenced.
     pub fn generate(
         &self,
-        result: &ExecutionResult,
+        result: &BatchResult,
         schemas: &BTreeMap<TableId, TableSchema>,
         old_column_states: &BTreeMap<(TableId, ColId), ColumnState<H>>,
     ) -> Result<BatchWitness<H>, TabulaError> {
@@ -108,7 +108,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
             column_metas,
             old_state_root,
             new_state_root,
-            tx_outcomes: result.tx_outcomes.clone(),
+            tx_results: result.txs.clone(),
             key_routes,
         })
     }
@@ -183,9 +183,9 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
     }
 
     /// Collect all `(table, col)` pairs touched by events or writes.
-    fn collect_touched(result: &ExecutionResult) -> BTreeSet<(TableId, ColId)> {
+    fn collect_touched(result: &BatchResult) -> BTreeSet<(TableId, ColId)> {
         let mut touched = BTreeSet::new();
-        for event in &result.events {
+        for event in result.successful_events() {
             touched.insert((event.key.table, event.key.col));
         }
         for (key, _) in &result.write_set_final {
@@ -222,7 +222,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
     /// Build init rows from `read_set_old`, grouped by `(t,c)`, sorted by row key.
     fn build_init_rows(
         &self,
-        result: &ExecutionResult,
+        result: &BatchResult,
         type_map: &BTreeMap<(TableId, ColId), ValueType>,
     ) -> Result<BTreeMap<(TableId, ColId), Vec<InitRow>>, TabulaError> {
         let mut grouped: BTreeMap<(TableId, ColId), Vec<InitRow>> = BTreeMap::new();
@@ -249,15 +249,15 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
         Ok(grouped)
     }
 
-    /// Build access rows from `events`, grouped by `(t,c)`, preserving event order.
+    /// Build access rows from successful events, grouped by `(t,c)`, preserving event order.
     fn build_access_rows(
         &self,
-        result: &ExecutionResult,
+        result: &BatchResult,
         type_map: &BTreeMap<(TableId, ColId), ValueType>,
     ) -> Result<BTreeMap<(TableId, ColId), Vec<AccessRow>>, TabulaError> {
         let mut grouped: BTreeMap<(TableId, ColId), Vec<AccessRow>> = BTreeMap::new();
 
-        for event in &result.events {
+        for event in result.successful_events() {
             let tc = (event.key.table, event.key.col);
             let value_type = *type_map.get(&tc).ok_or_else(|| TabulaError::ProofError {
                 phase: "witness",
@@ -293,7 +293,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
     /// Returns writes as `(RowKey, Option<Vec<BabyBear>>)` — `None` for deletes.
     fn group_writes(
         &self,
-        result: &ExecutionResult,
+        result: &BatchResult,
         type_map: &BTreeMap<(TableId, ColId), ValueType>,
     ) -> Result<BTreeMap<(TableId, ColId), ColumnWrites>, TabulaError> {
         let mut grouped: BTreeMap<(TableId, ColId), ColumnWrites> = BTreeMap::new();

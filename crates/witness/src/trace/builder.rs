@@ -5,7 +5,7 @@ use p3_baby_bear::BabyBear;
 use tabula_commitment::{FieldHasher, NativeDigest};
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StaticTableProvider;
-use tabula_core::{Batch, ColId, ExecutionResult, TableId, TableSchema};
+use tabula_core::{Batch, BatchResult, ColId, TableId, TableSchema};
 use tabula_ir::Program;
 
 use crate::witness::BatchWitness;
@@ -63,7 +63,7 @@ where
         &self,
         program: &Program,
         batch: &Batch,
-        execution_result: &ExecutionResult,
+        execution_result: &BatchResult,
         schemas: &BTreeMap<TableId, TableSchema>,
         static_tables: &dyn StaticTableProvider,
         hasher: H,
@@ -139,7 +139,7 @@ where
         &self,
         program: &Program,
         batch: &Batch,
-        execution_result: &ExecutionResult,
+        execution_result: &BatchResult,
         schemas: &BTreeMap<TableId, TableSchema>,
         static_tables: &dyn StaticTableProvider,
         hasher: H,

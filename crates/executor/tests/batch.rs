@@ -5,7 +5,7 @@ mod common;
 use std::collections::BTreeMap;
 
 use tabula_core::{
-    Batch, CellKey, ColId, ColumnDef, RowKey, TableId, TableSchema, TxOutcome, TxTypeId, Value,
+    Batch, CellKey, ColId, ColumnDef, RowKey, TableId, TableSchema, TxResult, TxTypeId, Value,
     ValueType,
 };
 use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
@@ -128,8 +128,8 @@ fn single_successful_tx() {
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    assert_eq!(result.tx_outcomes.len(), 1);
-    assert_eq!(result.tx_outcomes[0], TxOutcome::Success);
+    assert_eq!(result.txs.len(), 1);
+    assert!(result.txs[0].is_success());
     assert_eq!(
         result.write_set_final,
         vec![(cell(1, 0, 0), Some(Value::U64(42)))]
@@ -173,10 +173,9 @@ fn inter_tx_read_your_writes() {
     .unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    assert_eq!(
-        result.tx_outcomes,
-        vec![TxOutcome::Success, TxOutcome::Success]
-    );
+    assert_eq!(result.txs.len(), 2);
+    assert!(result.txs[0].is_success());
+    assert!(result.txs[1].is_success());
     assert!(
         result
             .write_set_final
@@ -204,9 +203,9 @@ fn failed_tx_rollback() {
     prog.register(transfer_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    assert_eq!(result.tx_outcomes[0], TxOutcome::Success);
-    assert!(matches!(result.tx_outcomes[1], TxOutcome::Failed { .. }));
-    assert_eq!(result.tx_outcomes[2], TxOutcome::Success);
+    assert!(result.txs[0].is_success());
+    assert!(matches!(result.txs[1], TxResult::Failed { .. }));
+    assert!(result.txs[2].is_success());
     assert!(
         result
             .write_set_final
@@ -234,7 +233,7 @@ fn invalid_signature() {
         ..test_env()
     };
     let result = execute_batch(&batch, &prog, &snap, &env, &BTreeMap::new()).unwrap();
-    assert!(matches!(result.tx_outcomes[0], TxOutcome::Failed { .. }));
+    assert!(matches!(result.txs[0], TxResult::Failed { .. }));
 }
 
 #[test]
@@ -253,7 +252,7 @@ fn invalid_nonce() {
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    assert!(matches!(result.tx_outcomes[0], TxOutcome::Failed { .. }));
+    assert!(matches!(result.txs[0], TxResult::Failed { .. }));
 }
 
 #[test]
@@ -265,7 +264,7 @@ fn empty_batch() {
     let prog = tabula_ir::Program::new();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    assert!(result.tx_outcomes.is_empty());
+    assert!(result.txs.is_empty());
     assert!(result.read_set_old.is_empty());
     assert!(result.write_set_final.is_empty());
 }
@@ -286,7 +285,7 @@ fn tx_outcomes_len_matches_batch() {
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    assert_eq!(result.tx_outcomes.len(), batch.transactions.len());
+    assert_eq!(result.txs.len(), batch.transactions.len());
 }
 
 #[test]
@@ -302,7 +301,7 @@ fn param_count_mismatch_fails() {
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
     assert!(
-        matches!(&result.tx_outcomes[0], TxOutcome::Failed { reason, .. } if reason.contains("expected 2 params"))
+        matches!(&result.txs[0], TxResult::Failed { reason, .. } if reason.contains("expected 2 params"))
     );
 }
 
@@ -324,7 +323,7 @@ fn param_type_mismatch_fails() {
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
     assert!(
-        matches!(&result.tx_outcomes[0], TxOutcome::Failed { reason, .. } if reason.contains("param 1"))
+        matches!(&result.txs[0], TxResult::Failed { reason, .. } if reason.contains("param 1"))
     );
 }
 
@@ -344,7 +343,7 @@ fn events_carry_correct_tx_index() {
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    let indices: Vec<u32> = result.events.iter().map(|e| e.tx_index).collect();
+    let indices: Vec<u32> = result.successful_events().map(|e| e.tx_index).collect();
     assert_eq!(indices, vec![0, 1, 2]);
 }
 
@@ -364,8 +363,8 @@ fn failed_tx_partial_events() {
     prog.register(transfer_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    match &result.tx_outcomes[0] {
-        TxOutcome::Failed {
+    match &result.txs[0] {
+        TxResult::Failed {
             partial_events,
             failed_instruction,
             ..
@@ -373,7 +372,7 @@ fn failed_tx_partial_events() {
             assert_eq!(partial_events.len(), 2);
             assert_eq!(*failed_instruction, Some(3));
         }
-        TxOutcome::Success => panic!("expected failure"),
+        TxResult::Success { .. } => panic!("expected failure"),
     }
 }
 
@@ -389,8 +388,8 @@ fn precheck_failure_empty_partial() {
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    match &result.tx_outcomes[0] {
-        TxOutcome::Failed {
+    match &result.txs[0] {
+        TxResult::Failed {
             partial_events,
             failed_instruction,
             ..
@@ -398,7 +397,7 @@ fn precheck_failure_empty_partial() {
             assert!(partial_events.is_empty());
             assert_eq!(*failed_instruction, None);
         }
-        TxOutcome::Success => panic!("expected failure"),
+        TxResult::Success { .. } => panic!("expected failure"),
     }
 }
 
@@ -420,15 +419,8 @@ fn multi_sender_independent_nonces() {
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    assert_eq!(
-        result.tx_outcomes,
-        vec![
-            TxOutcome::Success,
-            TxOutcome::Success,
-            TxOutcome::Success,
-            TxOutcome::Success
-        ]
-    );
+    assert_eq!(result.txs.len(), 4);
+    assert!(result.txs.iter().all(|tx| tx.is_success()));
 }
 
 #[test]
@@ -450,8 +442,8 @@ fn failed_tx_reads_not_in_read_set() {
     prog.register(transfer_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    assert_eq!(result.tx_outcomes[0], TxOutcome::Success);
-    assert!(matches!(result.tx_outcomes[1], TxOutcome::Failed { .. }));
+    assert!(result.txs[0].is_success());
+    assert!(matches!(result.txs[1], TxResult::Failed { .. }));
 
     let read_keys: Vec<CellKey> = result.read_set_old.iter().map(|(k, _)| *k).collect();
     assert!(read_keys.contains(&cell(1, 0, 0)));
@@ -493,10 +485,11 @@ fn emitted_events_accumulate_across_txs() {
     prog.register(emit_def).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    assert_eq!(result.emitted.len(), 3);
-    assert_eq!(result.emitted[0].data, vec![Value::U64(1)]);
-    assert_eq!(result.emitted[1].data, vec![Value::U64(2)]);
-    assert_eq!(result.emitted[2].data, vec![Value::U64(3)]);
+    let emitted: Vec<_> = result.successful_emitted().collect();
+    assert_eq!(emitted.len(), 3);
+    assert_eq!(emitted[0].data, vec![Value::U64(1)]);
+    assert_eq!(emitted[1].data, vec![Value::U64(2)]);
+    assert_eq!(emitted[2].data, vec![Value::U64(3)]);
 }
 
 #[test]
@@ -509,5 +502,5 @@ fn unknown_tx_type_fails() {
     let prog = tabula_ir::Program::new();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    assert!(matches!(result.tx_outcomes[0], TxOutcome::Failed { .. }));
+    assert!(matches!(result.txs[0], TxResult::Failed { .. }));
 }

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use tabula_core::{ExecutionResult, TxOutcome, Value};
+use tabula_core::{BatchResult, TxResult, Value};
 use tabula_witness::witness::route::KeyRoute;
 
 use super::*;
@@ -11,12 +11,13 @@ use super::*;
 fn state_root_deterministic() {
     let wg = make_wg();
     let vc = mock_vc();
-    let result = ExecutionResult {
+    let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![],
-        events: vec![read_event(1, 0, 1, 10, 1, 0)],
-        emitted: vec![],
-        tx_outcomes: vec![TxOutcome::Success],
+        txs: vec![TxResult::Success {
+            emitted: vec![],
+            access_trace: vec![read_event(1, 0, 1, 10, 1, 0)],
+        }],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10)])].into();
@@ -30,15 +31,16 @@ fn state_root_deterministic() {
 fn state_root_changes_on_write() {
     let wg = make_wg();
     let vc = mock_vc();
-    let result = ExecutionResult {
+    let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(20)))],
-        events: vec![
-            read_event(1, 0, 1, 10, 1, 0),
-            write_event(1, 0, 1, 20, 2, 0),
-        ],
-        emitted: vec![],
-        tx_outcomes: vec![TxOutcome::Success],
+        txs: vec![TxResult::Success {
+            emitted: vec![],
+            access_trace: vec![
+                read_event(1, 0, 1, 10, 1, 0),
+                write_event(1, 0, 1, 20, 2, 0),
+            ],
+        }],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10)])].into();
@@ -50,15 +52,16 @@ fn state_root_changes_on_write() {
 fn state_root_empty_state() {
     let wg = make_wg();
     let vc = mock_vc();
-    let result = ExecutionResult {
+    let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), None)],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(1)))],
-        events: vec![
-            null_read_event(1, 0, 1, 1, 0),
-            write_event(1, 0, 1, 1, 2, 0),
-        ],
-        emitted: vec![],
-        tx_outcomes: vec![TxOutcome::Success],
+        txs: vec![TxResult::Success {
+            emitted: vec![],
+            access_trace: vec![
+                null_read_event(1, 0, 1, 1, 0),
+                write_event(1, 0, 1, 1, 2, 0),
+            ],
+        }],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = [empty_column_state(&vc, 1, 0)].into();
@@ -72,7 +75,7 @@ fn state_root_empty_state() {
 fn e2e_full_flow_single_column() {
     let wg = make_wg();
     let vc = mock_vc();
-    let result = ExecutionResult {
+    let result = BatchResult {
         read_set_old: vec![
             (ck(1, 0, 1), Some(Value::U64(10))),
             (ck(1, 0, 2), Some(Value::U64(20))),
@@ -81,14 +84,15 @@ fn e2e_full_flow_single_column() {
             (ck(1, 0, 1), Some(Value::U64(15))),
             (ck(1, 0, 3), Some(Value::U64(30))),
         ],
-        events: vec![
-            read_event(1, 0, 1, 10, 1, 0),
-            read_event(1, 0, 2, 20, 2, 0),
-            write_event(1, 0, 1, 15, 3, 0),
-            write_event(1, 0, 3, 30, 4, 0),
-        ],
-        emitted: vec![],
-        tx_outcomes: vec![TxOutcome::Success],
+        txs: vec![TxResult::Success {
+            emitted: vec![],
+            access_trace: vec![
+                read_event(1, 0, 1, 10, 1, 0),
+                read_event(1, 0, 2, 20, 2, 0),
+                write_event(1, 0, 1, 15, 3, 0),
+                write_event(1, 0, 3, 30, 4, 0),
+            ],
+        }],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10), (2, 20)])].into();
@@ -100,14 +104,14 @@ fn e2e_full_flow_single_column() {
     assert_eq!(col_w.access_rows.len(), 4);
     assert!(col_w.meta.is_touched);
     assert!(col_w.merge_trace.is_some());
-    assert_eq!(witness.tx_outcomes.len(), 1);
+    assert_eq!(witness.tx_results.len(), 1);
 }
 
 #[test]
 fn e2e_two_columns_multi_tx() {
     let wg = make_wg();
     let vc = mock_vc();
-    let result = ExecutionResult {
+    let result = BatchResult {
         read_set_old: vec![
             (ck(1, 0, 1), Some(Value::U64(10))),
             (ck(1, 1, 1), Some(Value::U64(100))),
@@ -116,16 +120,24 @@ fn e2e_two_columns_multi_tx() {
             (ck(1, 0, 1), Some(Value::U64(15))),
             (ck(1, 1, 1), Some(Value::U64(200))),
         ],
-        events: vec![
+        txs: vec![
             // tx 0: read+write col 0
-            read_event(1, 0, 1, 10, 1, 0),
-            write_event(1, 0, 1, 15, 2, 0),
+            TxResult::Success {
+                emitted: vec![],
+                access_trace: vec![
+                    read_event(1, 0, 1, 10, 1, 0),
+                    write_event(1, 0, 1, 15, 2, 0),
+                ],
+            },
             // tx 1: read+write col 1
-            read_event(1, 1, 1, 100, 3, 1),
-            write_event(1, 1, 1, 200, 4, 1),
+            TxResult::Success {
+                emitted: vec![],
+                access_trace: vec![
+                    read_event(1, 1, 1, 100, 3, 1),
+                    write_event(1, 1, 1, 200, 4, 1),
+                ],
+            },
         ],
-        emitted: vec![],
-        tx_outcomes: vec![TxOutcome::Success, TxOutcome::Success],
     };
     let schema = schemas(vec![u64_schema(1, &[0, 1])]);
     let states: BTreeMap<_, _> = [
@@ -137,7 +149,7 @@ fn e2e_two_columns_multi_tx() {
 
     assert_eq!(witness.columns.len(), 2);
     assert!(witness.columns.iter().all(|c| c.meta.is_touched));
-    assert_eq!(witness.tx_outcomes.len(), 2);
+    assert_eq!(witness.tx_results.len(), 2);
     assert_ne!(witness.old_state_root, witness.new_state_root);
 }
 
@@ -145,12 +157,13 @@ fn e2e_two_columns_multi_tx() {
 fn missing_schema_returns_error() {
     let wg = make_wg();
     let vc = mock_vc();
-    let result = ExecutionResult {
+    let result = BatchResult {
         read_set_old: vec![],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        events: vec![write_event(1, 0, 1, 10, 1, 0)],
-        emitted: vec![],
-        tx_outcomes: vec![TxOutcome::Success],
+        txs: vec![TxResult::Success {
+            emitted: vec![],
+            access_trace: vec![write_event(1, 0, 1, 10, 1, 0)],
+        }],
     };
     let schema = schemas(vec![]); // no schemas!
     let states: BTreeMap<_, _> = [empty_column_state(&vc, 1, 0)].into();
@@ -160,12 +173,13 @@ fn missing_schema_returns_error() {
 #[test]
 fn touched_column_missing_from_old_states_returns_error() {
     let wg = make_wg();
-    let result = ExecutionResult {
+    let result = BatchResult {
         read_set_old: vec![],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        events: vec![write_event(1, 0, 1, 10, 1, 0)],
-        emitted: vec![],
-        tx_outcomes: vec![TxOutcome::Success],
+        txs: vec![TxResult::Success {
+            emitted: vec![],
+            access_trace: vec![write_event(1, 0, 1, 10, 1, 0)],
+        }],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = BTreeMap::new(); // no column states!
@@ -177,19 +191,20 @@ fn touched_column_missing_from_old_states_returns_error() {
 fn column_metas_populated_and_sorted() {
     let wg = make_wg();
     let vc = mock_vc();
-    let result = ExecutionResult {
+    let result = BatchResult {
         read_set_old: vec![
             (ck(1, 0, 1), Some(Value::U64(10))),
             (ck(1, 1, 1), Some(Value::U64(20))),
         ],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(15)))],
-        events: vec![
-            read_event(1, 0, 1, 10, 1, 0),
-            read_event(1, 1, 1, 20, 2, 0),
-            write_event(1, 0, 1, 15, 3, 0),
-        ],
-        emitted: vec![],
-        tx_outcomes: vec![TxOutcome::Success],
+        txs: vec![TxResult::Success {
+            emitted: vec![],
+            access_trace: vec![
+                read_event(1, 0, 1, 10, 1, 0),
+                read_event(1, 1, 1, 20, 2, 0),
+                write_event(1, 0, 1, 15, 3, 0),
+            ],
+        }],
     };
     let schema = schemas(vec![u64_schema(1, &[0, 1])]);
     let states: BTreeMap<_, _> = [
@@ -211,17 +226,18 @@ fn column_metas_populated_and_sorted() {
 }
 
 #[test]
-fn tx_outcomes_preserved() {
+fn tx_results_preserved() {
     let wg = make_wg();
     let vc = mock_vc();
-    let result = ExecutionResult {
+    let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![],
-        events: vec![read_event(1, 0, 1, 10, 1, 0)],
-        emitted: vec![],
-        tx_outcomes: vec![
-            TxOutcome::Success,
-            TxOutcome::Failed {
+        txs: vec![
+            TxResult::Success {
+                emitted: vec![],
+                access_trace: vec![read_event(1, 0, 1, 10, 1, 0)],
+            },
+            TxResult::Failed {
                 reason: "overflow".into(),
                 partial_events: vec![],
                 failed_instruction: Some(3),
@@ -231,8 +247,8 @@ fn tx_outcomes_preserved() {
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10)])].into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
-    assert_eq!(witness.tx_outcomes.len(), 2);
-    assert!(matches!(witness.tx_outcomes[1], TxOutcome::Failed { .. }));
+    assert_eq!(witness.tx_results.len(), 2);
+    assert!(matches!(witness.tx_results[1], TxResult::Failed { .. }));
 }
 
 // -- Key routing integration --
@@ -243,19 +259,20 @@ fn key_routes_populated() {
     let vc = mock_vc();
     let k_read = ck(1, 0, 1);
     let k_write = ck(1, 0, 2);
-    let result = ExecutionResult {
+    let result = BatchResult {
         read_set_old: vec![
             (k_read, Some(Value::U64(10))),
             (k_write, Some(Value::U64(20))),
         ],
         write_set_final: vec![(k_write, Some(Value::U64(99)))],
-        events: vec![
-            read_event(1, 0, 1, 10, 1, 0),
-            read_event(1, 0, 2, 20, 2, 0),
-            write_event(1, 0, 2, 99, 3, 0),
-        ],
-        emitted: vec![],
-        tx_outcomes: vec![TxOutcome::Success],
+        txs: vec![TxResult::Success {
+            emitted: vec![],
+            access_trace: vec![
+                read_event(1, 0, 1, 10, 1, 0),
+                read_event(1, 0, 2, 20, 2, 0),
+                write_event(1, 0, 2, 99, 3, 0),
+            ],
+        }],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10), (2, 20)])].into();

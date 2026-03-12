@@ -43,18 +43,35 @@ pub fn cmd_execute(
         .iter()
         .map(|(k, v)| StateCell::from_cell_pair(k, v))
         .collect();
+    let all_events: Vec<_> = executed
+        .txs
+        .iter()
+        .flat_map(|tx| tx.access_trace())
+        .cloned()
+        .collect();
     let trace = if include_trace {
-        Some(executed.events.clone())
+        Some(all_events)
     } else {
         None
     };
 
+    let emitted: Vec<_> = executed
+        .txs
+        .iter()
+        .filter_map(|tx| match tx {
+            tabula_core::TxResult::Success { emitted, .. } => Some(emitted.iter()),
+            _ => None,
+        })
+        .flatten()
+        .cloned()
+        .collect();
+
     if json_output {
         let output = ExecutionOutput {
-            tx_outcomes: executed.tx_outcomes.clone(),
+            tx_results: executed.txs.clone(),
             read_set,
             write_set,
-            emitted: executed.emitted.clone(),
+            emitted: emitted.clone(),
             consistency: executed.consistency.clone(),
             trace,
         };
@@ -64,10 +81,10 @@ pub fn cmd_execute(
 
     println!("=== Execution Results ===\n");
 
-    for (i, outcome) in executed.tx_outcomes.iter().enumerate() {
-        match outcome {
-            tabula_core::TxOutcome::Success => println!("  tx {i}: SUCCESS"),
-            tabula_core::TxOutcome::Failed {
+    for (i, tx_result) in executed.txs.iter().enumerate() {
+        match tx_result {
+            tabula_core::TxResult::Success { .. } => println!("  tx {i}: SUCCESS"),
+            tabula_core::TxResult::Failed {
                 reason,
                 partial_events,
                 failed_instruction,
@@ -92,7 +109,7 @@ pub fn cmd_execute(
         "Events:    {} total",
         trace.as_ref().map_or(0, std::vec::Vec::len)
     );
-    println!("Emitted:   {} total", executed.emitted.len());
+    println!("Emitted:   {} total", emitted.len());
     println!();
 
     println!("Write set (final state changes):");

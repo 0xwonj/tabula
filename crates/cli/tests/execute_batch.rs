@@ -2,7 +2,7 @@
 
 use tabula_core::mock::*;
 use tabula_core::{
-    Batch, CellKey, ColId, ColumnDef, RowKey, TableId, TableSchema, Transaction, TxOutcome,
+    Batch, CellKey, ColId, ColumnDef, RowKey, TableId, TableSchema, Transaction, TxResult,
     TxTypeId, Value, ValueType,
 };
 use tabula_executor::batch::{BatchEnv, execute_batch};
@@ -154,9 +154,9 @@ fn test_multi_tx_mixed_outcomes() {
     )
     .unwrap();
 
-    assert_eq!(result.tx_outcomes[0], TxOutcome::Success);
-    assert!(matches!(result.tx_outcomes[1], TxOutcome::Failed { .. }));
-    assert_eq!(result.tx_outcomes[2], TxOutcome::Success);
+    assert!(result.txs[0].is_success());
+    assert!(matches!(result.txs[1], TxResult::Failed { .. }));
+    assert!(result.txs[2].is_success());
 
     // Final: Alice = 700, Bob = 700, Charlie = 300
     let ws: std::collections::BTreeMap<_, _> = result.write_set_final.iter().copied().collect();
@@ -234,8 +234,7 @@ fn test_deterministic_execution() {
 
     assert_eq!(r1.read_set_old, r2.read_set_old);
     assert_eq!(r1.write_set_final, r2.write_set_final);
-    assert_eq!(r1.events, r2.events);
-    assert_eq!(r1.tx_outcomes, r2.tx_outcomes);
+    assert_eq!(r1.txs, r2.txs);
 }
 
 #[test]
@@ -276,6 +275,7 @@ fn test_consistency_passes_for_valid_batch() {
     )
     .unwrap();
 
-    assert!(result.tx_outcomes.iter().all(|o| *o == TxOutcome::Success));
-    assert!(check_consistency(&result.events, &result.read_set_old).is_ok());
+    assert!(result.txs.iter().all(|tx| tx.is_success()));
+    let all_events: Vec<_> = result.successful_events().cloned().collect();
+    assert!(check_consistency(&all_events, &result.read_set_old).is_ok());
 }

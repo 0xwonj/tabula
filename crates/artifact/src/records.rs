@@ -5,7 +5,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use tabula_core::{EmittedEvent, ExecutionConsistencyStatus, AccessEvent, TxOutcome};
+use tabula_core::{AccessEvent, EmittedEvent, ExecutionConsistencyStatus, TxResult};
 
 use crate::{ExecutionReceipt, ProgramArtifact, StarkProofSummary, StateCell, StateFile};
 
@@ -171,8 +171,8 @@ pub struct InstanceRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionSummary {
-    /// Per-tx outcomes.
-    pub tx_outcomes: Vec<TxOutcome>,
+    /// Per-tx results.
+    pub tx_results: Vec<TxResult>,
     /// Read set.
     pub read_set: Vec<StateCell>,
     /// Write set.

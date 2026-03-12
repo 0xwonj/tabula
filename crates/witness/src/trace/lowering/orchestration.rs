@@ -11,7 +11,7 @@ use tabula_commitment::BabyBearCodec;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{StaticTableProvider, ValueCodec};
 use tabula_core::{
-    Batch, CellKey, ColId, ExecutionResult, OpKind, TableId, TableSchema, TxOutcome, zero_value,
+    Batch, BatchResult, CellKey, ColId, OpKind, TableId, TableSchema, TxResult, zero_value,
 };
 use tabula_ir::Program;
 
@@ -34,7 +34,7 @@ use super::{build_type_map, lower_tx_body};
 /// For richer opcode coverage (arith/hash/lookup), a full instruction witness
 /// source is still required.
 pub fn lower_execution_records<const W: usize>(
-    result: &ExecutionResult,
+    result: &BatchResult,
     schemas: &BTreeMap<TableId, TableSchema>,
 ) -> Result<Vec<InstructionRecord>, TabulaError> {
     let mut value_types = BTreeMap::new();
@@ -45,14 +45,15 @@ pub fn lower_execution_records<const W: usize>(
     }
 
     let codec = BabyBearCodec;
-    let mut records = Vec::with_capacity(result.events.len());
+    let events: Vec<_> = result.successful_events().cloned().collect();
+    let mut records = Vec::with_capacity(events.len());
     let mut slot_vals = vec![vec![BabyBear::ZERO; W]; MAX_SLOTS];
     let mut slot_nulls = [false; MAX_SLOTS];
     let mut slot_by_key: BTreeMap<CellKey, usize> = BTreeMap::new();
     let mut next_slot = 0usize;
     let mut last_time: Option<u64> = None;
 
-    for (idx, event) in result.events.iter().enumerate() {
+    for (idx, event) in events.iter().enumerate() {
         if let Some(prev_time) = last_time
             && event.time < prev_time
         {
@@ -240,7 +241,7 @@ pub struct LoweringOutput {
 pub fn lower_program_batch<const W: usize>(
     program: &Program,
     batch: &Batch,
-    execution_result: &ExecutionResult,
+    result: &BatchResult,
     schemas: &BTreeMap<TableId, TableSchema>,
     static_tables: &dyn StaticTableProvider,
     empty_columns: &BTreeSet<(TableId, ColId)>,
@@ -250,26 +251,19 @@ pub fn lower_program_batch<const W: usize>(
     let type_map = build_type_map(schemas);
     let codec = BabyBearCodec;
 
-    // Pre-index events by tx_index.
-    let mut events_by_tx: BTreeMap<u32, Vec<&tabula_core::AccessEvent>> = BTreeMap::new();
-    for event in &execution_result.events {
-        events_by_tx.entry(event.tx_index).or_default().push(event);
-    }
-
     let mut all_records = Vec::new();
     let mut all_static_rows: BTreeMap<(u32, u16, u64), StaticTableRow> = BTreeMap::new();
 
     for (tx_idx, tx) in batch.transactions.iter().enumerate() {
         let tx_index = tx_idx as u32;
 
-        // Skip failed txs.
-        match &execution_result.tx_outcomes[tx_idx] {
-            TxOutcome::Success => {}
-            TxOutcome::Failed { .. } => continue,
-        }
+        // Skip failed txs; extract access trace from successful ones.
+        let tx_events: Vec<&tabula_core::AccessEvent> = match &result.txs[tx_idx] {
+            TxResult::Success { access_trace, .. } => access_trace.iter().collect(),
+            TxResult::Failed { .. } => continue,
+        };
 
         let tx_def = program.resolve(tx.tx_type)?;
-        let tx_events = events_by_tx.get(&tx_index).cloned().unwrap_or_default();
 
         let mut ctx = LoweringContext::<W>::new(
             tx_index,

@@ -17,14 +17,33 @@ pub struct ExecutedBatch {
 
 impl ExecutedBatch {
     pub fn into_execution_summary(self, include_trace: bool) -> ExecutionSummary {
+        let all_events: Vec<_> = self
+            .inner
+            .txs
+            .iter()
+            .flat_map(|tx| tx.access_trace())
+            .cloned()
+            .collect();
         let trace = if include_trace {
-            Some(self.inner.events.clone())
+            Some(all_events)
         } else {
             None
         };
 
+        let emitted: Vec<_> = self
+            .inner
+            .txs
+            .iter()
+            .filter_map(|tx| match tx {
+                tabula_core::TxResult::Success { emitted, .. } => Some(emitted.iter()),
+                _ => None,
+            })
+            .flatten()
+            .cloned()
+            .collect();
+
         ExecutionSummary {
-            tx_outcomes: self.inner.tx_outcomes,
+            tx_results: self.inner.txs,
             read_set: self
                 .inner
                 .read_set
@@ -37,7 +56,7 @@ impl ExecutedBatch {
                 .iter()
                 .map(|(k, v)| StateCell::from_cell_pair(k, v))
                 .collect(),
-            emitted: self.inner.emitted,
+            emitted,
             consistency: self.inner.consistency,
             trace,
             state_after: self.inner.state_after,

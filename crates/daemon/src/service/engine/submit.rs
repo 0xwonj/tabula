@@ -101,11 +101,20 @@ impl super::LocalEngine {
         // Build legacy receipt for non-STARK path.
         let has_stark_proof = stark_proof_summary.is_some();
         let proof_requested = req.prove || req.verify;
+        let emitted_count = executed
+            .inner
+            .txs
+            .iter()
+            .filter_map(|tx| match tx {
+                tabula_core::TxResult::Success { emitted, .. } => Some(emitted.len()),
+                _ => None,
+            })
+            .sum::<usize>();
         let proof = if proof_requested && !has_stark_proof {
             Some(build_receipt(
                 &components,
-                executed.inner.tx_outcomes.len(),
-                executed.inner.emitted.len(),
+                executed.inner.txs.len(),
+                emitted_count,
                 &executed.inner.consistency,
             ))
         } else {

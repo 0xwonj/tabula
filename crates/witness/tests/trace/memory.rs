@@ -80,7 +80,7 @@ fn trace_builder_builds_valid_memory_traces() {
         column_metas: vec![meta],
         old_state_root,
         new_state_root,
-        tx_outcomes: vec![TxOutcome::Success],
+        tx_results: vec![TxResult::Success { emitted: vec![], access_trace: vec![] }],
         key_routes: BTreeMap::<CellKey, KeyRoute>::new(),
     };
 
@@ -213,7 +213,7 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
         column_metas: vec![meta],
         old_state_root,
         new_state_root,
-        tx_outcomes: vec![TxOutcome::Success],
+        tx_results: vec![TxResult::Success { emitted: vec![], access_trace: vec![] }],
         key_routes: BTreeMap::<CellKey, KeyRoute>::new(),
     };
 
@@ -374,7 +374,7 @@ tx touch(id: u64) {
     };
     let execution_result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
         .expect("batch execution should succeed");
-    assert_eq!(execution_result.events.len(), 2);
+    assert_eq!(execution_result.successful_events().count(), 2);
 
     let vc = HybridVC::new(PoseidonHasher::new(), 1024);
     let codec = BabyBearCodec;

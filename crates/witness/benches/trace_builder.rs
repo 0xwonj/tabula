@@ -21,7 +21,7 @@ struct BenchSetup {
     witness: tabula_witness::BatchWitness<PoseidonHasher>,
     program: Program,
     batch: Batch,
-    result: tabula_core::ExecutionResult,
+    result: tabula_core::BatchResult,
     schemas_by_id: BTreeMap<TableId, tabula_core::TableSchema>,
 }
 

@@ -10,7 +10,7 @@ use tabula_artifact::{BatchFile, StateFile, merge_output_state_cells, normalize_
 use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
 use tabula_core::traits::Hasher;
 use tabula_core::{
-    Batch, CellKey, EmittedEvent, ExecutionConsistencyStatus, AccessEvent, TxOutcome, Value,
+    Batch, CellKey, ExecutionConsistencyStatus, TxResult, Value,
 };
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency_status;
@@ -37,16 +37,12 @@ pub struct ExecutedBatch {
     pub state_before: StateFile,
     /// Post-execution state.
     pub state_after: StateFile,
-    /// Per-transaction outcomes.
-    pub tx_outcomes: Vec<TxOutcome>,
+    /// Per-transaction results (each carries its own access trace and emitted events).
+    pub txs: Vec<TxResult>,
     /// Read set from base state.
     pub read_set: Vec<(CellKey, Option<Value>)>,
     /// Final write set.
     pub write_set: Vec<(CellKey, Option<Value>)>,
-    /// Emitted events.
-    pub emitted: Vec<EmittedEvent>,
-    /// Full execution trace.
-    pub events: Vec<AccessEvent>,
     /// Consistency check result.
     pub consistency: ExecutionConsistencyStatus,
 }
@@ -98,7 +94,8 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, DriverError> {
         })?;
 
     // 5. Consistency check.
-    let consistency = check_consistency_status(&result.events, &result.read_set_old);
+    let all_events: Vec<_> = result.successful_events().cloned().collect();
+    let consistency = check_consistency_status(&all_events, &result.read_set_old);
 
     // 6. Merge output state.
     let state_after = StateFile {
@@ -108,11 +105,9 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, DriverError> {
     Ok(ExecutedBatch {
         state_before: normalized,
         state_after,
-        tx_outcomes: result.tx_outcomes,
+        txs: result.txs,
         read_set: result.read_set_old,
         write_set: result.write_set_final,
-        emitted: result.emitted,
-        events: result.events,
         consistency,
     })
 }
@@ -141,13 +136,8 @@ mod tests {
         })
         .expect("run_batch");
 
-        assert_eq!(executed.tx_outcomes.len(), 3);
-        assert!(
-            executed
-                .tx_outcomes
-                .iter()
-                .all(|o| matches!(o, TxOutcome::Success))
-        );
+        assert_eq!(executed.txs.len(), 3);
+        assert!(executed.txs.iter().all(|tx| tx.is_success()));
 
         // After transfers: row0=1000-300+50=750, row1=500+300-200=600, row2=200+200-50=350
         let val = |row: u64| -> Option<Value> {
@@ -211,7 +201,7 @@ mod tests {
         })
         .expect("run_batch");
 
-        assert!(executed.tx_outcomes.is_empty());
+        assert!(executed.txs.is_empty());
         assert!(executed.write_set.is_empty());
         // State passthrough: output equals normalized input
         assert_eq!(

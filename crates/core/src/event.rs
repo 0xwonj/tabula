@@ -76,22 +76,46 @@ impl AccessEvent {
     }
 }
 
-/// Per-transaction execution outcome.
+/// Per-transaction execution result.
+///
+/// Carries per-tx data: on success, the access trace and emitted events;
+/// on failure, diagnostic information about what went wrong.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TxOutcome {
+pub enum TxResult {
     /// Transaction executed successfully.
-    Success,
+    Success {
+        /// Application events emitted during this transaction.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        emitted: Vec<EmittedEvent>,
+        /// State-access events recorded during this transaction.
+        access_trace: Vec<AccessEvent>,
+    },
     /// Transaction failed; all its state changes were rolled back.
     Failed {
         /// Human-readable failure reason.
         reason: String,
-        /// Execution events produced before the failure (rolled back from state).
+        /// Access events produced before the failure (rolled back from state).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         partial_events: Vec<AccessEvent>,
         /// Index of the instruction that failed (None for pre-execution failures).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         failed_instruction: Option<usize>,
     },
+}
+
+impl TxResult {
+    /// Whether this transaction succeeded.
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Success { .. })
+    }
+
+    /// Access trace for successful transactions, empty slice for failed ones.
+    pub fn access_trace(&self) -> &[AccessEvent] {
+        match self {
+            Self::Success { access_trace, .. } => access_trace,
+            Self::Failed { .. } => &[],
+        }
+    }
 }
 
 /// An application-level event emitted during execution.
@@ -118,18 +142,40 @@ pub enum ExecutionConsistencyStatus {
 /// The output of deterministic batch execution.
 ///
 /// This is the handoff point between Phase A (execution) and Phase B (commitment).
+/// Per-transaction data (access trace, emitted events, failure info) lives in
+/// [`TxResult`] variants, eliminating the need for post-hoc repartitioning.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecutionResult {
+pub struct BatchResult {
     /// Cells read from committed state (not from overlay). Deduplicated.
     /// `None` = cell was absent.
     pub read_set_old: Vec<(CellKey, Option<Value>)>,
     /// Final writes to apply to committed state. Coalesced (last-write-wins).
     /// `None` = delete (write null).
     pub write_set_final: Vec<(CellKey, Option<Value>)>,
-    /// Full execution trace for consistency proving.
-    pub events: Vec<AccessEvent>,
-    /// Emitted application events / receipts.
-    pub emitted: Vec<EmittedEvent>,
-    /// Per-transaction outcomes (success/failure).
-    pub tx_outcomes: Vec<TxOutcome>,
+    /// Per-transaction results, in batch order.
+    pub txs: Vec<TxResult>,
+}
+
+impl BatchResult {
+    /// Iterate access events from all successful transactions, preserving order.
+    pub fn successful_events(&self) -> impl Iterator<Item = &AccessEvent> + '_ {
+        self.txs
+            .iter()
+            .filter_map(|tx| match tx {
+                TxResult::Success { access_trace, .. } => Some(access_trace.iter()),
+                TxResult::Failed { .. } => None,
+            })
+            .flatten()
+    }
+
+    /// Iterate emitted events from all successful transactions, preserving order.
+    pub fn successful_emitted(&self) -> impl Iterator<Item = &EmittedEvent> + '_ {
+        self.txs
+            .iter()
+            .filter_map(|tx| match tx {
+                TxResult::Success { emitted, .. } => Some(emitted.iter()),
+                TxResult::Failed { .. } => None,
+            })
+            .flatten()
+    }
 }

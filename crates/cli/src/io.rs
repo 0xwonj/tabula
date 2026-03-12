@@ -1,7 +1,7 @@
 //! JSON input/output types for the CLI.
 
 use tabula_artifact::{StateCell as ArtifactStateCell, StateFile as ArtifactStateFile};
-use tabula_core::{EmittedEvent, ExecutionConsistencyStatus, AccessEvent, TxOutcome};
+use tabula_core::{AccessEvent, EmittedEvent, ExecutionConsistencyStatus, TxResult};
 
 /// JSON representation of a state file.
 pub type StateFile = ArtifactStateFile;
@@ -10,8 +10,8 @@ pub type StateCell = ArtifactStateCell;
 /// JSON representation of execution results.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionOutput {
-    /// Per-transaction outcomes.
-    pub tx_outcomes: Vec<TxOutcome>,
+    /// Per-transaction results.
+    pub tx_results: Vec<TxResult>,
     /// Cells read from committed state.
     pub read_set: Vec<StateCell>,
     /// Final writes to committed state.

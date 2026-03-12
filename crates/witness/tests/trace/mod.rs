@@ -13,7 +13,7 @@ use tabula_commitment::{
 use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
 use tabula_core::traits::ValueCodec;
 use tabula_core::{
-    Batch, CellKey, ColId, RowKey, TableId, Transaction, TxOutcome, TxTypeId, Value,
+    Batch, CellKey, ColId, RowKey, TableId, Transaction, TxResult, TxTypeId, Value,
 };
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_ir::Program;

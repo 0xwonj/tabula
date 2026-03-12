@@ -41,12 +41,10 @@ pub fn prove_batch(
         .map(|s| (s.id, s))
         .collect();
 
-    let execution_result = tabula_core::ExecutionResult {
+    let execution_result = tabula_core::BatchResult {
         read_set_old: executed.inner.read_set.clone(),
         write_set_final: executed.inner.write_set.clone(),
-        events: executed.inner.events.clone(),
-        emitted: executed.inner.emitted.clone(),
-        tx_outcomes: executed.inner.tx_outcomes.clone(),
+        txs: executed.inner.txs.clone(),
     };
 
     let batch = Batch {

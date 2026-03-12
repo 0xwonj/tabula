@@ -11,7 +11,7 @@ pub(super) fn compile_execute_witness(
 ) -> (
     Program,
     Batch,
-    tabula_core::ExecutionResult,
+    tabula_core::BatchResult,
     BatchWitness<PoseidonHasher>,
     BTreeMap<TableId, tabula_core::TableSchema>,
 ) {
@@ -93,7 +93,7 @@ pub(super) fn make_tx(params: Vec<Value>) -> Transaction {
 pub(super) fn lower_build_validate(
     program: &Program,
     batch: &Batch,
-    result: &tabula_core::ExecutionResult,
+    result: &tabula_core::BatchResult,
     witness: &BatchWitness<PoseidonHasher>,
     schemas: &BTreeMap<TableId, tabula_core::TableSchema>,
 ) {
@@ -146,7 +146,7 @@ tx op(id: u64) {
         &[(TableId(0), ColId(0), RowKey(10), Value::U64(100))],
         vec![make_tx(vec![Value::U64(10)])],
     );
-    assert!(matches!(result.tx_outcomes[0], TxOutcome::Success));
+    assert!(matches!(result.txs[0], TxResult::Success { .. }));
     lower_build_validate(&program, &batch, &result, &witness, &schemas);
 }
 
@@ -167,7 +167,7 @@ tx op(id: u64) {
         &[(TableId(0), ColId(0), RowKey(5), Value::U64(100))],
         vec![make_tx(vec![Value::U64(5)])],
     );
-    assert!(matches!(result.tx_outcomes[0], TxOutcome::Success));
+    assert!(matches!(result.txs[0], TxResult::Success { .. }));
     lower_build_validate(&program, &batch, &result, &witness, &schemas);
 }
 
@@ -184,7 +184,7 @@ tx touch(id: u64) {
         &[(TableId(0), ColId(0), RowKey(10), Value::U64(50))],
         vec![make_tx(vec![Value::U64(10)])],
     );
-    assert!(matches!(result.tx_outcomes[0], TxOutcome::Success));
+    assert!(matches!(result.txs[0], TxResult::Success { .. }));
 
     let builder = TraceBuilder::<PoseidonHasher, 3>::new(&witness);
     let store = builder
@@ -286,7 +286,7 @@ tx transfer(from: u64, to: u64, amount: u64) {
         ],
         vec![make_tx(vec![Value::U64(0), Value::U64(1), Value::U64(300)])],
     );
-    assert!(matches!(result.tx_outcomes[0], TxOutcome::Success));
+    assert!(matches!(result.txs[0], TxResult::Success { .. }));
     lower_build_validate(&program, &batch, &result, &witness, &schemas);
 }
 
@@ -336,9 +336,9 @@ tx transfer(from: u64, to: u64, amount: u64) {
             },
         ],
     );
-    for (i, outcome) in result.tx_outcomes.iter().enumerate() {
+    for (i, outcome) in result.txs.iter().enumerate() {
         assert!(
-            matches!(outcome, TxOutcome::Success),
+            matches!(outcome, TxResult::Success { .. }),
             "tx {i} should succeed, got: {outcome:?}"
         );
     }

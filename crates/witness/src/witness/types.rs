@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use p3_baby_bear::BabyBear;
 
 use tabula_commitment::{ColumnMeta, ColumnState, FieldHasher, MergeTrace, NativeDigest};
-use tabula_core::{CellKey, ColId, LogicalTime, TableId, TxOutcome, ValueType};
+use tabula_core::{CellKey, ColId, LogicalTime, TableId, TxResult, ValueType};
 
 use super::route::KeyRoute;
 
@@ -94,8 +94,8 @@ pub struct BatchWitness<H: FieldHasher> {
     pub old_state_root: NativeDigest,
     /// State root after the batch.
     pub new_state_root: NativeDigest,
-    /// Per-transaction outcomes.
-    pub tx_outcomes: Vec<TxOutcome>,
+    /// Per-transaction results.
+    pub tx_results: Vec<TxResult>,
     /// Per-key proof path routing (ReadOnly / ShortRun / SortedMemory).
     /// Determines which memory-layer chip handles each key.
     pub key_routes: BTreeMap<CellKey, KeyRoute>,
@@ -108,7 +108,7 @@ impl<H: FieldHasher> core::fmt::Debug for BatchWitness<H> {
             .field("column_metas", &self.column_metas.len())
             .field("old_state_root", &self.old_state_root)
             .field("new_state_root", &self.new_state_root)
-            .field("tx_outcomes", &self.tx_outcomes.len())
+            .field("tx_results", &self.tx_results.len())
             .field("key_routes", &self.key_routes.len())
             .finish()
     }

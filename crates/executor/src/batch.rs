@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateSnapshot, StaticTableProvider};
-use tabula_core::{Batch, EmittedEvent, ExecutionResult, TxOutcome, Value};
+use tabula_core::{BatchResult, Batch, TxResult, Value};
 
 use tabula_ir::{ParamDef, Program};
 
@@ -50,18 +50,17 @@ pub struct BatchEnv<'a> {
 
 /// Execute a batch of transactions against a state snapshot.
 ///
-/// Returns an `ExecutionResult` containing the read set, write set, events,
-/// emitted events, and per-tx outcomes.
+/// Returns a `BatchResult` containing the read set, write set, and per-tx results
+/// (each carrying its own access trace and emitted events).
 pub fn execute_batch<S: StateSnapshot>(
     batch: &Batch,
     program: &Program,
     snapshot: &S,
     env: &BatchEnv<'_>,
     initial_nonces: &BTreeMap<[u8; 32], u64>,
-) -> Result<ExecutionResult, TabulaError> {
+) -> Result<BatchResult, TabulaError> {
     let mut overlay = Overlay::new(snapshot);
-    let mut tx_outcomes = Vec::new();
-    let mut all_emitted: Vec<EmittedEvent> = Vec::new();
+    let mut txs: Vec<TxResult> = Vec::new();
     let mut nonces: BTreeMap<[u8; 32], u64> = initial_nonces.clone();
 
     let ctx = interpreter::ExecContext {
@@ -79,7 +78,7 @@ pub fn execute_batch<S: StateSnapshot>(
         let tx_def = match program.resolve(tx.tx_type) {
             Ok(def) => def,
             Err(e) => {
-                tx_outcomes.push(TxOutcome::Failed {
+                txs.push(TxResult::Failed {
                     reason: e.to_string(),
                     partial_events: vec![],
                     failed_instruction: None,
@@ -90,7 +89,7 @@ pub fn execute_batch<S: StateSnapshot>(
 
         // Validate param count and types against schema
         if let Err(e) = validate_params(&tx.params, &tx_def.param_schema) {
-            tx_outcomes.push(TxOutcome::Failed {
+            txs.push(TxResult::Failed {
                 reason: e.to_string(),
                 partial_events: vec![],
                 failed_instruction: None,
@@ -101,7 +100,7 @@ pub fn execute_batch<S: StateSnapshot>(
         // Verify signature (message excludes the signature field itself)
         let msg = tx.signable_bytes()?;
         if let Err(e) = env.sig_verifier.verify(&tx.sender, &msg, &tx.signature) {
-            tx_outcomes.push(TxOutcome::Failed {
+            txs.push(TxResult::Failed {
                 reason: e.to_string(),
                 partial_events: vec![],
                 failed_instruction: None,
@@ -115,7 +114,7 @@ pub fn execute_batch<S: StateSnapshot>(
             .nonce_policy
             .validate(&tx.sender, tx.nonce, current_nonce)
         {
-            tx_outcomes.push(TxOutcome::Failed {
+            txs.push(TxResult::Failed {
                 reason: e.to_string(),
                 partial_events: vec![],
                 failed_instruction: None,
@@ -133,13 +132,16 @@ pub fn execute_batch<S: StateSnapshot>(
                 overlay.discard_checkpoint();
                 let next = env.nonce_policy.next_nonce(&tx.sender, current_nonce);
                 nonces.insert(tx.sender, next);
-                all_emitted.extend(output.emitted);
-                tx_outcomes.push(TxOutcome::Success);
+                let access_trace = overlay.events_since(events_before);
+                txs.push(TxResult::Success {
+                    emitted: output.emitted,
+                    access_trace,
+                });
             }
             Err(interp_err) => {
                 let partial_events = overlay.events_since(events_before);
                 overlay.rollback();
-                tx_outcomes.push(TxOutcome::Failed {
+                txs.push(TxResult::Failed {
                     reason: interp_err.error.to_string(),
                     partial_events,
                     failed_instruction: Some(interp_err.instruction_index),
@@ -149,11 +151,9 @@ pub fn execute_batch<S: StateSnapshot>(
     }
 
     let result = overlay.into_result();
-    Ok(ExecutionResult {
+    Ok(BatchResult {
         read_set_old: result.read_set_old,
         write_set_final: result.write_set_final,
-        events: result.events,
-        emitted: all_emitted,
-        tx_outcomes,
+        txs,
     })
 }
