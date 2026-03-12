@@ -39,8 +39,7 @@ pub(super) fn lower_arith<const W: usize>(
     rec.src2_val = rhs_enc;
     rec.src1_slot_idx = src1_idx;
     rec.src2_slot_idx = src2_idx;
-    rec.dst_val = dst_enc;
-    rec.dst_is_null = false;
+    rec.writes.push((dst as usize, dst_enc, false));
     ctx.push_record(rec);
 
     Ok(())

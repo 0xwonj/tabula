@@ -29,8 +29,7 @@ pub(super) fn lower_lookup<const W: usize>(
     rec.access_r = Some(row_key.0);
     rec.access_val = Some(dst_enc.clone());
     rec.access_is_null = Some(false);
-    rec.dst_val = dst_enc;
-    rec.dst_is_null = false;
+    rec.writes.push((dst as usize, dst_enc, false));
     ctx.push_record(rec);
 
     ctx.push_static_row(StaticTableRow {

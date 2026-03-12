@@ -5,7 +5,7 @@
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
 
-use crate::execution::{CmpOp, InstructionRecord, Opcode};
+use crate::execution::{CmpOp, InstructionRecord, Opcode, u64_to_limbs};
 
 use super::instruction_builder::{InstructionBuilder, bool_val};
 
@@ -21,7 +21,7 @@ pub fn make_add(
         .written_slots(vec![dst_slot])
         .src1(src1_slot, src1)
         .src2(src2_slot, src2)
-        .dst_u64(src1.wrapping_add(src2))
+        .write(dst_slot, src1.wrapping_add(src2))
         .build()
 }
 
@@ -37,7 +37,7 @@ pub fn make_sub(
         .written_slots(vec![dst_slot])
         .src1(src1_slot, src1)
         .src2(src2_slot, src2)
-        .dst_u64(src1.wrapping_sub(src2))
+        .write(dst_slot, src1.wrapping_sub(src2))
         .build()
 }
 
@@ -64,7 +64,7 @@ pub fn make_select(
         .src1(src1_slot, if_true)
         .src2(src2_slot, if_false)
         .cond(cond_slot, cond)
-        .dst_u64(result)
+        .write(dst_slot, result)
         .build()
 }
 
@@ -81,8 +81,7 @@ pub fn make_read(
         .written_slots(vec![dst_slot])
         .access(table, col, row_key)
         .access_val(val, is_null)
-        .dst_u64(val)
-        .dst_null(is_null)
+        .write_fe(dst_slot, u64_to_limbs(val).to_vec(), is_null)
         .build()
 }
 
@@ -99,7 +98,6 @@ pub fn make_write(
         .src1(src1_slot, val)
         .access(table, col, row_key)
         .access_val(val, is_null)
-        .dst_null(is_null)
         .build()
 }
 
@@ -108,7 +106,7 @@ pub fn make_not(dst_slot: usize, src1_slot: usize, src: bool) -> InstructionReco
     InstructionBuilder::new(Opcode::Not)
         .written_slots(vec![dst_slot])
         .src1_fe(src1_slot, bool_val(src))
-        .dst_fe(bool_val(!src))
+        .write_fe(dst_slot, bool_val(!src), false)
         .build()
 }
 
@@ -124,7 +122,7 @@ pub fn make_and(
         .written_slots(vec![dst_slot])
         .src1_fe(src1_slot, bool_val(a))
         .src2_fe(src2_slot, bool_val(b))
-        .dst_fe(bool_val(a && b))
+        .write_fe(dst_slot, bool_val(a && b), false)
         .build()
 }
 
@@ -140,7 +138,7 @@ pub fn make_or(
         .written_slots(vec![dst_slot])
         .src1_fe(src1_slot, bool_val(a))
         .src2_fe(src2_slot, bool_val(b))
-        .dst_fe(bool_val(a || b))
+        .write_fe(dst_slot, bool_val(a || b), false)
         .build()
 }
 
@@ -165,7 +163,7 @@ pub fn make_cmp(
         .written_slots(vec![dst_slot])
         .src1(src1_slot, src1)
         .src2(src2_slot, src2)
-        .dst_fe(bool_val(result))
+        .write_fe(dst_slot, bool_val(result), false)
         .build()
 }
 
@@ -223,7 +221,7 @@ pub fn make_hash(
         .written_slots(vec![dst_slot])
         .src1_fe(src1_slot, src1_fe)
         .src2_fe(src2_slot, src2_fe)
-        .dst_fe(dst_val)
+        .write_fe(dst_slot, dst_val, false)
         .hash_perm(perm_input, perm_output)
         .build()
 }
@@ -240,7 +238,7 @@ pub fn make_mul(
         .written_slots(vec![dst_slot])
         .src1(src1_slot, src1)
         .src2(src2_slot, src2)
-        .dst_u64(src1.wrapping_mul(src2))
+        .write(dst_slot, src1.wrapping_mul(src2))
         .build()
 }
 
@@ -257,8 +255,8 @@ pub fn make_divmod(
         .written_slots(vec![q_slot, r_slot])
         .src1(src1_slot, lhs)
         .src2(src2_slot, rhs)
-        .dst_u64(lhs / rhs)
-        .dst2_u64(lhs % rhs)
+        .write(q_slot, lhs / rhs)
+        .write(r_slot, lhs % rhs)
         .build()
 }
 
@@ -276,7 +274,7 @@ pub fn make_lookup(
         .written_slots(vec![dst_slot])
         .access(table, col, row_key)
         .access_val(val, false)
-        .dst_u64(val)
+        .write(dst_slot, val)
         .build()
 }
 
@@ -299,7 +297,8 @@ pub fn make_property_read(
         .written_slots(vec![val_slot, key_slot, null_slot])
         .access(table, col, 0)
         .property_read(query_type, result_val.clone(), result_key.clone(), is_null)
-        .dst_fe(result_val)
-        .dst2_fe(result_key)
+        .write_fe(val_slot, result_val, false)
+        .write_fe(key_slot, result_key, false)
+        .write_fe(null_slot, bool_val(is_null), false)
         .build()
 }

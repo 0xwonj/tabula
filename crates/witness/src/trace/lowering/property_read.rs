@@ -82,10 +82,11 @@ pub(super) fn lower_property_read<const W: usize>(
     rec.access_c = Some(col.0);
     rec.property_query_type = Some(query_kind_ordinal(query));
     rec.property_result_val = val_enc.clone();
-    rec.property_result_key = key_enc;
+    rec.property_result_key = key_enc.clone();
     rec.property_result_is_null = is_null;
-    rec.dst_val = val_enc;
-    rec.dst_is_null = false;
+    rec.writes.push((dst_val_idx, val_enc, false));
+    rec.writes.push((dst_key_idx, key_enc, false));
+    rec.writes.push((dst_is_null_idx, null_enc, is_null));
 
     ctx.push_record(rec);
 

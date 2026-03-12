@@ -74,8 +74,7 @@ pub(super) fn lower_hash<const W: usize>(
     rec.src2_val = v1_enc;
     rec.src1_slot_idx = src1_idx;
     rec.src2_slot_idx = src2_idx;
-    rec.dst_val = dst_enc;
-    rec.dst_is_null = false;
+    rec.writes.push((slot, dst_enc, false));
     rec.hash_perm_input = Some(perm_input);
     rec.hash_perm_output = Some(digest);
     ctx.push_record(rec);

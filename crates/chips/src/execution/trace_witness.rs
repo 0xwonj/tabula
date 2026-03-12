@@ -42,7 +42,7 @@ pub(super) fn populate_arith_carry<const W: usize>(
     cols: &mut ExecutionCols<BabyBear, W>,
     rec: &InstructionRecord,
 ) {
-    if rec.src1_val.len() < 3 || rec.src2_val.len() < 3 || rec.dst_val.len() < 3 {
+    if rec.src1_val.len() < 3 || rec.src2_val.len() < 3 {
         return;
     }
 
@@ -163,7 +163,7 @@ pub(super) fn populate_divmod<const W: usize>(
     cols: &mut ExecutionCols<BabyBear, W>,
     rec: &InstructionRecord,
 ) {
-    if rec.src1_val.len() < 3 || rec.src2_val.len() < 3 || rec.dst_val.len() < 3 {
+    if rec.src1_val.len() < 3 || rec.src2_val.len() < 3 {
         return;
     }
 

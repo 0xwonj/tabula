@@ -193,7 +193,7 @@ fn multi_tx_monotone_index() {
 #[test]
 fn invalid_wrong_add_result() {
     let mut records = make_read_then_add(0, 1, 2, 100, 200);
-    records[2].dst_val = u64_to_limbs(999).to_vec();
+    records[2].writes[0].1 = u64_to_limbs(999).to_vec();
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong add result");
 }
@@ -213,7 +213,7 @@ fn invalid_wrong_select_result() {
         make_read(2, 0, 0, 300, 1, false),
         make_select(3, 0, 1, 2, true, 42, 99),
     ];
-    records[3].dst_val = u64_to_limbs(99).to_vec();
+    records[3].writes[0].1 = u64_to_limbs(99).to_vec();
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong select result");
 }
@@ -221,7 +221,7 @@ fn invalid_wrong_select_result() {
 #[test]
 fn invalid_wrong_not_result() {
     let mut records = vec![make_read(0, 0, 0, 100, 1, false), make_not(1, 0, true)];
-    records[1].dst_val = vec![BabyBear::ONE, BabyBear::ZERO, BabyBear::ZERO];
+    records[1].writes[0].1 = vec![BabyBear::ONE, BabyBear::ZERO, BabyBear::ZERO];
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong not result should fail");
 }
@@ -233,7 +233,7 @@ fn invalid_wrong_and_result() {
         make_read(1, 0, 0, 200, 0, false),
         make_and(2, 0, 1, true, false),
     ];
-    records[2].dst_val = vec![BabyBear::ONE, BabyBear::ZERO, BabyBear::ZERO];
+    records[2].writes[0].1 = vec![BabyBear::ONE, BabyBear::ZERO, BabyBear::ZERO];
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong and result should fail");
 }
@@ -245,7 +245,7 @@ fn invalid_wrong_or_result() {
         make_read(1, 0, 0, 200, 0, false),
         make_or(2, 0, 1, false, false),
     ];
-    records[2].dst_val = vec![BabyBear::ONE, BabyBear::ZERO, BabyBear::ZERO];
+    records[2].writes[0].1 = vec![BabyBear::ONE, BabyBear::ZERO, BabyBear::ZERO];
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong or result should fail");
 }
@@ -392,7 +392,7 @@ fn soundness_wrong_sub_result() {
         make_read(1, 0, 0, 200, 100, false),
         make_sub(2, 0, 1, 300, 100),
     ];
-    records[2].dst_val = u64_to_limbs(999).to_vec(); // should be 200
+    records[2].writes[0].1 = u64_to_limbs(999).to_vec(); // should be 200
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong sub result should fail");
 }

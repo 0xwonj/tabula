@@ -103,7 +103,7 @@ fn cmp_wrong_result_fails() {
         make_cmp(2, 0, 1, CmpOp::Lt, 10, 20),
     ];
     // Corrupt: set dst to 0 (wrong: 10 < 20 should be 1)
-    records[2].dst_val = vec![BabyBear::ZERO, BabyBear::ZERO, BabyBear::ZERO];
+    records[2].writes[0].1 = vec![BabyBear::ZERO, BabyBear::ZERO, BabyBear::ZERO];
     let trace = generate_execution_trace::<3>(&records);
     debug_check(&ExecutionChip::<3>, &trace).expect_err("wrong cmp result should fail constraint");
 }
@@ -155,8 +155,8 @@ fn hash_wrong_output_fails() {
         make_read(1, 0, 0, 200, 99, false),
         make_hash(2, 0, 1, 0x20, 2, [42, 0, 0], [99, 0, 0]),
     ];
-    // Corrupt the hash output (dst_val)
-    records[2].dst_val = vec![BabyBear::new(999), BabyBear::ZERO, BabyBear::ZERO];
+    // Corrupt the hash output (writes[0] value)
+    records[2].writes[0].1 = vec![BabyBear::new(999), BabyBear::ZERO, BabyBear::ZERO];
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace)
         .expect_err("wrong hash output should fail result binding");
@@ -205,8 +205,8 @@ fn lookup_result_binding() {
 #[test]
 fn lookup_wrong_result_fails() {
     let mut records = vec![make_lookup(0, 5, 0, 100, 42)];
-    // Corrupt dst_val
-    records[0].dst_val = u64_to_limbs(999).to_vec();
+    // Corrupt writes[0] value
+    records[0].writes[0].1 = u64_to_limbs(999).to_vec();
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong lookup result should fail");
 }
@@ -282,7 +282,7 @@ fn mul_wrong_result_fails() {
         make_read(1, 0, 0, 200, 5, false),
         make_mul(2, 0, 1, 3, 5),
     ];
-    records[2].dst_val = u64_to_limbs(999).to_vec();
+    records[2].writes[0].1 = u64_to_limbs(999).to_vec();
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong mul result should fail");
 }
@@ -295,7 +295,7 @@ fn mul_overflow_detected() {
     let a = (1u64 << 60) + 1;
     let b = 1u64 << 30;
     // Product overflows: (2^60+1) * 2^30 = 2^90 + 2^30 > 2^64
-    let result = a.wrapping_mul(b); // wrapping for the dst_val
+    let result = a.wrapping_mul(b); // wrapping for the writes value
 
     let mut records = vec![
         make_read(0, 0, 0, 100, a, false),
@@ -303,7 +303,7 @@ fn mul_overflow_detected() {
         make_mul(2, 0, 1, a, b),
     ];
     // Force the "correct" wrapping result to check that the overflow constraint catches it
-    records[2].dst_val = u64_to_limbs(result).to_vec();
+    records[2].writes[0].1 = u64_to_limbs(result).to_vec();
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("mul overflow should fail T3/T4");
 }
@@ -366,7 +366,7 @@ fn divmod_wrong_quotient_fails() {
         make_read(1, 0, 0, 200, 3, false),
         make_divmod(2, 3, 0, 1, 7, 3),
     ];
-    records[2].dst_val = u64_to_limbs(999).to_vec(); // wrong quotient
+    records[2].writes[0].1 = u64_to_limbs(999).to_vec(); // wrong quotient
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong quotient should fail");
 }
@@ -378,7 +378,7 @@ fn divmod_wrong_remainder_fails() {
         make_read(1, 0, 0, 200, 3, false),
         make_divmod(2, 3, 0, 1, 7, 3),
     ];
-    records[2].dst2_val = u64_to_limbs(2).to_vec(); // rem=2 but should be 1
+    records[2].writes[1].1 = u64_to_limbs(2).to_vec(); // rem=2 but should be 1
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong remainder should fail");
 }

@@ -93,33 +93,21 @@ impl InstructionBuilder {
         self
     }
 
-    /// Set destination value as u64 (converted to limbs).
-    pub fn dst_u64(mut self, val: u64) -> Self {
-        self.inner.dst_val = u64_to_limbs(val).to_vec();
+    /// Add a slot write: u64 value (converted to limbs), not null.
+    pub fn write(mut self, slot: usize, val: u64) -> Self {
+        self.inner.writes.push((slot, u64_to_limbs(val).to_vec(), false));
         self
     }
 
-    /// Set destination value with raw BabyBear field elements.
-    pub fn dst_fe(mut self, val: Vec<BabyBear>) -> Self {
-        self.inner.dst_val = val;
+    /// Add a slot write with raw BabyBear field elements.
+    pub fn write_fe(mut self, slot: usize, val: Vec<BabyBear>, is_null: bool) -> Self {
+        self.inner.writes.push((slot, val, is_null));
         self
     }
 
-    /// Set dst_is_null flag.
-    pub fn dst_null(mut self, is_null: bool) -> Self {
-        self.inner.dst_is_null = is_null;
-        self
-    }
-
-    /// Set second destination value (for DivMod remainder) as u64.
-    pub fn dst2_u64(mut self, val: u64) -> Self {
-        self.inner.dst2_val = u64_to_limbs(val).to_vec();
-        self
-    }
-
-    /// Set second destination value with raw BabyBear field elements.
-    pub fn dst2_fe(mut self, val: Vec<BabyBear>) -> Self {
-        self.inner.dst2_val = val;
+    /// Add a null slot write: u64 value with is_null = true.
+    pub fn write_null(mut self, slot: usize, val: u64) -> Self {
+        self.inner.writes.push((slot, u64_to_limbs(val).to_vec(), true));
         self
     }
 

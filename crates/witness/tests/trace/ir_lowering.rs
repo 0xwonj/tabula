@@ -249,15 +249,15 @@ tx transfer(from: u64, to: u64, amount: u64) {
     .expect("IR lowering");
     for (i, rec) in lowering.instruction_records.iter().enumerate() {
         eprintln!(
-            "  rec[{i}]: opcode={:?} tx={} written_slots={:?} src1_idx={:?} src2_idx={:?} dst_val={:?}",
+            "  rec[{i}]: opcode={:?} tx={} written_slots={:?} src1_idx={:?} src2_idx={:?} writes={:?}",
             rec.opcode,
             rec.tx_index,
             rec.written_slots,
             rec.src1_slot_idx,
             rec.src2_slot_idx,
-            rec.dst_val
+            rec.writes
                 .iter()
-                .map(|f: &BabyBear| f.as_canonical_u32())
+                .map(|(s, v, n)| (s, v.iter().map(|f: &BabyBear| f.as_canonical_u32()).collect::<Vec<_>>(), n))
                 .collect::<Vec<_>>()
         );
     }

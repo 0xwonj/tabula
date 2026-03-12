@@ -67,8 +67,7 @@ pub(super) fn lower_read<const W: usize>(
     rec.access_r = Some(row_key.0);
     rec.access_val = Some(encoded.clone());
     rec.access_is_null = Some(event.val_is_null);
-    rec.dst_val = encoded;
-    rec.dst_is_null = event.val_is_null;
+    rec.writes.push((slot, encoded, event.val_is_null));
     rec.is_empty_col = is_empty;
     ctx.push_record(rec);
 

@@ -121,8 +121,7 @@ pub(super) fn lower_precompile<const W: usize>(
     rec.precompile_id = Some(id.0);
     rec.hash_perm_input = Some(perm_input);
     rec.hash_perm_output = Some(digest);
-    rec.dst_val = dst_enc;
-    rec.dst_is_null = false;
+    rec.writes.push((first_slot, dst_enc, false));
 
     // Populate operand values for linkage constraints.
     if !input_vals.is_empty() {

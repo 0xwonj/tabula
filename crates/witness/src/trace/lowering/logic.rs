@@ -34,8 +34,7 @@ pub(super) fn lower_not<const W: usize>(
     rec.written_slots = vec![slot];
     rec.src1_val = src_enc;
     rec.src1_slot_idx = src1_idx;
-    rec.dst_val = dst_enc;
-    rec.dst_is_null = false;
+    rec.writes.push((dst as usize, dst_enc, false));
     ctx.push_record(rec);
 
     Ok(())
@@ -96,8 +95,7 @@ fn lower_bool_binop<const W: usize>(
     rec.src2_val = rhs_enc;
     rec.src1_slot_idx = src1_idx;
     rec.src2_slot_idx = src2_idx;
-    rec.dst_val = dst_enc;
-    rec.dst_is_null = false;
+    rec.writes.push((dst as usize, dst_enc, false));
     ctx.push_record(rec);
 
     Ok(())

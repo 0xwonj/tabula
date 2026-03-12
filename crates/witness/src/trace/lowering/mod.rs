@@ -184,8 +184,7 @@ fn pre_materialize_params<const W: usize>(
         rec.src2_val = vec![BabyBear::ZERO; W];
         rec.src1_slot_idx = Some(slot); // self-referential: src1 reads from the slot we write
         rec.src2_slot_idx = Some(zero_slot);
-        rec.dst_val = enc;
-        rec.dst_is_null = false;
+        rec.writes.push((slot, enc, false));
         ctx.push_record(rec);
     }
 

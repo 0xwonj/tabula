@@ -36,10 +36,8 @@ pub(super) fn lower_divmod<const W: usize>(
     rec.src2_val = rhs_enc;
     rec.src1_slot_idx = src1_idx;
     rec.src2_slot_idx = src2_idx;
-    rec.dst_val = q_enc;
-    rec.dst_is_null = false;
-    rec.dst2_val = r_enc;
-    rec.dst2_is_null = false;
+    rec.writes.push((dst_q as usize, q_enc, false));
+    rec.writes.push((dst_r as usize, r_enc, false));
     ctx.push_record(rec);
 
     Ok(())

@@ -59,7 +59,7 @@ fn slot_written_count_extra_write_fails() {
     let mut records = vec![make_read(0, 0, 0, 100, 42, false)];
     // Read should write exactly 1 slot. Claim 2 written.
     records[0].written_slots = vec![0, 1];
-    records[0].dst2_val = u64_to_limbs(0).to_vec();
+    records[0].writes.push((1, u64_to_limbs(0).to_vec(), false));
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("extra slot_written should fail");
 }
@@ -152,7 +152,7 @@ fn divmod_rem_equals_rhs_rejected() {
     ];
     // Set rem=3 (same as rhs=3). The identity 7 = q*3 + rem also breaks,
     // but the StrictIneq constraint fires first: diff0 = rhs[0]-rem[0]-1 = 3-3-1 = -1 (wraps).
-    records[2].dst2_val = u64_to_limbs(3).to_vec(); // rem=3 instead of 1
+    records[2].writes[1].1 = u64_to_limbs(3).to_vec(); // rem=3 instead of 1
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace)
         .expect_err("rem=rhs must fail StrictIneq (rem < rhs) constraint");
@@ -160,26 +160,26 @@ fn divmod_rem_equals_rhs_rejected() {
 
 // ── T4: Select null propagation ──
 
-/// T4: Select where dst_is_null correctly propagates from selected branch.
+/// T4: Select where the write's is_null flag correctly propagates from selected branch.
 ///
 /// When cond=1 (true branch), dst gets if_true's value. If if_true's slot
-/// is not null, dst_is_null must be false. We forge dst_is_null=true to verify
+/// is not null, is_null must be false. We forge is_null=true to verify
 /// it fails.
 #[test]
 fn select_null_propagation_forged_fails() {
     // Read non-null 42 into slot 0 (if_true), non-null 99 into slot 1 (if_false),
-    // cond=1 into slot 2. Select → dst=42, dst_is_null=false.
+    // cond=1 into slot 2. Select → dst=42, is_null=false.
     let mut records = vec![
         make_read(0, 0, 0, 100, 42, false),
         make_read(1, 0, 0, 200, 99, false),
         make_read(2, 0, 0, 300, 1, false),
         make_select(3, 0, 1, 2, true, 42, 99),
     ];
-    // Forge dst_is_null=true (should be false since if_true slot is not null).
-    records[3].dst_is_null = true;
+    // Forge writes[0].is_null=true (should be false since if_true slot is not null).
+    records[3].writes[0].2 = true;
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace)
-        .expect_err("forged dst_is_null=true on select should fail operand linkage");
+        .expect_err("forged is_null=true on select should fail operand linkage");
 }
 
 /// T4b: Valid Select with null input propagation — cond selects null branch correctly.
@@ -241,7 +241,7 @@ fn mul_u64_max_times_two_overflow() {
     ];
     // Force the wrapping result (trace gen uses wrapping_mul already, but it still
     // fails because the overflow check detects T3≠0).
-    records[2].dst_val = u64_to_limbs(a.wrapping_mul(b)).to_vec();
+    records[2].writes[0].1 = u64_to_limbs(a.wrapping_mul(b)).to_vec();
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace)
         .expect_err("u64::MAX * 2 overflow must fail no-overflow constraint");
@@ -249,19 +249,19 @@ fn mul_u64_max_times_two_overflow() {
 
 // ── T14: Lookup forged null ──
 
-/// T14: Lookup sets dst_is_null=true, which must fail because Lookup is a total function.
+/// T14: Lookup with is_null=true must fail because Lookup is a total function.
 ///
 /// The constraint `assert_zero(slot_gate * slot_is_null[s])` in constrain_lookup
 /// enforces that Lookup's destination slot is never null.
 #[test]
 fn lookup_forged_null_dst_fails() {
     let mut records = vec![make_lookup(0, 5, 0, 100, 42)];
-    // Forge dst_is_null=true. Trace gen will set slot_is_null[0]=1 for this slot,
+    // Forge writes[0].is_null=true. Trace gen will set slot_is_null[0]=1 for this slot,
     // violating constrain_lookup's slot_is_null assertion.
-    records[0].dst_is_null = true;
+    records[0].writes[0].2 = true;
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace)
-        .expect_err("lookup with dst_is_null=true must fail (total function, no null output)");
+        .expect_err("lookup with is_null=true must fail (total function, no null output)");
 }
 
 // ── Column width test ──

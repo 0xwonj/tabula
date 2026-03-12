@@ -108,15 +108,13 @@ pub struct InstructionRecord {
     pub access_val: Option<Vec<BabyBear>>,
     /// For access instructions: null flag.
     pub access_is_null: Option<bool>,
-    /// Destination value for the written slot (W field elements).
-    /// For Read: comes from access_val. For Arith: computed result.
-    pub dst_val: Vec<BabyBear>,
-    /// Destination null flag for the written slot.
-    pub dst_is_null: bool,
-    /// For DivMod: second destination value (remainder), written to second slot.
-    pub dst2_val: Vec<BabyBear>,
-    /// For DivMod: second destination null flag.
-    pub dst2_is_null: bool,
+    /// Per-slot write outputs: `(slot_index, value_fes, is_null)`.
+    ///
+    /// Single-destination opcodes (Read, Arith, Cmp, etc.) have 1 entry.
+    /// DivMod has 2 entries (quotient, remainder).
+    /// PropertyRead has 3 entries (value, key, is_null flag).
+    /// Write/Assert/Emit have 0 entries (no new slot values).
+    pub writes: Vec<(usize, Vec<BabyBear>, bool)>,
     /// For Hash: precomputed Poseidon permutation input (16 FE).
     pub hash_perm_input: Option<[BabyBear; 16]>,
     /// For Hash: precomputed Poseidon permutation output (8 FE).
@@ -153,10 +151,7 @@ impl Default for InstructionRecord {
             access_r: None,
             access_val: None,
             access_is_null: None,
-            dst_val: vec![],
-            dst_is_null: false,
-            dst2_val: vec![],
-            dst2_is_null: false,
+            writes: vec![],
             hash_perm_input: None,
             hash_perm_output: None,
             is_empty_col: false,
@@ -346,28 +341,12 @@ pub fn generate_execution_trace<const W: usize>(
             cols.slot_written[s] = BabyBear::ONE;
         }
 
-        // Update slot values for written slots
-        if let Some(&first_slot) = rec.written_slots.first() {
-            for (j, v) in rec.dst_val.iter().enumerate().take(W) {
-                slot_vals[first_slot][j] = *v;
+        // Update slot values from writes
+        for (slot, val, is_null) in &rec.writes {
+            for (j, v) in val.iter().enumerate().take(W) {
+                slot_vals[*slot][j] = *v;
             }
-            slot_nulls[first_slot] = bool_fe(rec.dst_is_null);
-        }
-        // DivMod/PropertyRead second slot (key or remainder)
-        if rec.written_slots.len() >= 2 && !rec.dst2_val.is_empty() {
-            let second_slot = rec.written_slots[1];
-            for (j, v) in rec.dst2_val.iter().enumerate().take(W) {
-                slot_vals[second_slot][j] = *v;
-            }
-            slot_nulls[second_slot] = bool_fe(rec.dst2_is_null);
-        }
-
-        // PropertyRead third slot (is_null flag as value)
-        if rec.opcode == Opcode::PropertyRead && rec.written_slots.len() >= 3 {
-            let null_slot = rec.written_slots[2];
-            slot_vals[null_slot] = [BabyBear::ZERO; W];
-            slot_vals[null_slot][0] = bool_fe(rec.property_result_is_null);
-            slot_nulls[null_slot] = BabyBear::ZERO;
+            slot_nulls[*slot] = bool_fe(*is_null);
         }
 
         // Write all slot values to trace (carry + new writes)
