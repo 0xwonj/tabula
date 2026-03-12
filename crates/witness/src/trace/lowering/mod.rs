@@ -27,7 +27,6 @@ use context::LoweringContext;
 
 // ── Re-exports ──────────────────────────────────────────────────────────────
 
-pub use context::{PrecompileExecuteFn, PropertyReadFn};
 pub use orchestration::{LoweringOutput, lower_execution_records, lower_program_batch};
 
 // ── Internal helpers ────────────────────────────────────────────────────────

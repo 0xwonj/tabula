@@ -7,28 +7,12 @@ use p3_field::PrimeCharacteristicRing;
 use tabula_commitment::BabyBearCodec;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{StaticTableProvider, ValueCodec};
-use tabula_core::{ColId, AccessEvent, RowKey, TableId, Value};
-use tabula_ir::{PropertyQuery, RowExpr, ValueExpr};
+use tabula_core::{AccessEvent, ColId, PrecompileIo, PropertyReadResult, RowKey, TableId, Value};
+use tabula_ir::{RowExpr, ValueExpr};
 
 use tabula_chips::execution::MAX_SLOTS;
 use tabula_chips::execution::trace::{InstructionRecord, Opcode};
 use tabula_chips::static_table::trace::StaticTableRow;
-
-/// Callback for executing a precompile during witness lowering.
-///
-/// Signature: `(precompile_id, inputs) → outputs`.
-/// The caller wraps their `PrecompileRegistry` in this closure.
-pub type PrecompileExecuteFn =
-    dyn Fn(u16, &[Value]) -> Result<Vec<Value>, TabulaError> + Send + Sync;
-
-/// Callback for resolving a structural property query during witness lowering.
-///
-/// Signature: `(table, col, query) → (value, key, is_null)`.
-/// Returns the result value, the key at which it was found (or `None` if
-/// no matching key), and whether the result is null.
-pub type PropertyReadFn = dyn Fn(TableId, ColId, &PropertyQuery) -> Result<(Value, Option<RowKey>, bool), TabulaError>
-    + Send
-    + Sync;
 
 /// Mutable lowering context threaded through per-opcode lowering functions.
 ///
@@ -72,10 +56,14 @@ pub(super) struct LoweringContext<'a, const W: usize> {
     pub(super) params: &'a [Value],
     /// Value codec.
     pub(super) codec: &'a BabyBearCodec,
-    /// Optional precompile executor for re-executing precompile instructions.
-    pub(super) precompile_executor: Option<&'a PrecompileExecuteFn>,
-    /// Optional property reader for resolving PropertyRead queries.
-    pub(super) property_reader: Option<&'a PropertyReadFn>,
+    /// Stored precompile I/O pairs from execution (consumed sequentially).
+    pub(super) precompile_ios: &'a [PrecompileIo],
+    /// Index into `precompile_ios` for the next Precompile instruction.
+    pub(super) precompile_idx: usize,
+    /// Stored property read results from execution (consumed sequentially).
+    pub(super) property_reads_stored: &'a [PropertyReadResult],
+    /// Index into `property_reads_stored` for the next PropertyRead instruction.
+    pub(super) property_read_idx: usize,
 }
 
 impl<'a, const W: usize> LoweringContext<'a, W> {
@@ -90,8 +78,8 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         params: &'a [Value],
         codec: &'a BabyBearCodec,
         num_instructions: usize,
-        precompile_executor: Option<&'a PrecompileExecuteFn>,
-        property_reader: Option<&'a PropertyReadFn>,
+        precompile_ios: &'a [PrecompileIo],
+        property_reads_stored: &'a [PropertyReadResult],
     ) -> Self {
         Self {
             slots: vec![None; MAX_SLOTS],
@@ -109,8 +97,10 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
             empty_columns,
             params,
             codec,
-            precompile_executor,
-            property_reader,
+            precompile_ios,
+            precompile_idx: 0,
+            property_reads_stored,
+            property_read_idx: 0,
         }
     }
 

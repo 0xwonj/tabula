@@ -127,7 +127,6 @@ fn build_pipeline(
             &schemas_by_id,
             &InMemoryStaticTables::new(),
             PoseidonHasher::new(),
-            None,
         )
         .expect("witness store preparation");
 

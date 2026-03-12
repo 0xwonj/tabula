@@ -104,7 +104,6 @@ pub fn prove_batch(
             &schemas_by_id,
             &InMemoryStaticTables::new(),
             PoseidonHasher::new(),
-            None,
         )
         .map_err(|e| {
             ServiceError::internal(ErrorCode::InternalError, format!("witness store: {e}"))

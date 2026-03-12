@@ -1,6 +1,6 @@
 //! Witness lowering for the Precompile opcode.
 //!
-//! Re-executes the precompile handler to obtain I/O, then constructs a
+//! Reads stored precompile I/O from execution results, then constructs a
 //! Poseidon I/O commitment and writes the digest into the destination slot.
 
 use p3_baby_bear::BabyBear;
@@ -21,14 +21,20 @@ pub(super) fn lower_precompile<const W: usize>(
     dst_slots: &[u16],
     inputs: &[ValueExpr],
 ) -> Result<(), TabulaError> {
-    let execute_fn = ctx
-        .precompile_executor
+    // 1. Read stored I/O from execution results.
+    let io = ctx
+        .precompile_ios
+        .get(ctx.precompile_idx)
         .ok_or_else(|| TabulaError::ProofError {
             phase: "trace_lowering",
-            detail: "precompile instruction encountered but no precompile executor provided".into(),
+            detail: format!(
+                "precompile instruction encountered but no stored I/O at index {}",
+                ctx.precompile_idx
+            ),
         })?;
+    ctx.precompile_idx += 1;
 
-    // 1. Resolve input values and encode to field elements.
+    // Resolve input values and encode to field elements.
     let mut input_vals = Vec::with_capacity(inputs.len());
     let mut input_fes = Vec::new();
     for inp in inputs {
@@ -38,10 +44,10 @@ pub(super) fn lower_precompile<const W: usize>(
         input_vals.push(val);
     }
 
-    // 2. Re-execute the precompile to get output values.
-    let output_vals = execute_fn(id.0, &input_vals)?;
+    // Use stored output values instead of re-executing.
+    let output_vals = &io.outputs;
     let mut output_fes = Vec::new();
-    for val in &output_vals {
+    for val in output_vals {
         let enc = ctx.encode_padded(val)?;
         output_fes.extend_from_slice(&enc);
     }

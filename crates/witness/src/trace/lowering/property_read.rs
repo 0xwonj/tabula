@@ -1,8 +1,8 @@
 //! Witness lowering for the PropertyRead opcode.
 //!
-//! Calls the property reader callback to resolve a structural query against
-//! committed column state, then encodes the result (value, key, is_null)
-//! into three destination slots and builds an `InstructionRecord`.
+//! Reads stored property read results from execution, then encodes the
+//! result (value, key, is_null) into three destination slots and builds
+//! an `InstructionRecord`.
 
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, RowKey, TableId, Value};
@@ -36,13 +36,22 @@ pub(super) fn lower_property_read<const W: usize>(
     col: ColId,
     query: &PropertyQuery,
 ) -> Result<(), TabulaError> {
-    let reader = ctx.property_reader.ok_or_else(|| TabulaError::ProofError {
-        phase: "trace_lowering",
-        detail: "PropertyRead instruction encountered but no property reader provided".into(),
-    })?;
+    // 1. Read stored result from execution.
+    let stored = ctx
+        .property_reads_stored
+        .get(ctx.property_read_idx)
+        .ok_or_else(|| TabulaError::ProofError {
+            phase: "trace_lowering",
+            detail: format!(
+                "PropertyRead instruction encountered but no stored result at index {}",
+                ctx.property_read_idx
+            ),
+        })?;
+    ctx.property_read_idx += 1;
 
-    // 1. Call the property reader to resolve the query.
-    let (value, key_opt, is_null) = reader(table, col, query)?;
+    let value = stored.value;
+    let key_opt = stored.key;
+    let is_null = stored.is_null;
 
     // 2. Encode the value to W field elements.
     let val_enc = ctx.encode_padded(&value)?;

@@ -136,7 +136,6 @@ tx touch(id: u64) {
                     &s.schemas_by_id,
                     &InMemoryStaticTables::new(),
                     PoseidonHasher::new(),
-                    None,
                 )
                 .unwrap();
             let chips = tabula_chips::core_dyn_chips();
@@ -171,7 +170,6 @@ tx op(id: u64) {
                     &s.schemas_by_id,
                     &InMemoryStaticTables::new(),
                     PoseidonHasher::new(),
-                    None,
                 )
                 .unwrap();
             let chips = tabula_chips::core_dyn_chips();

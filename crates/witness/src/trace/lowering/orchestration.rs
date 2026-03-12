@@ -248,7 +248,6 @@ pub struct LoweringOutput {
 /// (src1/src2/cond) must reference either a `Slot(s)` or a value already
 /// present in a slot. `Param`/`Literal` operands will search existing
 /// slots for a matching value; if none is found, an error is returned.
-#[allow(clippy::too_many_arguments)]
 pub fn lower_program_batch<const W: usize>(
     program: &Program,
     batch: &Batch,
@@ -256,8 +255,6 @@ pub fn lower_program_batch<const W: usize>(
     schemas: &BTreeMap<TableId, TableSchema>,
     static_tables: &dyn StaticTableProvider,
     empty_columns: &BTreeSet<(TableId, ColId)>,
-    precompile_executor: Option<&super::context::PrecompileExecuteFn>,
-    property_reader: Option<&super::context::PropertyReadFn>,
 ) -> Result<LoweringOutput, TabulaError> {
     let type_map = build_type_map(schemas);
     let codec = BabyBearCodec;
@@ -268,9 +265,18 @@ pub fn lower_program_batch<const W: usize>(
     for (tx_idx, tx) in batch.transactions.iter().enumerate() {
         let tx_index = tx_idx as u32;
 
-        // Skip failed txs; extract access trace from successful ones.
-        let tx_events: Vec<&tabula_core::AccessEvent> = match &result.txs[tx_idx] {
-            TxResult::Success { access_trace, .. } => access_trace.iter().collect(),
+        // Skip failed txs; extract data from successful ones.
+        let (tx_events, precompile_ios, property_reads) = match &result.txs[tx_idx] {
+            TxResult::Success {
+                access_trace,
+                precompile_ios,
+                property_reads,
+                ..
+            } => (
+                access_trace.iter().collect::<Vec<_>>(),
+                precompile_ios.as_slice(),
+                property_reads.as_slice(),
+            ),
             TxResult::Failed { .. } => continue,
         };
 
@@ -285,8 +291,8 @@ pub fn lower_program_batch<const W: usize>(
             &tx.params,
             &codec,
             tx_def.body.len(),
-            precompile_executor,
-            property_reader,
+            precompile_ios,
+            property_reads,
         );
 
         lower_tx_body(&mut ctx, &tx_def.body)?;

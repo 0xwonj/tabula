@@ -108,7 +108,6 @@ pub(super) fn lower_build_validate(
             schemas,
             &static_tables,
             PoseidonHasher::new(),
-            None,
         )
         .expect("witness store preparation");
 
@@ -195,7 +194,6 @@ tx touch(id: u64) {
             &schemas,
             &InMemoryStaticTables::new(),
             PoseidonHasher::new(),
-            None,
         )
         .expect("unified pipeline");
 
@@ -247,8 +245,6 @@ tx transfer(from: u64, to: u64, amount: u64) {
         &schemas,
         &static_tables,
         &empty_columns,
-        None,
-        None,
     )
     .expect("IR lowering");
     for (i, rec) in lowering.instruction_records.iter().enumerate() {

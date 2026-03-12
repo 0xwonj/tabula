@@ -67,7 +67,6 @@ where
         schemas: &BTreeMap<TableId, TableSchema>,
         static_tables: &dyn StaticTableProvider,
         hasher: H,
-        precompile_executor: Option<&super::lowering::PrecompileExecuteFn>,
     ) -> Result<WitnessStore, TabulaError>
     where
         H: Clone,
@@ -79,7 +78,6 @@ where
             schemas,
             static_tables,
             hasher,
-            precompile_executor,
         )?;
 
         let inputs = AllTraceInputs {
@@ -134,7 +132,6 @@ where
     }
 
     /// Shared input preparation for IR-based pipelines.
-    #[allow(clippy::too_many_arguments)]
     fn prepare_inputs(
         &self,
         program: &Program,
@@ -143,7 +140,6 @@ where
         schemas: &BTreeMap<TableId, TableSchema>,
         static_tables: &dyn StaticTableProvider,
         hasher: H,
-        precompile_executor: Option<&super::lowering::PrecompileExecuteFn>,
     ) -> Result<PreparedInputs, TabulaError>
     where
         H: Clone,
@@ -165,8 +161,6 @@ where
             schemas,
             static_tables,
             &empty_columns,
-            precompile_executor,
-            None,
         )?;
 
         // 3. Build SMT paths from witness metadata.
