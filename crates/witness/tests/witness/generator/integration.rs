@@ -14,10 +14,7 @@ fn state_root_deterministic() {
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![],
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![read_event(1, 0, 1, 10, 1, 0)],
-        }],
+        txs: vec![TxResult::success(vec![read_event(1, 0, 1, 10, 1, 0)], vec![])],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10)])].into();
@@ -34,13 +31,13 @@ fn state_root_changes_on_write() {
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(20)))],
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![
+        txs: vec![TxResult::success(
+            vec![
                 read_event(1, 0, 1, 10, 1, 0),
                 write_event(1, 0, 1, 20, 2, 0),
             ],
-        }],
+            vec![],
+        )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10)])].into();
@@ -55,13 +52,13 @@ fn state_root_empty_state() {
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), None)],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(1)))],
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![
+        txs: vec![TxResult::success(
+            vec![
                 null_read_event(1, 0, 1, 1, 0),
                 write_event(1, 0, 1, 1, 2, 0),
             ],
-        }],
+            vec![],
+        )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = [empty_column_state(&vc, 1, 0)].into();
@@ -84,15 +81,15 @@ fn e2e_full_flow_single_column() {
             (ck(1, 0, 1), Some(Value::U64(15))),
             (ck(1, 0, 3), Some(Value::U64(30))),
         ],
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![
+        txs: vec![TxResult::success(
+            vec![
                 read_event(1, 0, 1, 10, 1, 0),
                 read_event(1, 0, 2, 20, 2, 0),
                 write_event(1, 0, 1, 15, 3, 0),
                 write_event(1, 0, 3, 30, 4, 0),
             ],
-        }],
+            vec![],
+        )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10), (2, 20)])].into();
@@ -122,21 +119,21 @@ fn e2e_two_columns_multi_tx() {
         ],
         txs: vec![
             // tx 0: read+write col 0
-            TxResult::Success {
-                emitted: vec![],
-                access_trace: vec![
+            TxResult::success(
+                vec![
                     read_event(1, 0, 1, 10, 1, 0),
                     write_event(1, 0, 1, 15, 2, 0),
                 ],
-            },
+                vec![],
+            ),
             // tx 1: read+write col 1
-            TxResult::Success {
-                emitted: vec![],
-                access_trace: vec![
+            TxResult::success(
+                vec![
                     read_event(1, 1, 1, 100, 3, 1),
                     write_event(1, 1, 1, 200, 4, 1),
                 ],
-            },
+                vec![],
+            ),
         ],
     };
     let schema = schemas(vec![u64_schema(1, &[0, 1])]);
@@ -160,10 +157,7 @@ fn missing_schema_returns_error() {
     let result = BatchResult {
         read_set_old: vec![],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![write_event(1, 0, 1, 10, 1, 0)],
-        }],
+        txs: vec![TxResult::success(vec![write_event(1, 0, 1, 10, 1, 0)], vec![])],
     };
     let schema = schemas(vec![]); // no schemas!
     let states: BTreeMap<_, _> = [empty_column_state(&vc, 1, 0)].into();
@@ -176,10 +170,7 @@ fn touched_column_missing_from_old_states_returns_error() {
     let result = BatchResult {
         read_set_old: vec![],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![write_event(1, 0, 1, 10, 1, 0)],
-        }],
+        txs: vec![TxResult::success(vec![write_event(1, 0, 1, 10, 1, 0)], vec![])],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = BTreeMap::new(); // no column states!
@@ -197,14 +188,14 @@ fn column_metas_populated_and_sorted() {
             (ck(1, 1, 1), Some(Value::U64(20))),
         ],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(15)))],
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![
+        txs: vec![TxResult::success(
+            vec![
                 read_event(1, 0, 1, 10, 1, 0),
                 read_event(1, 1, 1, 20, 2, 0),
                 write_event(1, 0, 1, 15, 3, 0),
             ],
-        }],
+            vec![],
+        )],
     };
     let schema = schemas(vec![u64_schema(1, &[0, 1])]);
     let states: BTreeMap<_, _> = [
@@ -233,10 +224,7 @@ fn tx_results_preserved() {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![],
         txs: vec![
-            TxResult::Success {
-                emitted: vec![],
-                access_trace: vec![read_event(1, 0, 1, 10, 1, 0)],
-            },
+            TxResult::success(vec![read_event(1, 0, 1, 10, 1, 0)], vec![]),
             TxResult::Failed {
                 reason: "overflow".into(),
                 partial_events: vec![],
@@ -265,14 +253,14 @@ fn key_routes_populated() {
             (k_write, Some(Value::U64(20))),
         ],
         write_set_final: vec![(k_write, Some(Value::U64(99)))],
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![
+        txs: vec![TxResult::success(
+            vec![
                 read_event(1, 0, 1, 10, 1, 0),
                 read_event(1, 0, 2, 20, 2, 0),
                 write_event(1, 0, 2, 99, 3, 0),
             ],
-        }],
+            vec![],
+        )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10), (2, 20)])].into();

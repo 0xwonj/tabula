@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, StateSnapshot, StaticTableProvider};
 use tabula_core::{
-    CellKey, ColId, EmittedEvent, TableId, TableSchema, Value, ValueType, zero_value,
+    CellKey, ColId, EmittedEvent, PrecompileIo, PropertyReadResult, TableId, TableSchema, Value,
+    ValueType, zero_value,
 };
 use tabula_ir::{Instruction, Slot};
 
@@ -22,6 +23,10 @@ use crate::resolve::{resolve_row_expr, resolve_value_expr};
 pub struct TxExecutionOutput {
     /// Application events emitted during execution.
     pub emitted: Vec<EmittedEvent>,
+    /// Precompile I/O pairs recorded during execution.
+    pub precompile_ios: Vec<PrecompileIo>,
+    /// Property read results recorded during execution.
+    pub property_reads: Vec<PropertyReadResult>,
 }
 
 /// Error produced by the interpreter, wrapping the underlying error with
@@ -68,6 +73,8 @@ pub fn execute<S: StateSnapshot>(
 ) -> Result<TxExecutionOutput, InterpreterError> {
     let mut slots: Vec<Value> = Vec::new();
     let mut emitted: Vec<EmittedEvent> = Vec::new();
+    let mut precompile_ios: Vec<PrecompileIo> = Vec::new();
+    let mut property_reads: Vec<PropertyReadResult> = Vec::new();
 
     for (idx, instr) in instructions.iter().enumerate() {
         let step: Result<(), TabulaError> = (|| {
@@ -304,6 +311,12 @@ pub fn execute<S: StateSnapshot>(
                             dst_slots.len(),
                         )));
                     }
+                    precompile_ios.push(PrecompileIo {
+                        instruction_index: idx,
+                        precompile_id: id.0,
+                        inputs: args,
+                        outputs: results.clone(),
+                    });
                     for (dst, val) in dst_slots.iter().zip(results) {
                         set_slot(&mut slots, *dst, val)?;
                     }
@@ -329,6 +342,12 @@ pub fn execute<S: StateSnapshot>(
                     })?;
                     let col_type = lookup_col_type(ctx.schemas, *table, *col)?;
                     let result = registry.resolve(*table, *col, query, provider, col_type)?;
+                    property_reads.push(PropertyReadResult {
+                        instruction_index: idx,
+                        value: result.value,
+                        key: result.key,
+                        is_null: result.is_null,
+                    });
                     set_slot(&mut slots, *dst_val, result.value)?;
                     set_slot(
                         &mut slots,
@@ -346,7 +365,11 @@ pub fn execute<S: StateSnapshot>(
         })?;
     }
 
-    Ok(TxExecutionOutput { emitted })
+    Ok(TxExecutionOutput {
+        emitted,
+        precompile_ios,
+        property_reads,
+    })
 }
 
 // ---------------------------------------------------------------------------

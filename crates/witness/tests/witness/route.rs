@@ -46,10 +46,7 @@ fn read_only_keys_no_writes() {
     let k1 = ck(1, 0, 1);
     let k2 = ck(1, 0, 2);
     let result = BatchResult {
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![read_ev(k1, 1), read_ev(k2, 2)],
-        }],
+        txs: vec![TxResult::success(vec![read_ev(k1, 1), read_ev(k2, 2)], vec![])],
         ..empty_result()
     };
     let routes = route_keys(&result);
@@ -62,10 +59,7 @@ fn read_only_keys_no_writes() {
 fn sorted_memory_keys_with_writes() {
     let k1 = ck(1, 0, 1);
     let result = BatchResult {
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![read_ev(k1, 1), write_ev(k1, 2)],
-        }],
+        txs: vec![TxResult::success(vec![read_ev(k1, 1), write_ev(k1, 2)], vec![])],
         write_set_final: vec![(k1, Some(Value::U64(42)))],
         ..empty_result()
     };
@@ -79,14 +73,14 @@ fn mixed_routing() {
     let k_read = ck(1, 0, 1);
     let k_write = ck(1, 0, 2);
     let result = BatchResult {
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![
+        txs: vec![TxResult::success(
+            vec![
                 read_ev(k_read, 1),
                 read_ev(k_write, 2),
                 write_ev(k_write, 3),
             ],
-        }],
+            vec![],
+        )],
         write_set_final: vec![(k_write, Some(Value::U64(99)))],
         ..empty_result()
     };
@@ -119,10 +113,10 @@ fn deterministic_output() {
     let k1 = ck(1, 0, 1);
     let k2 = ck(1, 1, 2);
     let result = BatchResult {
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![read_ev(k1, 1), read_ev(k2, 2), write_ev(k2, 3)],
-        }],
+        txs: vec![TxResult::success(
+            vec![read_ev(k1, 1), read_ev(k2, 2), write_ev(k2, 3)],
+            vec![],
+        )],
         write_set_final: vec![(k2, Some(Value::U64(10)))],
         ..empty_result()
     };
@@ -135,10 +129,7 @@ fn deterministic_output() {
 fn read_of_written_key_is_sorted_memory() {
     let k = ck(1, 0, 1);
     let result = BatchResult {
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![read_ev(k, 1), write_ev(k, 2)],
-        }],
+        txs: vec![TxResult::success(vec![read_ev(k, 1), write_ev(k, 2)], vec![])],
         write_set_final: vec![(k, Some(Value::U64(100)))],
         ..empty_result()
     };
@@ -154,14 +145,8 @@ fn multi_tx_read_only_same_key() {
     let ev1 = read_ev(k, 3);
     let result = BatchResult {
         txs: vec![
-            TxResult::Success {
-                emitted: vec![],
-                access_trace: vec![ev0],
-            },
-            TxResult::Success {
-                emitted: vec![],
-                access_trace: vec![ev1],
-            },
+            TxResult::success(vec![ev0], vec![]),
+            TxResult::success(vec![ev1], vec![]),
         ],
         ..empty_result()
     };
@@ -175,10 +160,7 @@ fn delete_routed_sorted_memory() {
     // write_set_final with None (delete) -> SortedMemory.
     let k = ck(1, 0, 1);
     let result = BatchResult {
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![read_ev(k, 1), write_ev(k, 2)],
-        }],
+        txs: vec![TxResult::success(vec![read_ev(k, 1), write_ev(k, 2)], vec![])],
         write_set_final: vec![(k, None)],
         ..empty_result()
     };

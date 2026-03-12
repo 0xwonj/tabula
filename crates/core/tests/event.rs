@@ -27,10 +27,7 @@ fn test_batch_result_construction() {
     let result = BatchResult {
         read_set_old: vec![],
         write_set_final: vec![],
-        txs: vec![TxResult::Success {
-            emitted: vec![],
-            access_trace: vec![],
-        }],
+        txs: vec![TxResult::success(vec![], vec![])],
     };
     assert_eq!(result.txs.len(), 1);
     assert!(result.txs[0].is_success());
@@ -54,10 +51,7 @@ fn test_batch_result_successful_events() {
         read_set_old: vec![],
         write_set_final: vec![],
         txs: vec![
-            TxResult::Success {
-                emitted: vec![],
-                access_trace: vec![event.clone()],
-            },
+            TxResult::success(vec![event.clone()], vec![]),
             TxResult::Failed {
                 reason: "test".into(),
                 partial_events: vec![],

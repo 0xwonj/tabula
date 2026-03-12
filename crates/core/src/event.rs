@@ -3,7 +3,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::{CellKey, Value};
+use crate::{CellKey, RowKey, Value};
 
 /// Monotonically increasing logical timestamp within a batch execution.
 pub type LogicalTime = u64;
@@ -62,6 +62,32 @@ pub struct AccessEvent {
     pub effect_ordinal_in_tx: u32,
 }
 
+/// I/O pair recorded during a Precompile instruction execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrecompileIo {
+    /// Zero-based index of the instruction within the tx body.
+    pub instruction_index: usize,
+    /// Precompile identifier.
+    pub precompile_id: u16,
+    /// Input values passed to the precompile.
+    pub inputs: Vec<Value>,
+    /// Output values returned by the precompile.
+    pub outputs: Vec<Value>,
+}
+
+/// Result of a PropertyRead instruction execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PropertyReadResult {
+    /// Zero-based index of the instruction within the tx body.
+    pub instruction_index: usize,
+    /// The resolved value.
+    pub value: Value,
+    /// The key at which the value was found (None if not applicable).
+    pub key: Option<RowKey>,
+    /// Whether the result is null (no matching row).
+    pub is_null: bool,
+}
+
 /// Per-transaction execution result.
 ///
 /// Carries per-tx data: on success, the access trace and emitted events;
@@ -75,6 +101,12 @@ pub enum TxResult {
         emitted: Vec<EmittedEvent>,
         /// State-access events recorded during this transaction.
         access_trace: Vec<AccessEvent>,
+        /// Precompile I/O pairs recorded during this transaction.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        precompile_ios: Vec<PrecompileIo>,
+        /// Property read results recorded during this transaction.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        property_reads: Vec<PropertyReadResult>,
     },
     /// Transaction failed; all its state changes were rolled back.
     Failed {
@@ -90,6 +122,16 @@ pub enum TxResult {
 }
 
 impl TxResult {
+    /// Create a successful result with only access trace and emitted events.
+    pub fn success(access_trace: Vec<AccessEvent>, emitted: Vec<EmittedEvent>) -> Self {
+        Self::Success {
+            emitted,
+            access_trace,
+            precompile_ios: vec![],
+            property_reads: vec![],
+        }
+    }
+
     /// Whether this transaction succeeded.
     pub fn is_success(&self) -> bool {
         matches!(self, Self::Success { .. })

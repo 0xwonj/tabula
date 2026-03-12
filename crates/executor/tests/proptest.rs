@@ -253,7 +253,7 @@ proptest! {
         events[idx].value = Value::U64(999);
 
         // Wrap events in a single TxResult for etrace identity check
-        let txs = vec![TxResult::Success { emitted: vec![], access_trace: events.clone() }];
+        let txs = vec![TxResult::success(events.clone(), vec![])];
         let check = check_consistency(&events, &read_set_old, &txs);
         prop_assert!(check.is_err(), "tampered trace should fail consistency check");
     }

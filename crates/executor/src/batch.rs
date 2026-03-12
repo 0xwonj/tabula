@@ -136,6 +136,8 @@ pub fn execute_batch<S: StateSnapshot>(
                 txs.push(TxResult::Success {
                     emitted: output.emitted,
                     access_trace,
+                    precompile_ios: output.precompile_ios,
+                    property_reads: output.property_reads,
                 });
             }
             Err(interp_err) => {

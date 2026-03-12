@@ -80,7 +80,7 @@ fn trace_builder_builds_valid_memory_traces() {
         column_metas: vec![meta],
         old_state_root,
         new_state_root,
-        tx_results: vec![TxResult::Success { emitted: vec![], access_trace: vec![] }],
+        tx_results: vec![TxResult::success(vec![], vec![])],
         key_routes: BTreeMap::<CellKey, KeyRoute>::new(),
     };
 
@@ -213,7 +213,7 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
         column_metas: vec![meta],
         old_state_root,
         new_state_root,
-        tx_results: vec![TxResult::Success { emitted: vec![], access_trace: vec![] }],
+        tx_results: vec![TxResult::success(vec![], vec![])],
         key_routes: BTreeMap::<CellKey, KeyRoute>::new(),
     };
 

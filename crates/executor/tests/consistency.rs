@@ -56,10 +56,7 @@ fn null_read_event(key: CellKey, zero: Value, time: u64) -> AccessEvent {
 
 /// Wrap a flat event slice into a single-tx TxResult for etrace identity checks.
 fn single_tx(events: &[AccessEvent]) -> Vec<TxResult> {
-    vec![TxResult::Success {
-        emitted: vec![],
-        access_trace: events.to_vec(),
-    }]
+    vec![TxResult::success(events.to_vec(), vec![])]
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
