@@ -13,6 +13,8 @@ use tabula_core::{
 use tabula_ir::{Instruction, Slot};
 
 use crate::overlay::Overlay;
+use crate::precompile::PrecompileRegistry;
+use crate::property::{CommittedStateProvider, PropertyOpeningRegistry};
 use crate::resolve::{resolve_row_expr, resolve_value_expr};
 
 /// Output of executing a single transaction's instruction body.
@@ -43,6 +45,12 @@ pub struct ExecContext<'a> {
     pub static_tables: &'a dyn StaticTableProvider,
     /// Table schemas for column type resolution.
     pub schemas: &'a BTreeMap<TableId, TableSchema>,
+    /// Optional precompile handlers for custom instructions.
+    pub precompiles: Option<&'a PrecompileRegistry>,
+    /// Optional committed state for PropertyRead instructions.
+    pub committed_state: Option<&'a dyn CommittedStateProvider>,
+    /// Optional property opening registry for PropertyRead resolution.
+    pub property_openings: Option<&'a PropertyOpeningRegistry>,
 }
 
 /// Execute a transaction body against an overlay.
@@ -269,6 +277,65 @@ pub fn execute<S: StateSnapshot>(
                         topic: topic.clone(),
                         data: values,
                     });
+                }
+
+                Instruction::Precompile {
+                    id,
+                    dst_slots,
+                    inputs,
+                } => {
+                    let registry = ctx.precompiles.ok_or_else(|| {
+                        TabulaError::InvalidIr(
+                            "precompile instruction encountered but no PrecompileRegistry provided"
+                                .into(),
+                        )
+                    })?;
+                    let handler = registry.get(*id)?;
+                    let args: Vec<Value> = inputs
+                        .iter()
+                        .map(|inp| resolve_value_expr(inp, &slots, params))
+                        .collect::<Result<_, _>>()?;
+                    let results = handler.execute(&args)?;
+                    if results.len() != dst_slots.len() {
+                        return Err(TabulaError::InvalidIr(format!(
+                            "precompile 0x{:04x} returned {} values but {} dst_slots declared",
+                            id.0,
+                            results.len(),
+                            dst_slots.len(),
+                        )));
+                    }
+                    for (dst, val) in dst_slots.iter().zip(results) {
+                        set_slot(&mut slots, *dst, val)?;
+                    }
+                }
+
+                Instruction::PropertyRead {
+                    dst_val,
+                    dst_key,
+                    dst_is_null,
+                    table,
+                    col,
+                    query,
+                } => {
+                    let provider = ctx.committed_state.ok_or_else(|| {
+                        TabulaError::InvalidIr(
+                            "PropertyRead encountered but no CommittedStateProvider".into(),
+                        )
+                    })?;
+                    let registry = ctx.property_openings.ok_or_else(|| {
+                        TabulaError::InvalidIr(
+                            "PropertyRead encountered but no PropertyOpeningRegistry".into(),
+                        )
+                    })?;
+                    let col_type = lookup_col_type(ctx.schemas, *table, *col)?;
+                    let result = registry.resolve(*table, *col, query, provider, col_type)?;
+                    set_slot(&mut slots, *dst_val, result.value)?;
+                    set_slot(
+                        &mut slots,
+                        *dst_key,
+                        result.key.map_or(Value::U64(0), |k| Value::U64(k.0)),
+                    )?;
+                    set_slot(&mut slots, *dst_is_null, Value::Bool(result.is_null))?;
                 }
             }
             Ok(())

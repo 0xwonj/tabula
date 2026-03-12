@@ -10,7 +10,7 @@ use tabula_artifact::{BatchFile, StateFile, merge_output_state_cells, normalize_
 use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
 use tabula_core::traits::Hasher;
 use tabula_core::{
-    Batch, CellKey, EmittedEvent, ExecutionConsistencyStatus, ExecutionEvent, TxOutcome, Value,
+    Batch, CellKey, EmittedEvent, ExecutionConsistencyStatus, AccessEvent, TxOutcome, Value,
 };
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency_status;
@@ -46,7 +46,7 @@ pub struct ExecutedBatch {
     /// Emitted events.
     pub emitted: Vec<EmittedEvent>,
     /// Full execution trace.
-    pub events: Vec<ExecutionEvent>,
+    pub events: Vec<AccessEvent>,
     /// Consistency check result.
     pub consistency: ExecutionConsistencyStatus,
 }
@@ -87,6 +87,7 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, DriverError> {
         sig_verifier: &MockSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &st,
+        precompiles: None,
     };
 
     let result = execute_batch(&batch, input.program, &state_store, &env, &BTreeMap::new())

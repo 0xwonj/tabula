@@ -37,7 +37,7 @@ pub struct ExecutionCols<T, const W: usize> {
     /// Effect ordinal within the transaction (E-Trace identity anchor).
     pub effect_ordinal_in_tx: T,
 
-    // ── Opcode one-hot selectors (12) ──
+    // ── Opcode one-hot selectors (13) ──
     // Note: Emit is intentionally omitted — it is out-of-protocol (semantics-spec §2.8)
     // and produces no AIR constraints.
     /// Read from state.
@@ -64,6 +64,13 @@ pub struct ExecutionCols<T, const W: usize> {
     pub op_hash: T,
     /// Lookup (static table query).
     pub op_lookup: T,
+    /// Precompile call (custom instruction).
+    pub op_precompile: T,
+    /// PropertyRead (structural query on committed state).
+    pub op_property_read: T,
+
+    /// Precompile ID witness (populated when op_precompile=1).
+    pub precompile_id: T,
 
     // ── Arith sub-selectors (gated by op_arith) ──
     /// 1 if Sub, 0 otherwise.
@@ -144,6 +151,20 @@ pub struct ExecutionCols<T, const W: usize> {
     // ── DivMod opcode (M10-C2) ──
     /// DivMod witness: quotient selector + carry chain + remainder bound (36 cols).
     pub divmod: DivModWitness<T, MAX_SLOTS>,
+
+    // ── PropertyRead opcode ──
+    /// Query type discriminant (PropertyQueryKind ordinal, 0–5).
+    pub property_query_type: T,
+    /// Result value field elements.
+    pub property_result_val: [T; W],
+    /// Result key as u64 limbs (W field elements).
+    pub property_result_key: [T; W],
+    /// Result null flag (boolean: 1 if no matching key found).
+    pub property_result_is_null: T,
+    /// One-hot: which slot receives the value result.
+    pub property_val_sel: [T; MAX_SLOTS],
+    /// One-hot: which slot receives the key result.
+    pub property_key_sel: [T; MAX_SLOTS],
 }
 
 /// Compute the width of ExecutionCols for a given value width.

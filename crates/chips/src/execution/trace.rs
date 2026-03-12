@@ -66,6 +66,10 @@ pub enum Opcode {
     Hash,
     /// Static table lookup.
     Lookup,
+    /// Precompile call.
+    Precompile,
+    /// PropertyRead (structural query on committed state).
+    PropertyRead,
 }
 
 /// Per-instruction witness record for trace generation.
@@ -119,6 +123,16 @@ pub struct InstructionRecord {
     pub hash_perm_output: Option<[BabyBear; 8]>,
     /// For Read: whether the column being read is empty.
     pub is_empty_col: bool,
+    /// For Precompile: the precompile identifier.
+    pub precompile_id: Option<u16>,
+    /// For PropertyRead: query type discriminant (PropertyQueryKind ordinal).
+    pub property_query_type: Option<u8>,
+    /// For PropertyRead: result value (W field elements).
+    pub property_result_val: Vec<BabyBear>,
+    /// For PropertyRead: result key as u64 limbs (W field elements).
+    pub property_result_key: Vec<BabyBear>,
+    /// For PropertyRead: result null flag.
+    pub property_result_is_null: bool,
 }
 
 impl Default for InstructionRecord {
@@ -146,6 +160,11 @@ impl Default for InstructionRecord {
             hash_perm_input: None,
             hash_perm_output: None,
             is_empty_col: false,
+            precompile_id: None,
+            property_query_type: None,
+            property_result_val: vec![],
+            property_result_key: vec![],
+            property_result_is_null: false,
         }
     }
 }
@@ -184,7 +203,10 @@ pub fn generate_execution_trace<const W: usize>(
 
         // Populate access columns for Read, Write, and Lookup.
         // Only Read/Write set is_access and advance the clock.
-        let uses_access_cols = matches!(rec.opcode, Opcode::Read | Opcode::Write | Opcode::Lookup);
+        let uses_access_cols = matches!(
+            rec.opcode,
+            Opcode::Read | Opcode::Write | Opcode::Lookup | Opcode::PropertyRead
+        );
 
         if is_access {
             clk += 1;
@@ -270,13 +292,51 @@ pub fn generate_execution_trace<const W: usize>(
             populate_cmp_witness(cols, rec, cmp_op);
         }
 
-        // Hash permutation columns
-        if rec.opcode == Opcode::Hash {
+        // Hash / Precompile permutation columns
+        if matches!(rec.opcode, Opcode::Hash | Opcode::Precompile) {
             if let Some(ref input) = rec.hash_perm_input {
                 cols.hash_perm_input = *input;
             }
             if let Some(ref output) = rec.hash_perm_output {
                 cols.hash_perm_output = *output;
+            }
+        }
+
+        // Precompile ID
+        if rec.opcode == Opcode::Precompile
+            && let Some(id) = rec.precompile_id
+        {
+            cols.precompile_id = BabyBear::from_u32(id as u32);
+        }
+
+        // PropertyRead columns
+        if rec.opcode == Opcode::PropertyRead {
+            if let Some(qt) = rec.property_query_type {
+                cols.property_query_type = BabyBear::new(qt as u32);
+            }
+            for (j, v) in rec.property_result_val.iter().enumerate().take(W) {
+                cols.property_result_val[j] = *v;
+            }
+            for (j, v) in rec.property_result_key.iter().enumerate().take(W) {
+                cols.property_result_key[j] = *v;
+            }
+            cols.property_result_is_null = bool_fe(rec.property_result_is_null);
+
+            // Set val_sel and key_sel from written_slots order:
+            // written_slots[0] = val slot, [1] = key slot, [2] = is_null slot
+            if rec.written_slots.len() >= 2 {
+                let val_slot = rec.written_slots[0];
+                let key_slot = rec.written_slots[1];
+                assert!(
+                    val_slot < MAX_SLOTS,
+                    "property val_slot {val_slot} >= MAX_SLOTS"
+                );
+                assert!(
+                    key_slot < MAX_SLOTS,
+                    "property key_slot {key_slot} >= MAX_SLOTS"
+                );
+                cols.property_val_sel[val_slot] = BabyBear::ONE;
+                cols.property_key_sel[key_slot] = BabyBear::ONE;
             }
         }
 
@@ -293,13 +353,21 @@ pub fn generate_execution_trace<const W: usize>(
             }
             slot_nulls[first_slot] = bool_fe(rec.dst_is_null);
         }
-        // DivMod second slot (remainder)
+        // DivMod/PropertyRead second slot (key or remainder)
         if rec.written_slots.len() >= 2 && !rec.dst2_val.is_empty() {
             let second_slot = rec.written_slots[1];
             for (j, v) in rec.dst2_val.iter().enumerate().take(W) {
                 slot_vals[second_slot][j] = *v;
             }
             slot_nulls[second_slot] = bool_fe(rec.dst2_is_null);
+        }
+
+        // PropertyRead third slot (is_null flag as value)
+        if rec.opcode == Opcode::PropertyRead && rec.written_slots.len() >= 3 {
+            let null_slot = rec.written_slots[2];
+            slot_vals[null_slot] = [BabyBear::ZERO; W];
+            slot_vals[null_slot][0] = bool_fe(rec.property_result_is_null);
+            slot_nulls[null_slot] = BabyBear::ZERO;
         }
 
         // Write all slot values to trace (carry + new writes)

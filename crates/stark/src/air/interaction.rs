@@ -72,9 +72,13 @@ pub mod core_buses {
     pub const SMT_LEAF_DIGEST: BusId = BusId(15);
     /// SmtColPathChip → SmtTablePathChip (per-table SMT roots).
     pub const SMT_TABLE_ROOT: BusId = BusId(16);
+    /// ExecutionChip → PrecompileChip (precompile I/O commitment).
+    pub const PRECOMPILE: BusId = BusId(17);
+    /// Execution → PropertyVerifier (cross-tier property query results).
+    pub const PROPERTY_READ: BusId = BusId(18);
 
     /// All core bus IDs, for iteration and validation.
-    pub const ALL: [BusId; 11] = [
+    pub const ALL: [BusId; 13] = [
         POSEIDON_PERM,
         COMMITMENT_VERIF,
         RANGE_CHECK,
@@ -86,6 +90,8 @@ pub mod core_buses {
         COALESCED_WRITE,
         SMT_LEAF_DIGEST,
         SMT_TABLE_ROOT,
+        PRECOMPILE,
+        PROPERTY_READ,
     ];
 
     /// Human-readable name for a core bus ID, or `None` for app-defined buses.
@@ -102,6 +108,8 @@ pub mod core_buses {
             14 => Some("CoalescedWrite"),
             15 => Some("SmtLeafDigest"),
             16 => Some("SmtTableRoot"),
+            17 => Some("Precompile"),
+            18 => Some("PropertyRead"),
             _ => None,
         }
     }

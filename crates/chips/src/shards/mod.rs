@@ -12,6 +12,7 @@
 
 pub mod memory;
 pub mod meta;
+pub mod property;
 pub mod smt;
 pub mod ssmc;
 pub mod state;

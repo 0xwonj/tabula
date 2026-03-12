@@ -40,9 +40,9 @@ pub enum OpKind {
     Write,
 }
 
-/// A single execution event for the consistency module.
+/// A single state-access event (read or write) recorded during execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct ExecutionEvent {
+pub struct AccessEvent {
     /// The cell being accessed.
     pub key: CellKey,
     /// Whether this is a read or write.
@@ -66,7 +66,7 @@ pub struct ExecutionEvent {
     pub effect_ordinal_in_tx: u32,
 }
 
-impl ExecutionEvent {
+impl AccessEvent {
     /// Canonical identity of this event in E-Trace.
     pub fn etrace_id(&self) -> ETraceEventId {
         ETraceEventId {
@@ -87,7 +87,7 @@ pub enum TxOutcome {
         reason: String,
         /// Execution events produced before the failure (rolled back from state).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        partial_events: Vec<ExecutionEvent>,
+        partial_events: Vec<AccessEvent>,
         /// Index of the instruction that failed (None for pre-execution failures).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         failed_instruction: Option<usize>,
@@ -127,7 +127,7 @@ pub struct ExecutionResult {
     /// `None` = delete (write null).
     pub write_set_final: Vec<(CellKey, Option<Value>)>,
     /// Full execution trace for consistency proving.
-    pub events: Vec<ExecutionEvent>,
+    pub events: Vec<AccessEvent>,
     /// Emitted application events / receipts.
     pub emitted: Vec<EmittedEvent>,
     /// Per-transaction outcomes (success/failure).

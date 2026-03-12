@@ -13,13 +13,14 @@ impl Parser {
             Token::Let => self.parse_let_stmt(),
             Token::Assert => self.parse_assert_stmt(),
             Token::Emit => self.parse_emit_stmt(),
+            Token::At => self.parse_precompile_stmt(),
             Token::Ident(_) => self.parse_assign_stmt(),
             _ => {
                 self.errors.push(CompileError::new(
                     ErrorKind::UnexpectedToken,
                     self.peek_span(),
                     format!(
-                        "expected statement (let, assert, emit, or assignment), found {:?}",
+                        "expected statement (let, assert, emit, @precompile, or assignment), found {:?}",
                         self.peek()
                     ),
                 ));
@@ -112,6 +113,96 @@ impl Parser {
 
         Some(Stmt {
             kind: StmtKind::Emit { topic, args },
+            span: start.merge(end),
+        })
+    }
+
+    fn parse_precompile_stmt(&mut self) -> Option<Stmt> {
+        let start = self.peek_span();
+        self.advance(); // consume '@'
+
+        let (name, _) = self.expect_ident().ok()?;
+        if name != "precompile" {
+            self.errors.push(CompileError::new(
+                ErrorKind::UnexpectedToken,
+                self.peek_span(),
+                format!("expected 'precompile' after '@', found '{name}'"),
+            ));
+            return None;
+        }
+
+        self.expect(&Token::LParen).ok()?;
+
+        // Parse ID (hex or decimal integer literal).
+        let id_expr = self.parse_expr()?;
+        self.expect(&Token::Comma).ok()?;
+
+        // Parse destination names: [name1, name2, ...]
+        self.expect(&Token::LBracket).ok()?;
+        let mut dst_names = Vec::new();
+        while !matches!(self.peek(), Token::RBracket | Token::Eof) {
+            let (ident, _) = self.expect_ident().ok()?;
+            dst_names.push(ident);
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+            }
+        }
+        self.expect(&Token::RBracket).ok()?;
+
+        // Parse inputs: , expr, expr, ...
+        let mut inputs = Vec::new();
+        while matches!(self.peek(), Token::Comma) {
+            self.advance(); // consume ','
+            if matches!(self.peek(), Token::RParen | Token::Eof) {
+                break;
+            }
+            let arg = self.parse_expr()?;
+            inputs.push(arg);
+        }
+        let end = self.peek_span();
+        self.expect(&Token::RParen).ok()?;
+
+        // Extract ID from expression (integer or small hex literal).
+        let id = match &id_expr.kind {
+            crate::ast::ExprKind::IntLit(n) => {
+                if *n > u16::MAX as u64 {
+                    self.errors.push(CompileError::new(
+                        ErrorKind::UnexpectedToken,
+                        id_expr.span,
+                        format!("precompile ID {n} exceeds u16::MAX"),
+                    ));
+                    return None;
+                }
+                *n as u16
+            }
+            crate::ast::ExprKind::HexLit(bytes) => {
+                // Only the last 2 bytes may be non-zero for a valid u16 ID.
+                if bytes[..30].iter().any(|&b| b != 0) {
+                    self.errors.push(CompileError::new(
+                        ErrorKind::UnexpectedToken,
+                        id_expr.span,
+                        "precompile ID exceeds u16::MAX",
+                    ));
+                    return None;
+                }
+                u16::from_be_bytes([bytes[30], bytes[31]])
+            }
+            _ => {
+                self.errors.push(CompileError::new(
+                    ErrorKind::ExpectedToken,
+                    id_expr.span,
+                    "precompile ID must be an integer literal",
+                ));
+                return None;
+            }
+        };
+
+        Some(Stmt {
+            kind: StmtKind::Precompile {
+                id,
+                dst_names,
+                inputs,
+            },
             span: start.merge(end),
         })
     }

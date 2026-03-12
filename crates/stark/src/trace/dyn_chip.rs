@@ -37,6 +37,7 @@ use crate::trace::contributor::TraceContributor;
 /// | Memory | MemoryShardChip | `SSMC_WITNESS_LABEL` (per-column) |
 /// | Memory | StateShardChip | `SSMC_WITNESS_LABEL` (per-column) |
 /// | Memory | MetaShardChip | `SSMC_WITNESS_LABEL` (per-column) |
+/// | Memory | PropertyVerifierChip | `PROPERTY_READ_RECORDS` (per-column) |
 /// | Dependent | PoseidonChip | `POSEIDON_INPUTS` (populated by `BusConsumer`) |
 /// | Dependent | RangeCheckChip | `RANGE_CHECK_MULTS` (populated by `BusConsumer`) |
 ///

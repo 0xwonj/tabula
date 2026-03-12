@@ -5,7 +5,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use tabula_core::{EmittedEvent, ExecutionConsistencyStatus, ExecutionEvent, TxOutcome};
+use tabula_core::{EmittedEvent, ExecutionConsistencyStatus, AccessEvent, TxOutcome};
 
 use crate::{ExecutionReceipt, ProgramArtifact, StarkProofSummary, StateCell, StateFile};
 
@@ -183,7 +183,7 @@ pub struct ExecutionSummary {
     pub consistency: ExecutionConsistencyStatus,
     /// Optional full trace.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace: Option<Vec<ExecutionEvent>>,
+    pub trace: Option<Vec<AccessEvent>>,
     /// Post-state.
     pub state_after: StateFile,
 }

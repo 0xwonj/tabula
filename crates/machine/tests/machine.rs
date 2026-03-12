@@ -52,9 +52,9 @@ fn machine_new_creates_valid_machine() {
 
     // Execution tier: 4 chips
     assert_eq!(setups.execution.registry.chip_ids().len(), 4);
-    // One column tier: 5 chips
+    // One column tier: 6 chips
     assert_eq!(setups.columns.len(), 1);
-    assert_eq!(setups.columns[0].1.registry.chip_ids().len(), 5);
+    assert_eq!(setups.columns[0].1.registry.chip_ids().len(), 6);
     // Root tier: 4 chips
     assert_eq!(setups.root.registry.chip_ids().len(), 4);
 }

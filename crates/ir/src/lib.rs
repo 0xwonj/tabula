@@ -5,7 +5,10 @@ pub mod pass;
 pub mod program;
 pub mod tx;
 
-pub use instruction::{ArithOp, CmpOp, Instruction, RowExpr, Slot, ValueExpr};
+pub use instruction::{
+    AggregateKind, ArithOp, CmpOp, Instruction, PrecompileId, PropertyQuery, PropertyQueryKind,
+    RowExpr, Slot, ValueExpr,
+};
 pub use pass::BodyTypeInfo;
 pub use program::Program;
 pub use tx::{ParamDef, TxTypeDef};

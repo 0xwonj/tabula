@@ -279,3 +279,27 @@ pub fn make_lookup(
         .dst_u64(val)
         .build()
 }
+
+/// Build a PropertyRead instruction record.
+///
+/// Populates access and property columns for structural queries.
+#[allow(clippy::too_many_arguments)]
+pub fn make_property_read(
+    val_slot: usize,
+    key_slot: usize,
+    null_slot: usize,
+    table: u32,
+    col: u16,
+    query_type: u8,
+    result_val: Vec<BabyBear>,
+    result_key: Vec<BabyBear>,
+    is_null: bool,
+) -> InstructionRecord {
+    InstructionBuilder::new(Opcode::PropertyRead)
+        .written_slots(vec![val_slot, key_slot, null_slot])
+        .access(table, col, 0)
+        .property_read(query_type, result_val.clone(), result_key.clone(), is_null)
+        .dst_fe(result_val)
+        .dst2_fe(result_key)
+        .build()
+}

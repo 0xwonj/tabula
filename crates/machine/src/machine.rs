@@ -22,17 +22,17 @@ use tabula_core::error::TabulaError;
 use tabula_stark::air::interaction::BusId;
 use tabula_stark::air::statement::PublicStatement;
 
-use crate::config::{Challenger, EF4, TabulaStarkConfig, default_config};
+use crate::builder::MachineBuilder;
+use crate::config::{Challenger, EF4, TabulaStarkConfig};
 use crate::keys::{TabulaVerifyingKey, compute_external_buses};
 use crate::proof::{
     ColumnIdentity, ColumnProofEntry, ProofTier, ProveError, SubProofEnvelope, TabulaProof,
     VerificationError, check_cross_proof_bus_balance,
 };
 use crate::proof_instance::{MainCommitment, ProofInstance};
+use crate::property::PropertyOpening;
 use crate::registry::{ChipRegistry, SetupError};
-use crate::setup::{
-    ColumnSetupConfig, ProofSetups, ProofTraces, build_proof_traces, create_proof_setups,
-};
+use crate::setup::{ColumnSetupConfig, ProofSetups, ProofTraces, build_proof_traces};
 
 /// A configured STARK machine for multi-proof proving and verification.
 ///
@@ -42,6 +42,7 @@ use crate::setup::{
 pub struct TabulaMachine {
     config: TabulaStarkConfig,
     setups: ProofSetups,
+    property_openings: Vec<Box<dyn PropertyOpening>>,
 }
 
 impl fmt::Debug for TabulaMachine {
@@ -58,18 +59,53 @@ impl TabulaMachine {
     ///
     /// Builds per-tier setups (execution, per-column, root) with registries,
     /// keys, and chip sets. Uses the default STARK configuration.
+    ///
+    /// For custom configurations or extensions, use [`builder()`](Self::builder).
     pub fn new(col_configs: &[ColumnSetupConfig]) -> Result<Self, SetupError> {
-        Self::with_config(col_configs, default_config())
+        MachineBuilder::new()
+            .with_columns(col_configs.to_vec())
+            .build()
     }
 
     /// Create a machine with a custom STARK configuration.
+    ///
+    /// For full control (extensions, custom root proof), use [`builder()`](Self::builder).
     pub fn with_config(
         col_configs: &[ColumnSetupConfig],
         config: TabulaStarkConfig,
     ) -> Result<Self, SetupError> {
-        let setups =
-            create_proof_setups(col_configs).map_err(|e| SetupError::SetupFailed(e.to_string()))?;
-        Ok(Self { config, setups })
+        MachineBuilder::new()
+            .with_columns(col_configs.to_vec())
+            .with_config(config)
+            .build()
+    }
+
+    /// Create a builder for customized machine construction.
+    ///
+    /// The builder allows registering extensions, custom root proofs,
+    /// and per-column commitment schemes.
+    ///
+    /// ```ignore
+    /// let machine = TabulaMachine::builder()
+    ///     .with_columns(col_configs)
+    ///     .with_extension(MyExtension)
+    ///     .build()?;
+    /// ```
+    pub fn builder() -> MachineBuilder {
+        MachineBuilder::new()
+    }
+
+    /// Construct from pre-built parts (used by [`MachineBuilder`]).
+    pub(crate) fn from_parts(
+        config: TabulaStarkConfig,
+        setups: ProofSetups,
+        property_openings: Vec<Box<dyn PropertyOpening>>,
+    ) -> Self {
+        Self {
+            config,
+            setups,
+            property_openings,
+        }
     }
 
     /// Build per-tier traces from partitioned witness stores.
@@ -117,6 +153,14 @@ impl TabulaMachine {
     /// The per-tier proof setups.
     pub fn setups(&self) -> &ProofSetups {
         &self.setups
+    }
+
+    /// Registered property openings for structural queries.
+    ///
+    /// Used by the executor to resolve `PropertyRead` instructions against
+    /// the correct opening implementation based on commitment compatibility.
+    pub fn property_openings(&self) -> &[Box<dyn PropertyOpening>] {
+        &self.property_openings
     }
 }
 

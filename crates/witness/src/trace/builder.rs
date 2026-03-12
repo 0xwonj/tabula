@@ -9,7 +9,8 @@ use tabula_core::{Batch, ColId, ExecutionResult, TableId, TableSchema};
 use tabula_ir::Program;
 
 use crate::witness::BatchWitness;
-use tabula_chips::execution::trace::InstructionRecord;
+use tabula_chips::execution::trace::{InstructionRecord, Opcode};
+use tabula_chips::shards::property::trace::PropertyReadRecord;
 use tabula_chips::smt_path::trace::{SmtPathWitness, SmtTablePathWitness};
 use tabula_chips::static_table::trace::StaticTableRow;
 
@@ -54,6 +55,7 @@ where
     /// Runs the complete preparation pipeline:
     /// 1. Derives empty columns from witness metadata.
     /// 2. Lowers IR body → instruction records + static table rows.
+    #[allow(clippy::too_many_arguments)]
     /// 3. Builds SMT paths from witness metadata.
     /// 4. Validates SMT path shapes.
     /// 5. Populates a [`WitnessStore`] with all chip inputs.
@@ -65,6 +67,7 @@ where
         schemas: &BTreeMap<TableId, TableSchema>,
         static_tables: &dyn StaticTableProvider,
         hasher: H,
+        precompile_executor: Option<&super::lowering::PrecompileExecuteFn>,
     ) -> Result<WitnessStore, TabulaError>
     where
         H: Clone,
@@ -76,6 +79,7 @@ where
             schemas,
             static_tables,
             hasher,
+            precompile_executor,
         )?;
 
         let inputs = AllTraceInputs {
@@ -116,6 +120,10 @@ where
         );
         store.put(witness_labels::SMT_TABLE_PVS, smt_table_pvs);
 
+        // PropertyRead records grouped by (table, col) for column-tier verifiers.
+        let property_records = extract_property_read_records(inputs.execution_records);
+        store.put(PROPERTY_READ_ALL_LABEL, property_records);
+
         // Phase 1 (Memory) inputs are handled per-column via shard witness
         // preparation (prepare_shard_witness). No global memory chip inputs.
         //
@@ -126,6 +134,7 @@ where
     }
 
     /// Shared input preparation for IR-based pipelines.
+    #[allow(clippy::too_many_arguments)]
     fn prepare_inputs(
         &self,
         program: &Program,
@@ -134,6 +143,7 @@ where
         schemas: &BTreeMap<TableId, TableSchema>,
         static_tables: &dyn StaticTableProvider,
         hasher: H,
+        precompile_executor: Option<&super::lowering::PrecompileExecuteFn>,
     ) -> Result<PreparedInputs, TabulaError>
     where
         H: Clone,
@@ -155,6 +165,8 @@ where
             schemas,
             static_tables,
             &empty_columns,
+            precompile_executor,
+            None,
         )?;
 
         // 3. Build SMT paths from witness metadata.
@@ -180,4 +192,34 @@ struct PreparedInputs {
     static_table_rows: Vec<StaticTableRow>,
     smt_col_paths: Vec<SmtPathWitness>,
     smt_table_paths: Vec<SmtTablePathWitness>,
+}
+
+/// WitnessStore label for the global PropertyRead records map.
+///
+/// Contains `BTreeMap<(TableId, ColId), Vec<PropertyReadRecord>>` that gets
+/// split per-column during partitioning.
+pub(crate) const PROPERTY_READ_ALL_LABEL: &str = "property_read_all";
+
+/// Extract PropertyRead records from instruction records, grouped by (table, col).
+fn extract_property_read_records(
+    records: &[InstructionRecord],
+) -> BTreeMap<(TableId, ColId), Vec<PropertyReadRecord>> {
+    let mut result: BTreeMap<(TableId, ColId), Vec<PropertyReadRecord>> = BTreeMap::new();
+    for rec in records {
+        if rec.opcode != Opcode::PropertyRead {
+            continue;
+        }
+        let table = TableId(rec.access_t.unwrap_or(0));
+        let col = ColId(rec.access_c.unwrap_or(0));
+        result
+            .entry((table, col))
+            .or_default()
+            .push(PropertyReadRecord {
+                query_type: rec.property_query_type.unwrap_or(0),
+                result_val: rec.property_result_val.clone(),
+                result_key: rec.property_result_key.clone(),
+                is_null: rec.property_result_is_null,
+            });
+    }
+    result
 }

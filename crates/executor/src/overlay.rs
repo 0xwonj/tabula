@@ -14,7 +14,7 @@
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateSnapshot;
-use tabula_core::{CellKey, ExecutionEvent, LogicalTime, OpKind, Value, ValueType};
+use tabula_core::{CellKey, AccessEvent, LogicalTime, OpKind, Value, ValueType};
 
 use crate::execution_state::ExecutionState;
 use crate::trace_recorder::TraceRecorder;
@@ -29,7 +29,7 @@ pub struct OverlayResult {
     /// Final writes to committed state (coalesced). `None` = delete.
     pub write_set_final: Vec<(CellKey, Option<Value>)>,
     /// Full execution trace.
-    pub events: Vec<ExecutionEvent>,
+    pub events: Vec<AccessEvent>,
 }
 
 // ── Overlay (public facade) ─────────────────────────────────────────────
@@ -138,7 +138,7 @@ impl<'a, S: StateSnapshot> Overlay<'a, S> {
     }
 
     /// Clone events recorded since a given index.
-    pub fn events_since(&self, since: usize) -> Vec<ExecutionEvent> {
+    pub fn events_since(&self, since: usize) -> Vec<AccessEvent> {
         self.recorder.events_since(since)
     }
 

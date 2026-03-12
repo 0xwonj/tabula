@@ -7,12 +7,28 @@ use p3_field::PrimeCharacteristicRing;
 use tabula_commitment::BabyBearCodec;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{StaticTableProvider, ValueCodec};
-use tabula_core::{ColId, ExecutionEvent, RowKey, TableId, Value};
-use tabula_ir::{RowExpr, ValueExpr};
+use tabula_core::{ColId, AccessEvent, RowKey, TableId, Value};
+use tabula_ir::{PropertyQuery, RowExpr, ValueExpr};
 
 use tabula_chips::execution::MAX_SLOTS;
 use tabula_chips::execution::trace::{InstructionRecord, Opcode};
 use tabula_chips::static_table::trace::StaticTableRow;
+
+/// Callback for executing a precompile during witness lowering.
+///
+/// Signature: `(precompile_id, inputs) → outputs`.
+/// The caller wraps their `PrecompileRegistry` in this closure.
+pub type PrecompileExecuteFn =
+    dyn Fn(u16, &[Value]) -> Result<Vec<Value>, TabulaError> + Send + Sync;
+
+/// Callback for resolving a structural property query during witness lowering.
+///
+/// Signature: `(table, col, query) → (value, key, is_null)`.
+/// Returns the result value, the key at which it was found (or `None` if
+/// no matching key), and whether the result is null.
+pub type PropertyReadFn = dyn Fn(TableId, ColId, &PropertyQuery) -> Result<(Value, Option<RowKey>, bool), TabulaError>
+    + Send
+    + Sync;
 
 /// Mutable lowering context threaded through per-opcode lowering functions.
 ///
@@ -45,7 +61,7 @@ pub(super) struct LoweringContext<'a, const W: usize> {
 
     // ── Shared immutable references ─────────────────────────────────────
     /// Execution events for this tx.
-    pub(super) tx_events: &'a [&'a ExecutionEvent],
+    pub(super) tx_events: &'a [&'a AccessEvent],
     /// Schema type map: (table, col) -> ValueType.
     pub(super) type_map: &'a BTreeMap<(TableId, ColId), tabula_core::ValueType>,
     /// Static table provider.
@@ -56,6 +72,10 @@ pub(super) struct LoweringContext<'a, const W: usize> {
     pub(super) params: &'a [Value],
     /// Value codec.
     pub(super) codec: &'a BabyBearCodec,
+    /// Optional precompile executor for re-executing precompile instructions.
+    pub(super) precompile_executor: Option<&'a PrecompileExecuteFn>,
+    /// Optional property reader for resolving PropertyRead queries.
+    pub(super) property_reader: Option<&'a PropertyReadFn>,
 }
 
 impl<'a, const W: usize> LoweringContext<'a, W> {
@@ -63,13 +83,15 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         tx_index: u32,
-        tx_events: &'a [&'a ExecutionEvent],
+        tx_events: &'a [&'a AccessEvent],
         type_map: &'a BTreeMap<(TableId, ColId), tabula_core::ValueType>,
         static_tables: &'a dyn StaticTableProvider,
         empty_columns: &'a BTreeSet<(TableId, ColId)>,
         params: &'a [Value],
         codec: &'a BabyBearCodec,
         num_instructions: usize,
+        precompile_executor: Option<&'a PrecompileExecuteFn>,
+        property_reader: Option<&'a PropertyReadFn>,
     ) -> Self {
         Self {
             slots: vec![None; MAX_SLOTS],
@@ -87,6 +109,8 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
             empty_columns,
             params,
             codec,
+            precompile_executor,
+            property_reader,
         }
     }
 
@@ -241,11 +265,16 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
             hash_perm_input: None,
             hash_perm_output: None,
             is_empty_col: false,
+            precompile_id: None,
+            property_query_type: None,
+            property_result_val: vec![],
+            property_result_key: vec![],
+            property_result_is_null: false,
         }
     }
 
     /// Find the event matching the current tx_index and effect ordinal.
-    pub(super) fn find_event(&self, instr_idx: usize) -> Result<&'a ExecutionEvent, TabulaError> {
+    pub(super) fn find_event(&self, instr_idx: usize) -> Result<&'a AccessEvent, TabulaError> {
         let tx_index = self.tx_index;
         let effect_ordinal = self.effect_ordinal;
         self.tx_events

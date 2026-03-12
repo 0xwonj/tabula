@@ -1,25 +1,25 @@
 # Tabula Extensibility Architecture
 
-> **Status**: Draft v0.4
-> **Date**: 2026-03-06
-> **Depends on**: tabula-machine-architecture.md (v0.4), proof-spec.md, semantics-spec.md
+> **Status**: v1.0
+> **Date**: 2026-03-12
 > **Scope**: Framework-level extensibility for purpose-built ZK applications
+> **Depends on**: sharded-protocol-design.md, prover-pipeline-acceleration.md
 
-## 1. Vision
+---
 
-Tabula is a **framework for building purpose-built verifiable state machines**. Rather than a fixed VM with a fixed instruction set, Tabula provides composable building blocks — instructions, chips, state strategies, and proof infrastructure — that application developers assemble into an optimized, application-specific proving system.
+## 1. Design Philosophy
 
-The design principle: **applications customize what they need, inherit everything else.**
+### 1.1 Core Values
 
-### 1.1 The Zero-Modification Principle
+**Near-Optimal for Any ZK Application.** Tabula is a framework for building purpose-built verifiable state machines. The architecture provides composable building blocks — chips, buses, state strategies, and proof infrastructure — that application developers assemble into an optimized, application-specific proving system. A ZK DEX built on Tabula should achieve within 5-10% of a hand-built circuit's performance, while saving months of development time.
 
-An application MUST be able to define all customizations — chips, buses, state commitment strategies, precompile handlers — **purely in its own crate**. The Tabula codebase is consumed as an immutable Cargo dependency and is never modified by applications.
+**Zero-Modification Principle.** Applications MUST define all customizations — chips, buses, commitment strategies, precompile handlers — purely in their own crate. Tabula is consumed as an immutable Cargo dependency. No forking, no patching, no conditional compilation flags in framework code.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  Tabula (immutable Cargo dependency, never modified by apps) │
 │  tabula-core, tabula-ir, tabula-executor, tabula-machine,   │
-│  tabula-gadgets, tabula-lang, tabula-std                     │
+│  tabula-stark, tabula-gadgets, tabula-chips, tabula-witness  │
 └──────────────────────────┬───────────────────────────────────┘
                     Cargo dependency (read-only)
 ┌──────────────────────────▼───────────────────────────────────┐
@@ -29,13 +29,12 @@ An application MUST be able to define all customizations — chips, buses, state
 │    TabulaMachine::builder()                                  │
 │        .with_core_chips()                                    │
 │        .with_extension(MyExtension)                          │
-│        .with_config(production_config())                     │
 │        .build()                                              │
 │                                                              │
 │  Pure app definitions (trait impls, no Tabula code changes): │
 │    impl ChipSpec + Air<AB> for AppChip  (auto AnyRap)       │
 │    impl ChipExtension for MyExtension                        │
-│    impl VectorCommitment for AppVc                           │
+│    impl ColumnCommitment for AppCommitment                    │
 │    impl PrecompileHandler for AppPrecompiles                 │
 │    define_bus! for app buses                                 │
 │    .tab files (DSL tx types)                                 │
@@ -46,724 +45,300 @@ An application MUST be able to define all customizations — chips, buses, state
 └──────────────────────────────────────────────────────────────┘
 ```
 
+**Graduated Complexity.** 80% of applications need only the DSL (`.tab` files). 15% add standard precompiles. 5% (like a ZK DEX) write custom AIR chips. Each level inherits everything from the levels below.
+
+**LogUp Buses as Universal Interface.** All inter-chip communication flows through LogUp buses. This is the composability primitive — chips never reference each other directly. A custom orderbook chip and the built-in memory chip compose because they both speak "bus." Bus balance guarantees soundness: if fingerprints don't match, verification fails.
+
+**Open Newtypes, Closed Semantics.** Identifiers (`ChipId(u16)`, `BusId(u16)`, `TracePhase(u32)`, `EncodingWidth(usize)`) are open newtypes that support downstream extension. Core semantics (the 4 value types, 13 instructions) are intentionally closed enums with exhaustive matching for soundness.
+
 ### 1.2 Design Goals
 
-1. **Zero-modification**: Apps never fork or modify Tabula's codebase.
-2. **Graduated complexity**: Simple apps use core IR unchanged. Complex apps go deeper.
-3. **Composability**: Extensions compose via LogUp buses — no coupling between components.
-4. **Near-optimal efficiency**: Custom chips approach purpose-built circuit performance.
-5. **Type safety**: Setup-time validation of chip composition, compile-time bus signatures.
-6. **Minimal boilerplate**: Macros and traits eliminate repetitive wiring code.
-7. **Upgrade resilience**: Apps survive Tabula minor version updates without code changes.
+1. **Zero-modification**: Apps never fork or modify Tabula's codebase
+2. **Near-optimal efficiency**: Custom chips approach purpose-built circuit performance (~5-10% overhead)
+3. **Graduated complexity**: Simple apps use core IR unchanged; complex apps go deeper
+4. **Composability**: Extensions compose via LogUp buses — no coupling between components
+5. **Type safety**: Setup-time validation of chip composition, compile-time bus signatures
+6. **Minimal boilerplate**: Macros and traits eliminate repetitive wiring code
+7. **Upgrade resilience**: Apps survive Tabula minor version updates without code changes
 
 ### 1.3 Non-Goals
 
-- ~~Runtime-pluggable chips (p3's `Air<AB>` requires static dispatch)~~ **Superseded.** OpenVM proves `dyn AnyRap` works. Tabula uses runtime `ChipRegistry` — see [implementation-workplan.md](implementation-workplan.md#composition-model-compile-time-enum-vs-runtime-registry).
 - Changing the base field (BabyBear is fixed)
 - General-purpose computation (Tabula is a state machine, not a zkVM)
-
-### 1.4 Framework Prerequisites
-
-The Zero-Modification Principle requires a set of **one-time framework changes** in Tabula. Once these are in place, all subsequent app development requires zero changes to Tabula's codebase.
-
-| # | Change | Current State | Target State | Scope |
-|---|--------|---------------|--------------|-------|
-| F1 | `BusId` newtype | Closed `InteractionKind` enum (11 variants) | `BusId(u16)` newtype with reserved ranges (core: 0-99, app: 100+) | ~50 LOC |
-| F2 | `ChipExtension` trait | No extension packaging | Registers chips + buses + witness as a unit | ~150 LOC |
-| F3 | `DynTraceContributor` | Hardcoded per-chip wiring in `orchestration.rs` | Object-safe `TraceContributor` wrapper (Phase 1) | Phase 1 |
-| F4 | `WitnessStore` | Implicit data passing via function arguments | Typed key-value store, chips declare dependencies | ~100 LOC |
-| F5 | `VectorCommitment` trait | SSMC/SMT hardcoded | Trait with `commit()`, `prove_transition()`, `chip_name()` | ~100 LOC |
-| F6 | `PropertyOpening` trait | No structural query mechanism | Trait for ordered/aggregate queries against committed state | ~100 LOC |
-| F9 | `Precompile` IR variant | No generic computation dispatch | Single `Precompile { id, dst_slots, inputs }` variant | ~50 LOC |
-| F10 | `PrecompileHandler` trait | N/A | Executor-side dispatch for precompile execution | ~50 LOC |
-| F11 | `TemplateChip` trait | Only generic `ExecutionChip` | Trait for specialized tx-pattern chips + equivalence harness | ~200 LOC |
-| F12 | `tabula-machine::prelude` | Apps import p3 crates directly | Stable re-export of p3 types through Tabula | ~50 LOC |
-| F13 | `op_precompile` + `PrecompileBus` | N/A | One-time ExecutionChip addition for precompile dispatch | ~100 LOC |
-
-> **v0.4 changes:** F2 changed from `define_chip_set! include` to `ChipExtension` (composition via `ChipRegistry` + `AnyRap` from Phase 1). F7 (`OpcodeSpec`) and F8 (`define_instruction_set!`) removed — the 12 core opcodes are stable; new computation uses the Precompile pattern (F9-F10, F13). F13 added for ExecutionChip precompile support.
-
-**Total**: ~950 LOC of framework-level changes. After these changes (plus Phase 1 `ChipRegistry`/`AnyRap`), all app development requires zero changes to Tabula's codebase.
-
-The dependency between these prerequisites:
-
-```
-Phase 1 (AnyRap + ChipRegistry) ──→ F1 (BusId) ──→ F2 (ChipExtension) ──→ F4 (WitnessStore) ──→ F5 (VC trait)
-                                                                                                ──→ F11 (Template)
-F9 (Precompile) ──→ F10 (PrecompileHandler) ──→ F13 (PrecompileBus)
-F12 (prelude) — independent, can be done anytime
-```
+- Custom type extensibility (closed ValueType + bytes32 escape hatch — see custom-type-extensibility.md)
+- Hot-swapping chips at runtime (setup is a one-time configuration step)
 
 ---
 
-## 2. Extension Axes
+## 2. Architecture Overview
 
-Tabula's extensibility decomposes into seven orthogonal axes, each with a clear extension mechanism and a well-defined boundary of responsibility.
+### 2.1 Three-Tier Proof Structure (Implemented)
+
+Full sharding IS the base architecture. No monolithic code paths remain.
 
 ```
-Axis 1: Instruction Set ────── what computations are available
-Axis 2: Chip Composition ───── what AIR components prove correctness
-Axis 3: Trace Pipeline ──────── how witnesses flow to chips
-Axis 4: State Commitment ───── how column state is committed
-Axis 5: State Opening ───────── how reads against committed state are proven
-Axis 6: Execution Strategy ──── how tx bodies are proven (interpreter/template/compiled)
-Axis 7: Proof Composition ───── how sub-proofs aggregate into batch proofs
+Tier 1: Execution Proof (1, global)
+  Chips: ExecutionChip<W>, StaticTableChip<W>, PoseidonLocal, RangeCheckLocal
+  Proves: instruction correctness, control flow, slot SSA
+
+Tier 2: Column Proofs (C, parallel)
+  Per-column (table_id, col_id) with encoding width W
+  Chips: MemoryShardChip<W>, StateShardChip<W>, MetaShardChip, PoseidonLocal, RangeCheckLocal
+  Proves: memory consistency, state transitions, commitment correctness
+
+Tier 3: Root Proof (1, lightweight)
+  Chips: SmtColPathChip, SmtTablePathChip, PoseidonLocal, RangeCheckLocal
+  Proves: SMT root integrity, cross-column commitment balance
+  Pluggable via RootProof trait
 ```
 
-Each axis is independently extensible. An extension on one axis composes with all existing strategies on other axes through the LogUp bus system (the "product composition" property from tabula-native-optimizations.md §5).
+**Key flow**: `partition_by_tier()` → per-tier `TierSetup::build_traces()` → `ProofInstance` per tier → shared Fiat-Shamir → independent proofs
+
+### 2.2 Current Extension Points (Implemented)
+
+| Component | Location | Status |
+|-----------|----------|--------|
+| `ChipRegistry` + `AnyRap` | `machine/src/registry.rs` | ✅ Runtime chip registration via `Box<dyn AnyRap>` |
+| `BusId(u16)` + `define_bus!` | `stark/src/air/interaction.rs` | ✅ Open bus IDs, core 0-99, app 100+ |
+| `TraceContributor` + `WitnessStore` | `stark/src/trace/contributor.rs` | ✅ Phase-ordered trace generation |
+| `DynChip` + `BusConsumer` | `stark/src/trace/dyn_chip.rs` | ✅ Object-safe chip + bus consumption |
+| `RootProof` trait | `machine/src/composition.rs` | ✅ Pluggable root proof (default: SMT) |
+| Per-tier setup | `machine/src/setup.rs` | ✅ `TierSetup` with registry + keys + dyn_chips |
+| `EncodingWidth` + `ColumnPlan` | `stark/src/trace/column_commitment.rs` | ✅ Per-column width polymorphism |
+
+### 2.3 Extension Points to Build (Goal 6)
+
+| Component | Mechanism | Priority |
+|-----------|-----------|----------|
+| `ChipExtension` trait | Package chips + witness + buses as distributable unit | High |
+| `TabulaMachine::builder()` | Fluent API for composition | High |
+| `tabula-machine::prelude` | Stable re-export of p3 types | High |
+| `ColumnCommitment` impls | Extract SSMC/SMT into trait; enable custom strategies | High |
+| `PropertyOpening` trait | Structural queries on committed state | Medium |
+| `Precompile` IR variant + handler | Custom computation dispatch | High (Goal 7) |
+| `TemplateChip` trait | Optimized tx-specific execution | Medium (Goal 8) |
+| `ProofAggregator` trait | Sub-proof aggregation / recursion | Low (future) |
 
 ---
 
-## 3. Axis 1: Computation Extension
+## 3. Seven Extension Axes
 
-### 3.1 Problem
+Tabula's extensibility decomposes into seven orthogonal axes, each independently extensible. Extensions compose via LogUp buses — the "product composition" property.
 
-The current `Instruction` enum has 12 core opcodes. Apps need new computational operations (ECDSA verification, Keccak hashing, bitwise operations, etc.) without modifying the core instruction set.
+```
+Axis 1: Computation ──────── what operations are available (precompiles)
+Axis 2: Chip Composition ─── what AIR components prove correctness
+Axis 3: Trace Pipeline ───── how witnesses flow to chips
+Axis 4: State Commitment ─── how column state is committed (ColumnCommitment)
+Axis 5: State Opening ────── structural queries on committed state (PropertyOpening)
+Axis 6: Execution Strategy ─ how tx bodies are proven (interpreter/template)
+Axis 7: Proof Composition ── how sub-proofs aggregate (recursion/IVC)
+```
 
-### 3.2 Mechanism: Precompile Pattern
+### 3.1 Axis 1: Computation Extension (Precompile Pattern)
 
-> **v0.4 decision:** The Precompile pattern replaces the previously proposed `OpcodeSpec` trait + `define_instruction_set!` macro. See [implementation-workplan.md](implementation-workplan.md#precompile-vs-opcodehandler) for rationale.
->
-> Key reasons:
-> - 12 core opcodes are computationally complete and stable (Arith, Cmp, Logic, Select, DivMod, Hash, Read/Write/Lookup, Assert, Emit)
-> - Hash→PoseidonChip and Lookup→StaticTableChip already demonstrate the precompile pattern
-> - SSA slot carry (80 columns) makes per-opcode chip decomposition impractical
-> - New computation = new chip + bus, zero core modification after one-time setup
+**Problem**: The 13 core instructions are computationally complete but not efficient for specialized operations (ECDSA, Keccak, bitwise ops).
 
-#### 3.2.1 Precompile IR Variant
+**Mechanism**: A single generic `Precompile` IR instruction dispatches to app-defined chips via a shared `PrecompileBus`. The ExecutionChip sends; each precompile chip receives and proves its computation.
 
 ```rust
-// Added to Instruction enum (one-time, ~50 LOC)
+// IR — one-time addition to Instruction enum
 Precompile {
-    dst: Slot,
-    precompile_id: PrecompileId,
-    args: Vec<SlotRef>,
+    id: PrecompileId,
+    dst_slots: Vec<Slot>,
+    inputs: Vec<ValueExpr>,
 }
-```
 
-#### 3.2.2 Executor-Side Dispatch
-
-```rust
-/// App-defined precompile execution handler.
+// Executor — app implements this trait
 pub trait PrecompileHandler: Send + Sync {
-    fn execute(
-        &self,
-        id: PrecompileId,
-        args: &[Value],
-    ) -> Result<Value, TabulaError>;
+    fn id(&self) -> PrecompileId;
+    fn execute(&self, inputs: &[Value]) -> Result<Vec<Value>, TabulaError>;
 }
 
-// Registered in BatchEnv
-let env = BatchEnv {
-    precompile_handler: &MyPrecompileHandler,
-    // ...
-};
-```
-
-#### 3.2.3 ExecutionChip Support (One-Time)
-
-```rust
-// Added to ExecutionCols (~1 boolean selector + bus send)
-op_precompile: T,  // selector
-
-// Constraint: when op_precompile active, send to PrecompileBus
-if op_precompile {
-    send_precompile(precompile_id, args..., result)
-}
-```
-
-#### 3.2.4 App-Defined Precompile Chip
-
-```rust
-// App defines: chip + bus receive + constraints
+// AIR — app defines chip, registers via ChipExtension
 struct EcdsaVerifyChip;
-
-impl ChipSpec for EcdsaVerifyChip { /* ... */ }
-impl<AB: InteractionAirBuilder + PrecompileAirBuilder> Air<AB> for EcdsaVerifyChip {
-    fn eval(&self, builder: &mut AB) {
-        // Receive from PrecompileBus
-        builder.receive_precompile(/* ... */);
-        // ECDSA-specific constraints
-        // ...
-    }
-}
-impl TraceContributor for EcdsaVerifyChip { /* ... */ }
-
-// Register via ChipExtension
-impl ChipExtension for EcdsaExtension {
-    fn register_chips(&self, reg: &mut ChipRegistry) {
-        reg.register(EcdsaVerifyChip::default());
-    }
-    // ...
-}
+impl Air<AB> for EcdsaVerifyChip { /* receive from PrecompileBus, constrain ECDSA */ }
 ```
 
-#### 3.2.5 Core + Standard Library Opcodes
-
-| Opcode | Category | Status |
-|--------|----------|--------|
-| Read, Write, Lookup | State access | Core (built-in) |
-| Arith (Add/Sub/Mul), DivMod | Arithmetic | Core (built-in) |
-| Cmp (6 sub-ops) | Comparison | Core (built-in) |
-| Not, And, Or | Logic | Core (built-in) |
-| Assert, Select | Control | Core (built-in) |
-| Hash | Crypto | Core (precompile: PoseidonChip) |
-| Emit | Side-effect | Core (built-in) |
-| ECDSA Verify | Crypto | Standard library (precompile) |
-| Keccak | Crypto | Standard library (precompile) |
-| Bitwise (And/Or/Xor/Shl/Shr) | Bitwise | Standard library (precompile) |
-
-Core opcodes and their constraints live in `ExecutionChip` (unchanged). Standard library precompiles are separate chips registered via `ChipExtension`.
-
-### 3.3 Files Affected
-
-All changes below are **one-time framework changes** (prerequisites F9, F10, F13). After these, app-defined precompiles live entirely in the app crate.
-
-| File | Change | Prerequisite |
-|---|---|---|
-| `crates/ir/src/instruction.rs` | Add `Precompile` variant | F9 |
-| `crates/executor/src/interpreter.rs` | Add `PrecompileHandler` dispatch | F10 |
-| `crates/chips/src/execution/columns.rs` | Add `op_precompile` selector | F13 |
-| `crates/chips/src/execution/buses.rs` | Add `PrecompileBus` send | F13 |
-| `crates/stark/src/air/bus.rs` | `PrecompileAirBuilder` trait via `define_bus!` | F13 |
-
----
-
-## 4. Axis 2: Chip Composition
-
-### 4.1 Problem
-
-The `TabulaAir` enum generated by `define_chip_set!` was a compile-time-closed set. Adding a chip required modifying `chips/mod.rs`. There was no mechanism to compose a core chip set with app-defined chips.
-
-> **v0.4 resolution:** `ChipRegistry` + `AnyRap` (Phase 1) solve this. `define_chip_set!`, `ChipSet` trait, `TabulaAir` enum, and `StarkAir` alias are all superseded. See [implementation-workplan.md](implementation-workplan.md#composition-model-compile-time-enum-vs-runtime-registry).
-
-### 4.2 Mechanism: Runtime ChipRegistry + AnyRap
-
-#### 4.2.1 AnyRap Trait
+**Bus**: All precompiles share `BusId::PRECOMPILE` with `precompile_id` field for discrimination:
 
 ```rust
-/// Type-erased AIR trait. Blanket-implemented for any type satisfying the bounds.
-pub trait AnyRap:
-    BaseAir<BabyBear>
-    + Air<SymbolicAirBuilder<BabyBear>>
-    + for<'a> Air<ProverConstraintFolder<'a, TabulaStarkConfig>>
-    + for<'a> Air<VerifierConstraintFolder<'a, TabulaStarkConfig>>
-    + for<'a> Air<DebugConstraintBuilder<'a, BabyBear>>
-    + for<'a> Air<RapProverFolder<'a>>
-    + for<'a> Air<RapVerifierFolder<'a>>
-    + Send + Sync
-{
+define_bus!(PrecompileAirBuilder(BusId::PRECOMPILE, ...) {
+    precompile_id: expr,  // prevents cross-precompile collision
+    nonce: expr,          // unique per invocation
+    inputs: var_slice,
+    outputs: var_slice,
+})
+```
+
+**Standard library precompiles** (shipped with Tabula, app opts in):
+
+| ID | Name | Use Case |
+|----|------|----------|
+| 0x0001 | ecdsa_secp256k1_verify | User authentication |
+| 0x0002 | ed25519_verify | Oracle attestation |
+| 0x0003 | keccak256 | EVM compatibility |
+| 0x0004 | sha256 | Bitcoin compatibility |
+
+**App-defined precompiles** (0x10000+): Implemented entirely in app crate.
+
+**Status**: Designed. Implementation in Goal 7.
+
+### 3.2 Axis 2: Chip Composition (Implemented)
+
+**Problem**: Adding a chip should not require modifying Tabula's source.
+
+**Mechanism**: `ChipRegistry` + `AnyRap` blanket impl. Any type implementing `ChipSpec + Air<AB>` automatically satisfies `AnyRap` and can be registered at runtime.
+
+```rust
+// AnyRap — blanket impl, zero boilerplate for app developers
+pub trait AnyRap: BaseAir<BabyBear> + Air<...all AB bounds...> + Send + Sync {
     fn chip_id(&self) -> ChipId;
     fn chip_name(&self) -> &str;
     fn has_interactions(&self) -> bool;
-    fn num_public_values(&self) -> usize;
-    fn preprocessed_width(&self) -> usize;
-    fn width(&self) -> usize;
+    // ...
 }
 
-// Blanket impl: any chip implementing ChipSpec + all Air<AB> bounds gets AnyRap for free.
-impl<T> AnyRap for T
-where
-    T: ChipSpec + BaseAir<BabyBear>
-        + Air<SymbolicAirBuilder<BabyBear>>
-        + for<'a> Air<ProverConstraintFolder<'a, TabulaStarkConfig>>
-        // ... (all bounds)
-        + Send + Sync,
-{ /* delegate to ChipSpec + BaseAir methods */ }
-```
-
-#### 4.2.2 ChipRegistry
-
-```rust
+// ChipRegistry — runtime registration
 pub struct ChipRegistry {
-    chips: Vec<RegisteredChip>,
+    chips: Vec<RegisteredChip>,  // Box<dyn AnyRap>
     buses: BTreeSet<BusId>,
-    public_value_chip: Option<ChipId>,
-}
-
-pub struct RegisteredChip {
-    pub air: Box<dyn AnyRap>,
-    pub contributor: Box<dyn DynTraceContributor>,
-    // Populated at validate():
-    pub interactions: InteractionDescriptor<BabyBear>,
-    pub log_quotient_degree: usize,
 }
 ```
 
-#### 4.2.3 App Composition
+**ChipExtension** — packages chips + witness logic as distributable unit:
 
 ```rust
-// App extends with custom chips — pure Rust, no macros
-let machine = TabulaMachine::builder()
-    .with_core_chips()                           // 9 core chips
-    .with_chip(EcdsaVerifyChip::default())       // one-off chip
-    .with_extension(LighterDexExtension)         // packaged extension
-    .with_config(production_config())
-    .build()
-    .expect("setup failed");
-```
-
-#### 4.2.4 ChipExtension Trait
-
-```rust
-/// Packages chips + witness logic as a distributable unit.
-pub trait ChipExtension {
+pub trait ChipExtension: Send + Sync {
+    /// Register all chips this extension provides.
     fn register_chips(&self, registry: &mut ChipRegistry);
+
+    /// Populate witness store with extension-specific data.
     fn populate_witness(&self, store: &mut WitnessStore, ctx: &ExtensionContext);
+
+    /// Human-readable name for diagnostics.
     fn name(&self) -> &str;
 }
-
-// Example:
-struct LighterDexExtension;
-impl ChipExtension for LighterDexExtension {
-    fn register_chips(&self, reg: &mut ChipRegistry) {
-        reg.register(EcdsaVerifyChip::default());
-        reg.register(OrderbookTreeChip::<24>::default());
-        reg.register(FillOrderTemplateChip::default());
-    }
-    fn populate_witness(&self, store: &mut WitnessStore, ctx: &ExtensionContext) {
-        let events = ctx.precompile_events(ECDSA_VERIFY_ID);
-        store.put::<Vec<EcdsaEvent>>("ecdsa_events", events);
-    }
-    fn name(&self) -> &str { "lighter-dex" }
-}
 ```
 
-#### 4.2.5 Chip Definition Pattern (unchanged)
-
-A new chip follows the existing 3-file pattern. The framework provides helper traits:
+**App composition**:
 
 ```rust
-/// Minimal trait for registering a chip.
-pub trait ChipSpec: Default + Send + Sync {
-    fn chip_id(&self) -> ChipId;
-    fn chip_name(&self) -> &str;
-    fn num_public_values(&self) -> usize { 0 }
-    fn preprocessed_width(&self) -> usize { 0 }
-    fn has_interactions(&self) -> bool { true }
-}
-```
-
-The developer defines:
-1. **`columns.rs`**: `#[repr(C)]` column struct parameterized by `T`
-2. **`air.rs`**: `impl Air<AB> for MyChip where AB: InteractionAirBuilder`
-3. **`trace.rs`**: `impl TraceContributor for MyChip` (see Axis 3)
-
-The `AnyRap` blanket impl automatically applies — zero additional boilerplate.
-
-#### 4.2.6 Feature-Gated Chips
-
-Optional chips are simply conditionally registered:
-
-```rust
-let mut builder = TabulaMachine::builder().with_core_chips();
-if cfg!(feature = "ecdsa") {
-    builder = builder.with_chip(EcdsaVerifyChip::default());
-}
-if cfg!(feature = "keccak") {
-    builder = builder.with_chip(KeccakChip::default());
-}
-let machine = builder.build().expect("setup failed");
-```
-
-Inactive chips are excluded — zero overhead.
-
-### 4.3 Prover/Verifier API
-
-The prover and verifier operate through `TabulaMachine`, which owns the `ChipRegistry`:
-
-```rust
-// Build machine once
 let machine = TabulaMachine::builder()
     .with_core_chips()
-    .with_extension(MyExtension)
+    .with_extension(LighterDexExtension)
+    .with_config(production_config())
     .build()?;
-
-// Prove and verify
-let proof = machine.prove(&traces, statement);
-machine.verify(&proof)?;
-
-// Standalone verification with serialized key
-let vk = machine.verifying_key();
-verify_with_key(&vk, &proof)?;
 ```
 
-### 4.4 Bus Extension
+**Status**: ChipRegistry + AnyRap + BusId ✅ implemented. ChipExtension + builder API: Goal 6.
 
-Apps can define new LogUp buses:
+### 3.3 Axis 3: Trace Pipeline (Implemented)
 
-```rust
-// In app code
-define_bus! {
-    pub EcdsaVerifyAirBuilder(
-        InteractionKind::EcdsaVerify,
-        send_ecdsa_verify,
-        receive_ecdsa_verify
-    ) {
-        pubkey_x: var_arr<3>,
-        pubkey_y: var_arr<3>,
-        msg_hash: var_arr<8>,
-        sig_valid: expr,
-    }
-}
-```
+**Problem**: Hardcoded per-chip wiring in orchestration.rs prevents adding chips without source modification.
 
-Adding a new bus requires adding a variant to `InteractionKind`. This enum should be made extensible:
+**Mechanism**: `TraceContributor` trait + `WitnessStore` typed key-value store. Chips declare their phase and data dependencies. The framework orchestrates trace generation in phase order.
 
 ```rust
-// Instead of a closed enum, use a newtype with reserved ranges
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct BusId(pub u16);
-
-impl BusId {
-    // Core buses: 0-99
-    pub const MEMORY: Self = Self(1);
-    pub const POSEIDON_PERM: Self = Self(5);
-    pub const RANGE_CHECK: Self = Self(8);
-    // ...
-
-    // App buses: 100+
-    pub const fn app(id: u16) -> Self { Self(100 + id) }
-}
-```
-
-### 4.5 Files Affected
-
-All changes below are **one-time framework changes** (Phase 1 + prerequisites F1, F2). After these, app-defined chips and buses live entirely in the app crate via `ChipExtension` + `BusId::app(N)`.
-
-| File | Change | Prerequisite |
-|---|---|---|
-| `crates/stark/src/air/any_rap.rs` | New: `AnyRap` trait + blanket impl | Phase 1 |
-| `crates/stark/src/trace/contributor.rs` | New: `DynTraceContributor` | Phase 1 |
-| `crates/machine/src/registry.rs` | New: `ChipRegistry` + `RegisteredChip` | Phase 1 |
-| `crates/machine/src/machine.rs` | New: `TabulaMachine` builder | Phase 1 |
-| `crates/stark/src/air/interaction.rs` | Replace `InteractionKind` enum with `BusId` newtype | F1 |
-| `crates/chips/src/lib.rs` | Replace `TabulaAir` enum with `core_chips()` function | Phase 1 |
-| `crates/stark/src/air/chip_set.rs` | **Delete**: `ChipSet` trait + `define_chip_set!` macro | Phase 1 |
-
----
-
-## 5. Axis 3: Trace Pipeline Extension
-
-### 5.1 Problem
-
-`trace/orchestration.rs` is the biggest friction point. Every chip is manually wired: constructed, evaluated, and inserted into `TraceMap` in hardcoded sequence. Adding a chip requires 3+ edits in this 148-line function.
-
-### 5.2 Mechanism: `TraceContributor` Trait
-
-```rust
-/// Trait for chips that contribute witness traces.
-/// Replaces hardcoded per-chip wiring in orchestration.rs.
 pub trait TraceContributor: ChipSpec {
-    /// Witness data this chip needs. Keyed by a string tag.
-    fn required_witness_keys(&self) -> &[&str];
-
-    /// Generate the trace from witness data.
-    /// `witness_store` provides access to shared witness data by key.
-    fn build_trace(&self, store: &WitnessStore) -> TraceEntry;
-
-    /// Ordering priority (lower = built first). Default 100.
-    /// Chips that produce shared witness data (e.g., Poseidon records)
-    /// should have lower priority than chips that consume it.
-    fn priority(&self) -> u32 { 100 }
+    fn phase(&self) -> TracePhase;  // INDEPENDENT(0), MEMORY(100), DEPENDENT(200)
+    fn contribute(&self, store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError>;
 }
-```
 
-```rust
-/// Shared witness data store. Chips deposit and consume data by key.
 pub struct WitnessStore {
-    data: BTreeMap<String, Box<dyn Any + Send + Sync>>,
-}
-
-impl WitnessStore {
-    pub fn get<T: 'static>(&self, key: &str) -> Option<&T> { ... }
-    pub fn insert<T: 'static + Send + Sync>(&mut self, key: &str, value: T) { ... }
+    entries: HashMap<WitnessKey, Box<dyn Any + Send + Sync>>,
 }
 ```
 
-### 5.3 Orchestration Becomes Generic
+**Status**: ✅ Implemented. TracePhase, TraceContributor, WitnessStore, DynChip, BusConsumer all in place.
+
+### 3.4 Axis 4: State Commitment Extension
+
+**Problem**: Column state commitment is hardcoded to SSMC (sorted hash chain) and SMT (sparse Merkle tree). Applications with specialized data structures (e.g., sorted orderbook tree) need custom strategies.
+
+**Mechanism**: `ColumnCommitment` trait (already defined in `stark/src/trace/column_commitment.rs`). Each column's state is committed via a pluggable strategy.
 
 ```rust
-fn build_all_traces<CS: ChipSet>(
-    batch_witness: &BatchWitness,
-    store: &mut WitnessStore,
-) -> TraceMap
-where
-    CS: TraceContributable, // marker: all chips in CS implement TraceContributor
-{
-    // Populate store with batch-level witness data
-    store.insert("instruction_records", batch_witness.instruction_records.clone());
-    store.insert("memory_records", batch_witness.memory_records.clone());
-    store.insert("smt_witnesses", batch_witness.smt_witnesses.clone());
-    // ...
+/// Pluggable column commitment scheme (batch API).
+/// Already implemented in stark/src/trace/column_commitment.rs.
+pub trait ColumnCommitment: Send + Sync {
+    /// Human-readable name (e.g., "ssmc", "smt").
+    fn name(&self) -> &str;
 
-    // Build traces in priority order
-    let mut chips: Vec<_> = CS::all_chips().collect();
-    chips.sort_by_key(|c| c.priority());
+    /// All chip IDs this scheme produces.
+    fn chip_ids(&self) -> Vec<ChipId>;
 
-    let mut map = TraceMap::new();
-    for chip in chips {
-        if chip.is_active(store) {
-            let entry = chip.build_trace(store);
-            map.insert(chip.chip_name().to_string(), entry);
-        }
-    }
-    map
-}
-```
-
-### 5.4 Example: Custom Chip's TraceContributor
-
-```rust
-impl TraceContributor for OrderbookTreeChip<24> {
-    fn required_witness_keys(&self) -> &[&str] {
-        &["orderbook_transitions"]
-    }
-
-    fn build_trace(&self, store: &WitnessStore) -> TraceEntry {
-        let transitions: &[OrderbookTransition] = store.get("orderbook_transitions").unwrap();
-        let num_rows = transitions.len() * self.rows_per_transition();
-        let mut trace = RowMajorMatrix::new(vec![BabyBear::ZERO; num_rows * self.width()], self.width());
-        // ... populate trace from transitions ...
-        TraceEntry { main: trace, preprocessed: None, public_values: vec![] }
-    }
-}
-```
-
-### 5.5 Files Affected
-
-All changes below are **one-time framework changes** (prerequisites F3, F4). After these, app chips participate in the trace pipeline by implementing `TraceContributor` in their own crate.
-
-| File | Change | Prerequisite |
-|---|---|---|
-| New: `crates/proof/src/trace/contributor.rs` | `TraceContributor` trait, `WitnessStore` | F3, F4 |
-| `crates/proof/src/trace/orchestration.rs` | Replace hardcoded wiring with generic loop | F3 |
-| `crates/proof/src/chips/*/trace.rs` | Each core chip implements `TraceContributor` | F3 |
-
----
-
-## 6. Axis 4: State Commitment Extension
-
-### 6.1 Problem
-
-State commitment is hardcoded to SSMC (sorted hash chain) and SMT (sparse Merkle tree). Applications with specialized data structures (e.g., sorted orderbook tree) cannot define custom commitment schemes.
-
-### 6.2 Mechanism: `VectorCommitment` Trait
-
-```rust
-/// Trait for column-level state commitment strategies.
-///
-/// A VectorCommitment defines how a column's entries are committed
-/// to a single digest, and how state transitions are proven.
-///
-/// The commitment digest MUST be a NativeDigest ([BabyBear; 8])
-/// for compatibility with ColumnMeta and SMT root computation.
-pub trait VectorCommitment: Send + Sync {
-    /// Unique identifier for this VC strategy.
-    fn vc_id(&self) -> VcId;
-
-    /// Human-readable name.
-    fn name(&self) -> &'static str;
-
-    /// Compute commitment digest from a set of entries.
-    ///
-    /// `entries` is sorted by key. Each entry is (key, encoded_value, is_null).
-    /// The encoding uses the column's schema type width.
-    fn commit(&self, entries: &[(RowKey, &[BabyBear], bool)]) -> NativeDigest;
-
-    /// Generate witness data for proving a state transition.
-    ///
-    /// The framework provides old entries, the writes applied, and the new entries.
-    /// The VC returns opaque witness data consumed by its AIR chip.
-    fn prove_transition(
+    /// Build traces for all columns of this scheme.
+    fn build_traces(
         &self,
-        old_entries: &[(RowKey, &[BabyBear], bool)],
-        writes: &[(RowKey, &[BabyBear], bool)],
-        new_entries: &[(RowKey, &[BabyBear], bool)],
-    ) -> Box<dyn VcWitness>;
+        cols: &[ColumnPlan],
+        store: &WitnessStore,
+    ) -> Result<Vec<(ChipId, TraceEntry)>, TabulaError>;
 
-    /// Name of the AIR chip that proves this VC's transitions.
-    /// Must match a chip registered in the chip set.
-    fn chip_name(&self) -> &'static str;
-}
-
-/// Opaque witness data for a VC transition proof.
-pub trait VcWitness: Send + Sync + Any {
-    fn as_any(&self) -> &dyn Any;
+    /// Buses this scheme sends on.
+    fn output_buses(&self) -> Vec<BusId>;
 }
 ```
 
-### 6.3 Built-in Implementations
+Also already implemented: `BusConsumer` trait, `ColumnPlan`, `ProofPlan`, `EncodingWidth`.
 
-```rust
-/// Sorted Sub-table Multiset Commitment (existing).
-/// Optimal for small columns (< threshold entries).
-pub struct SsmcCommitment { /* ... */ }
-
-/// Sparse Merkle Tree (existing).
-/// Optimal for large columns (> threshold entries).
-pub struct SmtCommitment { depth: usize }
-```
-
-### 6.4 Bus Integration
-
-Custom VC chips integrate through **existing buses only** — no new bus definitions needed:
+Custom commitment chips integrate through **existing buses** — no new bus definitions needed:
 
 | Bus | Direction | Purpose |
 |-----|-----------|---------|
-| CommitmentVerification (C6) | receive | Bind computed digest to ColumnMeta |
-| BaseStateEntry (C13) | receive | Consume init rows (base state values) |
-| CoalescedWrite (C14) | receive | Consume write operations |
-| PoseidonPermutation (C5) | send | Internal hashing (if Poseidon-based) |
-| RangeCheck (C8) | send | Range-check limbs (if needed) |
+| COMMITMENT_VERIF | receive | Bind computed digest to column metadata |
+| BASE_STATE_ENTRY | receive | Consume init rows (base state values) |
+| COALESCED_WRITE | receive | Consume write operations |
+| POSEIDON_PERM | send | Internal hashing (if Poseidon-based) |
+| RANGE_CHECK | send | Range-check limbs (if needed) |
 
-The LogUp bus balance guarantees soundness: if the custom VC chip computes a different digest than what ColumnMeta expects, the CommitmentVerification bus will be unbalanced.
+**Built-in implementations** (Goal 6): `SsmcCommitment` (small columns), `SmtCommitment` (large columns).
 
-### 6.5 Column Strategy Selection
+**Status**: Trait ✅ implemented. Concrete impls (SSMC/SMT wrapping): Goal 6.
 
-The `ProofPlan` (from tabula-machine-architecture.md §4.2) determines which VC strategy each column uses:
+### 3.5 Axis 5: State Opening Extension
 
-```rust
-pub struct ColumnPlan {
-    pub table: TableId,
-    pub col: ColId,
-    pub schema_type: ValueType,
-    pub strategy: ColumnStrategy,
-}
+**Problem**: Tabula's state model is key-value: `Read(t, c, r)` returns the value at key `r`. Applications like DEXs need structural properties: "minimum key," "successor of k," "no key in range [a, b]." Without this, a malicious prover could skip better-priced orders.
 
-pub enum ColumnStrategy {
-    /// Column not touched in this batch. Zero cost.
-    Untouched,
-    /// Read-only access. Only Meta + SMT path needed.
-    ReadOnly { vc: VcId },
-    /// Small number of accesses. Lightweight proof.
-    ShortRun { pattern: AccessPattern, vc: VcId },
-    /// Full memory consistency proof.
-    Full { vc: VcId },
-}
-```
-
-Apps register custom VCs at program setup:
+**Mechanism**: `PropertyOpening` trait. Works with any compatible `ColumnScheme`. Verifier chips run in **Tier 2 (column proof)**, not Tier 1, because column state (sorted chains, Merkle paths) lives in Tier 2.
 
 ```rust
-let mut config = ProofConfig::default();
-config.register_vc(OrderbookTreeVc::new(24));
-
-// Override VC for specific columns
-config.set_column_vc(TableId(1), ColId(0), OrderbookTreeVc::VC_ID); // bids column
-config.set_column_vc(TableId(1), ColId(1), OrderbookTreeVc::VC_ID); // asks column
-```
-
-### 6.6 Example: Orderbook Tree VC
-
-```rust
-pub struct OrderbookTreeVc {
-    depth: usize,
-}
-
-impl VectorCommitment for OrderbookTreeVc {
-    fn vc_id(&self) -> VcId { VcId(0x4F42) }
-    fn name(&self) -> &'static str { "orderbook_tree" }
-
-    fn commit(&self, entries: &[(RowKey, &[BabyBear], bool)]) -> NativeDigest {
-        // Build balanced binary tree from sorted entries
-        // Internal nodes aggregate: (total_ask_qty, total_bid_qty, best_ask, best_bid)
-        // Root hash = Poseidon(domain_tag || aggregated_data || children_hashes)
-        build_tree_root(entries, self.depth)
-    }
-
-    fn prove_transition(&self, old: &[...], writes: &[...], new: &[...]) -> Box<dyn VcWitness> {
-        // Generate Merkle authentication paths for modified leaves
-        // Generate old root → new root transition witness
-        Box::new(OrderbookTreeWitness {
-            old_paths: compute_auth_paths(old, self.depth),
-            new_paths: compute_auth_paths(new, self.depth),
-            internal_updates: compute_aggregation_updates(old, writes, new),
-        })
-    }
-
-    fn chip_name(&self) -> &'static str { "orderbook_tree" }
-}
-```
-
-### 6.7 Files Affected
-
-All changes below are **one-time framework changes** (prerequisite F5). After these, custom VC strategies are defined entirely in the app crate via `impl VectorCommitment`.
-
-| File | Change | Prerequisite |
-|---|---|---|
-| New: `crates/proof/src/state/vc.rs` | `VectorCommitment` trait, `VcId`, `VcWitness` | F5 |
-| New: `crates/proof/src/state/ssmc.rs` | Extract existing SSMC into `VectorCommitment` impl | F5 |
-| New: `crates/proof/src/state/smt.rs` | Extract existing SMT into `VectorCommitment` impl | F5 |
-| `crates/proof/src/witness/` | Use `VcId` from `ColumnPlan` to dispatch witness generation | F5 |
-| `crates/proof/src/trace/orchestration.rs` | Route VC witness data to appropriate chip via `WitnessStore` | F3 |
-
----
-
-## 7. Axis 5: State Opening Extension
-
-### 7.1 Problem
-
-Tabula's state model is a key-value store: `Read(t, c, r)` returns the value at key `r` in column `(t, c)`. This is sufficient for simple lookups, but applications like order-matching DEXs need to prove **structural properties**: "this is the minimum key," "no key exists in range [a, b]," "this is the successor of key k."
-
-Without opening extensions, the prover could maliciously skip better-priced orders and the circuit could not detect it.
-
-### 7.2 Mechanism: `PropertyOpening` Trait
-
-```rust
-/// Proves structural properties of committed state.
-///
-/// This extends beyond simple key-value opening (which Tabula handles
-/// via init rows + memory consistency) to ordered/aggregate queries.
 pub trait PropertyOpening: Send + Sync {
-    /// The VC strategy this opening is compatible with.
-    fn compatible_vc(&self) -> VcId;
-
-    /// Supported query types.
+    fn name(&self) -> &str;
+    fn compatible_scheme_tag(&self) -> u16;  // Links to ColumnScheme
     fn supported_queries(&self) -> &[PropertyQueryKind];
-
-    /// Generate witness for a property query against committed state.
-    fn prove_property(
+    fn prove(
         &self,
-        commitment: &NativeDigest,
+        commitment_digest: &[BabyBear],
         query: &PropertyQuery,
         state: &[(RowKey, &[BabyBear], bool)],
-    ) -> Box<dyn PropertyWitness>;
-
-    /// Name of the AIR chip that verifies property proofs.
-    fn chip_name(&self) -> &'static str;
+    ) -> Result<Box<dyn PropertyWitness>, PropertyError>;
+    fn column_verifier(&self) -> Option<Box<dyn ChipExtension>>;  // Tier 2 chips
 }
 
-/// Structural queries against committed state.
+pub trait PropertyWitness: Send + Sync {
+    fn value(&self) -> &[BabyBear];
+    fn key(&self) -> Option<RowKey>;    // The key satisfying the property
+    fn is_null(&self) -> bool;
+    fn as_any(&self) -> &dyn Any;
+}
+
 pub enum PropertyQuery {
-    /// The entry with the minimum key.
     Minimum,
-    /// The entry with the maximum key.
     Maximum,
-    /// The entry immediately after key `k` (or proof of non-existence).
-    Successor(RowKey),
-    /// The entry immediately before key `k`.
-    Predecessor(RowKey),
-    /// Proof that no entry exists with key in `[lo, hi]`.
-    NonExistenceRange(RowKey, RowKey),
-    /// Aggregate value over all entries (e.g., sum of quantities).
-    Aggregate(AggregateKind),
-}
-
-pub enum AggregateKind {
-    Sum,
-    Count,
-    // App-defined aggregates via extension
-    Custom(u32),
+    Successor { key: RowKey },
+    Predecessor { key: RowKey },
+    NonExistenceRange { lower: RowKey, upper: RowKey },
+    Aggregate { kind: AggregateKind },
 }
 ```
 
-### 7.3 IR Integration
-
-Property openings surface as a new instruction variant:
+Surfaces as a new IR instruction:
 
 ```rust
 Instruction::PropertyRead {
     dst_val: Slot,
+    dst_key: Slot,       // Key at the result position
     dst_is_null: Slot,
     table: TableId,
     col: ColId,
@@ -771,352 +346,184 @@ Instruction::PropertyRead {
 }
 ```
 
-This instruction queries committed state for a structural property. The prover provides witness data; the AIR chip verifies the property holds against the column's commitment.
-
-### 7.4 Example: "Best Ask" Query for Lighter DEX
+**Cross-tier verification via PROPERTY_READ bus**:
 
 ```
-// In tabula-lang DSL
-let best_ask_price = property_read orders.asks.minimum();
-assert(fill_price >= best_ask_price);  // Ensure no better price was skipped
+Tier 1 (Execution): ExecutionChip SENDS on PROPERTY_READ bus
+    → (table_id, col_id, query_type, result_key, result_val[W], is_null)
+
+Tier 2 (Column): PropertyVerifierChip RECEIVES from PROPERTY_READ bus
+    → Verifies result against column commitment (com_old)
+
+Tier 3 (Root): Verifies PROPERTY_READ bus balance across tiers
+    → Handled automatically by existing unbalanced_buses() mechanism
 ```
 
-The `OrderbookTreeVc`'s property opening chip verifies:
-1. The claimed minimum leaf exists in the committed tree
-2. All leaves to its left are empty (proving minimality)
-3. The path from leaf to root matches the commitment digest
+**State semantics**: PropertyRead queries **pre-batch committed state (com_old)**, providing snapshot isolation. The in-flight overlay has no commitment and cannot be verified in ZK.
 
-### 7.5 Files Affected
+**Scheme compatibility**: SSMC columns support O(1) min/max/successor/predecessor queries (sorted hash chain). SMT columns are unordered by key hash — structural queries require full scan or an indexed variant (future).
 
-Framework changes (F6) provide the trait; `PropertyRead` is added once via the instruction set framework (F8). App-defined openings live entirely in the app crate.
+**Multiple queries**: Multiple PropertyRead calls on the same column in one batch are supported. The PropertyVerifier receives all bus messages and verifies each against the same com_old state.
 
-| File | Change | Prerequisite |
-|---|---|---|
-| New: `crates/proof/src/state/property.rs` | `PropertyOpening` trait, `PropertyQuery` enum | F6 |
-| `crates/ir/src/instruction.rs` | Add `PropertyRead` variant | F6 |
-| App code | Implement `PropertyOpening` for custom VCs | — (app-side) |
+**Status**: Trait implemented in `machine/src/property.rs`. Cross-tier integration: Goal 7 Phase 5.
 
----
+### 3.6 Axis 6: Execution Strategy Extension
 
-## 8. Axis 6: Execution Strategy Extension
+**Problem**: The ExecutionChip is monolithic (278 columns at W=3). For applications where 90% of transactions follow a few patterns, most columns are wasted per instruction.
 
-### 8.1 Problem
-
-The `ExecutionChip` is a monolithic chip (278 columns at W=3) that proves every instruction type. For applications where 90% of transactions follow a small number of patterns (e.g., `fill_order`), this is wasteful — most columns are unused per instruction.
-
-### 8.2 Mechanism: Template Chips
-
-Template chips are execution chips specialized for a specific transaction pattern. They prove the same bus interactions as the generic `ExecutionChip` but with fewer columns and tighter constraints.
+**Mechanism**: Template chips — execution chips specialized for specific tx patterns. Fewer columns, tighter constraints, same bus interactions.
 
 ```rust
-/// A template chip replaces ExecutionChip for specific tx patterns.
-///
-/// SOUNDNESS INVARIANT: A template chip MUST emit identical LogUp bus
-/// messages as the generic ExecutionChip would for the same transaction.
-/// Bus balance enforces this — mismatched fingerprints cause verification failure.
 pub trait TemplateChip: ChipSpec {
-    /// Unique template identifier.
     fn template_id(&self) -> TemplateId;
-
-    /// Check if a tx type definition matches this template.
     fn matches(&self, def: &TxTypeDef, info: &BodyTypeInfo) -> bool;
-
-    /// Maximum number of instructions this template handles per tx.
     fn max_instructions(&self) -> usize;
 }
 ```
 
-### 8.3 Template Selection
+**Soundness invariant**: A template chip MUST emit identical LogUp bus messages as the generic ExecutionChip for the same transaction. The framework provides an equivalence test harness to verify this.
 
-At proof planning time, the framework checks each `TxTypeDef` against registered templates:
+**Status**: Designed. Implementation in Goal 8.
 
-```rust
-fn select_execution_strategy(
-    def: &TxTypeDef,
-    info: &BodyTypeInfo,
-    templates: &[Box<dyn TemplateChip>],
-) -> ExecutionVariant {
-    for template in templates {
-        if template.matches(def, info) {
-            return ExecutionVariant::Template(template.template_id());
-        }
-    }
-    ExecutionVariant::Interpreter
-}
-```
+### 3.7 Axis 7: Proof Composition Extension
 
-### 8.4 Bus Compatibility Testing
+**Problem**: Linear proof size/time with batch size. High-throughput apps need aggregation.
 
-The framework provides a test harness to verify template correctness:
+**Mechanism**: `ProofAggregator` trait (future).
 
 ```rust
-/// Verify that a template chip emits identical bus messages
-/// as the generic ExecutionChip for the same transactions.
-pub fn verify_template_equivalence<T: TemplateChip>(
-    template: &T,
-    test_txs: &[Transaction],
-    program: &Program,
-) -> Result<(), TemplateError> {
-    for tx in test_txs {
-        let interpreter_messages = collect_bus_messages_interpreter(tx, program);
-        let template_messages = collect_bus_messages_template(template, tx, program);
-        assert_eq!(interpreter_messages, template_messages,
-            "Template {} emits different bus messages than interpreter for tx {:?}",
-            T::chip_name(), tx);
-    }
-    Ok(())
-}
-```
-
-### 8.5 Execution Strategy Composition
-
-Template chips compose freely with all other axes:
-
-```
-Template ──[ReadAccess bus]──────→ InterTxOrder → StateColumn (or Custom VC)
-Template ──[WriteAccess bus]─────→ InterTxOrder → StateColumn (or Custom VC)
-Template ──[PoseidonPerm bus]────→ PoseidonChip
-Template ──[PrecompileBus]───────→ Precompile Chips
-Template ──[RangeCheck bus]──────→ RangeCheckChip
-```
-
-The template chip does not know or care which state commitment strategy each column uses. The bus is the only interface.
-
-### 8.6 Files Affected
-
-All changes below are **one-time framework changes** (prerequisite F11). After these, template chips are defined entirely in the app crate via `impl TemplateChip` + `impl Air<AB>`.
-
-| File | Change | Prerequisite |
-|---|---|---|
-| New: `crates/proof/src/chips/template/mod.rs` | `TemplateChip` trait, `TemplateId` | F11 |
-| New: `crates/proof/src/chips/template/test_harness.rs` | Equivalence testing | F11 |
-| `crates/proof/src/witness/program_info.rs` | Template selection logic | F11 |
-| `crates/proof/src/trace/orchestration.rs` | Route txs to template or interpreter chip | F3 |
-
----
-
-## 9. Axis 7: Proof Composition Extension
-
-### 9.1 Problem
-
-Tabula currently produces a single flat proof per batch. For high-throughput applications, this creates a linear relationship between batch size and proving time. Lighter DEX compresses Block → Segment → Batch proofs via recursive aggregation.
-
-### 9.2 Mechanism: `ProofAggregator` Trait
-
-```rust
-/// Aggregates multiple sub-proofs into a single proof.
 pub trait ProofAggregator: Send + Sync {
-    /// Aggregate N sub-proofs into one.
     fn aggregate(&self, proofs: &[TabulaProof]) -> AggregatedProof;
-
-    /// Verify an aggregated proof.
     fn verify(&self, proof: &AggregatedProof) -> Result<(), VerificationError>;
-
-    /// Maximum number of sub-proofs per aggregation step.
     fn fan_in(&self) -> usize;
 }
 ```
 
-### 9.3 Aggregation Strategies
+Strategies: layered STARK aggregation, recursive SNARK wrapper (Groth16/FFLONK for L1), IVC.
 
-```rust
-/// Layered STARK aggregation (non-recursive).
-/// Each layer merges N proofs by re-proving the verification.
-pub struct LayeredStarkAggregator { fan_in: usize }
-
-/// Recursive SNARK wrapper.
-/// Wraps STARK proofs in a Groth16/FFLONK proof for L1 verification.
-pub struct RecursiveSnarkWrapper { /* ... */ }
-
-/// IVC (Incrementally Verifiable Computation).
-/// Each batch proof includes verification of the previous batch.
-pub struct IvcAggregator { /* ... */ }
-```
-
-### 9.4 Status
-
-Proof composition is the most complex extension axis and depends on the v0.4 machine layer (shared PCS, two-round protocol). It is designed here for architectural completeness but deferred to a later implementation phase.
+**Status**: Designed. Implementation deferred (future).
 
 ---
 
-## 10. Precompile System
+## 4. Framework Prerequisites
 
-Orthogonal to the 7 axes, the precompile system provides a streamlined path for adding computation units that are too specialized for the core IR but reusable across applications.
+One-time changes in Tabula that enable the Zero-Modification Principle. After these, all app development requires zero Tabula code changes.
 
-### 10.1 Design
+| # | Change | Status | Scope |
+|---|--------|--------|-------|
+| F1 | `BusId(u16)` newtype replacing closed enum | ✅ Done | ~50 LOC |
+| F2 | `ChipExtension` trait | **Goal 6** | ~150 LOC |
+| F3 | `TraceContributor` + `DynChip` | ✅ Done | Phase 1 |
+| F4 | `WitnessStore` typed key-value store | ✅ Done | ~100 LOC |
+| F5 | `ColumnCommitment` trait | ✅ Done (trait defined) | stark/src/trace/column_commitment.rs |
+| F5b | `ColumnCommitment` impls (SSMC/SMT) | **Goal 6** | Extract existing logic into trait impls |
+| F6 | `PropertyOpening` trait | **Goal 6** | ~100 LOC |
+| F9 | `Precompile` IR variant | **Goal 7** | ~50 LOC |
+| F10 | `PrecompileHandler` trait | **Goal 7** | ~50 LOC |
+| F11 | `TemplateChip` trait | **Goal 8** | ~200 LOC |
+| F12 | `tabula-machine::prelude` re-exports | **Goal 6** | ~50 LOC |
+| F13 | `op_precompile` + `PrecompileBus` | **Goal 7** | ~100 LOC |
 
-A single generic IR instruction handles all precompiles:
-
-```rust
-Instruction::Precompile {
-    id: PrecompileId,
-    dst_slots: Vec<Slot>,
-    inputs: Vec<ValueExpr>,
-}
-```
-
-Each precompile defines:
-
-```rust
-pub struct PrecompileDef {
-    pub id: PrecompileId,
-    pub name: &'static str,
-    pub input_types: Vec<ValueType>,
-    pub output_types: Vec<ValueType>,
-}
-```
-
-### 10.2 Precompile Bus
-
-All precompiles share a single bus with `precompile_id` discrimination:
-
-```rust
-define_bus! {
-    pub PrecompileAirBuilder(BusId::PRECOMPILE, ...) {
-        precompile_id: expr,    // Prevents cross-precompile collisions
-        nonce: expr,            // Unique per invocation
-        inputs: var_slice,      // Encoded input field elements
-        outputs: var_slice,     // Encoded output field elements
-    }
-}
-```
-
-The ExecutionChip sends on this bus; each precompile chip receives and proves its specific computation.
-
-### 10.3 Standard Precompiles
-
-| ID | Name | Input | Output | Use Case |
-|----|------|-------|--------|----------|
-| 0x0001 | ecdsa_secp256k1_verify | (pubkey, msg_hash, sig) | Bool | User authentication |
-| 0x0002 | ed25519_verify | (pubkey, msg, sig) | Bool | Oracle attestation |
-| 0x0003 | keccak256 | (data...) | Bytes32 | EVM compatibility |
-| 0x0004 | poseidon_hash | (data...) | Bytes32 | ZK-native hashing |
-| 0x0005 | sha256 | (data...) | Bytes32 | Bitcoin compatibility |
-
-### 10.4 App-Defined Precompiles
-
-Apps define precompiles in app-id range (0x10000+):
-
-```rust
-// lighter-dex/src/precompiles/mod.rs
-pub const ORDERBOOK_VERIFY: PrecompileId = PrecompileId(0x10001);
-
-pub struct OrderbookVerifyPrecompile;
-impl PrecompileChip for OrderbookVerifyPrecompile {
-    fn precompile_id(&self) -> PrecompileId { ORDERBOOK_VERIFY }
-    // AIR constraints verify orderbook tree operations
-}
-```
-
-### 10.5 DSL Syntax
+**Dependency chain**:
 
 ```
-// Built-in precompile syntax
-let valid = @ecdsa_verify(pubkey, msg_hash, signature);
-let hash = @keccak256(data);
-
-// App-defined precompile
-let result = @orderbook_verify(tree_root, operation, proof);
+✅ Phase 1 (AnyRap + ChipRegistry)
+✅ F1 (BusId) → F2 (ChipExtension) → F5b (ColumnCommitment impls)
+✅ F3 (TraceContributor)                 → F6 (PropertyOpening)
+✅ F4 (WitnessStore)                     → F11 (TemplateChip)
+✅ F5 (ColumnCommitment trait)
+F9 (Precompile IR) → F10 (PrecompileHandler) → F13 (PrecompileBus)
+F12 (prelude) — independent
 ```
 
-### 10.6 Files Affected
-
-All changes below are **one-time framework changes** (prerequisites F9, F10). After these, app-defined precompiles are implemented entirely in the app crate via `impl PrecompileHandler` (executor) + precompile AIR chip.
-
-| File | Change | Prerequisite |
-|---|---|---|
-| `crates/ir/src/instruction.rs` | Add `Precompile` variant | F9 |
-| New: `crates/ir/src/precompile.rs` | `PrecompileId`, `PrecompileDef`, `PrecompileRegistry` | F9 |
-| New: `crates/executor/src/precompile.rs` | `PrecompileHandler` trait | F10 |
-| `crates/executor/src/interpreter.rs` | Dispatch `Precompile` to handler | F10 |
-| New: `crates/proof/src/chips/precompile/` | `PrecompileChip` trait, standard impls | F10 |
+**Goal 6 scope**: F2, F5b, F6, F12 + builder API + extract SSMC/SMT into ColumnCommitment impls.
 
 ---
 
-## 11. Case Study: Lighter DEX on Tabula
+## 5. Case Study: ZK DEX (Lighter Protocol)
 
-This section maps Lighter DEX's architecture onto the Tabula extensibility framework to validate completeness.
+Lighter Protocol is a ZK order-book DEX built on custom Plonky2 circuits (~18 circuit modules). This case study validates Tabula's extensibility by mapping Lighter's architecture onto the framework.
 
-### 11.1 Lighter's Requirements
+### 5.1 Lighter's Architecture
 
-| Component | Requirement |
-|-----------|-------------|
-| Sequencer | Off-chain tx ordering → Batch production |
-| Signature verification | ECDSA secp256k1 per order |
-| Orderbook tree | Sorted binary tree with aggregated internal nodes |
-| Price-time priority | Deterministic index = f(price, nonce) |
-| Order matching | Fill best price first, variable N fills per market order |
-| Risk/margin checks | Position value, PnL, funding rate calculations |
-| State root | Merkle commitment over all state |
-| Block commitment | Hash chain over block execution |
-| Proof aggregation | Block → Segment → Batch compression |
-| Data availability | Blob posting to Ethereum L1 |
-| Escape hatch | L1 data enables state reconstruction |
+- **Off-chain**: Custom matching engine + prover generates Plonky2 STARK proofs
+- **State**: 8 concurrent Merkle trees at depths 6-80 (account, market, asset, orderbook, position, account-orders, API keys, account-delta)
+- **Transactions**: 41 types across L1 (11), L2 (22), internal (8)
+- **Key objects**: `AccountAsset` (96-bit balance), `Order` (price index, cumulative sums), `Position` (signed size, margin)
+- **Proof pipeline**: Block proofs → recursive aggregation → PLONK/BN254 SNARK wrapper → Solidity verifier
+- **Operations proven**: order matching, balance updates, ECDSA/EdDSA/Schnorr signatures, Merkle path verification, liquidation, funding rate, oracle prices
 
-### 11.2 Mapping to Tabula Axes
+### 5.2 What Lighter Built Manually
 
-| Lighter Component | Tabula Axis | Mechanism |
-|---|---|---|
-| ECDSA verification | Precompile | `EcdsaVerifyChip` (precompile 0x0001) |
-| Index calculation (`price << O \| nonce`) | Axis 1 | `BitwiseOp` (standard library opcode) |
-| Wide multiplication (price × qty) | Axis 1 | `WideMul` (standard library opcode) |
-| Orderbook tree state | Axis 4 | `OrderbookTreeVc` (custom VC) |
-| Best price query | Axis 5 | `PropertyQuery::Minimum` (custom opening) |
-| Fill order execution | Axis 6 | `FillOrderTemplate` (template chip) |
-| Multi-fill decomposition | Core | Batch of N fill txs (existing batch model) |
-| Risk/margin checks | Core IR | `Arith`, `Cmp`, `Assert` (existing) |
-| Funding rate | Core IR | Fixed-point arithmetic with `DivMod` |
-| State root | Core | SMT root proof (existing infrastructure) |
-| Oracle price feed | Precompile | `EcdsaVerifyChip` on oracle signature |
-| Proof aggregation | Axis 7 | `LayeredStarkAggregator` (future) |
-| Data availability | External | `tabula-da` crate (future) |
+| Component | Lighter's Approach | LOC (estimated) |
+|-----------|-------------------|------|
+| ECDSA verification circuit | Custom Plonky2 gadgets | ~2,000 |
+| Orderbook tree (80-level Merkle) | Custom circuit per tree operation | ~3,000 |
+| Order matching logic | Monolithic circuit with all 41 tx types | ~5,000 |
+| State root computation | Custom SMT circuit | ~1,500 |
+| Block proof aggregation | Cyclic recursion circuits | ~2,000 |
+| Fixed-point arithmetic | Custom gadgets for 96-bit ops | ~1,000 |
+| Plonky2 → SNARK wrapper | gnark (Go) BN254 wrapping | ~1,500 |
+| **Total custom circuit code** | | **~16,000** |
 
-### 11.3 Lighter's Tx Types
+Development time: months of ZK-specialized engineering.
+
+### 5.3 Mapping to Tabula
+
+| Lighter Component | Tabula Axis | Mechanism | App Code |
+|---|---|---|---|
+| ECDSA verification | Axis 1 (Precompile) | `EcdsaVerifyChip` (precompile 0x0001) | ~0 (standard library) |
+| Orderbook tree state | Axis 4 (State Commitment) | `OrderbookTreeCommitment` (custom ColumnCommitment) | ~500 LOC |
+| Best price query | Axis 5 (State Opening) | `PropertyQuery::Minimum` | ~300 LOC |
+| Fill order execution | Axis 6 (Execution Strategy) | `FillOrderTemplate` (template chip) | ~300 LOC |
+| Order placement | Core IR | `.tab` file with hash, read, write, assert | ~30 LOC |
+| Risk/margin checks | Core IR | Arith + Cmp + Assert + DivMod | ~20 LOC |
+| Fixed-point arithmetic | Core IR | Mul + DivMod with precision constants | ~0 (DSL) |
+| State root | Core | Built-in SMT root proof | ~0 |
+| Proof aggregation | Axis 7 | `ProofAggregator` (future) | ~0 (framework) |
+| Signatures for oracle | Axis 1 | Same EcdsaVerifyChip | ~0 |
+| **Total app-specific code** | | | **~1,150 LOC** |
+
+### 5.4 DSL Example: Order Placement
 
 ```
-// place_order.tab
 tx place_order(
-    sig: Bytes32,           // ECDSA signature
-    pubkey: Bytes32,        // trader's public key
+    sig: Bytes32,
+    pubkey: Bytes32,
     market_id: U64,
-    side: U64,              // 0 = bid, 1 = ask
+    side: U64,
     price: U64,
     quantity: U64,
     nonce: U64,
 ) {
-    // 1. Verify signature
+    // 1. Verify ECDSA signature (precompile — zero custom circuit code)
     let order_hash = hash(market_id, side, price, quantity, nonce);
     let valid = @ecdsa_verify(pubkey, order_hash, sig);
     assert(valid);
 
-    // 2. Calculate tree leaf index
-    let nonce_space = 1u64 << 20;
-    let index = select(
-        side == 0,
-        price << 20 | (nonce_space - 1 - nonce),  // bid: high price first
-        price << 20 | nonce,                         // ask: low price first
-    );
-
-    // 3. Check margin
+    // 2. Check margin
     let balance = read accounts[pubkey].balance;
-    let required_margin = price * quantity / PRECISION;
+    let required_margin = price * quantity / 1000000;
     assert(balance >= required_margin);
 
-    // 4. Write order to orderbook
+    // 3. Write order to orderbook
+    let index = price * 1048576 + nonce;  // price-time priority
     write orders[market_id].prices[index] = price;
     write orders[market_id].quantities[index] = quantity;
     write orders[market_id].owners[index] = pubkey;
 
-    // 5. Lock margin
+    // 4. Lock margin
+    let locked = read accounts[pubkey].locked;
     write accounts[pubkey].balance = balance - required_margin;
-    write accounts[pubkey].locked = read accounts[pubkey].locked + required_margin;
+    write accounts[pubkey].locked = locked + required_margin;
 
     emit("order_placed", market_id, side, price, quantity);
 }
 ```
 
+### 5.5 DSL Example: Fill Order
+
 ```
-// fill_order.tab
 tx fill_order(
     taker: Bytes32,
     maker: Bytes32,
@@ -1131,210 +538,218 @@ tx fill_order(
     assert(maker_qty >= fill_qty);
     assert(maker_price == fill_price);
 
-    // 2. Verify best price (custom property opening)
+    // 2. Verify best price (PropertyOpening — custom VC chip proves this)
     let best_price = property_read orders[market_id].prices.minimum();
-    assert(fill_price <= best_price);  // No better price was skipped
+    assert(fill_price <= best_price);
 
-    // 3. Update positions and PnL
-    // ... (arithmetic on accounts)
+    // 3. Update orderbook
+    write orders[market_id].quantities[maker_index] = maker_qty - fill_qty;
 
-    // 4. Update orderbook
-    let remaining = maker_qty - fill_qty;
-    write orders[market_id].quantities[maker_index] = remaining;
+    // 4. Settlement
+    let cost = fill_qty * fill_price / 1000000;
+    let taker_bal = read accounts[taker].balance;
+    let maker_bal = read accounts[maker].balance;
+    write accounts[taker].balance = taker_bal - cost;
+    write accounts[maker].balance = maker_bal + cost;
 
     emit("fill", market_id, taker, maker, fill_qty, fill_price);
 }
 ```
 
-### 11.4 Efficiency Analysis
+### 5.6 App Composition
+
+```rust
+// lighter-dex/src/main.rs
+use tabula_machine::prelude::*;
+
+fn main() {
+    let machine = TabulaMachine::builder()
+        .with_core_chips()
+        .with_extension(LighterDexExtension)
+        .build()
+        .expect("setup failed");
+
+    let proof = machine.prove(&traces, &identities, &statement);
+    machine.verify(&proof).expect("verification failed");
+}
+
+// lighter-dex/src/extension.rs
+struct LighterDexExtension;
+
+impl ChipExtension for LighterDexExtension {
+    fn name(&self) -> &str { "lighter-dex" }
+
+    fn register_chips(&self, reg: &mut ChipRegistry) {
+        // Standard precompile (from tabula-std)
+        reg.register(EcdsaVerifyChip::default());
+        // Custom VC chip for orderbook
+        reg.register(OrderbookTreeChip::<24>::default());
+        // Custom property opening chip
+        reg.register(OrderbookMinChip::default());
+    }
+
+    fn populate_witness(&self, store: &mut WitnessStore, ctx: &ExtensionContext) {
+        let ecdsa_events = ctx.precompile_events(ECDSA_VERIFY_ID);
+        store.put("ecdsa_events", ecdsa_events);
+        let tree_witnesses = ctx.commitment_witnesses("orderbook_tree");
+        store.put("orderbook_witnesses", tree_witnesses);
+    }
+}
+```
+
+### 5.7 Efficiency Analysis
 
 | Component | Purpose-Built (Lighter) | Tabula Framework | Overhead |
 |---|---|---|---|
-| ECDSA chip | Custom circuit | Precompile chip | ~0% (same AIR) |
-| Orderbook tree | Custom Merkle circuit | Custom VC chip | ~5% (bus fingerprints) |
-| Fill execution | Monolithic circuit | Template chip (~60 cols) vs Interpreter (278 cols) | ~10% (bus overhead) |
-| State root | Custom SMT | Built-in SMT | ~0% (same) |
+| ECDSA chip | Custom Plonky2 gadgets | Precompile chip (same AIR) | ~0% |
+| Orderbook tree | Custom Merkle circuit | Custom ColumnCommitment chip | ~5% (bus fingerprints) |
+| Fill execution | Monolithic 41-tx circuit | Template chip (~60 cols) vs Interpreter (278 cols) | ~10% (bus overhead) |
+| State root | Custom SMT circuit | Built-in SMT root proof | ~0% |
 | Proof aggregation | Custom recursion | Framework aggregator | TBD |
 | **Overall** | **Baseline** | | **~5-10% overhead** |
 
-The 5-10% overhead is the composability tax: LogUp bus fingerprint computation that enables modular composition. In exchange, development time drops from months to weeks.
+**The 5-10% overhead** is the composability tax: LogUp bus fingerprint computation that enables modular composition. In exchange:
+
+- **~16,000 LOC** of custom circuit code → **~1,150 LOC** of app code
+- Months of ZK-specialized development → weeks
+- Custom proving infrastructure → battle-tested framework
+- Upgrade burden on every protocol change → framework handles it
+
+### 5.8 What Bytes32 Covers
+
+Lighter needs types beyond U64/I64/Bool — 96-bit balances, signed positions, packed bitfields, Merkle paths. All of these map to Tabula's existing types:
+
+| Lighter Type | Tabula Encoding | How |
+|---|---|---|
+| 96-bit balance | 2x U64 (hi/lo split) | `balance_hi * 2^64 + balance_lo` |
+| Signed position size | I64 | Direct |
+| Price (64-bit) | U64 | Direct |
+| Merkle path node | Bytes32 | Direct (8 BabyBear field elements) |
+| EdDSA pubkey | Bytes32 | Direct |
+| Order flags (packed bits) | U64 | Bit masking with existing logic ops |
+| Fixed-point decimal | U64 | Integer with implicit denominator (e.g., /10^6) |
+
+No custom type extensibility needed. The closed `ValueType` enum handles all cases.
 
 ---
 
-## 12. Implementation Roadmap
+## 6. Developer Experience
 
-### Phase 1: Machine Layer + Composition (ChipRegistry, AnyRap, DynTraceContributor)
+### 6.1 Complexity Tiers
 
-> See [implementation-workplan.md §Phase 1](implementation-workplan.md) for detailed task list.
-
-| Item | Prerequisite | Scope | Priority |
+| Tier | Who | What They Write | Effort |
 |---|---|---|---|
-| `AnyRap` trait + blanket impl | Phase 1.1 | ~80 LOC | Critical |
-| `DynTraceContributor` | Phase 1.1 | ~50 LOC | Critical |
-| `ChipRegistry` + `TabulaMachine` | Phase 1.2 | ~400 LOC | Critical |
-| Remove `define_chip_set!`, `ChipSet`, `TabulaAir`, `StarkAir` | Phase 1.3 | ~-240 LOC | Critical |
-| `TabulaProvingKey` / `TabulaVerifyingKey` | Phase 1.4 | ~150 LOC | High |
-| Shared PCS + single FRI | Phase 1.7 | ~500 LOC | High |
+| **DSL only** | App developer | `.tab` files (DSL tx types) | Trivial |
+| **Standard precompiles** | App developer | Import and configure | Trivial |
+| **Custom precompile** | App developer (ZK) | `PrecompileChip` + `ChipExtension` (~300-500 LOC) | Medium |
+| **Custom chip** | App developer (ZK) | `ChipSpec` + `Air<AB>` + register | Medium |
+| **Custom commitment** | App developer (ZK) | `ColumnCommitment` + AIR chip (~500-1000 LOC) | High |
+| **Custom property opening** | App developer (ZK) | `PropertyOpening` + AIR chip (~500 LOC) | High |
+| **Template chip** | Framework contributor | `TemplateChip` + equivalence tests (~300 LOC) | Medium |
 
-### Phase 2: Extensibility Framework (F1-F2, F9-F13)
+### 6.2 Chip Definition Pattern (3-File Pattern)
 
-| Item | Prerequisite | Scope | Priority |
-|---|---|---|---|
-| `BusId` newtype replacing `InteractionKind` enum | F1 | Axis 2, ~50 LOC | High |
-| `ChipExtension` trait | F2 | Axis 2, ~150 LOC | High |
-| `WitnessStore` typed key-value store | F4 | Axis 3, ~100 LOC | High |
-| `tabula-machine::prelude` re-exports | F12 | Stable API, ~50 LOC | High |
-| `Precompile` IR variant + `PrecompileHandler` | F9, F10 | Axis 1, ~100 LOC | High |
-| `op_precompile` + `PrecompileBus` in ExecutionChip | F13 | Axis 1, ~100 LOC | High |
-| Standard precompile: ECDSA secp256k1 | — (app-side pattern) | ~500 LOC (chip) | High |
+App developers define custom chips using the same pattern as core chips:
 
-### Phase 3: State Extensibility (F5, F6)
+1. **`columns.rs`**: `#[repr(C)]` trace columns parameterized by `T`
+2. **`air.rs`**: `impl Air<AB> for MyChip where AB: InteractionAirBuilder`
+3. **`trace.rs`**: `impl TraceContributor for MyChip`
 
-| Item | Prerequisite | Scope | Priority |
-|---|---|---|---|
-| `VectorCommitment` trait | F5 | Axis 4, ~100 LOC | Medium |
-| Extract SSMC/SMT into trait impls | F5 | Axis 4, ~refactor | Medium |
-| `PropertyOpening` trait | F6 | Axis 5, ~100 LOC | Medium |
+The `AnyRap` blanket impl automatically applies — zero additional boilerplate.
 
-### Phase 4: Execution Optimization (F11)
+### 6.3 Plonky3 Re-export Strategy
 
-| Item | Prerequisite | Scope | Priority |
-|---|---|---|---|
-| `TemplateChip` trait | F11 | Axis 6, ~100 LOC | Medium |
-| Equivalence test harness | F11 | Axis 6, ~200 LOC | Medium |
-| Built-in template: Transfer | — (app-side pattern) | Axis 6, ~300 LOC | Low |
-
-### Phase 5: Proof Composition
-
-| Item | Prerequisite | Scope | Priority |
-|---|---|---|---|
-| `ProofAggregator` trait | — | Axis 7, ~100 LOC | Low |
-| Layered STARK aggregation | — | Axis 7, ~1000 LOC | Low |
-| Recursive SNARK wrapper | — | Axis 7, ~TBD | Future |
-
----
-
-## 13. Developer Experience Summary
-
-| Extension | Who | Effort | What They Write |
-|---|---|---|---|
-| Use core IR | App developer | **Trivial** | `.tab` files (DSL) |
-| Use standard precompiles | App developer | **Trivial** | `precompile!(ecdsa_verify, ...)` in DSL |
-| Define custom precompile | App developer (ZK) | **Medium** | `PrecompileChip` + `ChipExtension` (~300-500 LOC) |
-| Define custom chip | App developer (ZK) | **Medium** | `ChipSpec` + `Air<AB>` + register via `.with_chip()` |
-| Define template chip | Framework contributor | **Medium** | `TemplateChip` impl (~300 LOC) + equivalence tests |
-| Define custom VC | App developer (ZK) | **High** | `VectorCommitment` + AIR chip (~500-1000 LOC) |
-| Define property opening | App developer (ZK) | **High** | `PropertyOpening` + AIR chip (~500 LOC) |
-
-The graduated complexity ensures that 80% of applications need only DSL-level knowledge, while the remaining 20% (like Lighter DEX) can go as deep as custom AIR chips while still benefiting from the framework's composition infrastructure.
-
----
-
-## 14. Completeness Checklist
-
-Requirements for supporting arbitrary ZK applications:
-
-| Requirement | Axis | Mechanism | Status |
-|---|---|---|---|
-| Custom computations | 1 | Precompile pattern (chip + bus) | Designed |
-| Bitwise operations | 1 | Standard precompile | Designed |
-| Wide arithmetic (U128) | 1 | Standard precompile | Designed |
-| Signature verification | 1 | `EcdsaVerifyChip` precompile | Designed |
-| Custom hash functions | 1 | `KeccakChip` precompile | Designed |
-| App-defined chips | 2 | `ChipRegistry` + `AnyRap` + `ChipExtension` | Designed |
-| App-defined buses | 2 | `BusId` newtype + `define_bus!` | Designed |
-| Automatic trace routing | 3 | `TraceContributor` trait | Designed |
-| Custom state commitment | 4 | `VectorCommitment` trait | Designed |
-| Ordered data queries | 5 | `PropertyOpening` trait | Designed |
-| Optimized tx execution | 6 | `TemplateChip` trait | Designed |
-| Proof aggregation | 7 | `ProofAggregator` trait | Designed |
-| Cross-tx invariants | Core | Continuation token pattern | Already possible |
-| Oracle integration | Precompile | SigVerify on oracle data | Already possible |
-| Timestamp/clock | Core | Batch parameter | Already possible |
-| Data availability | External | `tabula-da` crate | Future |
-| L1 bridge / escape hatch | External | `tabula-bridge` crate | Future |
-
----
-
-## 15. API Stability and Upgrade Compatibility
-
-### 15.1 Stability Tiers
-
-Every public API in Tabula is classified into one of three stability tiers. Apps can gauge their upgrade risk based on which tiers they depend on.
-
-| Tier | Guarantee | What's Included |
-|------|-----------|-----------------|
-| **S (Stable)** | Breaking changes only on major versions. Deprecation warnings for 2 minor versions before removal. | `Value`, `ValueType`, `CellKey`, `TableId`, `ColId`, `RowKey`, `Transaction`, `Batch`, `Program`, `TxTypeDef`, `ProgramBudgets`, `TabulaError`, `Hasher`, `SigVerifier`, `StateSnapshot`, `BatchResult`, `ExecutionResult` |
-| **A (Extension)** | May evolve across minor versions, but with migration path documented. Additive changes (new trait methods with defaults) are non-breaking. | `ChipSpec`, `AnyRap`, `ChipRegistry`, `ChipExtension`, `TabulaMachine`, `DynTraceContributor`, `VectorCommitment`, `PropertyOpening`, `PrecompileHandler`, `TemplateChip`, `ProofAggregator`, `define_bus!`, `BusId`, `WitnessStore`, `PrecompileId`, `VcId` |
-| **I (Internal)** | No stability guarantee. May change between any release. | Individual chip implementations (`ExecutionChip`, `PoseidonChip`, etc.), column struct layouts, gadget internals, `trace/orchestration.rs`, constraint details, `stark/prover.rs` internals |
-
-**Rule**: An app that depends only on Tier S + Tier A APIs survives all minor version upgrades without code changes. Apps that import Tier I types (e.g., to reuse a gadget inside a custom chip) accept the risk of breakage.
-
-### 15.2 Plonky3 Re-export Strategy
-
-Apps building custom chips need p3 types (`BabyBear`, `AB::Expr`, `RowMajorMatrix`, etc.). Rather than requiring apps to depend on specific p3 crate versions (which creates diamond dependency conflicts), Tabula re-exports everything through a stable prelude:
+Apps building custom chips need p3 types. Rather than direct p3 dependency (diamond conflicts), Tabula re-exports through a stable prelude:
 
 ```rust
-// tabula-machine/src/prelude.rs (Tier A)
+// tabula-machine/src/prelude.rs
 pub use p3_air::{Air, AirBuilder, BaseAir};
 pub use p3_baby_bear::BabyBear;
 pub use p3_field::{Field, PrimeField32, PrimeCharacteristicRing};
 pub use p3_matrix::dense::RowMajorMatrix;
 
-// Tabula-specific re-exports
-pub use crate::air::{InteractionAirBuilder, ChipSpec, BusId};
-pub use crate::trace::{TraceContributor, WitnessStore, TraceEntry};
-pub use crate::state::{VectorCommitment, VcId, PropertyOpening};
+// Tabula-specific
+pub use crate::{ChipSpec, AnyRap, ChipRegistry, ChipExtension};
+pub use tabula_stark::{BusId, InteractionAirBuilder, TraceContributor, WitnessStore};
+pub use tabula_stark::trace::{ColumnCommitment, ColumnPlan, EncodingWidth};
 ```
 
-When Tabula upgrades p3 (e.g., 0.4 → 0.5), the prelude adapts internally. Apps using the prelude see no breakage as long as their code doesn't depend on p3-internal details.
-
-### 15.3 Bus Signature Versioning
-
-Bus signatures (the field layout of LogUp fingerprints) are the primary interoperability contract between chips. If a bus signature changes, all chips on that bus must update simultaneously.
-
-**Policy**:
-- Core bus signatures (BusId 0-99) are **Tier A** — stable within minor versions.
-- App bus signatures (BusId 100+) are app-controlled — no Tabula stability guarantee needed.
-- Bus signature changes are documented in release notes with migration instructions.
-
-### 15.4 Upgrade Scenarios
-
-| Scenario | App Impact | Why |
-|----------|-----------|-----|
-| Tabula adds new core opcode | **None** | App uses `with_core_chips()` which includes all core chips |
-| Tabula adds new core chip | **None** | `core_chips()` returns all core chips; apps inherit via `.with_core_chips()` |
-| Tabula improves SSMC/SMT internals | **None** | Internal chip changes are Tier I; VC trait interface is unchanged |
-| Tabula changes bus signature | **Recompile** | App's custom chips on affected bus need constraint updates |
-| Tabula changes `VectorCommitment` trait | **Minor update** | Tier A — new methods have defaults; app may need to implement new optional methods |
-| Tabula upgrades Plonky3 version | **None** (if using prelude) | Prelude absorbs p3 version changes |
-| App adds new precompile | **None to Tabula** | Purely additive in app crate |
-| App adds new custom VC | **None to Tabula** | Purely additive in app crate |
-
-### 15.5 Versioning Contract
-
-```
-tabula v0.X.Y
-         │ │
-         │ └── Patch: bug fixes only. Zero app impact.
-         │
-         └──── Minor: Tier S unchanged. Tier A additive only. Tier I may change.
-
-tabula v1.0.0+
-         │
-         └──── Major: Tier S may break (with deprecation cycle). Tier A may break.
-```
+When Tabula upgrades p3 (e.g., 0.4 → 0.5), the prelude adapts internally. Apps see no breakage.
 
 ---
 
-## 16. Summary
+## 7. API Stability
 
-Tabula's extensibility architecture provides **seven orthogonal extension axes** connected by **LogUp buses** as the universal composition interface. The **Zero-Modification Principle** ensures that applications never fork or modify Tabula's codebase — all customization is purely additive in the app's own crate.
+### 7.1 Stability Tiers
 
-The framework requires ~1,450 LOC of one-time prerequisites (§1.4) to enable this model. After that investment, the graduated complexity model allows:
+| Tier | Guarantee | Examples |
+|------|-----------|---------|
+| **S (Stable)** | Breaking changes only on major versions | `Value`, `ValueType`, `CellKey`, `TableId`, `ColId`, `Transaction`, `Batch`, `TabulaError`, `Hasher`, `SigVerifier` |
+| **A (Extension)** | May evolve across minor versions, with migration path | `ChipSpec`, `AnyRap`, `ChipExtension`, `TabulaMachine`, `ColumnCommitment`, `PropertyOpening`, `PrecompileHandler`, `BusId`, `WitnessStore`, `define_bus!` |
+| **I (Internal)** | No stability guarantee | Individual chip implementations, column layouts, gadget internals, constraint details |
 
-- **80% of apps**: DSL-only (`.tab` files) — zero Rust code, zero ZK knowledge needed
-- **15% of apps**: Standard library + precompiles — import and configure, minimal Rust
-- **5% of apps** (like Lighter DEX): Custom chips, VCs, and templates — full AIR development, but still composing with the framework rather than forking it
+**Rule**: An app using only S + A APIs survives all minor version upgrades.
 
-The ~5-10% proving overhead (compared to a fully purpose-built circuit) is the composability tax that buys development velocity, upgrade safety, and ecosystem interoperability.
+### 7.2 Bus Signature Stability
+
+Bus signatures (LogUp fingerprint field layouts) are the primary interoperability contract:
+
+- **Core buses** (BusId 0-99): Tier A — stable within minor versions
+- **App buses** (BusId 100+): App-controlled — no Tabula stability guarantee
+
+---
+
+## 8. Implementation Plan (Goal 6)
+
+### Phase 1: Builder API + ChipExtension (F2, F12)
+
+| Task | Scope | Details |
+|------|-------|---------|
+| `TabulaMachine::builder()` | ~200 LOC | Fluent API: `.with_core_chips()`, `.with_chip()`, `.with_extension()`, `.build()` |
+| `ChipExtension` trait | ~150 LOC | `register_chips()`, `populate_witness()`, `name()` |
+| `tabula-machine::prelude` | ~50 LOC | Re-export p3 types + Tabula extension traits |
+| Migrate `TabulaMachine::new()` | ~refactor | Internal: delegate to builder |
+
+### Phase 2: ColumnCommitment impls (F5b)
+
+| Task | Scope | Details |
+|------|-------|---------|
+| `SsmcCommitment` impl | ~refactor | Wrap existing SSMC shard logic into `ColumnCommitment` trait impl |
+| `SmtCommitment` impl | ~refactor | Wrap existing SMT logic into `ColumnCommitment` trait impl |
+| Per-column commitment selection | ~50 LOC | `ProofConfig.set_column_commitment(table, col, name)` |
+| Wire into witness pipeline | ~refactor | `ColumnPlan.scheme_name` → dispatch to registered `ColumnCommitment` |
+
+### Phase 3: PropertyOpening trait (F6)
+
+| Task | Scope | Details |
+|------|-------|---------|
+| `PropertyOpening` trait + `PropertyQuery` | ~100 LOC | Trait + query enum |
+| `PropertyRead` IR variant | ~50 LOC | One-time instruction addition |
+| Executor dispatch for property reads | ~50 LOC | Route to PropertyOpening.prove() |
+| Wire into trace pipeline | ~50 LOC | PropertyWitness → WitnessStore → chip trace |
+
+### Estimated Total: ~800 LOC framework changes + refactoring
+
+After Goal 6, Goals 7 (Precompile) and 8 (Templates) become unblocked.
+
+---
+
+## 9. Completeness Checklist
+
+Requirements for supporting arbitrary ZK applications:
+
+| Requirement | Axis | Mechanism | Status |
+|---|---|---|---|
+| Custom computations (ECDSA, Keccak) | 1 | Precompile pattern | Designed (Goal 7) |
+| App-defined chips | 2 | ChipRegistry + AnyRap | ✅ Implemented |
+| App-defined buses | 2 | BusId + define_bus! | ✅ Implemented |
+| Automatic trace routing | 3 | TraceContributor + WitnessStore | ✅ Implemented |
+| Custom state commitment | 4 | ColumnCommitment trait + impls | Trait ✅, impls **Goal 6** |
+| Ordered data queries | 5 | PropertyOpening trait | **Goal 6** |
+| Optimized tx execution | 6 | TemplateChip trait | Designed (Goal 8) |
+| Proof aggregation | 7 | ProofAggregator trait | Designed (future) |
+| Pluggable root proof | — | RootProof trait | ✅ Implemented |
+| Builder composition API | — | TabulaMachine::builder() | **Goal 6** |
+| Stable p3 re-exports | — | tabula-machine::prelude | **Goal 6** |
+| Cross-tx invariants | Core | Continuation token pattern | ✅ Already possible |
+| Oracle integration | 1 | SigVerify precompile | Designed (Goal 7) |

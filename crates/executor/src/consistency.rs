@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::{CellKey, ExecutionConsistencyStatus, ExecutionEvent, OpKind, Value};
+use tabula_core::{CellKey, ExecutionConsistencyStatus, AccessEvent, OpKind, Value};
 
 /// Check that the execution trace is consistent with last-write semantics.
 ///
@@ -17,7 +17,7 @@ use tabula_core::{CellKey, ExecutionConsistencyStatus, ExecutionEvent, OpKind, V
 /// Returns `Ok(())` if consistent, or `Err(TabulaError::ConsistencyError)` if a
 /// read returns a value inconsistent with the most recent write.
 pub fn check_consistency(
-    events: &[ExecutionEvent],
+    events: &[AccessEvent],
     read_set_old: &[(CellKey, Option<Value>)],
 ) -> Result<(), TabulaError> {
     check_etrace_identity(events)?;
@@ -26,13 +26,13 @@ pub fn check_consistency(
     let initial: BTreeMap<CellKey, Option<Value>> = read_set_old.iter().copied().collect();
 
     // Group events by cell key, preserving time order
-    let mut by_key: BTreeMap<CellKey, Vec<&ExecutionEvent>> = BTreeMap::new();
+    let mut by_key: BTreeMap<CellKey, Vec<&AccessEvent>> = BTreeMap::new();
     for event in events {
         by_key.entry(event.key).or_default().push(event);
     }
 
     // Convert an event's (value, val_is_null) pair to Option<Value>.
-    fn event_to_opt(event: &ExecutionEvent) -> Option<Value> {
+    fn event_to_opt(event: &AccessEvent) -> Option<Value> {
         if event.val_is_null {
             None
         } else {
@@ -78,7 +78,7 @@ pub fn check_consistency(
 /// For each transaction:
 /// - first event has `effect_ordinal_in_tx = 0`
 /// - ordinals increase contiguously by 1 in event order
-pub fn check_etrace_identity(events: &[ExecutionEvent]) -> Result<(), TabulaError> {
+pub fn check_etrace_identity(events: &[AccessEvent]) -> Result<(), TabulaError> {
     let mut expected_by_tx: BTreeMap<u32, u32> = BTreeMap::new();
     for event in events {
         let expected = expected_by_tx.entry(event.tx_index).or_insert(0);
@@ -95,7 +95,7 @@ pub fn check_etrace_identity(events: &[ExecutionEvent]) -> Result<(), TabulaErro
 
 /// Check consistency and return a typed status.
 pub fn check_consistency_status(
-    events: &[ExecutionEvent],
+    events: &[AccessEvent],
     read_set_old: &[(CellKey, Option<Value>)],
 ) -> ExecutionConsistencyStatus {
     match check_consistency(events, read_set_old) {

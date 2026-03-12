@@ -1,6 +1,6 @@
 # Execution Templates
 
-> Status: ⬜ Blocked on [composition.md](composition.md) (Goal 6 — needs BusId, ChipExtension, WitnessStore)
+> Status: 🔵 Ready (Goal 6 complete — ChipExtension, WitnessStore, MachineBuilder all available)
 > Design: [docs/design/extensibility-architecture.md](../docs/design/extensibility-architecture.md) §8 (Execution Strategy Extension), [docs/design/proof-optimization-architecture.md](../docs/design/proof-optimization-architecture.md) §3 (Template Chips), [docs/design/execution-chip-evolution.md](../docs/design/execution-chip-evolution.md)
 > Related: [research.md](research.md) "Template Chip Implementations" — concrete templates (TransferTemplate, FillOrderTemplate) depend on this trait infrastructure
 

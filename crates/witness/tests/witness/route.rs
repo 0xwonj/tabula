@@ -1,5 +1,5 @@
 use tabula_core::{
-    CellKey, ColId, ExecutionEvent, ExecutionResult, OpKind, RowKey, TableId, TxOutcome, Value,
+    CellKey, ColId, AccessEvent, ExecutionResult, OpKind, RowKey, TableId, TxOutcome, Value,
 };
 use tabula_witness::witness::route::{KeyRoute, route_keys};
 
@@ -11,8 +11,8 @@ fn ck(table: u32, col: u16, row: u64) -> CellKey {
     }
 }
 
-fn read_ev(key: CellKey, time: u64) -> ExecutionEvent {
-    ExecutionEvent {
+fn read_ev(key: CellKey, time: u64) -> AccessEvent {
+    AccessEvent {
         key,
         op: OpKind::Read,
         value: Value::U64(0),
@@ -23,8 +23,8 @@ fn read_ev(key: CellKey, time: u64) -> ExecutionEvent {
     }
 }
 
-fn write_ev(key: CellKey, time: u64) -> ExecutionEvent {
-    ExecutionEvent {
+fn write_ev(key: CellKey, time: u64) -> AccessEvent {
+    AccessEvent {
         key,
         op: OpKind::Write,
         value: Value::U64(0),

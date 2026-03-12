@@ -2,6 +2,7 @@ mod execution;
 mod memory_shard;
 mod meta_shard;
 mod poseidon;
+mod property_verifier;
 mod range_check;
 mod smt_commitment;
 mod smt_path;

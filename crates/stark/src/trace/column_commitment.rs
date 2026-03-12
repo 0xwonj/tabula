@@ -141,6 +141,10 @@ impl ProofPlan {
 
 /// Pluggable column commitment scheme (batch API).
 ///
+/// **Note**: For production use, prefer [`ColumnScheme`](tabula_machine::ColumnScheme)
+/// which separates chip instantiation from trace building. This trait
+/// bundles both responsibilities and is retained for test-level usage.
+///
 /// Each implementation knows how to produce AIR chips and trace data
 /// for a particular commitment strategy (SSMC, SMT, or custom).
 ///

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use tabula_commitment::BabyBearCodec;
 use tabula_core::traits::ValueCodec;
-use tabula_core::{ColId, ExecutionEvent, ExecutionResult, OpKind, TxOutcome, Value};
+use tabula_core::{ColId, AccessEvent, ExecutionResult, OpKind, TxOutcome, Value};
 
 use super::*;
 
@@ -236,7 +236,7 @@ fn column_witness_delete() {
         write_set_final: vec![(ck(1, 0, 1), None)],
         events: vec![
             read_event(1, 0, 1, 10, 1, 0),
-            ExecutionEvent {
+            AccessEvent {
                 key: ck(1, 0, 1),
                 op: OpKind::Write,
                 value: Value::U64(0),

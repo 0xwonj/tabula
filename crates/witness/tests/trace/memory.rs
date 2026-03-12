@@ -241,6 +241,11 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
             hash_perm_input: None,
             hash_perm_output: None,
             is_empty_col: false,
+            precompile_id: None,
+            property_query_type: None,
+            property_result_val: vec![],
+            property_result_key: vec![],
+            property_result_is_null: false,
         },
         InstructionRecord {
             opcode: Opcode::Write,
@@ -265,6 +270,11 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
             hash_perm_input: None,
             hash_perm_output: None,
             is_empty_col: false,
+            precompile_id: None,
+            property_query_type: None,
+            property_result_val: vec![],
+            property_result_key: vec![],
+            property_result_is_null: false,
         },
     ];
 
@@ -360,6 +370,7 @@ tx touch(id: u64) {
         sig_verifier: &MockSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &static_tables,
+        precompiles: None,
     };
     let execution_result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
         .expect("batch execution should succeed");

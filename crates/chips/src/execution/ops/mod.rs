@@ -10,3 +10,5 @@ pub(crate) mod divmod;
 pub(crate) mod hash;
 pub(crate) mod logic;
 pub(crate) mod mul;
+pub(crate) mod precompile;
+pub(crate) mod property_read;

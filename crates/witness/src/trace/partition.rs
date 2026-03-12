@@ -8,11 +8,16 @@
 //! their [`witness_labels`] key, without requiring knowledge of concrete chip
 //! types. This keeps the witness layer decoupled from chip implementations.
 
+use std::collections::BTreeMap;
+
 use tabula_core::{ColId, TableId};
 
+use tabula_chips::shards::property::trace::{PROPERTY_READ_WITNESS_LABEL, PropertyReadRecord};
 use tabula_chips::shards::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
 
 use tabula_stark::trace::{WitnessStore, witness_labels};
+
+use super::builder::PROPERTY_READ_ALL_LABEL;
 
 // ── Sharded partitioning ──────────────────────────────────────────────────
 
@@ -66,6 +71,12 @@ pub fn partition_by_tier(
 ) -> PartitionedStores {
     let exec_store = global_store.drain_labels(EXECUTION_LABELS);
 
+    // Extract PropertyRead records (grouped by column) from the global store.
+    let mut property_records: BTreeMap<(TableId, ColId), Vec<PropertyReadRecord>> = global_store
+        .get::<BTreeMap<(TableId, ColId), Vec<PropertyReadRecord>>>(PROPERTY_READ_ALL_LABEL)
+        .cloned()
+        .unwrap_or_default();
+
     let columns: Vec<((TableId, ColId), WitnessStore)> = shard_witness
         .take_columns()
         .into_iter()
@@ -74,6 +85,12 @@ pub fn partition_by_tier(
             let mut single_witness = SsmcWitness::default();
             single_witness.insert(table, col, col_data);
             col_store.put(SSMC_WITNESS_LABEL, single_witness);
+
+            // Insert PropertyRead records for this column (if any).
+            if let Some(records) = property_records.remove(&(table, col)) {
+                col_store.put(PROPERTY_READ_WITNESS_LABEL, records);
+            }
+
             ((table, col), col_store)
         })
         .collect();

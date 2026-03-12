@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use proptest::prelude::*;
 
 use tabula_core::{
-    Batch, ColId, ColumnDef, ExecutionEvent, OpKind, RowKey, TableId, TableSchema, Transaction,
+    Batch, ColId, ColumnDef, AccessEvent, OpKind, RowKey, TableId, TableSchema, Transaction,
     TxTypeId, Value, ValueType,
 };
 use tabula_ir::{ArithOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
@@ -220,6 +220,7 @@ proptest! {
             sig_verifier: &AlwaysValidSig,
             nonce_policy: &SeqNonce,
             static_tables: &EmptyStaticTables,
+            precompiles: None,
         };
         let result = tabula_executor::batch::execute_batch(
             &batch, &prog, &snap, &env, &BTreeMap::new(),
@@ -237,11 +238,11 @@ proptest! {
     ) {
         let k = pcell(0);
         let mut events = vec![
-            ExecutionEvent { key: k, op: OpKind::Read, value: Value::U64(100), val_is_null: false, time: 0, tx_index: 0, effect_ordinal_in_tx: 0 },
-            ExecutionEvent { key: k, op: OpKind::Write, value: Value::U64(80), val_is_null: false, time: 1, tx_index: 0, effect_ordinal_in_tx: 1 },
-            ExecutionEvent { key: k, op: OpKind::Read, value: Value::U64(80), val_is_null: false, time: 2, tx_index: 0, effect_ordinal_in_tx: 2 },
-            ExecutionEvent { key: k, op: OpKind::Write, value: Value::U64(60), val_is_null: false, time: 3, tx_index: 0, effect_ordinal_in_tx: 3 },
-            ExecutionEvent { key: k, op: OpKind::Read, value: Value::U64(60), val_is_null: false, time: 4, tx_index: 0, effect_ordinal_in_tx: 4 },
+            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(100), val_is_null: false, time: 0, tx_index: 0, effect_ordinal_in_tx: 0 },
+            AccessEvent { key: k, op: OpKind::Write, value: Value::U64(80), val_is_null: false, time: 1, tx_index: 0, effect_ordinal_in_tx: 1 },
+            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(80), val_is_null: false, time: 2, tx_index: 0, effect_ordinal_in_tx: 2 },
+            AccessEvent { key: k, op: OpKind::Write, value: Value::U64(60), val_is_null: false, time: 3, tx_index: 0, effect_ordinal_in_tx: 3 },
+            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(60), val_is_null: false, time: 4, tx_index: 0, effect_ordinal_in_tx: 4 },
         ];
         let read_set_old = vec![(k, Some(Value::U64(100)))];
 

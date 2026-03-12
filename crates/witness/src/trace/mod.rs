@@ -18,7 +18,10 @@ pub use tabula_stark::trace::{
 };
 
 pub use builder::{AllTraceInputs, TraceBuilder};
-pub use lowering::{LoweringOutput, lower_execution_records, lower_program_batch};
+pub use lowering::{
+    LoweringOutput, PrecompileExecuteFn, PropertyReadFn, lower_execution_records,
+    lower_program_batch,
+};
 pub use memory::prepare_shard_witness;
 pub use orchestration::build_all_traces;
 pub use partition::{PartitionedStores, partition_by_tier};

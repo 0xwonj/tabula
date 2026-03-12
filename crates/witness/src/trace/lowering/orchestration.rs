@@ -151,6 +151,11 @@ pub fn lower_execution_records<const W: usize>(
                     hash_perm_input: None,
                     hash_perm_output: None,
                     is_empty_col: false,
+                    precompile_id: None,
+                    property_query_type: None,
+                    property_result_val: vec![],
+                    property_result_key: vec![],
+                    property_result_is_null: false,
                 });
             }
             OpKind::Write => {
@@ -198,6 +203,11 @@ pub fn lower_execution_records<const W: usize>(
                     hash_perm_input: None,
                     hash_perm_output: None,
                     is_empty_col: false,
+                    precompile_id: None,
+                    property_query_type: None,
+                    property_result_val: vec![],
+                    property_result_key: vec![],
+                    property_result_is_null: false,
                 });
             }
         }
@@ -226,6 +236,7 @@ pub struct LoweringOutput {
 /// (src1/src2/cond) must reference either a `Slot(s)` or a value already
 /// present in a slot. `Param`/`Literal` operands will search existing
 /// slots for a matching value; if none is found, an error is returned.
+#[allow(clippy::too_many_arguments)]
 pub fn lower_program_batch<const W: usize>(
     program: &Program,
     batch: &Batch,
@@ -233,12 +244,14 @@ pub fn lower_program_batch<const W: usize>(
     schemas: &BTreeMap<TableId, TableSchema>,
     static_tables: &dyn StaticTableProvider,
     empty_columns: &BTreeSet<(TableId, ColId)>,
+    precompile_executor: Option<&super::context::PrecompileExecuteFn>,
+    property_reader: Option<&super::context::PropertyReadFn>,
 ) -> Result<LoweringOutput, TabulaError> {
     let type_map = build_type_map(schemas);
     let codec = BabyBearCodec;
 
     // Pre-index events by tx_index.
-    let mut events_by_tx: BTreeMap<u32, Vec<&tabula_core::ExecutionEvent>> = BTreeMap::new();
+    let mut events_by_tx: BTreeMap<u32, Vec<&tabula_core::AccessEvent>> = BTreeMap::new();
     for event in &execution_result.events {
         events_by_tx.entry(event.tx_index).or_default().push(event);
     }
@@ -267,6 +280,8 @@ pub fn lower_program_batch<const W: usize>(
             &tx.params,
             &codec,
             tx_def.body.len(),
+            precompile_executor,
+            property_reader,
         );
 
         lower_tx_body(&mut ctx, &tx_def.body)?;

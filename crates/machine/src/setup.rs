@@ -14,7 +14,7 @@
 //! | Tier | Chips |
 //! |------|-------|
 //! | Execution | ExecutionChip, StaticTableChip, PoseidonChip, RangeCheckChip |
-//! | Column | MemoryShardChip, StateShardChip, MetaShardChip, PoseidonChip, RangeCheckChip |
+//! | Column | MemoryShardChip, StateShardChip, MetaShardChip, PropertyVerifierChip, PoseidonChip, RangeCheckChip |
 //! | Root | SmtColPathChip, SmtTablePathChip, PoseidonChip, RangeCheckChip |
 //!
 //! PoseidonChip and RangeCheckChip are included in every tier because bus
@@ -25,14 +25,11 @@ use std::collections::BTreeMap;
 
 use tabula_chips::poseidon::PoseidonChip;
 use tabula_chips::range_check::RangeCheckChip;
-use tabula_chips::shards::memory::MemoryShardChip;
-use tabula_chips::shards::meta::MetaShardChip;
-use tabula_chips::shards::state::StateShardChip;
 use tabula_core::{ColId, TableId};
-use tabula_stark::chips::{ChipIdAllocator, DEFAULT_VALUE_WIDTH};
+use tabula_stark::chips::ChipIdAllocator;
 use tabula_stark::trace::{BusConsumer, DynChip};
 
-use crate::composition::{RootProof, SmtRootProof, execution_dyn_chips};
+use crate::composition::{RootProof, execution_dyn_chips};
 use crate::keys::{TabulaProvingKey, TabulaVerifyingKey};
 use crate::registry::{ChipRegistry, SetupError};
 
@@ -80,46 +77,30 @@ pub(crate) fn execution_tier_setup() -> Result<TierSetup, SetupError> {
     })
 }
 
-/// Build setup for a column proof tier.
-///
-/// Chips: MemoryShardChip\<W\>, StateShardChip\<W\>, MetaShardChip, PoseidonChip, RangeCheckChip.
+/// Build setup for a column proof tier using a pluggable [`ColumnScheme`].
 ///
 /// Each column proof operates on a single `(table_id, col_id)` pair.
+/// The scheme determines which shard chips are created; PoseidonChip
+/// and RangeCheckChip are always added as bus consumers.
+///
 /// Shard chip IDs are allocated locally (starting at 100) and are independent
 /// across column proofs.
-pub(crate) fn column_tier_setup<const W: usize>(
-    table_id: TableId,
-    col_id: ColId,
-    scheme_tag: u16,
-    receives_commitment: bool,
+pub(crate) fn column_tier_setup_with_scheme(
+    config: &ColumnSetupConfig,
+    scheme: &dyn crate::column_scheme::ColumnScheme,
 ) -> Result<TierSetup, SetupError> {
-    let t = table_id.0;
-    let c = col_id.0;
-
     let mut alloc = ChipIdAllocator::for_shards();
-    let mem_id = alloc.next();
-    let state_id = alloc.next();
-    let meta_id = alloc.next();
-
-    let mem_chip = MemoryShardChip::<W>::new(mem_id, t, c);
-    let state_chip = StateShardChip::<W>::new(state_id, t, c);
-    let meta_chip = MetaShardChip::new(meta_id, t, c, scheme_tag, receives_commitment);
+    let chip_set = scheme.create_chips(config, &mut alloc)?;
 
     let mut registry = ChipRegistry::new();
-    registry.register(mem_chip.clone());
-    registry.register(state_chip.clone());
-    registry.register(meta_chip.clone());
+    registry.register_boxed(chip_set.airs);
     registry.register(PoseidonChip);
     registry.register(RangeCheckChip);
     registry.validate()?;
 
-    let dyn_chips: Vec<Box<dyn DynChip>> = vec![
-        Box::new(mem_chip),
-        Box::new(state_chip),
-        Box::new(meta_chip),
-        Box::new(PoseidonChip),
-        Box::new(RangeCheckChip),
-    ];
+    let mut dyn_chips = chip_set.dyn_chips;
+    dyn_chips.push(Box::new(PoseidonChip));
+    dyn_chips.push(Box::new(RangeCheckChip));
 
     let bus_consumers: Vec<Box<dyn BusConsumer>> =
         vec![Box::new(PoseidonChip), Box::new(RangeCheckChip)];
@@ -134,6 +115,29 @@ pub(crate) fn column_tier_setup<const W: usize>(
         dyn_chips,
         bus_consumers,
     })
+}
+
+/// Build setup for a column proof tier with the default SSMC scheme.
+///
+/// Chips: MemoryShardChip\<W\>, StateShardChip\<W\>, MetaShardChip, PoseidonChip, RangeCheckChip.
+///
+/// Convenience wrapper over [`column_tier_setup_with_scheme()`] using [`SsmcScheme`].
+/// Production code uses the builder which dispatches to `column_tier_setup_with_scheme`
+/// directly via the registered [`ColumnScheme`].
+#[cfg(test)]
+pub(crate) fn column_tier_setup<const W: usize>(
+    table_id: TableId,
+    col_id: ColId,
+    scheme_tag: u16,
+    receives_commitment: bool,
+) -> Result<TierSetup, SetupError> {
+    let config = ColumnSetupConfig {
+        table_id,
+        col_id,
+        scheme_tag,
+        receives_commitment,
+    };
+    column_tier_setup_with_scheme(&config, &crate::column_scheme::SsmcScheme::<W>)
 }
 
 /// Build setup for the root proof tier.
@@ -183,6 +187,9 @@ impl TierSetup {
 }
 
 /// Per-tier trace maps for the proof architecture.
+///
+/// **Warning**: Cloning is expensive — trace matrices can be megabytes.
+/// Prefer consuming by value via [`TabulaMachine::prove()`].
 #[derive(Clone)]
 pub struct ProofTraces {
     /// Execution tier traces.
@@ -204,6 +211,7 @@ pub struct ProofSetups {
 }
 
 /// Per-column configuration for setup creation.
+#[derive(Clone, Copy, Debug)]
 pub struct ColumnSetupConfig {
     /// Table identifier.
     pub table_id: TableId,
@@ -213,35 +221,6 @@ pub struct ColumnSetupConfig {
     pub scheme_tag: u16,
     /// Whether MetaShardChip receives on the CommitmentVerification bus.
     pub receives_commitment: bool,
-}
-
-/// Create all per-tier setups (registries + keys).
-pub(crate) fn create_proof_setups(
-    columns: &[ColumnSetupConfig],
-) -> Result<ProofSetups, TabulaError> {
-    let exec_setup = execution_tier_setup().map_err(|e| setup_to_tabula(&e))?;
-
-    let col_setups: Vec<((TableId, ColId), TierSetup)> = columns
-        .iter()
-        .map(|cfg| {
-            let setup = column_tier_setup::<DEFAULT_VALUE_WIDTH>(
-                cfg.table_id,
-                cfg.col_id,
-                cfg.scheme_tag,
-                cfg.receives_commitment,
-            )
-            .map_err(|e| setup_to_tabula(&e))?;
-            Ok(((cfg.table_id, cfg.col_id), setup))
-        })
-        .collect::<Result<Vec<_>, TabulaError>>()?;
-
-    let root_setup = root_tier_setup(&SmtRootProof).map_err(|e| setup_to_tabula(&e))?;
-
-    Ok(ProofSetups {
-        execution: exec_setup,
-        columns: col_setups,
-        root: root_setup,
-    })
 }
 
 /// Build all per-tier trace maps from setups and partitioned witness stores.
@@ -293,17 +272,10 @@ pub(crate) fn build_proof_traces(
     })
 }
 
-/// Convert [`SetupError`] to [`TabulaError`] for ergonomic chaining.
-fn setup_to_tabula(e: &SetupError) -> TabulaError {
-    TabulaError::ProofError {
-        phase: "setup",
-        detail: e.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::composition::SmtRootProof;
     use tabula_commitment::scheme_tags;
     use tabula_stark::chips::core_chips;
 
@@ -327,11 +299,11 @@ mod tests {
         let setup = column_tier_setup::<3>(TableId(1), ColId(2), scheme_tags::SSMC, true).unwrap();
         let ids = setup.registry.chip_ids();
 
-        assert_eq!(ids.len(), 5);
+        assert_eq!(ids.len(), 6);
         assert!(ids.contains(&core_chips::POSEIDON));
         assert!(ids.contains(&core_chips::RANGE_CHECK));
 
-        assert_eq!(setup.dyn_chips.len(), 5);
+        assert_eq!(setup.dyn_chips.len(), 6);
         assert_eq!(setup.bus_consumers.len(), 2);
     }
 

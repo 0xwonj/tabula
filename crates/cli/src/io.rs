@@ -1,7 +1,7 @@
 //! JSON input/output types for the CLI.
 
 use tabula_artifact::{StateCell as ArtifactStateCell, StateFile as ArtifactStateFile};
-use tabula_core::{EmittedEvent, ExecutionConsistencyStatus, ExecutionEvent, TxOutcome};
+use tabula_core::{EmittedEvent, ExecutionConsistencyStatus, AccessEvent, TxOutcome};
 
 /// JSON representation of a state file.
 pub type StateFile = ArtifactStateFile;
@@ -22,7 +22,7 @@ pub struct ExecutionOutput {
     pub consistency: ExecutionConsistencyStatus,
     /// Full execution trace (only if requested).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace: Option<Vec<ExecutionEvent>>,
+    pub trace: Option<Vec<AccessEvent>>,
 }
 
 /// Deserialize a JSON file from the given path.

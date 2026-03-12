@@ -3,7 +3,9 @@
 use p3_field::PrimeCharacteristicRing;
 
 use tabula_stark::air::builder::InteractionAirBuilder;
-use tabula_stark::air::bus::{AccessTupleExpr, ReadAccessAirBuilder, WriteAccessAirBuilder};
+use tabula_stark::air::bus::{
+    AccessTupleExpr, PropertyReadAirBuilder, ReadAccessAirBuilder, WriteAccessAirBuilder,
+};
 use tabula_stark::air::interaction::{AirInteraction, core_buses};
 
 use super::air::{HASH_INSTRUCTION_DOMAIN_TAG, HASH_INSTRUCTION_INPUT_COUNT};
@@ -164,7 +166,10 @@ pub(super) fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
     // diff2 proven by Limb2Bits, no RC send needed
 }
 
-/// C5 PoseidonPermutation bus send for Hash opcode.
+/// C5 PoseidonPermutation bus send for Hash and Precompile opcodes.
+///
+/// Both opcodes use the Poseidon permutation columns, so both contribute
+/// to the POSEIDON_PERM bus.
 pub(super) fn send_hash_permutation<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -175,7 +180,8 @@ pub(super) fn send_hash_permutation<AB: InteractionAirBuilder, const W: usize>(
     let _ = HASH_INSTRUCTION_DOMAIN_TAG;
     let _ = HASH_INSTRUCTION_INPUT_COUNT;
 
-    let multiplicity: AB::Expr = local.is_real.clone().into() * local.op_hash.clone().into();
+    let multiplicity: AB::Expr = local.is_real.clone().into()
+        * (local.op_hash.clone().into() + local.op_precompile.clone().into());
 
     let mut values: Vec<AB::Expr> = Vec::with_capacity(24);
     for i in 0..16 {
@@ -214,5 +220,51 @@ pub(super) fn send_static_table_lookup<AB: InteractionAirBuilder, const W: usize
         values,
         multiplicity,
         bus: core_buses::STATIC_TABLE_LOOKUP,
+    });
+}
+
+/// C18 PropertyRead bus send: structural query results.
+///
+/// Tuple: `(t, c, query_type, result_val[W], result_key[W], is_null)`.
+/// Multiplicity: `is_real * op_property_read`.
+pub(super) fn send_property_read<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr =
+        local.is_real.clone().into() * local.op_property_read.clone().into();
+
+    builder.send_property_read(
+        local.access_t.clone().into(),
+        local.access_c.clone().into(),
+        local.property_query_type.clone().into(),
+        &local.property_result_val,
+        &local.property_result_key,
+        local.property_result_is_null.clone().into(),
+        multiplicity,
+    );
+}
+
+/// C17 Precompile bus send: I/O commitment for precompile calls.
+///
+/// Tuple: `(precompile_id, hash_perm_output[0..8])`.
+/// Multiplicity: `is_real * op_precompile`.
+pub(super) fn send_precompile<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr = local.is_real.clone().into() * local.op_precompile.clone().into();
+
+    // 9 FE: (precompile_id, hash_perm_output[0..8])
+    let mut values: Vec<AB::Expr> = Vec::with_capacity(9);
+    values.push(local.precompile_id.clone().into());
+    for i in 0..8 {
+        values.push(local.hash_perm_output[i].clone().into());
+    }
+
+    builder.send(AirInteraction {
+        values,
+        multiplicity,
+        bus: core_buses::PRECOMPILE,
     });
 }

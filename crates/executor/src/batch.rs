@@ -11,6 +11,7 @@ use tabula_ir::{ParamDef, Program};
 
 use crate::interpreter;
 use crate::overlay::Overlay;
+use crate::precompile::PrecompileRegistry;
 
 /// Validate transaction parameters against the schema definition.
 fn validate_params(params: &[Value], schema: &[ParamDef]) -> Result<(), TabulaError> {
@@ -43,6 +44,8 @@ pub struct BatchEnv<'a> {
     pub nonce_policy: &'a dyn NoncePolicy,
     /// Static (read-only) table lookups.
     pub static_tables: &'a dyn StaticTableProvider,
+    /// Optional precompile handlers for custom instructions.
+    pub precompiles: Option<&'a PrecompileRegistry>,
 }
 
 /// Execute a batch of transactions against a state snapshot.
@@ -65,6 +68,9 @@ pub fn execute_batch<S: StateSnapshot>(
         hasher: env.hasher,
         static_tables: env.static_tables,
         schemas: program.schemas(),
+        precompiles: env.precompiles,
+        committed_state: None,
+        property_openings: None,
     };
 
     for (tx_idx, tx) in batch.transactions.iter().enumerate() {

@@ -266,6 +266,66 @@ fn test_parse_select_call() {
     }
 }
 
+// --- Precompile ---
+
+#[test]
+fn test_parse_precompile_no_inputs() {
+    let prog = parse_source("tx t() { @precompile(1, [out]) }");
+    let body = &prog.transactions[0].body;
+    assert_eq!(body.len(), 1);
+    if let StmtKind::Precompile {
+        id,
+        dst_names,
+        inputs,
+    } = &body[0].kind
+    {
+        assert_eq!(*id, 1);
+        assert_eq!(dst_names, &["out"]);
+        assert!(inputs.is_empty());
+    } else {
+        panic!("expected precompile stmt");
+    }
+}
+
+#[test]
+fn test_parse_precompile_with_inputs() {
+    let prog = parse_source("tx t(x: u64, y: u64) { @precompile(42, [a, b], x, y) }");
+    let body = &prog.transactions[0].body;
+    assert_eq!(body.len(), 1);
+    if let StmtKind::Precompile {
+        id,
+        dst_names,
+        inputs,
+    } = &body[0].kind
+    {
+        assert_eq!(*id, 42);
+        assert_eq!(dst_names, &["a", "b"]);
+        assert_eq!(inputs.len(), 2);
+        assert!(matches!(&inputs[0].kind, ExprKind::Ident(n) if n == "x"));
+        assert!(matches!(&inputs[1].kind, ExprKind::Ident(n) if n == "y"));
+    } else {
+        panic!("expected precompile stmt");
+    }
+}
+
+#[test]
+fn test_parse_precompile_hex_id() {
+    let prog = parse_source("tx t() { @precompile(0x0001, [r]) }");
+    let body = &prog.transactions[0].body;
+    if let StmtKind::Precompile { id, .. } = &body[0].kind {
+        assert_eq!(*id, 1);
+    } else {
+        panic!("expected precompile stmt");
+    }
+}
+
+#[test]
+fn test_parse_precompile_error_bad_name() {
+    let tokens = lex("tx t() { @foobar(1, [x]) }").unwrap();
+    let result = parse(tokens);
+    assert!(result.is_err());
+}
+
 // --- Error cases ---
 
 #[test]

@@ -112,6 +112,9 @@ fn bench_arith_chain(c: &mut Criterion) {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
+        precompiles: None,
+        committed_state: None,
+        property_openings: None,
     };
 
     c.bench_function("arith_chain_100", |b| {
@@ -155,6 +158,9 @@ fn bench_read_write_mix(c: &mut Criterion) {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
+        precompiles: None,
+        committed_state: None,
+        property_openings: None,
     };
 
     c.bench_function("read_write_50_50", |b| {
@@ -186,6 +192,9 @@ fn bench_cmp_assert(c: &mut Criterion) {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
+        precompiles: None,
+        committed_state: None,
+        property_openings: None,
     };
 
     c.bench_function("cmp_assert_100", |b| {

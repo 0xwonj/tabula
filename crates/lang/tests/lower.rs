@@ -589,6 +589,76 @@ tx s(id: u64, flag: bool) {
     }
 }
 
+// --- Precompile ---
+
+#[test]
+fn test_lower_precompile_basic() {
+    let source = "tx t(x: u64) { @precompile(1, [out], x) }";
+    let prog = compile(source);
+    let body = &prog.tx_types[0].body;
+    assert_eq!(body.len(), 1);
+    assert!(matches!(
+        &body[0],
+        Instruction::Precompile {
+            id,
+            dst_slots,
+            inputs,
+        } if id.0 == 1 && dst_slots == &[0] && inputs.len() == 1
+    ));
+}
+
+#[test]
+fn test_lower_precompile_multi_output() {
+    let source = "tx t(a: u64, b: u64) { @precompile(42, [x, y], a, b) }";
+    let prog = compile(source);
+    let body = &prog.tx_types[0].body;
+    assert_eq!(body.len(), 1);
+    if let Instruction::Precompile {
+        id,
+        dst_slots,
+        inputs,
+    } = &body[0]
+    {
+        assert_eq!(id.0, 42);
+        assert_eq!(dst_slots, &[0, 1]);
+        assert_eq!(inputs.len(), 2);
+        assert!(matches!(&inputs[0], ValueExpr::Param(0)));
+        assert!(matches!(&inputs[1], ValueExpr::Param(1)));
+    } else {
+        panic!("expected Precompile instruction");
+    }
+}
+
+#[test]
+fn test_lower_precompile_output_usable() {
+    // Verify precompile outputs can be referenced in subsequent statements.
+    let source = "\
+tx t(x: u64) {
+    @precompile(1, [result], x)
+    assert result == 0x0000000000000000000000000000000000000000000000000000000000000000
+}";
+    let prog = compile(source);
+    let body = &prog.tx_types[0].body;
+    // Precompile (slot 0) + Cmp (slot 1) + Assert
+    assert_eq!(body.len(), 3);
+    assert!(matches!(&body[0], Instruction::Precompile { .. }));
+    assert!(matches!(
+        &body[1],
+        Instruction::Cmp {
+            lhs: ValueExpr::Slot(0),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn test_lower_precompile_duplicate_binding_error() {
+    let tokens = lex("tx t(x: u64) { @precompile(1, [x], x) }").unwrap();
+    let ast = parse(tokens).unwrap();
+    let err = lower(&ast).unwrap_err();
+    assert!(err.iter().any(|e| e.kind == ErrorKind::DuplicateBinding));
+}
+
 // --- Logical AND in assert ---
 
 #[test]

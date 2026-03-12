@@ -1,109 +1,120 @@
-# Commitment Traits
+# Goal 6: Extensibility API
 
-> Status: ⬜ Blocked (Goal 6 — depends on sharding migration)
-> Depends: [sharding.md](sharding.md) §Migration (Goal 4) — design on sharded architecture
-> Design: [docs/design/extensibility-architecture.md](../docs/design/extensibility-architecture.md) §6 (State Commitment Extension), §7 (State Opening Extension)
-> Related: [docs/design/master-roadmap.md](../docs/design/master-roadmap.md) (layered composition), [docs/design/commitment-architecture-research.md](../docs/design/commitment-architecture-research.md)
+> Status: ✅ Complete (Phase 1-3 ✅, E9 deferred to Goal 7)
+> Design: [docs/design/extensibility-architecture.md](../docs/design/extensibility-architecture.md)
+> Depends: Goals 1-5 (✅ complete)
+> Unblocks: Goal 7 (Precompile), Goal 8 (Templates)
 
 ## Goal
 
-Make commitment schemes (SSMC, SMT) pluggable via traits. App developers can provide custom commitment schemes without modifying Tabula. StateShard becomes an SSMC implementation detail, not core infrastructure.
+Enable the Zero-Modification Principle: applications customize Tabula purely in their own crate, consuming Tabula as an immutable Cargo dependency. Foundation for future SDK.
 
-**Sharding context**: With full sharding as base architecture, ColumnCommitment operates within Tier 2 (per-column proofs). Each column proof independently runs its commitment scheme. The trait must be designed for per-column-proof context, not global batching.
+## Already Implemented (from prior goals)
 
-## Architecture
+- [x] `ChipRegistry` + `AnyRap` — runtime chip registration via `Box<dyn AnyRap>`
+- [x] `BusId(u16)` + `define_bus!` — open bus IDs (core 0-99, app 100+)
+- [x] `TraceContributor` + `WitnessStore` — phase-ordered trace generation
+- [x] `DynChip` + `BusConsumer` — object-safe chip + bus consumption
+- [x] `RootProof` trait — pluggable root proof (default: SmtRootProof)
+- [x] Per-tier setup — `TierSetup` with registry + keys + dyn_chips
+- [x] `EncodingWidth` + `ColumnPlan` — per-column width polymorphism
 
-Three-tier composition model (aligned with sharded proof structure):
+## Phase 1: Builder API + ChipExtension (F2, F12)
 
-```
-Tier 1: Execution Proof (fixed)
-  ExecutionChip, StaticTableChip, PoseidonLocal, RCLocal
+### E1: `ChipExtension` trait ✅
 
-Tier 2: Column Proofs (pluggable commitment per column)
-  ColumnCommitment trait — per-column API
-  "ssmc" → SsmcCommitment → MemoryShard + StateShard
-  "smt"  → SmtCommitment → (lightweight)
-  "custom" → user-defined
+- [x] Trait defined in `machine/src/extension.rs`
+  - `name()`, `airs()`, `dyn_chips()`, `bus_consumers()`, `populate_witness()`
+  - Follows `RootProof` pattern: returns owned `Box<dyn AnyRap>` / `Box<dyn DynChip>`
+- [x] `ExtensionContext` — minimal Phase 1 struct, expanded in Phase 2+
+- [x] Tests: register extension, verify chips appear in registry (10 tests in `builder.rs`)
 
-Tier 3: Root Proof (fixed)
-  Cumsum balance, SMT path verification
-```
+### E2: `TabulaMachine::builder()` API ✅
 
-## Tasks
+- [x] `MachineBuilder` struct with fluent API in `machine/src/builder.rs`
+  - `with_columns()`, `with_config()`, `with_root_proof()`, `with_extension()`, `build()`
+- [x] `TabulaMachine::new()` and `with_config()` delegate to builder
+- [x] Duplicate ChipId detection via `registry.validate()`
+- [x] `register_boxed()` widened from `pub(crate)` to `pub`
+- [x] `ColumnSetupConfig` derives Clone + Copy + Debug
+- [x] Tests: core-only, with extension, with config, duplicate rejection, legacy parity
 
-### ColumnCommitment trait
+### E3: `tabula-machine::prelude` ✅
 
-- [ ] Define trait in `machine/src/commitment.rs`
-  ```rust
-  pub trait ColumnCommitment: Send + Sync {
-      fn name(&self) -> &str;
-      fn create_chips(&self, columns: &[ColumnPlan]) -> Vec<Box<dyn AnyRap>>;
-      fn create_dyn_chips(&self, columns: &[ColumnPlan]) -> Vec<Box<dyn DynChip>>;
-      fn required_buses(&self) -> Vec<BusId>;
-  }
-  ```
-- [ ] SsmcCommitment impl (wraps existing StateColumnChip)
-- [ ] SmtCommitment impl (lightweight, no extra chip)
-- [ ] Tests: custom commitment registration + build
+- [x] Module re-exporting p3 types + Tabula extension traits in `machine/src/prelude.rs`
+  - p3: `Air`, `AirBuilder`, `BaseAir`, `BabyBear`, `PrimeCharacteristicRing`, `Matrix`, `RowMajorMatrix`
+  - Tabula: `ChipSpec`, `ChipId`, `ChipIdAllocator`, `BusId`, `InteractionAirBuilder`,
+    `TraceContributor`, `TracePhase`, `WitnessStore`, `DynChip`, `BusConsumer`
+  - Machine: `AnyRap`, `ChipRegistry`, `ChipExtension`, `ExtensionContext`
+- [x] Verified: DummyChip test uses only prelude imports
 
-### BusConsumer trait
+## Phase 2: ColumnCommitment Impls (F5b)
 
-- [ ] Define trait
-  ```rust
-  pub trait BusConsumer: Send + Sync {
-      fn consumed_buses(&self) -> Vec<BusId>;
-      fn create_chip(&self) -> Box<dyn AnyRap>;
-      fn create_dyn_chip(&self) -> Box<dyn DynChip>;
-  }
-  ```
-- [ ] PoseidonChip as BusConsumer
-- [ ] RangeCheckChip as BusConsumer
-- [ ] Auto-collection in MachineBuilder
+> `ColumnCommitment` trait is already defined in `stark/src/trace/column_commitment.rs`.
+> This phase wraps the existing SSMC/SMT logic into trait impls.
 
-### ProofPlan + ColumnPlan
+### E4: `SsmcCommitment` impl ✅ (pre-existing)
 
-- [ ] Define per-column metadata
-  ```rust
-  pub struct ColumnPlan {
-      pub table_id: TableId,
-      pub col_id: ColId,
-      pub encoding_width: EncodingWidth,
-      pub commitment_scheme: String,
-  }
-  pub struct ProofPlan {
-      pub columns: Vec<ColumnPlan>,
-  }
-  ```
-- [ ] Wire into witness pipeline and prover
+- [x] `ColumnCommitment` trait impl in `chips/src/shards/ssmc.rs` (pre-existing, tested)
+- [x] Bus integration preserved (all 7 core buses)
 
-### Internal traits (pub(crate))
+### E5: `SmtCommitment` impl ✅ (pre-existing)
 
-- [ ] RootProof — abstraction over ColumnMeta + SmtPath (single impl: GlobalSmtRootProof)
+- [x] `ColumnCommitment` trait impl in `chips/src/shards/smt.rs` (pre-existing, tested)
+- [x] Bus integration preserved
 
-### Builder API extensions
+### E6: Per-column commitment selection ✅
 
-- [ ] `with_commitment(name, impl)` — register custom commitment scheme
-- [ ] `with_default_commitments()` — register SSMC + SMT
-- [ ] `with_proof_plan(|plan| ...)` — configure per-column scheme
+- [x] `ColumnScheme` trait in `machine/src/column_scheme.rs`
+  - `name()`, `create_chips()` — per-column chip instantiation
+- [x] `SsmcScheme<W>` — 3 shard chips (Memory, State, Meta)
+- [x] `SmtScheme<W>` — 2 shard chips (Memory, Meta)
+- [x] `MachineBuilder::with_column_scheme(tag, scheme)` — register per-tag schemes
+- [x] `column_tier_setup_with_scheme()` — setup dispatches to registered scheme
+- [x] Default: `SsmcScheme<3>` pre-registered for `scheme_tags::SSMC`
+- [x] Unregistered scheme_tag → `SetupError::SetupFailed`
+- [x] Tests: SSMC default, SMT registration, mixed schemes, error on unknown tag
 
-### Witness pipeline cleanup
+## Phase 3: PropertyOpening Trait (F6)
 
-- [ ] Revert broken shard migration artifacts in witness crate
-- [ ] Ensure TraceBuilder works with ColumnCommitment-provided chips
+### E8: `PropertyOpening` trait ✅
+
+- [x] Trait defined in `machine/src/property.rs`
+  - `PropertyOpening` trait: `name()`, `compatible_scheme_tag()`, `supported_queries()`, `prove()`, `column_verifier()`
+  - `PropertyQuery` enum: Minimum, Maximum, Successor, Predecessor, NonExistenceRange, Aggregate (keys use `RowKey`)
+  - `PropertyQueryKind` enum: capability declaration for implementations
+  - `AggregateKind` enum: Sum, Count
+  - `PropertyWitness` trait: `value()`, `key()`, `is_null()`, `as_any()` (opaque, downcastable)
+  - `PropertyError` enum: UnsupportedQuery, IncompatibleSchemeTag, NoOpeningRegistered, ProofFailed
+- [x] Types exported from `machine/src/lib.rs` and `machine/src/prelude.rs`
+- [x] `MachineBuilder::with_property_opening()` for registration
+- [x] `TabulaMachine::property_openings()` accessor
+- [x] Tests: registration, multiple openings, prove/verify, unsupported query, empty state, query-kind mapping (7 tests in `builder.rs`)
+
+### E9: `PropertyRead` IR variant (⏳ deferred to Goal 7)
+
+> Deferred: Adding a new `Instruction` variant requires updating 4+ exhaustive match sites
+> across crates. This is best done in Goal 7 (Precompile) when concrete property opening
+> implementations exist to test against.
+
+- [ ] Add to `Instruction` enum (one-time)
+- [ ] Executor dispatch to `PropertyOpening.prove()`
+- [ ] Wire PropertyWitness into WitnessStore → chip trace
 
 ## Completion Criteria
 
-- StateShard owned by SsmcCommitment, not core
-- SSMC/SMT registered via ColumnCommitment trait
-- PoseidonChip and RangeCheckChip via BusConsumer
-- Internal trait boundaries (MemoryModel, RootProof) exist
-- Builder API working: `with_core_chips()` + `with_commitment()`
-- All existing tests pass
+- [x] App crate can define custom chips using only `tabula-machine::prelude`
+- [x] App crate can package chips via `ChipExtension` trait
+- [x] `TabulaMachine::builder()` API for composition
+- [x] SSMC/SMT wrapped as `ColumnScheme` impls with per-column selection
+- [x] `PropertyOpening` trait for structural queries
+- [x] All 882 tests pass (25 builder tests including H1/L5/L6/M6 validation tests)
+- [x] Integration test demonstrating custom extension (DummyChip in `builder.rs`)
 
 ## Verification
 
 ```bash
-cargo check --workspace
+cargo check --workspace --all-targets
 cargo test --workspace
 cargo clippy --workspace --all-targets
 ```

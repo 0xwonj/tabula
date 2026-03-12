@@ -165,6 +165,8 @@ pub mod witness_labels {
     pub const POSEIDON_INPUTS: &str = "poseidon_inputs";
     /// `Box<[u32; RANGE_CHECK_SIZE]>` — range check multiplicities (collected from Phase 0+1).
     pub const RANGE_CHECK_MULTS: &str = "range_check_mults";
+    /// `Vec<PropertyReadRecord>` — property read query records (per-column, column tier).
+    pub const PROPERTY_READ_RECORDS: &str = "property_read_records";
 }
 
 #[cfg(test)]

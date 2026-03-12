@@ -217,4 +217,21 @@ define_bus! {
         old_root: var_arr<8>,
         new_root: var_arr<8>,
     }
+
+    /// Extension trait for send/receive on the PropertyRead bus (C18).
+    ///
+    /// Tuple (2W+4 elements): `(t, c, query_type, result_val[W], result_key[W], is_null)`.
+    #[allow(clippy::too_many_arguments)]
+    pub PropertyReadAirBuilder(
+        core_buses::PROPERTY_READ,
+        send_property_read,
+        receive_property_read
+    ) {
+        t: expr,
+        c: expr,
+        query_type: expr,
+        result_val: var_slice,
+        result_key: var_slice,
+        is_null: expr,
+    }
 }

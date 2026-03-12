@@ -1,11 +1,11 @@
 #![allow(missing_docs)]
 use tabula_core::{
-    CellKey, ColId, ExecutionEvent, ExecutionResult, OpKind, RowKey, TableId, TxOutcome, Value,
+    CellKey, ColId, AccessEvent, ExecutionResult, OpKind, RowKey, TableId, TxOutcome, Value,
 };
 
 #[test]
 fn test_execution_event_borsh_round_trip() {
-    let event = ExecutionEvent {
+    let event = AccessEvent {
         key: CellKey {
             table: TableId(1),
             col: ColId(0),
@@ -19,7 +19,7 @@ fn test_execution_event_borsh_round_trip() {
         effect_ordinal_in_tx: 0,
     };
     let bytes = borsh::to_vec(&event).unwrap();
-    let decoded: ExecutionEvent = borsh::from_slice(&bytes).unwrap();
+    let decoded: AccessEvent = borsh::from_slice(&bytes).unwrap();
     assert_eq!(event, decoded);
 }
 

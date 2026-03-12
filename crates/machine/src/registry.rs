@@ -58,7 +58,10 @@ impl ChipRegistry {
     }
 
     /// Register a batch of boxed chips.
-    pub(crate) fn register_boxed(&mut self, chips: Vec<Box<dyn AnyRap>>) {
+    ///
+    /// Accepts pre-boxed AIR implementations. Useful for extensions and
+    /// composition traits that produce `Vec<Box<dyn AnyRap>>`.
+    pub fn register_boxed(&mut self, chips: Vec<Box<dyn AnyRap>>) {
         for chip in chips {
             let chip_id = tabula_stark::chips::ChipSpec::chip_id(chip.as_ref());
             self.chips.push(RegisteredChip { chip_id, air: chip });

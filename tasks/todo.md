@@ -27,8 +27,9 @@
 | Pipeline acceleration (Tier 1a) | BLAKE3 Merkle hash (~30% proving), trace ownership transfer (~50% memory) |
 | Parallelization + batch inversion (Tier 1b) | rayon P-1..P-5 (quotient, perm trace, sub-proof, trace build, verify) + Montgomery batch inversion |
 | Type foundation | Closed ValueType enum, soundness fixes (boolean constraints, W≥3 const assert, null encoding), dead code removed |
+| Extensibility API | ChipExtension + MachineBuilder + prelude, ColumnScheme (SSMC/SMT), PropertyOpening trait |
 
-857 tests passing across workspace. Zero failures.
+927 tests passing across workspace. Zero failures.
 
 ---
 
@@ -60,11 +61,12 @@ See [docs/design/full-sharding-research.md](../docs/design/full-sharding-researc
 | 3 | Sharding infrastructure (25 gaps: G1–G13, W1–W11) | ✅ | [sharding.md](sharding.md) | 2 |
 | 4 | Sharding migration | ✅ | [sharding.md](sharding.md) §Migration | 3 |
 | 5 | Type foundation (closed ValueType) | ✅ | [custom-types.md](custom-types.md) | — |
-| 6 | Extensibility API | 🔵 | [commitment-traits.md](commitment-traits.md), [composition.md](composition.md), [state-traits.md](state-traits.md) | — |
-| 7 | Precompile framework | ⬜ | [precompile.md](precompile.md) | 6 |
-| 8 | Execution templates | ⬜ | [execution-templates.md](execution-templates.md) | 6 |
+| 6 | Extensibility API | ✅ | [commitment-traits.md](commitment-traits.md) | — |
+| 7 | Precompile framework | 🔧 | [precompile.md](precompile.md) | 6 |
+| 8 | Execution templates | 🔵 | [execution-templates.md](execution-templates.md) | 6 |
 | 9 | Optimization (sharded) | 🔵 | [optimization.md](optimization.md) §Sharded | — |
 | 10 | Advanced research (incl. GKR-LogUp) | 🔬 | [research.md](research.md) | Various |
+| 11 | DSL improvements | ⬜ | [dsl-improvements.md](dsl-improvements.md) | 7 |
 
 ---
 
@@ -79,11 +81,15 @@ See [docs/design/full-sharding-research.md](../docs/design/full-sharding-researc
 │         └──→ 4. Migration ──── monolithic removed, sharded = base
 └── 5. Type Foundation ──────── closed ValueType, soundness fixes, no custom types
 
+├── 6. Extensibility API ──── ChipExtension, MachineBuilder, ColumnScheme, PropertyOpening
+
 Ready (can start now, in parallel)
-├── 6. Extensibility API ────────── on sharded architecture
-│     ├──→ 7. Precompile
-│     └──→ 8. Execution Templates
+├── 7. Precompile framework ──────── (unblocked by 6)
+├── 8. Execution templates ───────── (unblocked by 6)
 └── 9. Optimization (sharded) ──── D1 per-column, constraint CSE, coprocessors
+
+Blocked on 7:
+└── 11. DSL improvements ─────────── soundness, sugar, diagnostics, module system
 
 Future:
 └──→ 10. Research (GKR-LogUp, D2+D3 accumulator, recursion, GPU, compiler redesign)
@@ -106,12 +112,13 @@ See `docs/research/zk-codebase-patterns.md` for the full comparison.
 
 ### Deferred
 
-- [ ] **Operation trait for ExecutionChip** (align with Goal 6)
+- [ ] **Operation trait for ExecutionChip** (align with Goal 7)
   - Define `Operation<AB, W>` trait with `eval()` + `populate()` methods
   - Migrate 14 operations from function-based to trait-based dispatch
   - Extract common patterns first: `slot_gate_builder()`, `carry_chain()` helpers
-  - Column layout stays monolithic until extensibility API (Goal 6)
+  - Goal 6 extensibility API is complete — blocker removed
   - Currently 9 files must change to add a new opcode — trait reduces to ~3
+  - Best paired with Goal 7 (Precompile) which adds new operations
   - Ref: SP1's `SP1Operation` pattern
 - [ ] **Feature-gate prover code** (align with Goal 9)
   - Separate `prove` feature from `verify` — keep verifier lightweight
@@ -124,7 +131,8 @@ See `docs/research/zk-codebase-patterns.md` for the full comparison.
 
 ## Recommended Order
 
-1. **6** — extensibility API on stable sharded architecture
-2. **7 + 8** — precompile + templates (after 6)
-3. **9** — D1 per-column, constraint CSE, coprocessor factoring (parallel with 6)
-4. **10** — GKR-LogUp (after benchmarking perm cost), long-term research
+1. **7** — Precompile framework (adds Precompile + PropertyRead IR instructions)
+2. **11** — DSL improvements: Tier 1 soundness (2w) → Tier 2 sugar + diagnostics (8-10w)
+3. **8** — Execution templates (parallel with 11 Tier 2)
+4. **9** — Optimization: per-column, constraint CSE, coprocessors (parallel with 8/11)
+5. **10** — GKR-LogUp (after benchmarking perm cost), long-term research

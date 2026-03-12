@@ -2,7 +2,7 @@
 //!
 //! Handles the execution event trace, logical time, and tx index.
 
-use tabula_core::{CellKey, ExecutionEvent, LogicalTime, OpKind, Value, ValueType, zero_value};
+use tabula_core::{CellKey, AccessEvent, LogicalTime, OpKind, Value, ValueType, zero_value};
 
 /// Checkpoint for the trace recorder.
 pub(crate) struct RecorderCheckpoint {
@@ -18,7 +18,7 @@ pub(crate) struct RecorderCheckpoint {
 /// Accessible as `pub(crate)` for future ok-gating support, where
 /// events must be preserved even when state is rolled back.
 pub(crate) struct TraceRecorder {
-    events: Vec<ExecutionEvent>,
+    events: Vec<AccessEvent>,
     time: LogicalTime,
     current_tx_index: u32,
     current_effect_ordinal_in_tx: u32,
@@ -48,7 +48,7 @@ impl TraceRecorder {
             Some(v) => (*v, false),
             None => (zero_value(col_type), true),
         };
-        self.events.push(ExecutionEvent {
+        self.events.push(AccessEvent {
             key: *key,
             op,
             value,
@@ -96,11 +96,11 @@ impl TraceRecorder {
         self.events.len()
     }
 
-    pub(crate) fn events_since(&self, since: usize) -> Vec<ExecutionEvent> {
+    pub(crate) fn events_since(&self, since: usize) -> Vec<AccessEvent> {
         self.events[since..].to_vec()
     }
 
-    pub(crate) fn into_events(self) -> Vec<ExecutionEvent> {
+    pub(crate) fn into_events(self) -> Vec<AccessEvent> {
         self.events
     }
 }

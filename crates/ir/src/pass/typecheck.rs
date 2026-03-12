@@ -298,6 +298,59 @@ pub fn check(
                     check_value_expr(d, param_count, &slot_types, i)?;
                 }
             }
+
+            Instruction::Precompile {
+                dst_slots, inputs, ..
+            } => {
+                for input in inputs {
+                    check_value_expr(input, param_count, &slot_types, i)?;
+                }
+                for dst in dst_slots {
+                    assign_slot(
+                        *dst,
+                        None, // type depends on precompile impl
+                        i,
+                        &mut slot_types,
+                        &mut assigned_at,
+                        &mut max_slot,
+                    )?;
+                }
+            }
+
+            Instruction::PropertyRead {
+                dst_val,
+                dst_key,
+                dst_is_null,
+                table,
+                col,
+                ..
+            } => {
+                let ty = schema_col_type(schemas, *table, *col);
+                assign_slot(
+                    *dst_val,
+                    ty,
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
+                assign_slot(
+                    *dst_key,
+                    Some(ValueType::U64), // key is always U64
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
+                assign_slot(
+                    *dst_is_null,
+                    Some(ValueType::Bool),
+                    i,
+                    &mut slot_types,
+                    &mut assigned_at,
+                    &mut max_slot,
+                )?;
+            }
         }
     }
 

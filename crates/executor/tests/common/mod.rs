@@ -181,6 +181,7 @@ pub fn test_env() -> tabula_executor::batch::BatchEnv<'static> {
         sig_verifier: &AlwaysValidSig,
         nonce_policy: &SeqNonce,
         static_tables: &TestStaticTables,
+        precompiles: None,
     }
 }
 
@@ -227,6 +228,9 @@ pub fn run_with(
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
+        precompiles: None,
+        committed_state: None,
+        property_openings: None,
     };
     let out = tabula_executor::interpreter::execute(&instrs, params, &mut ov, &ctx).unwrap();
     (out, ov.into_result())
@@ -251,6 +255,9 @@ pub fn run_err_with(
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
+        precompiles: None,
+        committed_state: None,
+        property_openings: None,
     };
     tabula_executor::interpreter::execute(&instrs, params, &mut ov, &ctx).unwrap_err()
 }

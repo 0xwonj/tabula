@@ -173,11 +173,11 @@ fn core_transaction_types_are_send_sync() {
 #[test]
 fn core_execution_types_are_send_sync() {
     use tabula_core::{
-        ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, ExecutionEvent, ExecutionResult,
+        AccessEvent, ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, ExecutionResult,
         OpKind, TxOutcome,
     };
 
-    assert_send_sync::<ExecutionEvent>();
+    assert_send_sync::<AccessEvent>();
     assert_send_sync::<ExecutionResult>();
     assert_send_sync::<TxOutcome>();
     assert_send_sync::<EmittedEvent>();

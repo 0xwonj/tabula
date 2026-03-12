@@ -143,6 +143,7 @@ fn test_multi_tx_mixed_outcomes() {
         sig_verifier: &MockSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &st,
+        precompiles: None,
     };
     let result = execute_batch(
         &batch,
@@ -211,6 +212,7 @@ fn test_deterministic_execution() {
         sig_verifier: &MockSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &st,
+        precompiles: None,
     };
     let r1 = execute_batch(
         &batch,
@@ -263,6 +265,7 @@ fn test_consistency_passes_for_valid_batch() {
         sig_verifier: &MockSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &st,
+        precompiles: None,
     };
     let result = execute_batch(
         &batch,

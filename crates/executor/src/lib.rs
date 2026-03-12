@@ -16,6 +16,8 @@ pub mod consistency;
 mod execution_state;
 pub mod interpreter;
 pub mod overlay;
+pub mod precompile;
+pub mod property;
 pub mod resolve;
 mod trace_recorder;
 
@@ -25,3 +27,5 @@ pub use batch::{BatchEnv, execute_batch};
 pub use consistency::check_consistency_status;
 pub use interpreter::execute;
 pub use overlay::{Overlay, OverlayResult};
+pub use precompile::{PrecompileHandler, PrecompileRegistry};
+pub use property::{CommittedStateProvider, PropertyOpeningRegistry, PropertyOpeningResolver};

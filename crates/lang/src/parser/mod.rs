@@ -280,7 +280,7 @@ impl Parser {
     fn skip_to_stmt_boundary(&mut self) {
         while !self.at_eof() {
             match self.peek() {
-                Token::Let | Token::Assert | Token::Emit | Token::RBrace => return,
+                Token::Let | Token::Assert | Token::Emit | Token::At | Token::RBrace => return,
                 Token::Ident(_) => return,
                 _ => {
                     self.advance();

@@ -1,5 +1,7 @@
 //! Statement lowering methods for TxLower.
 
+use tabula_ir::PrecompileId;
+
 use super::{
     Binding, CompileError, ErrorKind, Instruction, LoweredExpr, Span, TxLower, Value, ValueExpr,
     ValueType, ast,
@@ -25,6 +27,11 @@ impl<'a> TxLower<'a> {
             } => self.lower_assign(table, row, col, value, stmt.span),
             StmtKind::Assert { condition } => self.lower_assert(condition),
             StmtKind::Emit { topic, args } => self.lower_emit(topic, args),
+            StmtKind::Precompile {
+                id,
+                dst_names,
+                inputs,
+            } => self.lower_precompile(*id, dst_names, inputs, stmt.span),
         }
     }
 
@@ -246,5 +253,44 @@ impl<'a> TxLower<'a> {
             topic: topic.as_bytes().to_vec(),
             data,
         });
+    }
+
+    fn lower_precompile(&mut self, id: u16, dst_names: &[String], inputs: &[Expr], span: Span) {
+        // Check for duplicate bindings.
+        for name in dst_names {
+            if self.locals.contains_key(name) || self.params.contains_key(name) {
+                self.errors.push(CompileError::new(
+                    ErrorKind::DuplicateBinding,
+                    span,
+                    format!("'{name}' is already defined"),
+                ));
+                return;
+            }
+        }
+
+        // Allocate slots for each destination.
+        let dst_slots: Vec<_> = dst_names.iter().map(|_| self.alloc_slot()).collect();
+
+        // Lower input expressions.
+        let input_ves: Vec<_> = inputs
+            .iter()
+            .filter_map(|a| self.lower_value_expr(a))
+            .collect();
+        if input_ves.len() != inputs.len() {
+            return;
+        }
+
+        self.instructions.push(Instruction::Precompile {
+            id: PrecompileId(id),
+            dst_slots: dst_slots.clone(),
+            inputs: input_ves,
+        });
+
+        // Bind destination names to their slots.
+        // Precompile output type is opaque (Bytes32 for the I/O commitment).
+        for (name, slot) in dst_names.iter().zip(dst_slots) {
+            self.locals
+                .insert(name.clone(), Binding::Slot(slot, ValueType::Bytes32));
+        }
     }
 }

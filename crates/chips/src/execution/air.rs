@@ -3,7 +3,7 @@
 //! One row per instruction. Constraints enforce:
 //! 1. Boolean fields: all opcode selectors, is_access, access_is_write, slot_written, etc.
 //! 2. `is_real` prefix: monotonic 1→0
-//! 3. Opcode exactly-one: sum of 12 opcode selectors = 1 when is_real
+//! 3. Opcode exactly-one: sum of 13 opcode selectors = 1 when is_real
 //! 4. `is_access` derived: is_access = op_read + op_write
 //! 5. Clock recurrence: clk increments by is_access; first row clk=0
 //! 6. Access log: access_is_write = op_write when is_access
@@ -82,6 +82,8 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         super::ops::logic::constrain_and(builder, local, is_real.clone());
         super::ops::logic::constrain_or(builder, local, is_real.clone());
         super::ops::hash::constrain_hash(builder, local, is_real.clone());
+        super::ops::precompile::constrain_precompile(builder, local, is_real.clone());
+        super::ops::property_read::constrain_property_read(builder, local, is_real.clone());
         constrain_lookup(builder, local, is_real.clone());
         constrain_tx_index_monotonicity(builder, local, next, both_real);
 
@@ -98,6 +100,8 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         super::buses::send_empty_col_read(builder, local);
         super::buses::send_range_checks(builder, local);
         super::buses::send_hash_permutation(builder, local);
+        super::buses::send_precompile(builder, local);
+        super::buses::send_property_read(builder, local);
         super::buses::send_static_table_lookup(builder, local);
     }
 }
@@ -122,6 +126,8 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder.assert_bool(local.op_select.clone());
     builder.assert_bool(local.op_hash.clone());
     builder.assert_bool(local.op_lookup.clone());
+    builder.assert_bool(local.op_precompile.clone());
+    builder.assert_bool(local.op_property_read.clone());
 
     // Arith sub-selectors
     builder.assert_bool(local.arith_is_sub.clone());
@@ -153,7 +159,7 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     }
 }
 
-/// 3. Opcode exactly-one: sum of 12 selectors = 1 when is_real.
+/// 3. Opcode exactly-one: sum of 14 selectors = 1 when is_real.
 fn constrain_opcode_one_hot<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -170,7 +176,9 @@ fn constrain_opcode_one_hot<AB: AirBuilder, const W: usize>(
         + local.op_assert.clone().into()
         + local.op_select.clone().into()
         + local.op_hash.clone().into()
-        + local.op_lookup.clone().into();
+        + local.op_lookup.clone().into()
+        + local.op_precompile.clone().into()
+        + local.op_property_read.clone().into();
 
     builder.assert_zero(is_real * (opcode_sum - AB::Expr::ONE));
 }
@@ -305,7 +313,8 @@ fn constrain_slot_written_count<AB: AirBuilder, const W: usize>(
 
     let expected: AB::Expr =
         AB::Expr::ONE - local.op_write.clone().into() - local.op_assert.clone().into()
-            + local.op_divmod.clone().into();
+            + local.op_divmod.clone().into()
+            + local.op_property_read.clone().into() * AB::Expr::TWO;
 
     builder.assert_zero(is_real * (written_sum - expected));
 }

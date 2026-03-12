@@ -2,7 +2,7 @@
 
 mod common;
 
-use tabula_core::{CellKey, ExecutionEvent, OpKind, Value};
+use tabula_core::{CellKey, AccessEvent, OpKind, Value};
 
 use tabula_executor::consistency::check_consistency;
 
@@ -10,8 +10,8 @@ use common::cell;
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-fn read_event(key: CellKey, value: Value, time: u64) -> ExecutionEvent {
-    ExecutionEvent {
+fn read_event(key: CellKey, value: Value, time: u64) -> AccessEvent {
+    AccessEvent {
         key,
         op: OpKind::Read,
         value,
@@ -22,8 +22,8 @@ fn read_event(key: CellKey, value: Value, time: u64) -> ExecutionEvent {
     }
 }
 
-fn write_event(key: CellKey, value: Value, time: u64) -> ExecutionEvent {
-    ExecutionEvent {
+fn write_event(key: CellKey, value: Value, time: u64) -> AccessEvent {
+    AccessEvent {
         key,
         op: OpKind::Write,
         value,
@@ -34,8 +34,8 @@ fn write_event(key: CellKey, value: Value, time: u64) -> ExecutionEvent {
     }
 }
 
-fn null_write_event(key: CellKey, zero: Value, time: u64) -> ExecutionEvent {
-    ExecutionEvent {
+fn null_write_event(key: CellKey, zero: Value, time: u64) -> AccessEvent {
+    AccessEvent {
         key,
         op: OpKind::Write,
         value: zero,
@@ -46,8 +46,8 @@ fn null_write_event(key: CellKey, zero: Value, time: u64) -> ExecutionEvent {
     }
 }
 
-fn null_read_event(key: CellKey, zero: Value, time: u64) -> ExecutionEvent {
-    ExecutionEvent {
+fn null_read_event(key: CellKey, zero: Value, time: u64) -> AccessEvent {
+    AccessEvent {
         key,
         op: OpKind::Read,
         value: zero,
@@ -118,7 +118,7 @@ fn empty_events() {
 fn invalid_etrace_identity_fails() {
     let k = cell(1, 0, 0);
     let events = vec![
-        ExecutionEvent {
+        AccessEvent {
             key: k,
             op: OpKind::Read,
             value: Value::U64(10),
@@ -127,7 +127,7 @@ fn invalid_etrace_identity_fails() {
             tx_index: 0,
             effect_ordinal_in_tx: 0,
         },
-        ExecutionEvent {
+        AccessEvent {
             key: k,
             op: OpKind::Write,
             value: Value::U64(11),

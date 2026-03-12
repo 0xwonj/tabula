@@ -96,6 +96,133 @@ impl ValueExpr {
     }
 }
 
+/// Precompile identifier for custom instructions.
+///
+/// ID space: 0x0001–0x00FF (Tabula standard library), 0x1000–0xFFFF (app-defined).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub struct PrecompileId(pub u16);
+
+/// Kind of structural property query on committed column state.
+///
+/// Closed enum — apps define semantics via custom `PropertyOpening` impls,
+/// not custom query variants.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub enum PropertyQueryKind {
+    /// Find the row with the minimum value.
+    Minimum,
+    /// Find the row with the maximum value.
+    Maximum,
+    /// Find the row immediately after a given key.
+    Successor,
+    /// Find the row immediately before a given key.
+    Predecessor,
+    /// Prove no keys exist in a given range.
+    NonExistenceRange,
+    /// Compute an aggregate over column values.
+    Aggregate,
+}
+
+/// Type of aggregate computation.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub enum AggregateKind {
+    /// Sum of all values.
+    Sum,
+    /// Count of non-null values.
+    Count,
+}
+
+impl std::fmt::Display for AggregateKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sum => write!(f, "sum"),
+            Self::Count => write!(f, "count"),
+        }
+    }
+}
+
+/// A concrete structural property query with parameters.
+///
+/// Produced by the compiler when processing a `property_read` statement.
+/// Consumed by the executor to resolve the query against committed state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub enum PropertyQuery {
+    /// Find the row key with the minimum value in the column.
+    Minimum,
+    /// Find the row key with the maximum value in the column.
+    Maximum,
+    /// Find the row key immediately after `key` in sorted order.
+    Successor {
+        /// The reference key to find the successor of.
+        key: RowKey,
+    },
+    /// Find the row key immediately before `key` in sorted order.
+    Predecessor {
+        /// The reference key to find the predecessor of.
+        key: RowKey,
+    },
+    /// Prove that no keys exist in the range `[lower, upper)`.
+    NonExistenceRange {
+        /// Inclusive lower bound of the empty range.
+        lower: RowKey,
+        /// Exclusive upper bound of the empty range.
+        upper: RowKey,
+    },
+    /// Compute an aggregate over all values in the column.
+    Aggregate {
+        /// The type of aggregation to compute.
+        kind: AggregateKind,
+    },
+}
+
+impl PropertyQuery {
+    /// The kind of this query (for capability checking).
+    pub fn kind(&self) -> PropertyQueryKind {
+        match self {
+            Self::Minimum => PropertyQueryKind::Minimum,
+            Self::Maximum => PropertyQueryKind::Maximum,
+            Self::Successor { .. } => PropertyQueryKind::Successor,
+            Self::Predecessor { .. } => PropertyQueryKind::Predecessor,
+            Self::NonExistenceRange { .. } => PropertyQueryKind::NonExistenceRange,
+            Self::Aggregate { .. } => PropertyQueryKind::Aggregate,
+        }
+    }
+}
+
 impl CmpOp {
     /// Apply this comparison to two values, producing `Value::Bool`.
     pub fn apply(&self, lhs: &Value, rhs: &Value) -> Result<Value, TabulaError> {
@@ -253,6 +380,42 @@ pub enum Instruction {
         /// Data values to include.
         data: Vec<ValueExpr>,
     },
+
+    /// Invoke a precompile (custom instruction).
+    ///
+    /// The precompile handler is resolved at execution time via `PrecompileRegistry`.
+    /// I/O is committed via Poseidon hash and sent on the PRECOMPILE bus.
+    Precompile {
+        /// Precompile identifier.
+        id: PrecompileId,
+        /// Destination slots for outputs.
+        dst_slots: Vec<Slot>,
+        /// Input value expressions.
+        inputs: Vec<ValueExpr>,
+    },
+
+    /// Query a structural property of committed column state.
+    ///
+    /// The result is the value at the key satisfying the property
+    /// (e.g., the value at the minimum key). For aggregate queries,
+    /// the result is the aggregate value itself.
+    ///
+    /// Queries operate on pre-batch committed state (com_old),
+    /// providing snapshot isolation semantics.
+    PropertyRead {
+        /// Destination slot for the result value.
+        dst_val: Slot,
+        /// Destination slot for the key at the result position.
+        dst_key: Slot,
+        /// Destination slot for the null flag (true if no matching key).
+        dst_is_null: Slot,
+        /// Table to query.
+        table: TableId,
+        /// Column to query.
+        col: ColId,
+        /// The structural query to execute.
+        query: PropertyQuery,
+    },
 }
 
 impl Instruction {
@@ -355,6 +518,30 @@ impl Instruction {
                 topic,
                 data: data.into_iter().map(|e| e.map_slot(f)).collect(),
             },
+            Self::Precompile {
+                id,
+                dst_slots,
+                inputs,
+            } => Self::Precompile {
+                id,
+                dst_slots: dst_slots.into_iter().map(&f).collect(),
+                inputs: inputs.into_iter().map(|e| e.map_slot(f)).collect(),
+            },
+            Self::PropertyRead {
+                dst_val,
+                dst_key,
+                dst_is_null,
+                table,
+                col,
+                query,
+            } => Self::PropertyRead {
+                dst_val: f(dst_val),
+                dst_key: f(dst_key),
+                dst_is_null: f(dst_is_null),
+                table,
+                col,
+                query,
+            },
         }
     }
 
@@ -376,6 +563,13 @@ impl Instruction {
             | Self::Hash { dst, .. }
             | Self::Select { dst, .. } => vec![*dst],
             Self::Write { .. } | Self::Assert { .. } | Self::Emit { .. } => vec![],
+            Self::Precompile { dst_slots, .. } => dst_slots.clone(),
+            Self::PropertyRead {
+                dst_val,
+                dst_key,
+                dst_is_null,
+                ..
+            } => vec![*dst_val, *dst_key, *dst_is_null],
         }
     }
 }

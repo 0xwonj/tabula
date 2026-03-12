@@ -111,6 +111,12 @@ pub enum StmtKind {
     Assert { condition: Expr },
     /// `emit "topic" (args...)`
     Emit { topic: String, args: Vec<Expr> },
+    /// `@precompile(0x0001, [dst1, dst2], arg1, arg2)`
+    Precompile {
+        id: u16,
+        dst_names: Vec<String>,
+        inputs: Vec<Expr>,
+    },
 }
 
 // ---------------------------------------------------------------------------

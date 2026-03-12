@@ -117,6 +117,12 @@ impl InstructionBuilder {
         self
     }
 
+    /// Set second destination value with raw BabyBear field elements.
+    pub fn dst2_fe(mut self, val: Vec<BabyBear>) -> Self {
+        self.inner.dst2_val = val;
+        self
+    }
+
     /// Set hash permutation input/output.
     pub fn hash_perm(mut self, input: [BabyBear; 16], output: [BabyBear; 8]) -> Self {
         self.inner.hash_perm_input = Some(input);
@@ -127,6 +133,27 @@ impl InstructionBuilder {
     /// Mark the column being read as empty.
     pub fn mark_empty_col(mut self) -> Self {
         self.inner.is_empty_col = true;
+        self
+    }
+
+    /// Set the precompile identifier.
+    pub fn precompile_id(mut self, id: u16) -> Self {
+        self.inner.precompile_id = Some(id);
+        self
+    }
+
+    /// Set PropertyRead columns.
+    pub fn property_read(
+        mut self,
+        query_type: u8,
+        result_val: Vec<BabyBear>,
+        result_key: Vec<BabyBear>,
+        is_null: bool,
+    ) -> Self {
+        self.inner.property_query_type = Some(query_type);
+        self.inner.property_result_val = result_val;
+        self.inner.property_result_key = result_key;
+        self.inner.property_result_is_null = is_null;
         self
     }
 

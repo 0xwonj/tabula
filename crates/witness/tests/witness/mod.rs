@@ -5,7 +5,7 @@ use p3_baby_bear::BabyBear;
 use tabula_commitment::{BabyBearCodec, ColumnState, HybridVC, MockFieldHasher};
 use tabula_core::traits::ValueCodec;
 use tabula_core::{
-    CellKey, ColId, ColumnDef, ExecutionEvent, OpKind, RowKey, TableId, TableSchema, Value,
+    CellKey, ColId, ColumnDef, AccessEvent, OpKind, RowKey, TableId, TableSchema, Value,
     ValueType,
 };
 
@@ -93,8 +93,8 @@ pub(super) fn read_event(
     val: u64,
     time: u64,
     tx: u32,
-) -> ExecutionEvent {
-    ExecutionEvent {
+) -> AccessEvent {
+    AccessEvent {
         key: ck(table, col, row),
         op: OpKind::Read,
         value: Value::U64(val),
@@ -112,8 +112,8 @@ pub(super) fn write_event(
     val: u64,
     time: u64,
     tx: u32,
-) -> ExecutionEvent {
-    ExecutionEvent {
+) -> AccessEvent {
+    AccessEvent {
         key: ck(table, col, row),
         op: OpKind::Write,
         value: Value::U64(val),
@@ -130,8 +130,8 @@ pub(super) fn null_read_event(
     row: u64,
     time: u64,
     tx: u32,
-) -> ExecutionEvent {
-    ExecutionEvent {
+) -> AccessEvent {
+    AccessEvent {
         key: ck(table, col, row),
         op: OpKind::Read,
         value: Value::U64(0),

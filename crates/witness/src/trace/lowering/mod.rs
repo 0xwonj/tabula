@@ -20,11 +20,14 @@ mod hash;
 mod logic;
 mod lookup;
 pub mod orchestration;
+mod precompile;
+mod property_read;
 
 use context::LoweringContext;
 
 // ── Re-exports ──────────────────────────────────────────────────────────────
 
+pub use context::{PrecompileExecuteFn, PropertyReadFn};
 pub use orchestration::{LoweringOutput, lower_execution_records, lower_program_batch};
 
 // ── Internal helpers ────────────────────────────────────────────────────────
@@ -58,6 +61,17 @@ fn max_dst_slot(instr: &Instruction) -> Option<usize> {
         | Instruction::Hash { dst, .. }
         | Instruction::Lookup { dst, .. } => Some(*dst as usize),
         Instruction::DivMod { dst_q, dst_r, .. } => Some((*dst_q as usize).max(*dst_r as usize)),
+        Instruction::Precompile { dst_slots, .. } => dst_slots.iter().map(|s| *s as usize).max(),
+        Instruction::PropertyRead {
+            dst_val,
+            dst_key,
+            dst_is_null,
+            ..
+        } => Some(
+            (*dst_val as usize)
+                .max(*dst_key as usize)
+                .max(*dst_is_null as usize),
+        ),
         Instruction::Write { .. } | Instruction::Assert { .. } | Instruction::Emit { .. } => None,
     }
 }
@@ -103,6 +117,11 @@ fn collect_param_operands(instructions: &[Instruction], params: &[Value]) -> Vec
                 }
             }
             Instruction::Write { src_val, .. } => add(src_val),
+            Instruction::Precompile { inputs, .. } => {
+                for inp in inputs {
+                    add(inp);
+                }
+            }
             _ => {}
         }
     }
@@ -241,6 +260,29 @@ fn lower_tx_body<const W: usize>(
             Instruction::Emit { .. } => {
                 // Out-of-protocol; skip.
             }
+
+            Instruction::Precompile {
+                id,
+                dst_slots,
+                inputs,
+            } => precompile::lower_precompile(ctx, *id, dst_slots, inputs)?,
+
+            Instruction::PropertyRead {
+                dst_val,
+                dst_key,
+                dst_is_null,
+                table,
+                col,
+                query,
+            } => property_read::lower_property_read(
+                ctx,
+                *dst_val,
+                *dst_key,
+                *dst_is_null,
+                *table,
+                *col,
+                query,
+            )?,
         }
     }
 

@@ -57,6 +57,7 @@ fn build_pipeline(
         sig_verifier: &MockSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &static_tables,
+        precompiles: None,
     };
     let result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
         .expect("batch execution");
@@ -126,6 +127,7 @@ fn build_pipeline(
             &schemas_by_id,
             &InMemoryStaticTables::new(),
             PoseidonHasher::new(),
+            None,
         )
         .expect("witness store preparation");
 
