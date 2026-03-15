@@ -1,6 +1,6 @@
 //! Handler for the `example` subcommand.
 
-use tabula_driver::transfer_example_bundle;
+use tabula_compiler::transfer_example_bundle;
 
 use crate::io::write_json;
 

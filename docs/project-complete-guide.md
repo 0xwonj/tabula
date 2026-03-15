@@ -313,7 +313,7 @@ Output:
 | `tabula-commitment` | field-native hashing, SSMC/SMT, hybrid commitment routing |
 | `tabula-proof` | witness generation, trace assembly, AIR chips, STARK prove/verify |
 | `tabula-contract` | statement and metadata compatibility contract |
-| `tabula-driver` | canonical compile/register/compatibility entrypoint |
+| `tabula-compiler` | canonical compile/register/compatibility entrypoint |
 | `tabula-artifact` | shared artifact schemas and serialization helpers |
 | `tabula-cli` | command-line adapter |
 | `tabula-daemon` | local HTTP adapter and run orchestration interface |
@@ -770,7 +770,7 @@ The following files are the operational anchors for each architectural plane:
    7. `crates/proof/src/stark/verifier.rs`
 6. Compatibility spine:
    1. `crates/contract/src/lib.rs`
-   2. `crates/driver/src/lib.rs`
+   2. `crates/compiler/src/lib.rs`
    3. `crates/artifact/src/lib.rs`
 7. Product adapters:
    1. `crates/cli/src/main.rs`

@@ -29,5 +29,9 @@ prove = [
     "dep:p3-field",
 ]
 
+[dev-dependencies]
+tabula-contract = { workspace = true }
+tabula-core = { workspace = true, features = ["test-utils"] }
+
 [lints]
 workspace = true

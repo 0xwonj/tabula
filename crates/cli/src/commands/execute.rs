@@ -2,7 +2,7 @@
 
 use tabula_artifact::{BatchFile, StateFile};
 use tabula_core::mock::Blake3Hasher;
-use tabula_driver::{BatchInput, run_batch};
+use tabula_runtime::{CompiledBatchInput, run_compiled_batch};
 
 use crate::io::{ExecutionOutput, StateCell, load_json, write_json};
 
@@ -15,15 +15,15 @@ pub fn cmd_execute(
     json_output: bool,
 ) -> anyhow::Result<()> {
     // 1. Load + register program
-    let registered = tabula_driver::load_and_register_program(program_path)?;
+    let compiled = tabula_compiler::load_and_register_program(program_path)?;
 
     // 2. Load state + batch
     let state_file: StateFile = load_json(state_path)?;
     let batch_file: BatchFile = load_json(batch_path)?;
 
-    // 3. Execute via driver pipeline
-    let executed = run_batch(&BatchInput {
-        program: &registered.program,
+    // 3. Execute via runtime pipeline
+    let executed = run_compiled_batch(&CompiledBatchInput {
+        compiled_program: &compiled,
         state: &state_file,
         batch: &batch_file,
         hasher: &Blake3Hasher,

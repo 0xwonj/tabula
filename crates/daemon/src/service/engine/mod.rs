@@ -71,12 +71,15 @@ impl LocalEngine {
     /// Register and persist a program artifact.
     pub fn register_program(&self, req: RegisterProgramCommand) -> ServiceResult<ProgramRecord> {
         let resolved = self.resolve_program_input(&req.program)?;
-        let registered = register_resolved_program(&resolved)?;
-        let program = ProgramArtifact {
-            table_schemas: registered.table_schemas.clone(),
-            tx_types: registered.tx_types.clone(),
-            contract_metadata: Some(registered.metadata_envelope.clone()),
-        };
+        let compiled_program = register_resolved_program(&resolved)?;
+        let program: ProgramArtifact = compiled_program.as_program_artifact();
+
+        #[cfg(feature = "stark")]
+        let prepared_runtime = Arc::new(
+            tabula_runtime::PreparedRuntime::builder(compiled_program.clone())
+                .build()
+                .map_err(|e| map_runtime_registration_error(&e))?,
+        );
 
         let mut catalog = write_guard(&self.catalog, "catalog")?;
         let record = ProgramRecord {
@@ -85,15 +88,17 @@ impl LocalEngine {
             created_at_ms: now_ms(),
             table_count: program.table_schemas.len(),
             tx_type_count: program.tx_types.len(),
-            profile_hash: bytes_to_hex(&registered.metadata_envelope.profile_hash),
-            metadata_hash: bytes_to_hex(&registered.metadata_envelope.canonical_hash()),
+            profile_hash: bytes_to_hex(&compiled_program.metadata_envelope.profile_hash),
+            metadata_hash: bytes_to_hex(&compiled_program.metadata_envelope.canonical_hash()),
             program_hash: hash_json("program", &program)?,
             program,
         };
 
         let entry = CatalogEntry {
             record: record.clone(),
-            registered,
+            compiled_program,
+            #[cfg(feature = "stark")]
+            prepared_runtime,
         };
         catalog.replace_single(entry);
 
@@ -210,6 +215,19 @@ impl LocalEngine {
     }
 }
 
+#[cfg(feature = "stark")]
+fn map_runtime_registration_error(err: &tabula_runtime::RuntimeError) -> ServiceError {
+    match err {
+        tabula_runtime::RuntimeError::ValidationFailed { detail } => {
+            ServiceError::unprocessable(ErrorCode::ProgramSchemaError, detail.clone())
+        }
+        tabula_runtime::RuntimeError::MachineSetup(source) => {
+            ServiceError::internal(ErrorCode::InternalError, source.to_string())
+        }
+        _ => ServiceError::internal(ErrorCode::InternalError, err.to_string()),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -221,8 +239,8 @@ mod tests {
 
     use crate::service::ErrorKind;
     use tabula_artifact::{RunStatus, SubmitRunCommand, merge_output_state_cells};
+    use tabula_compiler::transfer_example_bundle;
     use tabula_core::Value;
-    use tabula_driver::transfer_example_bundle;
 
     #[test]
     fn inline_program_requires_contract_metadata() {

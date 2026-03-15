@@ -13,7 +13,9 @@ use tabula_core::mock::Blake3Hasher;
 
 use crate::protocol::error::ErrorCode;
 use crate::service::error::{ServiceError, ServiceResult};
-use crate::service::execute::execute_registered_batch;
+use crate::service::execute::execute_compiled_batch;
+#[cfg(feature = "stark")]
+use crate::service::execute::execute_prepared_batch;
 use crate::service::receipt::{build_receipt, now_ms, statement_components, verify_receipt};
 
 use super::helpers::write_guard;
@@ -42,23 +44,22 @@ impl super::LocalEngine {
             if use_stark {
                 #[cfg(feature = "stark")]
                 {
-                    let poseidon_hasher = tabula_commitment::PoseidonHasher::new();
-                    let exec = execute_registered_batch(
-                        program.registered.clone(),
+                    let exec = execute_prepared_batch(
+                        program.compiled_program.clone(),
+                        program.prepared_runtime.as_ref(),
                         &state_before,
                         batch_file,
-                        &poseidon_hasher,
                     )?;
-                    stark_proof_summary =
-                        match super::super::prove::prove_batch(&exec, &program.registered) {
-                            Ok(summary) => Some(summary),
-                            Err(e) => {
-                                tracing::warn!(
-                                    "STARK proof generation failed, returning mock: {e}"
-                                );
-                                Some(super::super::prove::mock_stark_summary())
-                            }
-                        };
+                    stark_proof_summary = match super::super::prove::prove_batch(
+                        &exec,
+                        program.prepared_runtime.as_ref(),
+                    ) {
+                        Ok(summary) => Some(summary),
+                        Err(e) => {
+                            tracing::warn!("STARK proof generation failed, returning mock: {e}");
+                            Some(super::super::prove::mock_stark_summary())
+                        }
+                    };
                     exec
                 }
                 #[cfg(not(feature = "stark"))]
@@ -68,8 +69,8 @@ impl super::LocalEngine {
                 {
                     stark_proof_summary = None;
                 }
-                execute_registered_batch(
-                    program.registered,
+                execute_compiled_batch(
+                    program.compiled_program,
                     &state_before,
                     batch_file,
                     &Blake3Hasher,
@@ -80,7 +81,7 @@ impl super::LocalEngine {
         let execution = executed.clone().into_execution_summary(req.include_trace);
 
         let components = statement_components(
-            &executed.artifact,
+            &executed.compiled_program,
             &executed.inner.state_before,
             &executed.batch_file,
             &executed.inner.state_after,

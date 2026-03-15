@@ -251,7 +251,7 @@ Deliberately excluded from the component list:
 | L1 bridge | External concern (`tabula-bridge` crate, future) |
 | Recursion | Extension, not prerequisite |
 | GPU acceleration | Implementation detail of trace builder, not architectural |
-| `tabula-driver` | Execution orchestration CLI — infrastructure layer, not proof architecture |
+| `tabula-compiler` | Execution orchestration CLI — infrastructure layer, not proof architecture |
 | `tabula-daemon` | HTTP control-plane server — infrastructure layer |
 | `tabula-artifact` | Canonical artifact models (ProgramArtifact, BatchFile, etc.) — serialization layer |
 | `tabula-web` | Leptos CSR frontend — presentation layer |

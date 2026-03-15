@@ -62,7 +62,7 @@ Consistent 3-file chip pattern (`columns.rs` / `air.rs` / `trace.rs`) with `#[re
 
 ### Orchestration & Governance (driver, artifact, contract) — Excellent
 
-`tabula-driver` is the canonical semantic hub — compile, register, validate, execute. CLI and daemon delegate here. Zero logic duplication.
+`tabula-compiler` is the canonical semantic hub — compile, register, and validate. CLI and daemon delegate semantic checks here, while execution and proving flow through `tabula-runtime`.
 
 `tabula-contract` provides fail-closed proof compatibility: profile hash, schema version, binding version must all match or proof is rejected. Versioned with expiry dates on deferred bindings.
 

@@ -1,5 +1,5 @@
 [package]
-name = "tabula-driver"
+name = "tabula-compiler"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,7 +16,6 @@ tabula-contract = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-lang = { workspace = true }
 tabula-artifact = { workspace = true }
-tabula-runtime = { workspace = true }
 
 [dev-dependencies]
 tabula-core = { workspace = true, features = ["test-utils"] }

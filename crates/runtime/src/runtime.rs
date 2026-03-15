@@ -6,7 +6,9 @@
 
 use std::collections::BTreeMap;
 
-use tabula_artifact::{BatchFile, StateFile, merge_output_state_cells, normalize_state};
+use tabula_artifact::{
+    BatchFile, CompiledProgram, StateFile, merge_output_state_cells, normalize_state,
+};
 use tabula_commitment::PoseidonHasher;
 use tabula_core::{
     InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce, TableId, TableSchema,
@@ -16,7 +18,7 @@ use tabula_executor::consistency::check_consistency_status;
 use tabula_executor::precompile::PrecompileRegistry;
 use tabula_executor::property::PropertyOpeningRegistry;
 use tabula_ir::Program;
-use tabula_machine::TabulaMachine;
+use tabula_machine::{TabulaMachine, TabulaProof};
 
 use crate::builder::RuntimeBuilder;
 use crate::committed_state::StateFileCommittedState;
@@ -29,7 +31,7 @@ use crate::prove::{self, ProofSummary, ProveInput, ProveResult, VerifiedResult};
 /// Built once via [`RuntimeBuilder`], then reused for every batch:
 ///
 /// ```ignore
-/// let runtime = TabulaRuntime::builder(program, schemas).build()?;
+/// let runtime = TabulaRuntime::builder(compiled_program).build()?;
 ///
 /// // Per-batch: execute, then prove
 /// let executed = runtime.execute(&state_file, &batch_file)?;
@@ -48,8 +50,7 @@ use crate::prove::{self, ProofSummary, ProveInput, ProveResult, VerifiedResult};
 /// - **PrecompileRegistry** — executor-side precompile handlers
 /// - **PropertyOpeningRegistry** — executor-side property query resolvers
 pub struct TabulaRuntime {
-    program: Program,
-    schemas: Vec<TableSchema>,
+    compiled_program: CompiledProgram,
     schemas_by_id: BTreeMap<TableId, TableSchema>,
     machine: TabulaMachine,
     precompiles: PrecompileRegistry,
@@ -58,22 +59,20 @@ pub struct TabulaRuntime {
 
 impl TabulaRuntime {
     /// Create a builder for customized runtime construction.
-    pub fn builder(program: Program, schemas: Vec<TableSchema>) -> RuntimeBuilder {
-        RuntimeBuilder::new(program, schemas)
+    pub fn builder(compiled_program: CompiledProgram) -> RuntimeBuilder {
+        RuntimeBuilder::new(compiled_program)
     }
 
     /// Construct from pre-built parts (used by [`RuntimeBuilder`]).
     pub(crate) fn from_parts(
-        program: Program,
-        schemas: Vec<TableSchema>,
+        compiled_program: CompiledProgram,
         schemas_by_id: BTreeMap<TableId, TableSchema>,
         machine: TabulaMachine,
         precompiles: PrecompileRegistry,
         property_openings: Option<PropertyOpeningRegistry>,
     ) -> Self {
         Self {
-            program,
-            schemas,
+            compiled_program,
             schemas_by_id,
             machine,
             precompiles,
@@ -81,14 +80,19 @@ impl TabulaRuntime {
         }
     }
 
+    /// The compiled program artifact backing this runtime.
+    pub fn compiled_program(&self) -> &CompiledProgram {
+        &self.compiled_program
+    }
+
     /// The IR program.
     pub fn program(&self) -> &Program {
-        &self.program
+        &self.compiled_program.program
     }
 
     /// Table schemas.
     pub fn schemas(&self) -> &[TableSchema] {
-        &self.schemas
+        &self.compiled_program.table_schemas
     }
 
     /// The STARK machine (for advanced usage).
@@ -143,7 +147,7 @@ impl TabulaRuntime {
 
         let result = execute_batch(
             &batch_core,
-            &self.program,
+            &self.compiled_program.program,
             &state_store,
             &env,
             &BTreeMap::new(),
@@ -188,7 +192,7 @@ impl TabulaRuntime {
         let traces = prove::build_traces(
             &self.machine,
             &witness,
-            &self.program,
+            &self.compiled_program.program,
             &batch,
             &batch_result,
             &self.schemas_by_id,
@@ -207,6 +211,14 @@ impl TabulaRuntime {
         Ok(ProveResult { proof, summary })
     }
 
+    /// Verify a STARK proof against this runtime's prepared machine.
+    #[tracing::instrument(skip_all, name = "verify")]
+    pub fn verify(&self, proof: &TabulaProof) -> Result<(), RuntimeError> {
+        self.machine
+            .verify(proof)
+            .map_err(RuntimeError::Verification)
+    }
+
     /// Generate and verify a STARK proof.
     ///
     /// Convenience method that calls [`prove()`](Self::prove) then
@@ -217,7 +229,7 @@ impl TabulaRuntime {
 
         let verified = {
             let _span = tracing::info_span!("stark_verify").entered();
-            self.machine.verify(&prove_result.proof).is_ok()
+            self.verify(&prove_result.proof).is_ok()
         };
 
         tracing::info!(verified, "verification complete");
@@ -251,7 +263,7 @@ impl TabulaRuntime {
 impl std::fmt::Debug for TabulaRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TabulaRuntime")
-            .field("schemas", &self.schemas.len())
+            .field("schemas", &self.compiled_program.table_schemas.len())
             .field("machine", &self.machine)
             .field("precompiles_registered", &!self.precompiles.is_empty())
             .field(

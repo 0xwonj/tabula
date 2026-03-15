@@ -2677,10 +2677,11 @@ dependencies = [
  "serde",
  "serde_json",
  "tabula-artifact",
+ "tabula-compiler",
  "tabula-core",
- "tabula-driver",
  "tabula-executor",
  "tabula-ir",
+ "tabula-runtime",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2694,6 +2695,23 @@ dependencies = [
  "p3-poseidon2",
  "p3-symmetric",
  "tabula-core",
+]
+
+[[package]]
+name = "tabula-compiler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "borsh",
+ "serde",
+ "serde_json",
+ "tabula-artifact",
+ "tabula-contract",
+ "tabula-core",
+ "tabula-ir",
+ "tabula-lang",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2732,8 +2750,8 @@ dependencies = [
  "tabula-artifact",
  "tabula-chips",
  "tabula-commitment",
+ "tabula-compiler",
  "tabula-core",
- "tabula-driver",
  "tabula-ir",
  "tabula-lang",
  "tabula-machine",
@@ -2743,24 +2761,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "tabula-driver"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "blake3",
- "borsh",
- "serde",
- "serde_json",
- "tabula-artifact",
- "tabula-contract",
- "tabula-core",
- "tabula-ir",
- "tabula-lang",
- "tabula-runtime",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2841,6 +2841,7 @@ dependencies = [
  "p3-koala-bear",
  "tabula-artifact",
  "tabula-commitment",
+ "tabula-contract",
  "tabula-core",
  "tabula-executor",
  "tabula-ir",

@@ -5,18 +5,19 @@
 //! [`PrecompileRegistry`] and the machine's [`MachineBuilder`].
 //!
 //! ```ignore
-//! let runtime = TabulaRuntime::builder(program, schemas)
+//! let runtime = TabulaRuntime::builder(compiled_program)
 //!     .with_precompile(id, handler, verifier_ext)
 //!     .build()?;
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use tabula_artifact::CompiledProgram;
 use tabula_commitment::scheme_tags;
 use tabula_core::{TableId, TableSchema};
 use tabula_executor::precompile::{PrecompileHandler, PrecompileRegistry};
 use tabula_executor::property::{PropertyOpeningRegistry, PropertyOpeningResolver};
-use tabula_ir::{PrecompileId, Program};
+use tabula_ir::PrecompileId;
 use tabula_machine::{
     ChipExtension, ColumnScheme, ColumnSetupConfig, MachineBuilder, PropertyOpening, RootProof,
     TabulaStarkConfig,
@@ -32,8 +33,7 @@ use crate::runtime::TabulaRuntime;
 ///
 /// # Required inputs
 ///
-/// - `program` — the compiled IR program
-/// - `schemas` — table schemas (used to derive column configs)
+/// - `compiled_program` — compiler-produced semantic artifact
 ///
 /// # Optional registrations
 ///
@@ -44,19 +44,17 @@ use crate::runtime::TabulaRuntime;
 /// - `with_root_proof()` — custom root proof scheme
 /// - `with_config()` — custom STARK configuration
 pub struct RuntimeBuilder {
-    program: Program,
-    schemas: Vec<TableSchema>,
+    compiled_program: CompiledProgram,
     machine_builder: MachineBuilder,
     precompile_handlers: Vec<Box<dyn PrecompileHandler>>,
     property_resolver: Option<Box<dyn PropertyOpeningResolver>>,
 }
 
 impl RuntimeBuilder {
-    /// Create a builder with required program and schemas.
-    pub(crate) fn new(program: Program, schemas: Vec<TableSchema>) -> Self {
+    /// Create a builder with a compiler-produced program artifact.
+    pub(crate) fn new(compiled_program: CompiledProgram) -> Self {
         Self {
-            program,
-            schemas,
+            compiled_program,
             machine_builder: MachineBuilder::new(),
             precompile_handlers: Vec::new(),
             property_resolver: None,
@@ -150,7 +148,7 @@ impl RuntimeBuilder {
     pub fn build(self) -> Result<TabulaRuntime, RuntimeError> {
         self.validate()?;
 
-        let col_configs = derive_column_configs(&self.schemas);
+        let col_configs = derive_column_configs(&self.compiled_program.table_schemas);
         let machine = self
             .machine_builder
             .with_columns(col_configs)
@@ -159,11 +157,10 @@ impl RuntimeBuilder {
 
         let precompiles = build_precompile_registry(self.precompile_handlers);
         let property_openings = self.property_resolver.map(PropertyOpeningRegistry::new);
-        let schemas_by_id = index_schemas(&self.schemas);
+        let schemas_by_id = index_schemas(&self.compiled_program.table_schemas);
 
         Ok(TabulaRuntime::from_parts(
-            self.program,
-            self.schemas,
+            self.compiled_program,
             schemas_by_id,
             machine,
             precompiles,
@@ -182,7 +179,7 @@ impl RuntimeBuilder {
 
     /// Verify that no schema has an empty column set.
     fn validate_schemas(&self) -> Result<(), RuntimeError> {
-        for schema in &self.schemas {
+        for schema in &self.compiled_program.table_schemas {
             if schema.columns.is_empty() {
                 return Err(RuntimeError::ValidationFailed {
                     detail: format!(
@@ -198,8 +195,13 @@ impl RuntimeBuilder {
     /// Verify that every table ID referenced by Read/Write/PropertyRead
     /// instructions exists in the provided schemas.
     fn validate_table_references(&self) -> Result<(), RuntimeError> {
-        let schema_ids: BTreeSet<TableId> = self.schemas.iter().map(|s| s.id).collect();
-        for id in self.program.referenced_table_ids() {
+        let schema_ids: BTreeSet<TableId> = self
+            .compiled_program
+            .table_schemas
+            .iter()
+            .map(|s| s.id)
+            .collect();
+        for id in self.compiled_program.program.referenced_table_ids() {
             if !schema_ids.contains(&id) {
                 return Err(RuntimeError::ValidationFailed {
                     detail: format!("program references table {} not found in schemas", id.0,),
@@ -214,7 +216,7 @@ impl RuntimeBuilder {
     fn validate_precompile_references(&self) -> Result<(), RuntimeError> {
         let registered: BTreeSet<PrecompileId> =
             self.precompile_handlers.iter().map(|h| h.id()).collect();
-        for id in self.program.referenced_precompile_ids() {
+        for id in self.compiled_program.program.referenced_precompile_ids() {
             if !registered.contains(&id) {
                 return Err(RuntimeError::ValidationFailed {
                     detail: format!(

@@ -14,7 +14,7 @@ mod state;
 pub use error::ArtifactError;
 
 // Program
-pub use program::ProgramArtifact;
+pub use program::{CompiledProgram, ProgramArtifact};
 
 // State
 pub use state::{StateCell, StateFile, merge_output_state_cells, normalize_state};

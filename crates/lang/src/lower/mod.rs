@@ -15,17 +15,20 @@ use crate::ast::{self, TypeName};
 use crate::error::{CompileError, ErrorKind};
 use crate::span::Span;
 
-/// Compilation output: table schemas + tx type definitions.
+/// Lowering output: table schemas + tx type definitions.
 #[derive(Debug, Clone)]
-pub struct CompiledProgram {
+pub struct LoweredProgram {
     /// Table schemas (ordered by declaration order).
     pub schemas: Vec<TableSchema>,
     /// Transaction type definitions (ordered by declaration order).
     pub tx_types: Vec<TxTypeDef>,
 }
 
+/// Backward-compatible alias for older call sites.
+pub type CompiledProgram = LoweredProgram;
+
 /// Lower an AST program to IR.
-pub fn lower(program: &ast::Program) -> Result<CompiledProgram, Vec<CompileError>> {
+pub fn lower(program: &ast::Program) -> Result<LoweredProgram, Vec<CompileError>> {
     let mut ctx = LowerCtx::new();
     ctx.collect_schemas(program);
     if !ctx.errors.is_empty() {
@@ -33,7 +36,7 @@ pub fn lower(program: &ast::Program) -> Result<CompiledProgram, Vec<CompileError
     }
     ctx.lower_transactions(program);
     if ctx.errors.is_empty() {
-        Ok(CompiledProgram {
+        Ok(LoweredProgram {
             schemas: ctx.schemas,
             tx_types: ctx.tx_types,
         })

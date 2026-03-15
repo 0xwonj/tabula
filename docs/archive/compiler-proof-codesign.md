@@ -203,7 +203,7 @@ Deliver:
 ## Package B (Parallel with compiler-driver work)
 
 Crates:
-- `tabula-driver` (new), `tabula-cli`, `tabula-ir`
+- `tabula-compiler` (new), `tabula-cli`, `tabula-ir`
 
 Deliver:
 1. CLI semantic checks migrate into driver

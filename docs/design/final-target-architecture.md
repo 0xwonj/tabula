@@ -44,7 +44,7 @@ The target architecture is complete only if all invariants hold:
 
 Current refactor progress already achieved:
 
-1. `tabula-driver` exists and is used by CLI/daemon.
+1. `tabula-compiler` exists and is used by CLI/daemon.
 2. `tabula-contract` exists with fail-closed compatibility checks.
 3. proof-side M12 orchestration and bus tests were strengthened.
 
@@ -105,7 +105,7 @@ crates/
   tabula-lir/             # runtime executable low-level IR
   tabula-contract/        # statement schema, bus schema, compatibility policy
   tabula-artifact/        # canonical bundle (.tcb), ids, serialization
-  tabula-driver/          # static pipeline (parse->hir->mir->lir->contract->artifact)
+  tabula-compiler/          # static pipeline (parse->hir->mir->lir->contract->artifact)
   tabula-executor/        # deterministic LIR execution
   tabula-commitment/      # field-level commitment/hashing backend
   tabula-proof/           # witness/proof/verify over contract + traces
@@ -145,7 +145,7 @@ web-ide -> daemon api only
 | Executable instructions | `tabula-lir` | adapters |
 | Contract schemas/bus tuples | `tabula-contract` | proof-local duplicates |
 | Artifact format/hash ids | `tabula-artifact` | ad hoc JSON hashing |
-| Static pipeline orchestration | `tabula-driver` | CLI/daemon custom flow |
+| Static pipeline orchestration | `tabula-compiler` | CLI/daemon custom flow |
 | Dynamic workflow orchestration | `tabula-orchestrator` | daemon handlers |
 
 ---

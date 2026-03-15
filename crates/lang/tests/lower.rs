@@ -3,10 +3,10 @@ use tabula_core::{ColId, TableId, TxTypeId, Value, ValueType};
 use tabula_ir::{ArithOp, CmpOp, Instruction, Program, RowExpr, ValueExpr};
 use tabula_lang::error::ErrorKind;
 use tabula_lang::lexer::lex;
-use tabula_lang::lower::{CompiledProgram, lower};
+use tabula_lang::lower::{LoweredProgram, lower};
 use tabula_lang::parser::parse;
 
-fn compile(source: &str) -> CompiledProgram {
+fn compile(source: &str) -> LoweredProgram {
     let tokens = lex(source).expect("lex failed");
     let ast = parse(tokens).expect("parse failed");
     lower(&ast).expect("lower failed")

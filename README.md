@@ -155,7 +155,7 @@ tabula-web            Leptos browser IDE
 | [`tabula-executor`](crates/executor/) | Execution — interpreter, overlay, batch |
 | [`tabula-lang`](crates/lang/) | Compiler — `.tab` DSL to IR |
 | [`tabula-artifact`](crates/artifact/) | Artifacts — canonical program/state/batch/receipt models and helpers |
-| [`tabula-driver`](crates/driver/) | Orchestration — check/compile/execute/prove/verify workflows |
+| [`tabula-compiler`](crates/compiler/) | Static pipeline — load, compile, register, compatibility validation |
 | [`tabula-commitment`](crates/commitment/) | Crypto — Poseidon, SMT, SSMC (out-of-circuit) |
 | [`tabula-proof`](crates/proof/) | Proving — STARK proof generation via Plonky3 |
 | [`tabula-cli`](crates/cli/) | CLI — JSON-based batch execution and inspection |

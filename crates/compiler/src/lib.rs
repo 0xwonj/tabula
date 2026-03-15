@@ -1,13 +1,12 @@
-//! Compiler driver: canonical semantic ownership for program loading,
-//! registration, execution, and contract metadata generation.
+//! Compiler: canonical semantic ownership for program loading,
+//! registration, and contract metadata generation.
 //!
 //! CLI commands and daemon service should call this crate instead of
-//! duplicating semantic checks and execution pipeline assembly.
+//! duplicating semantic checks.
 
 mod compile;
 mod error;
 mod example;
-pub mod execute;
 mod load;
 mod profile;
 mod register;
@@ -16,17 +15,17 @@ mod register;
 
 /// Program file format used by compile/check/execute commands.
 pub type ProgramSourceFile = tabula_artifact::ProgramArtifact;
+/// Canonical in-memory artifact produced by the compiler/registration phase.
+pub use tabula_artifact::CompiledProgram;
 
 pub use compile::compile_program_source;
-pub use error::{CompileDiagnostic, DriverError, DriverResult};
+pub use error::{CompileDiagnostic, CompilerError, CompilerResult};
 pub use example::{ExampleBundle, TRANSFER_EXAMPLE_TAB_SOURCE, transfer_example_bundle};
 pub use load::{
     ProgramSourceFormat, load_and_register_program, load_program_sources,
     load_program_sources_strict, parse_program_sources,
 };
-pub use register::{MetadataPolicy, RegisteredProgram, register_program, register_program_sources};
-
-pub use execute::{BatchInput, ExecutedBatch, run_batch};
+pub use register::{MetadataPolicy, register_program, register_program_sources};
 
 #[cfg(test)]
 mod tests {
@@ -130,7 +129,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("tabula_driver_test_{nonce}.json"));
+        let path = std::env::temp_dir().join(format!("tabula_compiler_test_{nonce}.json"));
         let body = serde_json::to_string_pretty(program).expect("serialize");
         std::fs::write(&path, body).expect("write temp program file");
         path
@@ -168,10 +167,13 @@ mod tests {
         let program = simple_valid_program_sources();
         let path = write_temp_program_file(&program);
         let err = load_and_register_program(&path).expect_err("metadata missing should fail");
-        let driver_err = err
-            .downcast_ref::<DriverError>()
-            .expect("expected DriverError for metadata-missing path");
-        assert!(matches!(driver_err, DriverError::MissingContractMetadata));
+        let compiler_err = err
+            .downcast_ref::<CompilerError>()
+            .expect("expected CompilerError for metadata-missing path");
+        assert!(matches!(
+            compiler_err,
+            CompilerError::MissingContractMetadata
+        ));
         let _ = std::fs::remove_file(path);
     }
 
@@ -186,14 +188,14 @@ mod tests {
         });
         let path = write_temp_program_file(&program);
         let err = load_and_register_program(&path).expect_err("metadata mismatch should fail");
-        let driver_err = err
-            .downcast_ref::<DriverError>()
-            .expect("expected DriverError for metadata-mismatch path");
-        match driver_err {
-            DriverError::ContractMetadataMismatch(source) => {
+        let compiler_err = err
+            .downcast_ref::<CompilerError>()
+            .expect("expected CompilerError for metadata-mismatch path");
+        match compiler_err {
+            CompilerError::ContractMetadataMismatch(source) => {
                 assert!(source.to_string().contains("profile hash mismatch"));
             }
-            other => panic!("unexpected driver error: {other}"),
+            other => panic!("unexpected compiler error: {other}"),
         }
         let _ = std::fs::remove_file(path);
     }
@@ -202,7 +204,7 @@ mod tests {
     fn compile_program_source_returns_structured_diagnostics() {
         let bad_source = "table t { v: u64 }\n tx x() { let a = unknown[0].v }";
         let err = compile_program_source(bad_source).expect_err("compile should fail");
-        let DriverError::Compile { diagnostics } = err else {
+        let CompilerError::Compile { diagnostics } = err else {
             panic!("expected compile diagnostics error");
         };
         assert!(!diagnostics.is_empty(), "diagnostics should be present");
@@ -214,11 +216,11 @@ mod tests {
         let program = simple_valid_program_sources();
         let err = register_program_sources(&program, MetadataPolicy::Required)
             .expect_err("required metadata should fail");
-        assert!(matches!(err, DriverError::MissingContractMetadata));
+        assert!(matches!(err, CompilerError::MissingContractMetadata));
     }
 
     #[test]
-    fn transfer_example_bundle_contains_registered_metadata() {
+    fn transfer_example_bundle_contains_compiled_metadata() {
         let bundle = transfer_example_bundle().expect("example bundle");
         assert_eq!(bundle.program.tx_types.len(), 1);
         assert_eq!(bundle.state.cells.len(), 3);

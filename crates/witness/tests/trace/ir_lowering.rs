@@ -302,7 +302,7 @@ tx transfer(from: u64, to: u64, amount: u64) {
 }
 
 /// Reproduces the exact daemon web IDE scenario: 3 accounts, 3 txs, with emit.
-/// This is the `transfer_example_bundle()` from tabula-driver.
+/// This is the `transfer_example_bundle()` from tabula-compiler.
 #[test]
 fn trace_builder_transfer_3tx_with_emit_e2e() {
     let source = "\

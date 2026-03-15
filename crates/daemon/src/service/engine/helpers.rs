@@ -5,8 +5,9 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use serde_json::json;
 
-use tabula_driver::{
-    DriverError, MetadataPolicy, ProgramSourceFormat, RegisteredProgram, parse_program_sources,
+use tabula_artifact::CompiledProgram;
+use tabula_compiler::{
+    CompilerError, MetadataPolicy, ProgramSourceFormat, parse_program_sources,
     register_program_sources,
 };
 
@@ -15,7 +16,7 @@ use crate::service::error::{ServiceError, ServiceResult};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedProgramInput {
-    pub(crate) sources: tabula_driver::ProgramSourceFile,
+    pub(crate) sources: tabula_compiler::ProgramSourceFile,
     pub(crate) metadata_policy: MetadataPolicy,
 }
 
@@ -50,52 +51,31 @@ pub(super) fn next_id(counter: &AtomicU64, prefix: &str) -> String {
 
 pub(super) fn register_resolved_program(
     input: &ResolvedProgramInput,
-) -> ServiceResult<RegisteredProgram> {
+) -> ServiceResult<CompiledProgram> {
     register_program_sources(&input.sources, input.metadata_policy)
-        .map_err(|e| map_driver_error(&e))
+        .map_err(|e| map_compiler_error(&e))
 }
 
-pub(super) fn map_driver_error(err: &DriverError) -> ServiceError {
+pub(super) fn map_compiler_error(err: &CompilerError) -> ServiceError {
     match err {
-        DriverError::ReadFile { .. } => {
+        CompilerError::ReadFile { .. } => {
             ServiceError::bad_request(ErrorCode::FileIoError, err.to_string())
         }
-        DriverError::ParseJson { .. } => {
+        CompilerError::ParseJson { .. } => {
             ServiceError::bad_request(ErrorCode::ParseError, err.to_string())
         }
-        DriverError::Compile { diagnostics } => {
+        CompilerError::Compile { diagnostics } => {
             ServiceError::unprocessable(ErrorCode::CompileError, "program compilation failed")
                 .with_details(json!({ "diagnostics": diagnostics }))
         }
-        DriverError::InvalidProgram(source) => {
+        CompilerError::InvalidProgram(source) => {
             ServiceError::unprocessable(ErrorCode::ProgramValidationError, source.to_string())
         }
-        DriverError::MissingContractMetadata => {
+        CompilerError::MissingContractMetadata => {
             ServiceError::unprocessable(ErrorCode::ProgramSchemaError, err.to_string())
         }
-        DriverError::ContractMetadataMismatch(source) => {
+        CompilerError::ContractMetadataMismatch(source) => {
             ServiceError::unprocessable(ErrorCode::ProgramSchemaError, source.to_string())
-        }
-        DriverError::InvalidState(source) => {
-            ServiceError::bad_request(ErrorCode::InvalidStateCell, source.to_string())
-        }
-        DriverError::InvalidBatch(source) => {
-            ServiceError::bad_request(ErrorCode::InvalidBatchTx, source.to_string())
-        }
-        DriverError::Execution {
-            source,
-            instruction_index,
-            tx_index,
-        } => {
-            let mut svc_err =
-                ServiceError::unprocessable(ErrorCode::ExecutionError, source.to_string());
-            if instruction_index.is_some() || tx_index.is_some() {
-                svc_err = svc_err.with_details(json!({
-                    "instruction_index": instruction_index,
-                    "tx_index": tx_index,
-                }));
-            }
-            svc_err
         }
     }
 }
@@ -115,7 +95,7 @@ impl super::LocalEngine {
                             sources,
                             metadata_policy: MetadataPolicy::Optional,
                         })
-                        .map_err(|e| map_driver_error(&e))
+                        .map_err(|e| map_compiler_error(&e))
                 }
                 ProgramInline::Program(program) => Ok(ResolvedProgramInput {
                     sources: program.clone(),
@@ -147,7 +127,7 @@ impl super::LocalEngine {
                 sources,
                 metadata_policy,
             })
-            .map_err(|e| map_driver_error(&e))
+            .map_err(|e| map_compiler_error(&e))
     }
 }
 

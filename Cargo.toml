@@ -14,7 +14,7 @@ members = [
     "crates/lang",
     "crates/artifact",
     "crates/runtime",
-    "crates/driver",
+    "crates/compiler",
     "crates/cli",
     "crates/daemon",
     "crates/web",
@@ -46,7 +46,7 @@ tabula-machine = { path = "crates/machine" }
 tabula-lang = { path = "crates/lang" }
 tabula-artifact = { path = "crates/artifact" }
 tabula-runtime = { path = "crates/runtime" }
-tabula-driver = { path = "crates/driver" }
+tabula-compiler = { path = "crates/compiler" }
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -4,15 +4,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::bail;
 
+use tabula_artifact::CompiledProgram;
 use tabula_contract::{
-    BINDING_VERSION_V1, CONTRACT_SCHEMA_VERSION_V1, ContractCompatibilityPolicy,
-    ContractMetadataEnvelope, binding_registry_v1,
+    BINDING_VERSION_V1, CONTRACT_SCHEMA_VERSION_V1, ContractMetadataEnvelope, binding_registry_v1,
 };
 use tabula_core::{ColId, TableId, TableSchema};
 use tabula_ir::{Program, TxTypeDef};
 
 use crate::ProgramSourceFile;
-use crate::error::{DriverError, DriverResult};
+use crate::error::{CompilerError, CompilerResult};
 use crate::profile::compute_profile_hash;
 
 /// Contract metadata validation policy for program sources.
@@ -24,54 +24,20 @@ pub enum MetadataPolicy {
     Required,
 }
 
-/// Registered program artifact produced by the driver.
-#[derive(Debug, Clone)]
-pub struct RegisteredProgram {
-    /// Registered IR program.
-    pub program: Program,
-    /// Canonical table schemas consumed during registration.
-    pub table_schemas: Vec<TableSchema>,
-    /// Canonical tx definitions consumed during registration.
-    pub tx_types: Vec<TxTypeDef>,
-    /// Canonical metadata envelope for proof compatibility checks.
-    pub metadata_envelope: ContractMetadataEnvelope,
-}
-
-impl RegisteredProgram {
-    /// Build strict compatibility policy pinned to this artifact's metadata.
-    pub fn compatibility_policy(&self) -> ContractCompatibilityPolicy {
-        ContractCompatibilityPolicy {
-            expected_profile_hash: self.metadata_envelope.profile_hash,
-            expected_contract_schema_version: self.metadata_envelope.contract_schema_version,
-            expected_binding_version: self.metadata_envelope.binding_version,
-            expected_semantic_hash_stub: self.metadata_envelope.semantic_hash_stub,
-        }
-    }
-
-    /// Materialize a portable compiled artifact file.
-    pub fn into_program_file(self) -> ProgramSourceFile {
-        ProgramSourceFile {
-            table_schemas: self.table_schemas,
-            tx_types: self.tx_types,
-            contract_metadata: Some(self.metadata_envelope),
-        }
-    }
-}
-
 /// Register program sources using explicit metadata policy.
 pub fn register_program_sources(
     sources: &ProgramSourceFile,
     metadata_policy: MetadataPolicy,
-) -> DriverResult<RegisteredProgram> {
+) -> CompilerResult<CompiledProgram> {
     let artifact = register_program(&sources.table_schemas, &sources.tx_types)
-        .map_err(DriverError::InvalidProgram)?;
+        .map_err(CompilerError::InvalidProgram)?;
 
     match (metadata_policy, sources.contract_metadata.as_ref()) {
-        (MetadataPolicy::Required, None) => Err(DriverError::MissingContractMetadata),
+        (MetadataPolicy::Required, None) => Err(CompilerError::MissingContractMetadata),
         (_, Some(provided)) => artifact
             .compatibility_policy()
             .validate(provided)
-            .map_err(DriverError::ContractMetadataMismatch)
+            .map_err(CompilerError::ContractMetadataMismatch)
             .map(|_| artifact),
         (_, None) => Ok(artifact),
     }
@@ -81,7 +47,7 @@ pub fn register_program_sources(
 pub fn register_program(
     schemas: &[TableSchema],
     tx_types: &[TxTypeDef],
-) -> anyhow::Result<RegisteredProgram> {
+) -> anyhow::Result<CompiledProgram> {
     validate_schema_coverage(schemas, tx_types)?;
 
     let mut program = Program::new();
@@ -106,7 +72,7 @@ pub fn register_program(
         semantic_hash_stub: None,
     };
 
-    Ok(RegisteredProgram {
+    Ok(CompiledProgram {
         program,
         table_schemas: schemas.to_vec(),
         tx_types: tx_types.to_vec(),

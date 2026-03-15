@@ -25,9 +25,9 @@ tracing-subscriber = { workspace = true }
 
 tabula-artifact = { workspace = true }
 tabula-core = { workspace = true, features = ["test-utils"] }
-tabula-driver = { workspace = true }
+tabula-compiler = { workspace = true }
 tabula-ir = { workspace = true }
-tabula-runtime = { workspace = true, optional = true }
+tabula-runtime = { workspace = true }
 tabula-chips = { workspace = true, optional = true }
 tabula-machine = { workspace = true, optional = true }
 tabula-witness = { workspace = true, optional = true }
@@ -39,7 +39,7 @@ sha2 = { workspace = true }
 
 [features]
 default = []
-stark = ["dep:tabula-runtime", "tabula-runtime/prove", "dep:tabula-chips", "dep:tabula-machine", "dep:tabula-witness", "dep:tabula-commitment", "tabula-commitment/stark", "dep:tabula-lang", "dep:p3-koala-bear", "dep:p3-field"]
+stark = ["tabula-runtime/prove", "dep:tabula-chips", "dep:tabula-machine", "dep:tabula-witness", "dep:tabula-commitment", "tabula-commitment/stark", "dep:tabula-lang", "dep:p3-koala-bear", "dep:p3-field"]
 
 [lints]
 workspace = true

@@ -1,6 +1,6 @@
 //! Tabula execution runtime.
 //!
-//! Canonical batch execution pipeline, separated from the compiler driver
+//! Canonical batch execution pipeline, separated from the compiler
 //! to enable independent consumption by CLI, daemon, and embedded
 //! applications.
 //!
@@ -11,7 +11,7 @@
 //! normalize state -> build snapshot -> execute -> consistency check -> merge.
 //!
 //! ```text
-//! driver (compile/load/register) -> runtime (execute/prove) -> machine (STARK)
+//! compiler (compile/load/register) -> runtime (execute/prove) -> machine (STARK)
 //! ```
 //!
 //! # Feature gating
@@ -33,11 +33,14 @@ pub mod prove;
 mod runtime;
 
 pub use error::{RuntimeError, RuntimeResult};
-pub use execute::{BatchInput, ExecutedBatch, run_batch};
+pub use execute::{BatchInput, CompiledBatchInput, ExecutedBatch, run_batch, run_compiled_batch};
 
 #[cfg(feature = "prove")]
 pub use builder::RuntimeBuilder;
 #[cfg(feature = "prove")]
 pub use prove::{ProofSummary, ProveInput, ProveResult, VerifiedResult, digest_to_hex};
+#[cfg(feature = "prove")]
+/// Prepared runtime built once per [`tabula_artifact::CompiledProgram`].
+pub use runtime::TabulaRuntime as PreparedRuntime;
 #[cfg(feature = "prove")]
 pub use runtime::TabulaRuntime;

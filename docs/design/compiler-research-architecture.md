@@ -185,7 +185,7 @@ No, `lang/ir/cli` only is not sufficient.
 | `tabula-executor` | Yes | Execute LIR with explicit guards and typed outcomes |
 | `tabula-commitment` | Yes | Bind hash/encoding behavior to profile and contract metadata |
 | `tabula-proof` | Yes | Consume Contract IR; align statement/bus schemas to profile |
-| `tabula-driver` (new) | Yes | Central orchestration, pass manager, query engine, artifact pipeline |
+| `tabula-compiler` (new) | Yes | Central orchestration, pass manager, query engine, artifact pipeline |
 | `tabula-contract` (new) | Yes | Shared statement/bus/public-value schema ownership |
 
 ### 4.3 Principle-level reason
@@ -232,7 +232,7 @@ tabula/
     tabula-mir/          # effect graph IR + obligations
     tabula-lir/          # executable low-level IR
     tabula-contract/     # proof/runtime contract IR
-    tabula-driver/       # pass manager, incremental queries, artifact IO
+    tabula-compiler/       # pass manager, incremental queries, artifact IO
     tabula-runtime/      # execution over LIR + E-Trace emission
     tabula-commitment/   # profile-bound commitment/hash layer
     tabula-proof/        # proof system over Contract IR + E-Trace
@@ -870,7 +870,7 @@ Proof pipeline must fail if:
 
 ---
 
-## 23. `tabula-driver` (new)
+## 23. `tabula-compiler` (new)
 
 ### 23.1 Responsibilities
 
@@ -1068,7 +1068,7 @@ Gate:
 ### Phase 1: Driver introduction
 
 Deliverables:
-1. add `tabula-driver`
+1. add `tabula-compiler`
 2. route current CLI commands through driver wrapper
 
 Gate:
@@ -1337,7 +1337,7 @@ This appendix maps concrete current files to target ownership and action type.
 |---|---|---|
 | `crates/lang/src/lower/mod.rs` | Split into HIR elaboration and MIR lowering boundaries | `tabula-front` + `tabula-hir` |
 | `crates/lang/src/lower/expr.rs` | Remove implicit fallback typing; emit typed expression terms only | `tabula-hir` |
-| `crates/ir/src/program.rs` | Replace in-place mutation pipeline with pass manager invocation and artifact staging | `tabula-driver` + `tabula-mir` |
+| `crates/ir/src/program.rs` | Replace in-place mutation pipeline with pass manager invocation and artifact staging | `tabula-compiler` + `tabula-mir` |
 | `crates/ir/src/pass/typecheck.rs` | Replace with profile-bound operator legality engine | `tabula-hir` / `tabula-mir` |
 | `crates/ir/src/pass/validate.rs` | Convert NF checks into obligation verification framework | `tabula-mir` |
 | `crates/ir/src/pass/canonicalize/mod.rs` | Limit to deterministic normalization only; no semantic mutation | `tabula-mir` |

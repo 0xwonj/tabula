@@ -1,7 +1,11 @@
 //! Single-program registry.
 
-use tabula_artifact::{ProgramId, ProgramRecord};
-use tabula_driver::RegisteredProgram;
+use tabula_artifact::{CompiledProgram, ProgramId, ProgramRecord};
+
+#[cfg(feature = "stark")]
+use std::sync::Arc;
+#[cfg(feature = "stark")]
+use tabula_runtime::PreparedRuntime;
 
 use super::error::{ServiceError, ServiceResult};
 use crate::protocol::error::ErrorCode;
@@ -11,7 +15,9 @@ pub const SINGLE_PROGRAM_ID: &str = "pgm_default";
 #[derive(Debug, Clone)]
 pub struct CatalogEntry {
     pub record: ProgramRecord,
-    pub registered: RegisteredProgram,
+    pub compiled_program: CompiledProgram,
+    #[cfg(feature = "stark")]
+    pub prepared_runtime: Arc<PreparedRuntime>,
 }
 
 /// Single-program registry.

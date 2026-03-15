@@ -3,17 +3,17 @@
 use tabula_artifact::ProgramArtifact;
 
 use crate::ProgramSourceFile;
-use crate::error::{CompileDiagnostic, DriverError, DriverResult};
+use crate::error::{CompileDiagnostic, CompilerError, CompilerResult};
 
 /// Compile a `.tab` source string into a program artifact source file.
-pub fn compile_program_source(source: &str) -> DriverResult<ProgramSourceFile> {
+pub fn compile_program_source(source: &str) -> CompilerResult<ProgramSourceFile> {
     match tabula_lang::compile(source) {
         Ok(compiled) => Ok(ProgramArtifact {
             table_schemas: compiled.schemas,
             tx_types: compiled.tx_types,
             contract_metadata: None,
         }),
-        Err(errors) => Err(DriverError::Compile {
+        Err(errors) => Err(CompilerError::Compile {
             diagnostics: compile_diagnostics(source, &errors),
         }),
     }

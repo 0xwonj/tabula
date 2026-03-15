@@ -5,9 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use tabula_artifact::{ExecutionReceipt, ProgramArtifact, StateFile};
+use tabula_artifact::{CompiledProgram, ExecutionReceipt, ProgramArtifact, StateFile};
 use tabula_core::ExecutionConsistencyStatus;
-use tabula_driver::RegisteredProgram;
 
 use super::error::{ServiceError, ServiceResult};
 use crate::protocol::error::ErrorCode;
@@ -49,16 +48,12 @@ pub struct ReceiptVerification {
 
 /// Build statement components from execution artifacts.
 pub fn statement_components(
-    artifact: &RegisteredProgram,
+    artifact: &CompiledProgram,
     state: &StateFile,
     batch: &tabula_artifact::BatchFile,
     state_after: &StateFile,
 ) -> ServiceResult<StatementComponents> {
-    let program_file = ProgramArtifact {
-        table_schemas: artifact.table_schemas.clone(),
-        tx_types: artifact.tx_types.clone(),
-        contract_metadata: Some(artifact.metadata_envelope.clone()),
-    };
+    let program_file: ProgramArtifact = artifact.as_program_artifact();
 
     Ok(StatementComponents {
         program_hash: hash_json("program", &program_file)?,
