@@ -8,7 +8,7 @@ use tabula_stark::rap::verifier::RapVerifierFolder;
 
 use std::collections::BTreeSet;
 
-use p3_air::Air;
+use p3_air::{Air, RowWindow};
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::PrimeCharacteristicRing;
@@ -55,11 +55,11 @@ pub(crate) fn verify_sub_proof_with_challenges(
     validate_chip_manifest(vk, chip_openings)?;
 
     // ── Phase 1: Reconstruct per-proof challenges (alpha, zeta) ──────────
-    if let Some(perm_c) = perm_commitment {
-        challenger.observe(perm_c);
+    if let Some(ref perm_c) = perm_commitment {
+        challenger.observe(perm_c.clone());
     }
     let alpha: EF4 = challenger.sample_algebra_element();
-    challenger.observe(quotient_commitment);
+    challenger.observe(quotient_commitment.clone());
     let zeta: EF4 = challenger.sample_algebra_element();
 
     // ── Phase 2-3: PCS verification ─────────────────────────────────────
@@ -305,12 +305,17 @@ fn verify_chip_constraints(
     let sels = trace_domain.selectors_at_point(zeta);
 
     let preprocessed = match (&opening.preprocessed_local, &opening.preprocessed_next) {
-        (Some(local), Some(next)) => Some(VerticalPair::new(
+        (Some(local), Some(next)) => VerticalPair::new(
             RowMajorMatrixView::new_row(local),
             RowMajorMatrixView::new_row(next),
-        )),
-        _ => None,
+        ),
+        _ => VerticalPair::new(
+            RowMajorMatrixView::new(&[], 0),
+            RowMajorMatrixView::new(&[], 0),
+        ),
     };
+    let preprocessed_window =
+        RowWindow::from_two_rows(preprocessed.top.values, preprocessed.bottom.values);
 
     let ood_mismatch = "OOD evaluation mismatch: constraints(zeta) / Z_H(zeta) != quotient(zeta)";
 
@@ -322,6 +327,7 @@ fn verify_chip_constraints(
         let mut folder = VerifierConstraintFolder {
             main,
             preprocessed,
+            preprocessed_window,
             public_values: &opening.public_values,
             is_first_row: sels.is_first_row,
             is_last_row: sels.is_last_row,
@@ -347,9 +353,16 @@ fn verify_chip_constraints(
             RowMajorMatrixView::new_row(&full_next),
         );
 
+        // Convert Option<VerticalPair> to Option<RowMajorMatrixView> for RAP folder.
+        let preprocessed_opt = match (&opening.preprocessed_local, &opening.preprocessed_next) {
+            (Some(_), Some(_)) => Some(preprocessed),
+            _ => None,
+        };
+
         let mut folder1 = VerifierConstraintFolder {
             main: truncated_main,
             preprocessed,
+            preprocessed_window,
             public_values: &opening.public_values,
             is_first_row: sels.is_first_row,
             is_last_row: sels.is_last_row,
@@ -362,7 +375,7 @@ fn verify_chip_constraints(
         let mut rap_folder = RapVerifierFolder::new(
             truncated_main,
             full_main,
-            preprocessed,
+            preprocessed_opt,
             &opening.public_values,
             sels.is_first_row,
             sels.is_last_row,

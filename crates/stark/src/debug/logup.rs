@@ -4,17 +4,15 @@
 //! balance across the entire system. Uses random challenges over the
 //! base field for collision resistance.
 
-use p3_air::Air;
+use p3_air::{Air, RowWindow};
 use p3_field::Field;
 use p3_matrix::Matrix;
-use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
-use p3_matrix::stack::VerticalPair;
+use p3_matrix::dense::RowMajorMatrix;
 
 use crate::air::interaction::{BusId, InteractionDirection};
 
 use super::builder::DebugConstraintBuilder;
 use super::errors::MultiChipError;
-use super::single_chip::empty_preprocessed;
 
 /// A concrete interaction recorded during debug evaluation.
 #[derive(Clone, Debug)]
@@ -119,10 +117,7 @@ where
         let local = trace.row_slice(i).expect("row exists");
         let next = trace.row_slice(i_next).expect("row exists");
 
-        let main = VerticalPair::new(
-            RowMajorMatrixView::new_row(&*local),
-            RowMajorMatrixView::new_row(&*next),
-        );
+        let main = RowWindow::from_two_rows(&*local, &*next);
 
         // Bind preprocessed row slices at this scope level so they live long enough.
         let (prep_local_slice, prep_next_slice);
@@ -131,12 +126,9 @@ where
             prep_next_slice = prep_trace
                 .row_slice(i_next)
                 .expect("preprocessed row exists");
-            VerticalPair::new(
-                RowMajorMatrixView::new_row(&*prep_local_slice),
-                RowMajorMatrixView::new_row(&*prep_next_slice),
-            )
+            RowWindow::from_two_rows(&*prep_local_slice, &*prep_next_slice)
         } else {
-            empty_preprocessed()
+            RowWindow::from_two_rows(&[], &[])
         };
 
         let mut builder = DebugConstraintBuilder {
@@ -193,10 +185,7 @@ where
         let local = trace.row_slice(i).expect("row exists");
         let next = trace.row_slice(i_next).expect("row exists");
 
-        let main = VerticalPair::new(
-            RowMajorMatrixView::new_row(&*local),
-            RowMajorMatrixView::new_row(&*next),
-        );
+        let main = RowWindow::from_two_rows(&*local, &*next);
 
         let (prep_local_slice, prep_next_slice);
         let prep = if let Some(prep_trace) = preprocessed {
@@ -204,12 +193,9 @@ where
             prep_next_slice = prep_trace
                 .row_slice(i_next)
                 .expect("preprocessed row exists");
-            VerticalPair::new(
-                RowMajorMatrixView::new_row(&*prep_local_slice),
-                RowMajorMatrixView::new_row(&*prep_next_slice),
-            )
+            RowWindow::from_two_rows(&*prep_local_slice, &*prep_next_slice)
         } else {
-            empty_preprocessed()
+            RowWindow::from_two_rows(&[], &[])
         };
 
         let mut builder = DebugConstraintBuilder {

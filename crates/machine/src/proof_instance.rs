@@ -7,10 +7,11 @@
 
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
+use p3_air::symbolic::AirLayout;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{StarkGenericConfig, get_log_num_quotient_chunks, get_symbolic_constraints};
@@ -199,9 +200,9 @@ impl<'a> ProofInstance<'a> {
         let (main_commitment, main_data) = <P as Pcs<EF4, C>>::commit(pcs, main_pairs);
 
         self.pp_chip_indices = pp_chip_indices;
-        self.preprocessed_commitment = preprocessed_commitment;
+        self.preprocessed_commitment = preprocessed_commitment.clone();
         self.preprocessed_data = preprocessed_data;
-        self.main_commitment = Some(main_commitment);
+        self.main_commitment = Some(main_commitment.clone());
         self.main_data = Some(main_data);
 
         Ok(MainCommitment {
@@ -313,7 +314,7 @@ impl<'a> ProofInstance<'a> {
         // ── Phase 7: Observe perm commitment, sample alpha ──────────────
 
         if let Some(ref perm_c) = perm_commitment {
-            challenger.observe(*perm_c);
+            challenger.observe(perm_c);
         }
         let alpha: EF4 = challenger.sample_algebra_element();
 
@@ -342,7 +343,7 @@ impl<'a> ProofInstance<'a> {
 
         let (quotient_commitment, quotient_data) =
             <P as Pcs<EF4, C>>::commit_ldes(pcs, all_quotient_ldes);
-        challenger.observe(quotient_commitment);
+        challenger.observe(&quotient_commitment);
 
         // ── Phases 10-11: Open all commitments & extract openings ────────
 
@@ -358,7 +359,7 @@ impl<'a> ProofInstance<'a> {
         );
 
         Ok(SubProof {
-            preprocessed_commitment: self.preprocessed_commitment,
+            preprocessed_commitment: self.preprocessed_commitment.clone(),
             main_commitment,
             perm_commitment,
             quotient_commitment,
@@ -396,9 +397,9 @@ struct CommittedData<'a> {
 struct ChipProveInfo<'a> {
     chip_ref: ChipRef<'a>,
     chip_id: tabula_stark::chips::ChipId,
-    main_trace: Option<RowMajorMatrix<BabyBear>>,
-    public_values: Vec<BabyBear>,
-    preprocessed: Option<RowMajorMatrix<BabyBear>>,
+    main_trace: Option<RowMajorMatrix<KoalaBear>>,
+    public_values: Vec<KoalaBear>,
+    preprocessed: Option<RowMajorMatrix<KoalaBear>>,
     degree_bits: usize,
     main_width: usize,
     interactions_per_row: usize,
@@ -406,9 +407,9 @@ struct ChipProveInfo<'a> {
     total_constraint_count: usize,
     log_quotient_chunks: usize,
     /// Populated after interaction evaluation (before perm trace generation).
-    recorded_interactions: Vec<tabula_stark::debug::RecordedInteraction<BabyBear>>,
+    recorded_interactions: Vec<tabula_stark::debug::RecordedInteraction<KoalaBear>>,
     /// Populated after LogUp challenge sampling.
-    perm_trace: Option<RowMajorMatrix<BabyBear>>,
+    perm_trace: Option<RowMajorMatrix<KoalaBear>>,
     perm_width: usize,
     cumsum: EF4,
     /// Per-bus cumulative sums for sharding: maps BusId → cumsum contribution.
@@ -450,12 +451,14 @@ fn collect_chip_infos<'a>(
         let interactions_per_row =
             keygen.interactions.num_sends_per_row + keygen.interactions.num_receives_per_row;
 
-        let inner_constraint_count = get_symbolic_constraints(
-            &ChipRef::new(chip.air()),
-            keygen.preprocessed_width,
-            entry.public_values.len(),
-        )
-        .len();
+        let layout = AirLayout {
+            preprocessed_width: keygen.preprocessed_width,
+            main_width,
+            num_public_values: entry.public_values.len(),
+            ..Default::default()
+        };
+        let inner_constraint_count =
+            get_symbolic_constraints(&ChipRef::new(chip.air()), layout).len();
         let rap_count = if interactions_per_row > 0 {
             crate::keys::rap_constraint_count(interactions_per_row)
         } else {
@@ -463,12 +466,7 @@ fn collect_chip_infos<'a>(
         };
         let total_constraint_count = inner_constraint_count + rap_count;
 
-        let inner_log = get_log_num_quotient_chunks(
-            &ChipRef::new(chip.air()),
-            keygen.preprocessed_width,
-            entry.public_values.len(),
-            0,
-        );
+        let inner_log = get_log_num_quotient_chunks(&ChipRef::new(chip.air()), layout, 0);
         let log_quotient_chunks = if interactions_per_row > 0 {
             inner_log.max(2)
         } else {
@@ -524,13 +522,13 @@ fn compute_chip_quotients(
     chip_infos: &[ChipProveInfo<'_>],
     alpha: EF4,
     logup_challenges: [EF4; 2],
-) -> (Vec<RowMajorMatrix<BabyBear>>, Vec<(usize, usize)>) {
+) -> (Vec<RowMajorMatrix<KoalaBear>>, Vec<(usize, usize)>) {
     let pcs = ctx.pcs;
     type P = TabulaPcs;
     type C = Challenger;
 
     // Compute per-chip quotient LDEs in parallel.
-    let per_chip: Vec<Vec<RowMajorMatrix<BabyBear>>> = chip_infos
+    let per_chip: Vec<Vec<RowMajorMatrix<KoalaBear>>> = chip_infos
         .par_iter()
         .enumerate()
         .map(|(i, info)| {
@@ -609,7 +607,7 @@ fn compute_chip_quotients(
         .collect();
 
     // Sequential assembly: start indices depend on previous chunks.
-    let mut all_quotient_ldes: Vec<RowMajorMatrix<BabyBear>> = Vec::new();
+    let mut all_quotient_ldes: Vec<RowMajorMatrix<KoalaBear>> = Vec::new();
     let mut quotient_chunk_map: Vec<(usize, usize)> = Vec::new();
     for ldes in per_chip {
         let start = all_quotient_ldes.len();

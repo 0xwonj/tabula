@@ -9,7 +9,7 @@
 //! 2. **Multi-chip LogUp** ([`debug_check_logup`]):
 //!    Evaluates all chips' constraints AND verifies that LogUp interactions
 //!    balance across the entire system. Uses random challenges over the
-//!    quartic extension field `BabyBear⁴` for ~124-bit collision resistance.
+//!    quartic extension field `KoalaBear⁴` for ~124-bit collision resistance.
 
 mod builder;
 mod errors;

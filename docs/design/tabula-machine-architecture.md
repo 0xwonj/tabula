@@ -40,7 +40,7 @@ Applications customize Tabula **purely in their own crate**. They never fork or 
 
 - Not a general-purpose zkVM (no arbitrary binary execution)
 - Not a fixed-instruction-set machine (instruction set is extensible)
-- Not field-agnostic (BabyBear is fixed — this is a feature, not a limitation)
+- Not field-agnostic (KoalaBear is fixed — this is a feature, not a limitation)
 - Not a recursive proof system (recursion is a future extension, not a prerequisite)
 
 ---
@@ -463,15 +463,15 @@ These are choices, not requirements. They could change without breaking the arch
 
 | Choice | Current | Alternatives | Why Current |
 |--------|---------|-------------|-------------|
-| Base field | BabyBear (2^31-2^27+1) | Goldilocks, Mersenne31 | p3 ecosystem, 32-bit friendly |
+| Base field | KoalaBear (2^31-2^24+1) | Goldilocks, Mersenne31 | p3 ecosystem, 32-bit friendly |
 | Hash function | Poseidon2 width-16 | Rescue, Griffin, Blake3 | ZK-native, p3 native support |
-| Extension field | BabyBear^4 (~124-bit) | BabyBear^3, larger extension | Balance of security/performance |
+| Extension field | KoalaBear^4 (~124-bit) | KoalaBear^3, larger extension | Balance of security/performance |
 | FRI parameters | log_blowup=3, queries=TBD | Different blowup/query tradeoffs | Degree-9 constraint support |
 | VC threshold | ~100-300 rows | Different threshold | Calibrated by benchmark (B7) |
 | Chip set dispatch | Runtime `ChipRegistry` + `dyn AnyRap` | Static enum | Runtime composition, negligible vtable overhead |
 | Instruction format | 13 core + extensible | Different core set | Minimal but sufficient |
 | SMT depth | 16-24 levels | Different depth | Expected table/column count |
-| Value encoding split | 30+30+4 for U64 | 31+31+2 (WRONG: exceeds p) | Fits BabyBear range cleanly |
+| Value encoding split | 30+30+4 for U64 | 31+31+2 (WRONG: exceeds p) | Fits KoalaBear range cleanly |
 
 ---
 
@@ -554,8 +554,8 @@ pub struct TabulaProof {
 }
 
 pub struct PublicValues {
-    pub old_root: [BabyBear; 8],
-    pub new_root: [BabyBear; 8],
+    pub old_root: [KoalaBear; 8],
+    pub new_root: [KoalaBear; 8],
     pub plan_digest: [u8; 32],              // which program
     pub batch_digest: [u8; 32],             // which batch
     pub tx_outcomes_digest: [u8; 32],       // success/failure per tx
@@ -583,7 +583,7 @@ pub struct PublicValues {
 ```
 crates/proof/src/
 ├── machine/                   # Proving infrastructure (Axis 2+3)
-│   ├── config.rs              # STARK config (BabyBear + Poseidon2 + FRI)
+│   ├── config.rs              # STARK config (KoalaBear + Poseidon2 + FRI)
 │   ├── plan.rs                # ProofPlan, ExecutionPlan, ColumnPlan
 │   ├── keygen.rs              # ProofPlan → ProvingKey / VerifyingKey
 │   ├── prover.rs              # Two-round shared-PCS prover
@@ -700,7 +700,7 @@ pub enum VcStrategy { Ssmc, Smt }
 pub struct ProvingKey {
     pub chips: Vec<ChipKey>,
     pub interactions: Vec<Vec<SymbolicInteraction>>,
-    pub preprocessed: Vec<Option<RowMajorMatrix<BabyBear>>>,
+    pub preprocessed: Vec<Option<RowMajorMatrix<KoalaBear>>>,
     pub plan: ProofPlan,
 }
 

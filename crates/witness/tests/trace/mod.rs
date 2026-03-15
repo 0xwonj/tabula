@@ -1,20 +1,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_chips::execution::{InstructionRecord, Opcode};
 use tabula_chips::poseidon::constants::poseidon2_permutation;
 use tabula_chips::smt_path::trace::{SmtPathWitness, SmtTablePathWitness};
 use tabula_commitment::{
-    BabyBearCodec, ColumnMeta, DOMAIN_COL, DOMAIN_TABLE, HybridVC, MockFieldHasher, NativeDigest,
-    PoseidonHasher, SparseMerkleTree, scheme_tags,
+    ColumnMeta, ColumnState, DOMAIN_COL, DOMAIN_TABLE, KoalaBearCodec, MockFieldHasher,
+    NativeDigest, PoseidonHasher, SparseMerkleTree, compute_leaf, compute_state_root,
+    compute_table_root, scheme_tags,
 };
-use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
 use tabula_core::traits::ValueCodec;
-use tabula_core::{
-    Batch, CellKey, ColId, RowKey, TableId, Transaction, TxResult, TxTypeId, Value,
-};
+use tabula_core::{Batch, CellKey, ColId, RowKey, TableId, Transaction, TxResult, TxTypeId, Value};
+use tabula_core::{InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce};
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_ir::Program;
 use tabula_lang::compile;
@@ -24,33 +23,33 @@ use tabula_witness::trace::{
 };
 use tabula_witness::witness::{AccessRow, BatchWitness, ColumnWitness, InitRow, KeyRoute};
 
-pub(super) type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<BabyBear>)>>;
+pub(super) type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<KoalaBear>)>>;
 
-pub(super) fn mk_codec() -> BabyBearCodec {
-    BabyBearCodec
+pub(super) fn mk_codec() -> KoalaBearCodec {
+    KoalaBearCodec
 }
 
-pub(super) fn encode_u64(v: u64) -> Vec<BabyBear> {
+pub(super) fn encode_u64(v: u64) -> Vec<KoalaBear> {
     mk_codec().encode(&Value::U64(v)).expect("encode")
 }
 
 pub(super) fn single_column_roots(
-    vc: &HybridVC<MockFieldHasher>,
+    hasher: &MockFieldHasher,
     table: TableId,
     col: ColId,
     com_old: NativeDigest,
     com_new: NativeDigest,
 ) -> (NativeDigest, NativeDigest) {
-    let old_leaf = vc.compute_leaf(table, col, scheme_tags::SSMC, &com_old);
-    let new_leaf = vc.compute_leaf(table, col, scheme_tags::SSMC, &com_new);
+    let old_leaf = compute_leaf(hasher, table, col, scheme_tags::SSMC, &com_old);
+    let new_leaf = compute_leaf(hasher, table, col, scheme_tags::SSMC, &com_new);
 
     let mut old_cols = BTreeMap::new();
     old_cols.insert(col, old_leaf);
     let mut new_cols = BTreeMap::new();
     new_cols.insert(col, new_leaf);
 
-    let old_table = vc.compute_table_root(&old_cols);
-    let new_table = vc.compute_table_root(&new_cols);
+    let old_table = compute_table_root(hasher, &old_cols);
+    let new_table = compute_table_root(hasher, &new_cols);
 
     let mut old_tables = BTreeMap::new();
     old_tables.insert(table, old_table);
@@ -58,8 +57,8 @@ pub(super) fn single_column_roots(
     new_tables.insert(table, new_table);
 
     (
-        vc.compute_state_root(&old_tables),
-        vc.compute_state_root(&new_tables),
+        compute_state_root(hasher, &old_tables),
+        compute_state_root(hasher, &new_tables),
     )
 }
 
@@ -67,15 +66,15 @@ pub(super) fn chain_commit_single(
     table: u32,
     col: u16,
     key: u64,
-    value: &[BabyBear],
+    value: &[KoalaBear],
 ) -> NativeDigest {
     const MASK_30: u64 = (1u64 << 30) - 1;
-    let mut input = [BabyBear::ZERO; 16];
-    input[1] = BabyBear::new(table);
-    input[2] = BabyBear::new(col as u32);
-    input[3] = BabyBear::new((key & MASK_30) as u32);
-    input[4] = BabyBear::new(((key >> 30) & MASK_30) as u32);
-    input[5] = BabyBear::new((key >> 60) as u32);
+    let mut input = [KoalaBear::ZERO; 16];
+    input[1] = KoalaBear::new(table);
+    input[2] = KoalaBear::new(col as u32);
+    input[3] = KoalaBear::new((key & MASK_30) as u32);
+    input[4] = KoalaBear::new(((key >> 30) & MASK_30) as u32);
+    input[5] = KoalaBear::new((key >> 60) as u32);
     for (i, v) in value.iter().enumerate().take(3) {
         input[6 + i] = *v;
     }
@@ -84,7 +83,7 @@ pub(super) fn chain_commit_single(
 }
 
 pub(super) fn poseidon_compress(left: &NativeDigest, right: &NativeDigest) -> NativeDigest {
-    let mut perm_input = [BabyBear::ZERO; 16];
+    let mut perm_input = [KoalaBear::ZERO; 16];
     perm_input[..8].copy_from_slice(&left.0);
     perm_input[8..16].copy_from_slice(&right.0);
     let (_rounds, out) = poseidon2_permutation(perm_input);
@@ -97,11 +96,11 @@ pub(super) fn compute_leaf_digest(
     tag: u32,
     com: &NativeDigest,
 ) -> NativeDigest {
-    let mut perm_input = [BabyBear::ZERO; 16];
-    perm_input[0] = BabyBear::new(0x10);
-    perm_input[1] = BabyBear::new(table);
-    perm_input[2] = BabyBear::new(col as u32);
-    perm_input[3] = BabyBear::new(tag);
+    let mut perm_input = [KoalaBear::ZERO; 16];
+    perm_input[0] = KoalaBear::new(0x10);
+    perm_input[1] = KoalaBear::new(table);
+    perm_input[2] = KoalaBear::new(col as u32);
+    perm_input[3] = KoalaBear::new(tag);
     perm_input[8..16].copy_from_slice(&com.0);
     let (_rounds, out) = poseidon2_permutation(perm_input);
     NativeDigest(core::array::from_fn(|i| out[i]))

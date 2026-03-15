@@ -33,7 +33,7 @@ pub use any_rap::AnyRap;
 pub use builder::MachineBuilder;
 pub use column_scheme::{ColumnChipSet, ColumnScheme, SmtScheme, SsmcScheme};
 pub use composition::{RootProof, SmtRootProof};
-pub use config::{EF4, TabulaStarkConfig, default_config};
+pub use config::{EF4, TabulaStarkConfig, default_config, make_config};
 pub use extension::{ChipExtension, ExtensionContext};
 pub use keys::{TabulaProvingKey, TabulaVerifyingKey, compute_external_buses};
 pub use machine::TabulaMachine;

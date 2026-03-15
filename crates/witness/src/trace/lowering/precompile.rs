@@ -3,8 +3,8 @@
 //! Reads stored precompile I/O from execution results, then constructs a
 //! Poseidon I/O commitment and writes the digest into the destination slot.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_core::error::TabulaError;
 use tabula_ir::{PrecompileId, ValueExpr};
@@ -55,10 +55,10 @@ pub(super) fn lower_precompile<const W: usize>(
     // 3. Build Poseidon permutation input.
     //    Layout: [DOMAIN_TAG, precompile_id, n_inputs, input_fes..., output_fes..., 0-padding]
     //    Total: 16 field elements (Poseidon state width).
-    let mut perm_input = [BabyBear::ZERO; 16];
-    perm_input[0] = BabyBear::new(PRECOMPILE_DOMAIN_TAG);
-    perm_input[1] = BabyBear::new(id.0 as u32);
-    perm_input[2] = BabyBear::new(inputs.len() as u32);
+    let mut perm_input = [KoalaBear::ZERO; 16];
+    perm_input[0] = KoalaBear::new(PRECOMPILE_DOMAIN_TAG);
+    perm_input[1] = KoalaBear::new(id.0 as u32);
+    perm_input[2] = KoalaBear::new(inputs.len() as u32);
 
     let mut offset = 3;
     for fe in &input_fes {
@@ -77,7 +77,7 @@ pub(super) fn lower_precompile<const W: usize>(
 
     // 4. Compute Poseidon permutation.
     let (_rounds, perm_output) = poseidon2_permutation(perm_input);
-    let digest: [BabyBear; 8] = core::array::from_fn(|i| perm_output[i]);
+    let digest: [KoalaBear; 8] = core::array::from_fn(|i| perm_output[i]);
 
     // 5. The first dst_slot gets hash_perm_output[0..W] (the I/O commitment).
     //    The AIR constrains slot_written_count = 1 for Precompile, so only
@@ -88,7 +88,7 @@ pub(super) fn lower_precompile<const W: usize>(
     })? as usize;
 
     let mut dst_enc = digest[..W].to_vec();
-    dst_enc.resize(W, BabyBear::ZERO);
+    dst_enc.resize(W, KoalaBear::ZERO);
 
     // Resolve src operand slots for linkage (inputs may reference slots).
     let exclude = [first_slot];

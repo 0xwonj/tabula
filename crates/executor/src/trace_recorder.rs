@@ -2,7 +2,7 @@
 //!
 //! Handles the execution event trace, logical time, and tx index.
 
-use tabula_core::{CellKey, AccessEvent, LogicalTime, OpKind, Value, ValueType, zero_value};
+use tabula_core::{AccessEvent, CellKey, LogicalTime, OpKind, Value, ValueType, zero_value};
 
 /// Checkpoint for the trace recorder.
 pub(crate) struct RecorderCheckpoint {

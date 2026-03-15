@@ -63,7 +63,7 @@
 
 ### 1.3 Non-Goals
 
-- Changing the base field (BabyBear is fixed)
+- Changing the base field (KoalaBear is fixed)
 - General-purpose computation (Tabula is a state machine, not a zkVM)
 - Custom type extensibility (closed ValueType + bytes32 escape hatch — see custom-type-extensibility.md)
 - Hot-swapping chips at runtime (setup is a one-time configuration step)
@@ -192,7 +192,7 @@ define_bus!(PrecompileAirBuilder(BusId::PRECOMPILE, ...) {
 
 ```rust
 // AnyRap — blanket impl, zero boilerplate for app developers
-pub trait AnyRap: BaseAir<BabyBear> + Air<...all AB bounds...> + Send + Sync {
+pub trait AnyRap: BaseAir<KoalaBear> + Air<...all AB bounds...> + Send + Sync {
     fn chip_id(&self) -> ChipId;
     fn chip_name(&self) -> &str;
     fn has_interactions(&self) -> bool;
@@ -309,15 +309,15 @@ pub trait PropertyOpening: Send + Sync {
     fn supported_queries(&self) -> &[PropertyQueryKind];
     fn prove(
         &self,
-        commitment_digest: &[BabyBear],
+        commitment_digest: &[KoalaBear],
         query: &PropertyQuery,
-        state: &[(RowKey, &[BabyBear], bool)],
+        state: &[(RowKey, &[KoalaBear], bool)],
     ) -> Result<Box<dyn PropertyWitness>, PropertyError>;
     fn column_verifier(&self) -> Option<Box<dyn ChipExtension>>;  // Tier 2 chips
 }
 
 pub trait PropertyWitness: Send + Sync {
-    fn value(&self) -> &[BabyBear];
+    fn value(&self) -> &[KoalaBear];
     fn key(&self) -> Option<RowKey>;    // The key satisfying the property
     fn is_null(&self) -> bool;
     fn as_any(&self) -> &dyn Any;
@@ -624,7 +624,7 @@ Lighter needs types beyond U64/I64/Bool — 96-bit balances, signed positions, p
 | 96-bit balance | 2x U64 (hi/lo split) | `balance_hi * 2^64 + balance_lo` |
 | Signed position size | I64 | Direct |
 | Price (64-bit) | U64 | Direct |
-| Merkle path node | Bytes32 | Direct (8 BabyBear field elements) |
+| Merkle path node | Bytes32 | Direct (8 KoalaBear field elements) |
 | EdDSA pubkey | Bytes32 | Direct |
 | Order flags (packed bits) | U64 | Bit masking with existing logic ops |
 | Fixed-point decimal | U64 | Integer with implicit denominator (e.g., /10^6) |
@@ -664,7 +664,7 @@ Apps building custom chips need p3 types. Rather than direct p3 dependency (diam
 ```rust
 // tabula-machine/src/prelude.rs
 pub use p3_air::{Air, AirBuilder, BaseAir};
-pub use p3_baby_bear::BabyBear;
+pub use p3_koala_bear::KoalaBear;
 pub use p3_field::{Field, PrimeField32, PrimeCharacteristicRing};
 pub use p3_matrix::dense::RowMajorMatrix;
 

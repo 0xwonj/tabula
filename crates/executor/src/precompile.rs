@@ -54,6 +54,11 @@ impl PrecompileRegistry {
         self.handlers.push(Box::new(handler));
     }
 
+    /// Register a boxed handler.
+    pub fn register_boxed(&mut self, handler: Box<dyn PrecompileHandler>) {
+        self.handlers.push(handler);
+    }
+
     /// Look up a handler by ID.
     pub fn get(&self, id: PrecompileId) -> Result<&dyn PrecompileHandler, TabulaError> {
         self.handlers

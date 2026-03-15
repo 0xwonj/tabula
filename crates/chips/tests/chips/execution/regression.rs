@@ -31,7 +31,7 @@ fn hash_wrong_domain_tag_fails() {
     ];
     // Corrupt domain tag in perm_input
     if let Some(ref mut input) = records[2].hash_perm_input {
-        input[0] = BabyBear::new(0x10); // wrong domain tag
+        input[0] = KoalaBear::new(0x10); // wrong domain tag
     }
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong domain tag should fail");
@@ -47,7 +47,7 @@ fn hash_wrong_input_count_fails() {
     ];
     // Corrupt input count in perm_input
     if let Some(ref mut input) = records[2].hash_perm_input {
-        input[1] = BabyBear::new(1); // wrong count
+        input[1] = KoalaBear::new(1); // wrong count
     }
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong input count should fail");
@@ -88,11 +88,11 @@ fn divmod_wrong_q_sel_fails() {
     // This makes the AIR treat rem=1 as q and q=2 as rem, which should fail identity.
     let width = EXECUTION_STANDARD_WIDTH;
     let row2_offset = 2 * width;
-    let cols: &mut ExecutionCols<BabyBear, W> =
+    let cols: &mut ExecutionCols<KoalaBear, W> =
         borrow_cols_mut(&mut trace.values[row2_offset..row2_offset + width]);
     // Clear current q_sel[2] = 1, set q_sel[3] = 1 (swap q and rem selectors)
-    cols.divmod.q_sel[2] = BabyBear::ZERO;
-    cols.divmod.q_sel[3] = BabyBear::ONE;
+    cols.divmod.q_sel[2] = KoalaBear::ZERO;
+    cols.divmod.q_sel[3] = KoalaBear::ONE;
     debug_check(&ExecutionChip::<W>, &trace)
         .expect_err("wrong q_sel should fail division identity");
 }
@@ -121,19 +121,19 @@ fn divmod_div_by_zero_rejected() {
     // Row index 2 is the DivMod instruction.
     let width = EXECUTION_STANDARD_WIDTH;
     let row2_offset = 2 * width;
-    let cols: &mut ExecutionCols<BabyBear, W> =
+    let cols: &mut ExecutionCols<KoalaBear, W> =
         borrow_cols_mut(&mut trace.values[row2_offset..row2_offset + width]);
 
     // Zero out src2 limbs (pretend rhs=0).
-    cols.src2_val[0] = BabyBear::ZERO;
-    cols.src2_val[1] = BabyBear::ZERO;
-    cols.src2_val[2] = BabyBear::ZERO;
+    cols.src2_val[0] = KoalaBear::ZERO;
+    cols.src2_val[1] = KoalaBear::ZERO;
+    cols.src2_val[2] = KoalaBear::ZERO;
 
     // Set is_zero=1 (rhs "is" zero) — this makes the IsZero witness consistent
     // but triggers the final `assert_zero(gate * is_zero)` constraint.
-    cols.divmod.rhs_iz.is_zero = BabyBear::ONE;
+    cols.divmod.rhs_iz.is_zero = KoalaBear::ONE;
     // Set inv=0 (consistent with val=0 → no inverse).
-    cols.divmod.rhs_iz.inv = BabyBear::ZERO;
+    cols.divmod.rhs_iz.inv = KoalaBear::ZERO;
 
     debug_check(&ExecutionChip::<W>, &trace)
         .expect_err("divmod with rhs=0 must fail non-zero divisor constraint");

@@ -1,7 +1,7 @@
 //! Tests for the StaticTableChip.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_chips::static_table::air::StaticTableChip;
 use tabula_chips::static_table::columns::{STATIC_TABLE_STANDARD_WIDTH, static_table_width};
@@ -24,7 +24,7 @@ fn valid_single_row() {
         table_id: 1,
         col_id: 0,
         row_key: 100,
-        value: vec![BabyBear::new(42), BabyBear::ZERO, BabyBear::ZERO],
+        value: vec![KoalaBear::new(42), KoalaBear::ZERO, KoalaBear::ZERO],
         lookup_mult: 1,
     }];
     let trace = generate_static_table_trace::<3>(&rows);
@@ -38,21 +38,21 @@ fn valid_multiple_rows() {
             table_id: 1,
             col_id: 0,
             row_key: 0,
-            value: vec![BabyBear::new(10), BabyBear::ZERO, BabyBear::ZERO],
+            value: vec![KoalaBear::new(10), KoalaBear::ZERO, KoalaBear::ZERO],
             lookup_mult: 1,
         },
         StaticTableRow {
             table_id: 1,
             col_id: 0,
             row_key: 1,
-            value: vec![BabyBear::new(20), BabyBear::ZERO, BabyBear::ZERO],
+            value: vec![KoalaBear::new(20), KoalaBear::ZERO, KoalaBear::ZERO],
             lookup_mult: 1,
         },
         StaticTableRow {
             table_id: 2,
             col_id: 3,
             row_key: 42,
-            value: vec![BabyBear::new(99), BabyBear::new(7), BabyBear::ZERO],
+            value: vec![KoalaBear::new(99), KoalaBear::new(7), KoalaBear::ZERO],
             lookup_mult: 1,
         },
     ];
@@ -74,7 +74,7 @@ fn records_c9_receive_interactions() {
         table_id: 1,
         col_id: 0,
         row_key: 100,
-        value: vec![BabyBear::new(42), BabyBear::ZERO, BabyBear::ZERO],
+        value: vec![KoalaBear::new(42), KoalaBear::ZERO, KoalaBear::ZERO],
         lookup_mult: 1,
     }];
     let trace = generate_static_table_trace::<3>(&rows);
@@ -88,7 +88,7 @@ fn records_c9_receive_interactions() {
         .filter(|i| {
             i.bus == core_buses::STATIC_TABLE_LOOKUP
                 && i.direction == InteractionDirection::Receive
-                && i.multiplicity != BabyBear::ZERO
+                && i.multiplicity != KoalaBear::ZERO
         })
         .collect();
     assert_eq!(c9_receives.len(), 1, "should have exactly 1 C9 receive");
@@ -100,7 +100,7 @@ fn c9_receive_uses_lookup_multiplicity_witness() {
         table_id: 1,
         col_id: 0,
         row_key: 100,
-        value: vec![BabyBear::new(42), BabyBear::ZERO, BabyBear::ZERO],
+        value: vec![KoalaBear::new(42), KoalaBear::ZERO, KoalaBear::ZERO],
         lookup_mult: 3,
     }];
     let trace = generate_static_table_trace::<3>(&rows);
@@ -113,7 +113,7 @@ fn c9_receive_uses_lookup_multiplicity_witness() {
         .filter(|i| {
             i.bus == core_buses::STATIC_TABLE_LOOKUP
                 && i.direction == InteractionDirection::Receive
-                && i.multiplicity != BabyBear::ZERO
+                && i.multiplicity != KoalaBear::ZERO
         })
         .collect();
     assert_eq!(
@@ -123,7 +123,7 @@ fn c9_receive_uses_lookup_multiplicity_witness() {
     );
     assert_eq!(
         c9_receives[0].multiplicity,
-        BabyBear::new(3),
+        KoalaBear::new(3),
         "receive multiplicity should match lookup_mult witness"
     );
 }

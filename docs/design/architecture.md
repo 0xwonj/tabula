@@ -27,7 +27,7 @@
 Tabula is a **table-native zk state-transition VM kernel**. Its architecture is organized around a strict separation between three stages:
 
 - **Execution** — deterministic state transitions using a local overlay
-- **Commitment** — column/table commitments via SSMC/SMT over BabyBear
+- **Commitment** — column/table commitments via SSMC/SMT over KoalaBear
 - **Proving** — end-to-end STARK correctness proofs for `ApplyBatch`
 
 Two central design constraints govern the architecture:
@@ -35,7 +35,7 @@ Two central design constraints govern the architecture:
 1. **The executor has zero cryptographic dependencies** — execution correctness is testable and verifiable without any proof system. This is enforced at compile time by the crate dependency graph.
 2. **All cryptographic primitives are trait-based** — the system is agnostic to the concrete hash function, signature scheme, and encoding. Phase 1 uses mock implementations; real backends are swapped in later.
 
-The target proof system is **STARK (FRI-based) via Plonky3 over BabyBear**, aligning with the broader zkVM ecosystem (SP1, RISC Zero, Stwo). The trait-based design keeps SNARK (KZG-based) as a viable alternative.
+The target proof system is **STARK (FRI-based) via Plonky3 over KoalaBear**, aligning with the broader zkVM ecosystem (SP1, RISC Zero, Stwo). The trait-based design keeps SNARK (KZG-based) as a viable alternative.
 
 ---
 
@@ -49,7 +49,7 @@ tabula/
 │   ├── tabula-core/          # types, traits, errors — zero heavy deps
 │   ├── tabula-ir/            # IR definitions + NF validation passes
 │   ├── tabula-executor/      # deterministic execution engine
-│   ├── tabula-commitment/    # Plonky3/BabyBear state commitment
+│   ├── tabula-commitment/    # Plonky3/KoalaBear state commitment
 │   ├── tabula-proof/         # AIR chips, witness gen, STARK proof
 │   ├── tabula-lang/          # DSL compiler (lex → parse → lower)
 │   └── tabula-cli/           # binary entry point
@@ -123,11 +123,11 @@ Deterministic execution engine. Produces `ExecutionResult` from a batch + state 
 
 ### 3.4 tabula-commitment
 
-State commitment layer over BabyBear field elements. Manages column and table commitments.
+State commitment layer over KoalaBear field elements. Manages column and table commitments.
 
 - **`hasher.rs`** — `FieldHasher` trait (field-element-level hashing). See §4.2.
 - **`poseidon.rs`** — `PoseidonHasher`: Poseidon2 width-16. Implements both `FieldHasher` and core `Hasher`.
-- **`codec.rs`** — `BabyBearCodec`: schema-typed value ↔ field element encoding.
+- **`codec.rs`** — `KoalaBearCodec`: schema-typed value ↔ field element encoding.
 - **`smt.rs`** — `SparseMerkleTree` over `FieldHasher`.
 - **`ssmc.rs`** — `SsmcList`, `SsmcCommitment`, `MergeTrace`: sorted key-value list commitment + 3-way merge.
 - **`hybrid.rs`** — `HybridVC`: per-column SSMC/SMT dispatch with threshold-based auto-selection.
@@ -151,7 +151,7 @@ Proof generation and verification for the `ApplyBatch` statement.
 | GlobalSortedMem | 42 | — | Inter-tx memory consistency (sorted by key + timestamp) |
 | GlobalSSMC | 45 | — | SSMC hash chain + boundary constraints |
 | GlobalMerge | 52 | — | 3-way merge proof (old + write → new) |
-| PoseidonChip | 93 | 17 | Poseidon2 permutation (21 rows/perm), RC verification |
+| PoseidonChip | 93 | 17 | Poseidon2 permutation (28 rows/perm), RC verification |
 | ColumnMeta | 28 | — | Wires column commitments to state root proofs |
 | RangeCheck | 2 | — | 2^16 preprocessed range table |
 
@@ -190,16 +190,16 @@ Hashing operates at two distinct levels, matching the execution/commitment bound
   ─────────────                  ──────────────────
   trait Hasher                   trait FieldHasher
   ───────────                    ─────────────────
-  hash(&[u8]) → [u8;32]         hash(&[BabyBear]) → NativeDigest
+  hash(&[u8]) → [u8;32]         hash(&[KoalaBear]) → NativeDigest
   byte-level                     field-element-level
   used by: executor, IR Hash     used by: SSMC, SMT, commitment
 
   PoseidonHasher implements BOTH:
-    Hasher    (bytes → BabyBear limbs → Poseidon → squeeze → bytes)
-    FieldHasher (native BabyBear FE → Poseidon → NativeDigest)
+    Hasher    (bytes → KoalaBear limbs → Poseidon → squeeze → bytes)
+    FieldHasher (native KoalaBear FE → Poseidon → NativeDigest)
 ```
 
-**Why two layers?** The executor must remain field-agnostic — it hashes bytes via `Hasher`. The commitment layer operates natively on BabyBear field elements for STARK efficiency. `PoseidonHasher` bridges both worlds. `MockFieldHasher` provides fast unit tests without real Poseidon.
+**Why two layers?** The executor must remain field-agnostic — it hashes bytes via `Hasher`. The commitment layer operates natively on KoalaBear field elements for STARK efficiency. `PoseidonHasher` bridges both worlds. `MockFieldHasher` provides fast unit tests without real Poseidon.
 
 Domain separation tags prevent cross-context collisions: `0x00` = SSMC, `0x01` = SMT, `0x02` = IR Hash, `0x10` = leaf, `0x11` = tables, `0x12` = cols.
 
@@ -211,8 +211,8 @@ All traits live in `tabula-core/src/traits/`. They keep the system crypto-agnost
 |-------|-----------|---------|-----------|--------|
 | `Hasher` | `crypto.rs` | Byte-level hashing | Blake3 | Poseidon (in-circuit) |
 | `StateSnapshot` | `state.rs` | Read-only state access | InMemoryState (BTreeMap) | RocksDB, SQLite |
-| `SigVerifier` | `crypto.rs` | Signature verification | Always-accept | EdDSA-over-BabyBear |
-| `ValueCodec` | `codec.rs` | Value ↔ field element encoding | Borsh bytes | BabyBearCodec (limb decomp) |
+| `SigVerifier` | `crypto.rs` | Signature verification | Always-accept | EdDSA-over-KoalaBear |
+| `ValueCodec` | `codec.rs` | Value ↔ field element encoding | Borsh bytes | KoalaBearCodec (limb decomp) |
 | `NoncePolicy` | `codec.rs` | Replay protection | Sequential | Epoch-based, bitfield |
 | `MembershipScheme` | `crypto.rs` | Program membership proofs | Flat hash | Merkle tree |
 | `BatchDigester` | `crypto.rs` | Batch → digest | Borsh + Blake3 | Merkle tree of txs |
@@ -315,7 +315,7 @@ WRITE   Balances.balance[Param(1)] ← Slot(s6), Bool(false)
        │    STAGE 2: COMMITMENT       │  ← tabula-commitment
        │                              │
        │  SSMC/SMT openings + merges  │
-       │  + Value encoding (BabyBear) │
+       │  + Value encoding (KoalaBear) │
        │  + State root recomputation  │
        │                              │
        │  → newStateRoot              │
@@ -400,7 +400,7 @@ AIR Trace Generation (7 chips, each: witness → matrix)
 LogUp Cross-Chip Wiring (memory bus, SSMC bus, merge bus, range check, ...)
     │
     ▼
-STARK Proof (Plonky3/FRI over BabyBear)
+STARK Proof (Plonky3/FRI over KoalaBear)
 ```
 
 **Chip composition.** Each chip constrains one aspect of the state transition:
@@ -409,7 +409,7 @@ STARK Proof (Plonky3/FRI over BabyBear)
 - **GlobalSortedMem** — sorts all memory accesses by `(t, c, r, timestamp)` and verifies last-write semantics via LogUp. Init rows (τ=0) seed base state values.
 - **GlobalSSMC** — verifies SSMC hash chain integrity for small columns.
 - **GlobalMerge** — verifies the 3-way merge (old list + write set → new list) is complete and correct.
-- **PoseidonChip** — constrains Poseidon2 permutations (21 rows per permutation, width-16).
+- **PoseidonChip** — constrains Poseidon2 permutations (28 rows per permutation, width-16).
 - **ColumnMeta** — wires column commitments to SMT inclusion/update proofs.
 - **RangeCheck** — 2^16 preprocessed lookup table for integer limb range checks.
 
@@ -439,8 +439,8 @@ Chips communicate via **LogUp buses** — multiset equality arguments that enfor
 | Concern | Crate | Rationale |
 |---------|-------|-----------|
 | STARK proof system | `p3-uni-stark`, `p3-fri` | Plonky3 — production-ready, audited, SP1-validated. |
-| Field arithmetic | `p3-field`, `p3-baby-bear` | BabyBear (p = 2^31 − 2^27 + 1 = 2013265921). |
-| Hash (in-circuit) | `p3-poseidon2` | Poseidon2 over BabyBear. Width-16, rate-8. |
+| Field arithmetic | `p3-field`, `p3-koala-bear` | KoalaBear (p = 2^31 − 2^24 + 1 = 2130706433). |
+| Hash (in-circuit) | `p3-poseidon2` | Poseidon2 over KoalaBear. Width-16, rate-8. |
 | AIR framework | `p3-air`, `p3-matrix` | Native LogUp support for memory consistency arguments. |
 | SNARK wrapping | TBD | Optional: STARK→Groth16 for on-chain verification (~200 bytes). |
 
@@ -467,7 +467,7 @@ Chips communicate via **LogUp buses** — multiset equality arguments that enfor
 
 **Choice**: Application-level types only (`U64`, `I64`, `Bool`, `Bytes32`). No `Null`, no `Field`.
 
-- No field size assumptions leak into the executor. BabyBear (31-bit), Goldilocks (64-bit), BN254 (254-bit) all supported via `ValueCodec`.
+- No field size assumptions leak into the executor. KoalaBear (31-bit), Goldilocks (64-bit), BN254 (254-bit) all supported via `ValueCodec`.
 - Absence is `Option<Value>`, not a variant — cleaner type safety, matches 2-slot Read/Write design.
 - Field encoding is a commitment-layer concern. Conversion cost is negligible vs. proof operations.
 
@@ -513,7 +513,7 @@ Chips communicate via **LogUp buses** — multiset equality arguments that enfor
 
 ### D9: STARK (FRI) proof backend
 
-**Choice**: Plonky3 over BabyBear.
+**Choice**: Plonky3 over KoalaBear.
 
 - Transparent setup (no trusted ceremony). Post-quantum secure. Faster prover.
 - Ecosystem alignment: SP1, RISC Zero, Stwo all use STARK.
@@ -526,9 +526,9 @@ Chips communicate via **LogUp buses** — multiset equality arguments that enfor
 
 **Choice**: `Hasher` (byte-level, core) + `FieldHasher` (field-element-level, commitment).
 
-- Executor remains field-agnostic — hashes bytes, never touches BabyBear.
+- Executor remains field-agnostic — hashes bytes, never touches KoalaBear.
 - Commitment layer operates natively on field elements for STARK efficiency.
-- `PoseidonHasher` bridges both: implements `Hasher` (bytes → limbs → Poseidon → squeeze → bytes) and `FieldHasher` (native BabyBear FE → Poseidon → NativeDigest).
+- `PoseidonHasher` bridges both: implements `Hasher` (bytes → limbs → Poseidon → squeeze → bytes) and `FieldHasher` (native KoalaBear FE → Poseidon → NativeDigest).
 - Domain separation tags prevent cross-context collisions across all hash uses.
 
 ---
@@ -544,7 +544,7 @@ Deterministic execution, all crypto mocked. 191 tests at completion.
 - **M1**: IR Housekeeping (SSA, CellKey, Lookup, Select, Hash encoding)
 - **M2**: 2-Slot Migration (Read/Write, Value::Null removal, budgets, statement)
 - **M3**: NF Validation (NF-1~NF-4, tabula-ir extraction, canonicalization passes)
-- **M4**: Plonky3 Foundation (Poseidon2, BabyBear codec, SMT, SSMC, Hybrid VC)
+- **M4**: Plonky3 Foundation (Poseidon2, KoalaBear codec, SMT, SSMC, Hybrid VC)
 - **M5**: Witness Generation (WitnessGenerator, BatchWitness, key routing)
 - **M6**: AIR Foundation (chip/gadget patterns, ColumnMetaChip, debug checker)
 - **M7**: Gadgets + Memory Layer (integer/memory gadgets, GlobalSortedMem, RangeCheck)

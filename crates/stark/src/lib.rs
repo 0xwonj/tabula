@@ -4,8 +4,8 @@
 //! trace storage, debug constraint checker, and permutation trace generation.
 //! No chip implementations — those live in downstream crates.
 
-use p3_baby_bear::BabyBear;
 use p3_field::extension::BinomialExtensionField;
+use p3_koala_bear::KoalaBear;
 
 mod bridge;
 
@@ -18,7 +18,7 @@ pub mod permutation;
 pub mod rap;
 pub mod trace;
 
-/// Quartic extension of BabyBear for ~124-bit security.
+/// Quartic extension of KoalaBear for ~124-bit security.
 ///
 /// Used for LogUp fingerprints and permutation trace values.
-pub type EF4 = BinomialExtensionField<BabyBear, 4>;
+pub type EF4 = BinomialExtensionField<KoalaBear, 4>;

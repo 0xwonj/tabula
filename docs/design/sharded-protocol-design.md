@@ -221,7 +221,7 @@ dependencies (PoseidonPerm bus, RangeCheck bus). Each column's hash chain and ra
 are independent — embedding them locally makes column proofs fully self-contained.
 
 **Cost**: Poseidon preprocessed trace (round constants) is duplicated C times. For a
-21-row Poseidon permutation with 17 preprocessed columns, this is 21 × 17 = 357 field
+28-row Poseidon permutation with 17 preprocessed columns, this is 28 × 17 = 476 field
 elements per column — negligible.
 
 **Alternative considered**: Global Poseidon/RangeCheck with cross-proof partial sums.
@@ -296,7 +296,7 @@ struct ExecutionProof {
     // Cross-proof public outputs
     cumsum_memory: EF4,               // partial sum for ReadAccess + WriteAccess buses
     cumsum_empty_col: EF4,            // partial sum for EmptyColRead bus
-    batch_digest: [BabyBear; 8],
+    batch_digest: [KoalaBear; 8],
 }
 ```
 
@@ -317,8 +317,8 @@ struct ColumnProof {
 
     // Cross-proof public outputs
     cumsum_memory: EF4,               // partial sum for ReadAccess + WriteAccess buses
-    com_old: [BabyBear; 8],           // old SSMC commitment for this column
-    com_new: [BabyBear; 8],           // new SSMC commitment for this column
+    com_old: [KoalaBear; 8],           // old SSMC commitment for this column
+    com_new: [KoalaBear; 8],           // new SSMC commitment for this column
     is_empty_old: bool,
     is_empty_new: bool,
 }

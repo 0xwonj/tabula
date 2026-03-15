@@ -11,7 +11,7 @@
 //! ```
 
 use p3_air::{Air, BaseAir};
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_uni_stark::{ProverConstraintFolder, SymbolicAirBuilder, VerifierConstraintFolder};
 
 use tabula_stark::chips::ChipSpec;
@@ -37,12 +37,12 @@ use tabula_stark::rap::verifier::RapVerifierFolder;
 /// The blanket impl covers all chips automatically — no manual implementation needed.
 pub trait AnyRap:
     ChipSpec
-    + BaseAir<BabyBear>
-    + Air<SymbolicAirBuilder<BabyBear>>
+    + BaseAir<KoalaBear>
+    + Air<SymbolicAirBuilder<KoalaBear>>
     + for<'a> Air<ProverConstraintFolder<'a, TabulaStarkConfig>>
-    + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, BabyBear>>
+    + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, KoalaBear>>
     + for<'a> Air<VerifierConstraintFolder<'a, TabulaStarkConfig>>
-    + for<'a> Air<tabula_stark::debug::DebugConstraintBuilder<'a, BabyBear>>
+    + for<'a> Air<tabula_stark::debug::DebugConstraintBuilder<'a, KoalaBear>>
     + for<'a> Air<RapProverFolder<'a>>
     + for<'a> Air<RapVerifierFolder<'a>>
     + Send
@@ -52,12 +52,12 @@ pub trait AnyRap:
 
 impl<T> AnyRap for T where
     T: ChipSpec
-        + BaseAir<BabyBear>
-        + Air<SymbolicAirBuilder<BabyBear>>
+        + BaseAir<KoalaBear>
+        + Air<SymbolicAirBuilder<KoalaBear>>
         + for<'a> Air<ProverConstraintFolder<'a, TabulaStarkConfig>>
-        + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, BabyBear>>
+        + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, KoalaBear>>
         + for<'a> Air<VerifierConstraintFolder<'a, TabulaStarkConfig>>
-        + for<'a> Air<tabula_stark::debug::DebugConstraintBuilder<'a, BabyBear>>
+        + for<'a> Air<tabula_stark::debug::DebugConstraintBuilder<'a, KoalaBear>>
         + for<'a> Air<RapProverFolder<'a>>
         + for<'a> Air<RapVerifierFolder<'a>>
         + Send

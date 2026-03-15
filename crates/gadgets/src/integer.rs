@@ -6,9 +6,9 @@
 //! - A `constrain()` function for AIR constraint emission
 
 use p3_air::AirBuilder;
-use p3_baby_bear::BabyBear;
 use p3_field::integers::QuotientMap;
 use p3_field::{Field, PrimeCharacteristicRing};
+use p3_koala_bear::KoalaBear;
 
 // Re-export U64Limbs and constants from tabula-stark.
 pub use tabula_stark::gadgets::{MASK_30, SHIFT_30_U32, U64Limbs};
@@ -48,7 +48,7 @@ pub fn constrain_u64_decomposition<AB: AirBuilder>(
 /// 15-bit mask for half-limb extraction.
 pub(crate) const MASK_15: u64 = (1 << 15) - 1;
 
-/// 2^15 as u32 (fits in BabyBear).
+/// 2^15 as u32 (fits in KoalaBear).
 pub(crate) const SHIFT_15_U32: u32 = 1 << 15;
 
 /// Half-decomposition of a 30-bit limb into two 15-bit halves.
@@ -68,12 +68,12 @@ pub struct LimbHalves<T> {
     pub hi: T,
 }
 
-impl LimbHalves<BabyBear> {
+impl LimbHalves<KoalaBear> {
     /// Fill half columns from a 30-bit limb value.
     pub fn populate(&mut self, limb_val: u32) {
         debug_assert!(limb_val < (1 << 30), "limb value must be < 2^30");
-        self.lo = BabyBear::new(limb_val & MASK_15 as u32);
-        self.hi = BabyBear::new(limb_val >> 15);
+        self.lo = KoalaBear::new(limb_val & MASK_15 as u32);
+        self.hi = KoalaBear::new(limb_val >> 15);
     }
 }
 
@@ -108,15 +108,15 @@ pub struct IsZero<T> {
     pub is_zero: T,
 }
 
-impl IsZero<BabyBear> {
+impl IsZero<KoalaBear> {
     /// Fill witness columns from a field element.
-    pub fn populate(&mut self, val: BabyBear) {
-        if val == BabyBear::ZERO {
-            self.inv = BabyBear::ZERO;
-            self.is_zero = BabyBear::ONE;
+    pub fn populate(&mut self, val: KoalaBear) {
+        if val == KoalaBear::ZERO {
+            self.inv = KoalaBear::ZERO;
+            self.is_zero = KoalaBear::ONE;
         } else {
             self.inv = val.inverse();
-            self.is_zero = BabyBear::ZERO;
+            self.is_zero = KoalaBear::ZERO;
         }
     }
 }
@@ -159,14 +159,14 @@ pub struct Limb2Bits<T> {
     pub b3: T,
 }
 
-impl Limb2Bits<BabyBear> {
+impl Limb2Bits<KoalaBear> {
     /// Fill bit columns from a 4-bit value.
     pub fn populate(&mut self, val: u32) {
         debug_assert!(val < 16, "Limb2Bits: value must be < 16, got {val}");
-        self.b0 = BabyBear::new(val & 1);
-        self.b1 = BabyBear::new((val >> 1) & 1);
-        self.b2 = BabyBear::new((val >> 2) & 1);
-        self.b3 = BabyBear::new((val >> 3) & 1);
+        self.b0 = KoalaBear::new(val & 1);
+        self.b1 = KoalaBear::new((val >> 1) & 1);
+        self.b2 = KoalaBear::new((val >> 2) & 1);
+        self.b3 = KoalaBear::new((val >> 3) & 1);
     }
 }
 
@@ -217,7 +217,7 @@ pub struct StrictIneq<T> {
     pub borrow1: T,
 }
 
-impl StrictIneq<BabyBear> {
+impl StrictIneq<KoalaBear> {
     /// Fill witness columns proving `a < b`.
     ///
     /// # Panics
@@ -247,11 +247,11 @@ impl StrictIneq<BabyBear> {
         debug_assert!(d1 >= 0 && d1 < shift, "diff1 out of range: {d1}");
         debug_assert!((0..16).contains(&d2), "diff2 out of range: {d2}");
 
-        self.diff0 = BabyBear::new(d0 as u32);
-        self.diff1 = BabyBear::new(d1 as u32);
-        self.diff2 = BabyBear::new(d2 as u32);
-        self.borrow0 = BabyBear::new(borrow0 as u32);
-        self.borrow1 = BabyBear::new(borrow1 as u32);
+        self.diff0 = KoalaBear::new(d0 as u32);
+        self.diff1 = KoalaBear::new(d1 as u32);
+        self.diff2 = KoalaBear::new(d2 as u32);
+        self.borrow0 = KoalaBear::new(borrow0 as u32);
+        self.borrow1 = KoalaBear::new(borrow1 as u32);
     }
 }
 

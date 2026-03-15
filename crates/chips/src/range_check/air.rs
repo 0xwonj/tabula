@@ -1,7 +1,6 @@
 //! RangeCheck AIR chip — no constraints, soundness via LogUp.
 
-use p3_air::{Air, BaseAir};
-use p3_matrix::Matrix;
+use p3_air::{Air, BaseAir, WindowAccess};
 
 use tabula_stark::air::builder::InteractionAirBuilder;
 use tabula_stark::air::columns::borrow_cols;
@@ -27,8 +26,8 @@ impl<F> BaseAir<F> for RangeCheckChip {
 impl<AB: InteractionAirBuilder> Air<AB> for RangeCheckChip {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local_row = main.row_slice(0).expect("trace must have at least one row");
-        let local: &RangeCheckCols<AB::Var> = borrow_cols(&local_row);
+        let local_row = main.current_slice();
+        let local: &RangeCheckCols<AB::Var> = borrow_cols(local_row);
 
         // C8 RangeCheck bus receive: one receive per row.
         // value is fixed (0..2^16), multiplicity is prover-filled.

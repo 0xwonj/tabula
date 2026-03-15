@@ -1,6 +1,6 @@
 //! Tests for the MetaShard AIR chip.
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -21,7 +21,7 @@ fn chip() -> MetaShardChip {
     MetaShardChip::new(ChipId(100), 0, 0, scheme_tags::SSMC, true)
 }
 
-fn trace(row: Option<&MetaShardRow>) -> RowMajorMatrix<BabyBear> {
+fn trace(row: Option<&MetaShardRow>) -> RowMajorMatrix<KoalaBear> {
     generate_meta_shard_trace(0, 0, scheme_tags::SSMC, row)
 }
 

@@ -193,7 +193,7 @@ ReadOnlyOpeningCols<T> {
     is_real: T,
     table_id: T,
     col_id: T,
-    row_key: [T; 3],       // 30+30+4 BabyBear limbs
+    row_key: [T; 3],       // 30+30+4 KoalaBear limbs
     tag: T,                 // 0=SSMC, 1=SMT
     val: [T; MAX_W],        // Tier 1 ComEnc
     val_is_null: T,
@@ -695,7 +695,7 @@ Each `generate_*_trace()` function reads `witness.key_routes` to select its rows
 
 ```rust
 // sorted_mem/trace.rs — only SortedMemory keys
-fn generate_sorted_mem_trace(witness: &BatchWitness<H>) -> RowMajorMatrix<BabyBear> {
+fn generate_sorted_mem_trace(witness: &BatchWitness<H>) -> RowMajorMatrix<KoalaBear> {
     for col_w in &witness.columns {
         for init in &col_w.init_rows {
             if witness.key_routes[&init.key] == KeyRoute::SortedMemory { /* add row */ }
@@ -704,7 +704,7 @@ fn generate_sorted_mem_trace(witness: &BatchWitness<H>) -> RowMajorMatrix<BabyBe
 }
 
 // read_only_opening/trace.rs — only ReadOnlyOpening keys
-fn generate_read_only_opening_trace(witness: &BatchWitness<H>) -> RowMajorMatrix<BabyBear> {
+fn generate_read_only_opening_trace(witness: &BatchWitness<H>) -> RowMajorMatrix<KoalaBear> {
     for (key, &route) in &witness.key_routes {
         if route == KeyRoute::ReadOnlyOpening { /* add row from read_set_old */ }
     }

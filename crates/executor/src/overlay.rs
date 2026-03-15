@@ -14,7 +14,7 @@
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateSnapshot;
-use tabula_core::{CellKey, AccessEvent, LogicalTime, OpKind, Value, ValueType};
+use tabula_core::{AccessEvent, CellKey, LogicalTime, OpKind, Value, ValueType};
 
 use crate::execution_state::ExecutionState;
 use crate::trace_recorder::TraceRecorder;

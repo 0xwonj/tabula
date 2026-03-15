@@ -25,7 +25,7 @@
 //!   └─ Poseidon, RangeCheck, ...custom
 //! ```
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId};
@@ -218,7 +218,7 @@ pub trait BusConsumer: Send + Sync {
     /// aggregated from all upstream chip traces.
     fn collect(
         &self,
-        interactions: &[RecordedInteraction<BabyBear>],
+        interactions: &[RecordedInteraction<KoalaBear>],
         store: &mut WitnessStore,
     ) -> Result<(), TabulaError>;
 }

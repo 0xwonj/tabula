@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
 use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::EF4;
@@ -15,7 +15,7 @@ use super::PermutationError;
 /// Output of permutation trace generation.
 pub struct PermutationTraceOutput {
     /// The permutation trace matrix.
-    pub trace: RowMajorMatrix<BabyBear>,
+    pub trace: RowMajorMatrix<KoalaBear>,
     /// Total cumulative sum across all interactions.
     pub cumsum: EF4,
     /// Per-bus cumulative sums (for cross-proof bus balance).
@@ -25,8 +25,8 @@ pub struct PermutationTraceOutput {
 /// Compute an RLC fingerprint in the extension field EF4.
 ///
 /// `f = α + kind_tag + β · values[0] + β² · values[1] + …`
-pub fn compute_fingerprint_ef4(values: &[BabyBear], bus: BusId, alpha: EF4, beta: EF4) -> EF4 {
-    let mut result = alpha + EF4::from(BabyBear::from_u64(bus.tag() as u64));
+pub fn compute_fingerprint_ef4(values: &[KoalaBear], bus: BusId, alpha: EF4, beta: EF4) -> EF4 {
+    let mut result = alpha + EF4::from(KoalaBear::from_u64(bus.tag() as u64));
     let mut beta_power = beta;
     for &val in values {
         result += beta_power * EF4::from(val);
@@ -36,7 +36,7 @@ pub fn compute_fingerprint_ef4(values: &[BabyBear], bus: BusId, alpha: EF4, beta
 }
 
 /// Write an EF4 value into a trace row at the given column offset.
-fn write_ef4(row: &mut [BabyBear], offset: usize, val: EF4) {
+fn write_ef4(row: &mut [KoalaBear], offset: usize, val: EF4) {
     let coeffs = val.as_basis_coefficients_slice();
     row[offset] = coeffs[0];
     row[offset + 1] = coeffs[1];
@@ -65,7 +65,7 @@ fn write_ef4(row: &mut [BabyBear], offset: usize, val: EF4) {
 /// Returns [`PermutationError::FingerprintZero`] if a LogUp fingerprint evaluates
 /// to zero (probability ~2^{-124} with random challenges).
 pub fn generate_permutation_trace_from_interactions(
-    recorded: &[RecordedInteraction<BabyBear>],
+    recorded: &[RecordedInteraction<KoalaBear>],
     height: usize,
     challenges: [EF4; 2],
 ) -> Result<PermutationTraceOutput, PermutationError> {
@@ -85,10 +85,10 @@ pub fn generate_permutation_trace_from_interactions(
 
     let interactions_per_row = recorded.len() / height;
     let perm_width = 4 * (interactions_per_row + 1); // N phis + 1 cumsum
-    let mut perm_values = vec![BabyBear::ZERO; height * perm_width];
+    let mut perm_values = vec![KoalaBear::ZERO; height * perm_width];
 
     // ── Pass 1: Compute fingerprints for non-zero interactions ──────────
-    let mut multiplicities: Vec<BabyBear> = Vec::new();
+    let mut multiplicities: Vec<KoalaBear> = Vec::new();
     let mut fingerprints: Vec<EF4> = Vec::new();
 
     for row_idx in 0..height {
@@ -96,7 +96,7 @@ pub fn generate_permutation_trace_from_interactions(
         let row_interactions = &recorded[row_start..row_start + interactions_per_row];
 
         for (j, interaction) in row_interactions.iter().enumerate() {
-            if interaction.multiplicity == BabyBear::ZERO {
+            if interaction.multiplicity == KoalaBear::ZERO {
                 continue;
             }
 
@@ -129,7 +129,7 @@ pub fn generate_permutation_trace_from_interactions(
         let row_interactions = &recorded[row_start..row_start + interactions_per_row];
 
         for (j, interaction) in row_interactions.iter().enumerate() {
-            if interaction.multiplicity == BabyBear::ZERO {
+            if interaction.multiplicity == KoalaBear::ZERO {
                 continue;
             }
 
@@ -200,9 +200,9 @@ fn batch_inverse_ef4(elements: &[EF4]) -> Vec<EF4> {
 /// Returns a new trace with width = `main_width + perm_width`.
 #[cfg(test)]
 pub(crate) fn concat_traces(
-    main_trace: &RowMajorMatrix<BabyBear>,
-    perm_trace: &RowMajorMatrix<BabyBear>,
-) -> RowMajorMatrix<BabyBear> {
+    main_trace: &RowMajorMatrix<KoalaBear>,
+    perm_trace: &RowMajorMatrix<KoalaBear>,
+) -> RowMajorMatrix<KoalaBear> {
     use p3_matrix::Matrix;
     let height = main_trace.height();
     assert_eq!(height, perm_trace.height(), "trace heights must match");
@@ -211,7 +211,7 @@ pub(crate) fn concat_traces(
     let perm_w = perm_trace.width();
     let combined_w = main_w + perm_w;
 
-    let mut values = vec![BabyBear::ZERO; height * combined_w];
+    let mut values = vec![KoalaBear::ZERO; height * combined_w];
     for row in 0..height {
         let main_row = main_trace.row_slice(row).expect("row must exist");
         let perm_row = perm_trace.row_slice(row).expect("row must exist");

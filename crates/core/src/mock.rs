@@ -1,28 +1,33 @@
-//! Mock implementations of pluggable traits for Phase 1 testing.
+//! Test utilities requiring blake3.
 //!
-//! Enabled by the `mock` feature flag. These implement the traits defined
-//! in [`crate::traits`] using blake3 for hashing and in-memory collections
-//! for state.
-
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
+//! Enabled by the `test-utils` feature flag. For production-grade default
+//! implementations (no external deps), see the crate root re-exports.
 
 use crate::error::TabulaError;
-use crate::traits::{
-    BatchDigester, Hasher, MembershipScheme, NoncePolicy, SigVerifier, StateSnapshot,
-    StaticTableProvider, ValueCodec,
-};
-use crate::{Batch, CellKey, ColId, Digest, RowKey, TableId, Value, ValueType};
+use crate::traits::{BatchDigester, Hasher, MembershipScheme, ValueCodec};
+use crate::{Batch, Digest, Value, ValueType};
+
+// Re-export default implementations so existing `use tabula_core::mock::*` keeps working.
+pub use crate::{InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce};
+
+/// Backward-compatible alias. Prefer [`NoopSigVerifier`].
+pub type MockSigVerifier = NoopSigVerifier;
 
 // ---------------------------------------------------------------------------
-// MockHasher (blake3)
+// Blake3Hasher
 // ---------------------------------------------------------------------------
 
 /// Hash function backed by blake3.
-#[derive(Debug, Clone)]
-pub struct MockHasher;
+///
+/// Used for non-STARK execution paths (CLI, tests). The STARK proving path
+/// uses `PoseidonHasher` from `tabula-commitment`.
+#[derive(Debug, Clone, Copy)]
+pub struct Blake3Hasher;
 
-impl Hasher for MockHasher {
+/// Backward-compatible alias. Prefer [`Blake3Hasher`].
+pub type MockHasher = Blake3Hasher;
+
+impl Hasher for Blake3Hasher {
     fn hash(&self, data: &[u8]) -> Digest {
         *blake3::hash(data).as_bytes()
     }
@@ -40,153 +45,6 @@ impl Hasher for MockHasher {
             hasher.update(item);
         }
         *hasher.finalize().as_bytes()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// MockSigVerifier (always true)
-// ---------------------------------------------------------------------------
-
-/// Signature verifier that always returns `Ok(())`.
-#[derive(Debug, Clone)]
-pub struct MockSigVerifier;
-
-impl SigVerifier for MockSigVerifier {
-    fn verify(
-        &self,
-        _sender: &[u8; 32],
-        _message: &[u8],
-        _signature: &[u8],
-    ) -> Result<(), TabulaError> {
-        Ok(())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SequentialNonce
-// ---------------------------------------------------------------------------
-
-/// Nonce policy: `tx_nonce == current_nonce`, next = `current + 1`.
-#[derive(Debug, Clone)]
-pub struct SequentialNonce;
-
-impl NoncePolicy for SequentialNonce {
-    fn validate(
-        &self,
-        sender: &[u8; 32],
-        tx_nonce: u64,
-        current_nonce: u64,
-    ) -> Result<(), TabulaError> {
-        if tx_nonce == current_nonce {
-            Ok(())
-        } else {
-            Err(TabulaError::InvalidNonce {
-                sender: *sender,
-                expected: current_nonce,
-                actual: tx_nonce,
-            })
-        }
-    }
-
-    fn next_nonce(&self, _sender: &[u8; 32], current_nonce: u64) -> u64 {
-        current_nonce + 1
-    }
-}
-
-// ---------------------------------------------------------------------------
-// InMemoryStaticTables
-// ---------------------------------------------------------------------------
-
-/// BTreeMap-backed static table provider.
-#[derive(Debug, Clone)]
-pub struct InMemoryStaticTables {
-    data: BTreeMap<(TableId, RowKey, ColId), Value>,
-}
-
-impl InMemoryStaticTables {
-    /// Create a new empty static table provider.
-    pub fn new() -> Self {
-        Self {
-            data: BTreeMap::new(),
-        }
-    }
-
-    /// Insert a value into the static tables.
-    pub fn insert(&mut self, table: TableId, key: RowKey, col: ColId, value: Value) {
-        self.data.insert((table, key, col), value);
-    }
-}
-
-impl Default for InMemoryStaticTables {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StaticTableProvider for InMemoryStaticTables {
-    fn lookup(&self, table: TableId, key: RowKey, col: ColId) -> Result<Value, TabulaError> {
-        self.data
-            .get(&(table, key, col))
-            .copied()
-            .ok_or(TabulaError::CellNotFound(CellKey {
-                table,
-                col,
-                row: key,
-            }))
-    }
-
-    fn contains(&self, table: TableId, key: RowKey) -> Result<bool, TabulaError> {
-        use std::ops::Bound;
-        let start = (table, key, ColId(u16::MIN));
-        let end = (table, key, ColId(u16::MAX));
-        Ok(self
-            .data
-            .range((Bound::Included(start), Bound::Included(end)))
-            .next()
-            .is_some())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// InMemoryState (StateSnapshot)
-// ---------------------------------------------------------------------------
-
-/// BTreeMap-backed state snapshot.
-#[derive(Debug, Clone)]
-pub struct InMemoryState {
-    data: BTreeMap<CellKey, Value>,
-    tables: BTreeSet<TableId>,
-}
-
-impl InMemoryState {
-    /// Create a new empty state.
-    pub fn new() -> Self {
-        Self {
-            data: BTreeMap::new(),
-            tables: BTreeSet::new(),
-        }
-    }
-
-    /// Set a cell value.
-    pub fn set(&mut self, key: CellKey, value: Value) {
-        self.tables.insert(key.table);
-        self.data.insert(key, value);
-    }
-}
-
-impl Default for InMemoryState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StateSnapshot for InMemoryState {
-    fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
-        Ok(self.data.get(key).copied())
-    }
-
-    fn table_exists(&self, table: TableId) -> bool {
-        self.tables.contains(&table)
     }
 }
 
@@ -296,8 +154,8 @@ mod tests {
     use crate::{Transaction, TxTypeId};
 
     #[test]
-    fn test_mock_hasher_deterministic() {
-        let h = MockHasher;
+    fn blake3_hasher_deterministic() {
+        let h = Blake3Hasher;
         let a = h.hash(b"hello");
         let b = h.hash(b"hello");
         assert_eq!(a, b);
@@ -306,8 +164,8 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_hasher_pair() {
-        let h = MockHasher;
+    fn blake3_hasher_pair() {
+        let h = Blake3Hasher;
         let a = h.hash(b"left");
         let b = h.hash(b"right");
         let c = h.hash_pair(&a, &b);
@@ -316,56 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sequential_nonce() {
-        let n = SequentialNonce;
-        let sender = [0u8; 32];
-        assert!(n.validate(&sender, 0, 0).is_ok());
-        assert!(n.validate(&sender, 1, 0).is_err());
-        assert_eq!(n.next_nonce(&sender, 0), 1);
-    }
-
-    #[test]
-    fn test_in_memory_static_tables() {
-        let mut st = InMemoryStaticTables::new();
-        st.insert(TableId(1), RowKey(0), ColId(0), Value::U64(42));
-
-        assert_eq!(
-            st.lookup(TableId(1), RowKey(0), ColId(0)).unwrap(),
-            Value::U64(42)
-        );
-        assert!(st.contains(TableId(1), RowKey(0)).unwrap());
-        assert!(!st.contains(TableId(1), RowKey(999)).unwrap());
-        assert!(st.lookup(TableId(1), RowKey(999), ColId(0)).is_err());
-    }
-
-    #[test]
-    fn test_in_memory_state() {
-        let mut state = InMemoryState::new();
-        let k = CellKey {
-            table: TableId(1),
-            col: ColId(0),
-            row: RowKey(0),
-        };
-        state.set(k, Value::U64(100));
-
-        assert_eq!(state.read(&k).unwrap(), Some(Value::U64(100)));
-        assert!(state.table_exists(TableId(1)));
-        assert!(!state.table_exists(TableId(99)));
-    }
-
-    #[test]
-    fn test_in_memory_state_none_for_missing() {
-        let state = InMemoryState::new();
-        let k = CellKey {
-            table: TableId(1),
-            col: ColId(0),
-            row: RowKey(0),
-        };
-        assert_eq!(state.read(&k).unwrap(), None);
-    }
-
-    #[test]
-    fn test_mock_value_codec_round_trip() {
+    fn mock_value_codec_round_trip() {
         let codec = MockValueCodec;
         let v = Value::U64(42);
         let encoded = codec.encode(&v).unwrap();
@@ -374,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn test_flat_hash_membership() {
+    fn flat_hash_membership() {
         let scheme = FlatHashMembership;
         let item = b"tx_type_1_serialized";
         let items: Vec<&[u8]> = vec![item.as_slice()];
@@ -385,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_batch_digester_deterministic() {
+    fn simple_batch_digester_deterministic() {
         let digester = SimpleBatchDigester;
         let batch = Batch {
             transactions: vec![Transaction {

@@ -3,13 +3,13 @@
 //! Full gadget constraint implementations live in `tabula-gadgets`.
 //! Only types referenced by [`define_bus!`] macro expansions live here.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
+use p3_koala_bear::KoalaBear;
 
 /// 30-bit mask for limb extraction.
 pub const MASK_30: u64 = (1 << 30) - 1;
 
-/// 2^30 as u32 (fits in BabyBear: 1073741824 < p = 2013265921).
+/// 2^30 as u32 (fits in KoalaBear: 1073741824 < p = 2130706433).
 pub const SHIFT_30_U32: u32 = 1 << 30;
 
 /// 3-limb decomposition of a u64 (30+30+4 bits).
@@ -30,20 +30,20 @@ pub struct U64Limbs<T> {
     pub limb2: T,
 }
 
-impl U64Limbs<BabyBear> {
+impl U64Limbs<KoalaBear> {
     /// Fill limb columns from a u64 value.
     pub fn populate(&mut self, val: u64) {
-        self.limb0 = BabyBear::new((val & MASK_30) as u32);
-        self.limb1 = BabyBear::new(((val >> 30) & MASK_30) as u32);
-        self.limb2 = BabyBear::new((val >> 60) as u32);
+        self.limb0 = KoalaBear::new((val & MASK_30) as u32);
+        self.limb1 = KoalaBear::new(((val >> 30) & MASK_30) as u32);
+        self.limb2 = KoalaBear::new((val >> 60) as u32);
     }
 
     /// Create U64Limbs from a u64 value.
     pub fn from_u64(val: u64) -> Self {
         Self {
-            limb0: BabyBear::new((val & MASK_30) as u32),
-            limb1: BabyBear::new(((val >> 30) & MASK_30) as u32),
-            limb2: BabyBear::new((val >> 60) as u32),
+            limb0: KoalaBear::new((val & MASK_30) as u32),
+            limb1: KoalaBear::new(((val >> 30) & MASK_30) as u32),
+            limb2: KoalaBear::new((val >> 60) as u32),
         }
     }
 

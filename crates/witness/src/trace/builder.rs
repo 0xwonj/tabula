@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use tabula_commitment::{FieldHasher, NativeDigest};
 use tabula_core::error::TabulaError;
@@ -36,14 +36,14 @@ pub struct AllTraceInputs<'a> {
 #[derive(Clone, Copy)]
 pub struct TraceBuilder<'a, H, const W: usize>
 where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     witness: &'a BatchWitness<H>,
 }
 
 impl<'a, H, const W: usize> TraceBuilder<'a, H, W>
 where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     /// Create a new trace builder for a witness.
     pub fn new(witness: &'a BatchWitness<H>) -> Self {

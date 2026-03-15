@@ -23,6 +23,8 @@ use tabula_stark::chips::DEFAULT_VALUE_WIDTH;
 use tabula_stark::trace::DynChip;
 use tabula_stark::trace::column_commitment::BusConsumer;
 
+use tabula_ir::PrecompileId;
+
 use crate::AnyRap;
 use crate::column_scheme::{ColumnScheme, SsmcScheme};
 use crate::composition::{RootProof, SmtRootProof, execution_dyn_chips};
@@ -55,6 +57,7 @@ pub struct MachineBuilder {
     extensions: Vec<Box<dyn ChipExtension>>,
     column_schemes: BTreeMap<u16, Box<dyn ColumnScheme>>,
     property_openings: Vec<Box<dyn PropertyOpening>>,
+    precompile_ids: BTreeSet<PrecompileId>,
 }
 
 impl MachineBuilder {
@@ -74,6 +77,7 @@ impl MachineBuilder {
             extensions: Vec::new(),
             column_schemes,
             property_openings: Vec::new(),
+            precompile_ids: BTreeSet::new(),
         }
     }
 
@@ -110,6 +114,40 @@ impl MachineBuilder {
     pub fn with_extension(mut self, ext: impl ChipExtension + 'static) -> Self {
         self.extensions.push(Box::new(ext));
         self
+    }
+
+    /// Register a precompile verification chip for the execution tier.
+    ///
+    /// The extension provides the RECEIVE side of the PRECOMPILE bus
+    /// (BusId 17) for a specific [`PrecompileId`]. The ExecutionChip
+    /// handles the SEND side automatically.
+    ///
+    /// Each [`PrecompileId`] may only be registered once. This method
+    /// validates uniqueness at registration time, not at build time,
+    /// for early error detection.
+    ///
+    /// Note: this registers the *proving* side only. The execution handler
+    /// ([`PrecompileHandler`](tabula_executor::PrecompileHandler)) must be
+    /// registered separately in the executor's [`PrecompileRegistry`].
+    ///
+    /// ```ignore
+    /// TabulaMachine::builder()
+    ///     .with_precompile(PrecompileId(0x0004), Sha256VerifierExtension)
+    ///     .build()?;
+    /// ```
+    pub fn with_precompile(mut self, id: PrecompileId, ext: impl ChipExtension + 'static) -> Self {
+        self.precompile_ids.insert(id);
+        self.extensions.push(Box::new(ext));
+        self
+    }
+
+    /// The set of registered precompile IDs.
+    ///
+    /// Useful for downstream code that needs to know which precompiles
+    /// are available for proving (e.g., to validate executor registry
+    /// consistency at application setup time).
+    pub fn precompile_ids(&self) -> &BTreeSet<PrecompileId> {
+        &self.precompile_ids
     }
 
     /// Register a custom column commitment scheme.
@@ -169,6 +207,7 @@ impl MachineBuilder {
             self.config,
             setups,
             self.property_openings,
+            self.precompile_ids,
         ))
     }
 

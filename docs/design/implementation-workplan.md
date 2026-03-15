@@ -285,7 +285,7 @@ witness population logic, and optionally custom `ColumnCommitment` schemes as a 
 | 3.1.1 | `ChipExtension` trait: `register(&self, registry, plan)`, `populate_witness(&self, store, context)`, `name()`. Includes optional `commitment_schemes() -> Vec<Box<dyn ColumnCommitment>>` for state commitment extensions. |
 | 3.1.2 | `CoreExtension` — wraps `core_chips()` + `SsmcCommitment` + `SmtCommitment` as a `ChipExtension`. |
 | 3.1.3 | `TabulaMachine::builder().with_extension(ext)` — registers all chips and commitment schemes from an extension. |
-| 3.1.4 | `tabula-machine::prelude` — stable re-exports of p3 types apps need (`BabyBear`, `RowMajorMatrix`, `InteractionAirBuilder`, etc.). |
+| 3.1.4 | `tabula-machine::prelude` — stable re-exports of p3 types apps need (`KoalaBear`, `RowMajorMatrix`, `InteractionAirBuilder`, etc.). |
 
 #### 3.2 Precompile Framework
 
@@ -527,7 +527,7 @@ Per-column inner STARK proofs + recursive tree aggregation → fixed-size final 
 | SSA slot carry | 16×(W+1) | Prevent slot value fabrication across rows |
 | Operand linkage | 48+3 | Prevent fake operand values |
 | Arithmetic correctness | 7 opcodes | Verify computation results |
-| Range checks | 20+ sends | Prevent BabyBear mod-p exploitation |
+| Range checks | 20+ sends | Prevent KoalaBear mod-p exploitation |
 | Bus interactions | 6 buses | Cross-chip consistency |
 | Clock/ordering | 2 | Timestamp and tx sequence integrity |
 | First row init | 1 | Establish clean initial state |

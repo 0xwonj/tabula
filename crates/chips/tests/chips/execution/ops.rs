@@ -103,7 +103,7 @@ fn cmp_wrong_result_fails() {
         make_cmp(2, 0, 1, CmpOp::Lt, 10, 20),
     ];
     // Corrupt: set dst to 0 (wrong: 10 < 20 should be 1)
-    records[2].writes[0].1 = vec![BabyBear::ZERO, BabyBear::ZERO, BabyBear::ZERO];
+    records[2].writes[0].1 = vec![KoalaBear::ZERO, KoalaBear::ZERO, KoalaBear::ZERO];
     let trace = generate_execution_trace::<3>(&records);
     debug_check(&ExecutionChip::<3>, &trace).expect_err("wrong cmp result should fail constraint");
 }
@@ -156,7 +156,7 @@ fn hash_wrong_output_fails() {
         make_hash(2, 0, 1, 0x20, 2, [42, 0, 0], [99, 0, 0]),
     ];
     // Corrupt the hash output (writes[0] value)
-    records[2].writes[0].1 = vec![BabyBear::new(999), BabyBear::ZERO, BabyBear::ZERO];
+    records[2].writes[0].1 = vec![KoalaBear::new(999), KoalaBear::ZERO, KoalaBear::ZERO];
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace)
         .expect_err("wrong hash output should fail result binding");
@@ -171,7 +171,7 @@ fn hash_wrong_input_composition_fails() {
     ];
     // Corrupt perm_input[2] (should match src1_val[0])
     if let Some(ref mut input) = records[2].hash_perm_input {
-        input[2] = BabyBear::new(999);
+        input[2] = KoalaBear::new(999);
     }
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong input composition should fail");
@@ -186,7 +186,7 @@ fn hash_nonzero_capacity_fails() {
     ];
     // Corrupt capacity (perm_input[8] should be 0)
     if let Some(ref mut input) = records[2].hash_perm_input {
-        input[8] = BabyBear::ONE;
+        input[8] = KoalaBear::ONE;
     }
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("nonzero capacity should fail");

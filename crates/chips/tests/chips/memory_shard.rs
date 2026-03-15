@@ -1,7 +1,7 @@
 //! Tests for the MemoryShard AIR chip.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_chips::shards::memory::air::MemoryShardChip;
@@ -19,7 +19,7 @@ fn chip() -> MemoryShardChip<3> {
     MemoryShardChip::new(ChipId(100), 0, 0)
 }
 
-fn trace(rows: &[MemoryShardRow]) -> RowMajorMatrix<BabyBear> {
+fn trace(rows: &[MemoryShardRow]) -> RowMajorMatrix<KoalaBear> {
     generate_memory_shard_trace::<3>(0, 0, rows)
 }
 
@@ -209,7 +209,7 @@ fn invalid_output_derivation() {
         ms_init(100, [50, 0, 0], false),
         ms_read(100, 0, [50, 0, 0], false),
     ];
-    rows[1].output_val = vec![BabyBear::new(99), BabyBear::ZERO, BabyBear::ZERO];
+    rows[1].output_val = vec![KoalaBear::new(99), KoalaBear::ZERO, KoalaBear::ZERO];
     debug_check(&chip(), &trace(&rows)).expect_err("output derivation error should fail");
 }
 
@@ -237,9 +237,9 @@ fn invalid_no_read_no_write() {
             is_init: false,
             has_read: false,
             has_write: false,
-            input_val: vec![BabyBear::new(50), BabyBear::ZERO, BabyBear::ZERO],
+            input_val: vec![KoalaBear::new(50), KoalaBear::ZERO, KoalaBear::ZERO],
             input_is_null: false,
-            output_val: vec![BabyBear::new(50), BabyBear::ZERO, BabyBear::ZERO],
+            output_val: vec![KoalaBear::new(50), KoalaBear::ZERO, KoalaBear::ZERO],
             output_is_null: false,
         },
     ];
@@ -255,7 +255,7 @@ fn invalid_key_ordering_violation() {
 #[test]
 fn invalid_init_output_differs_from_input() {
     let mut rows = vec![ms_init(100, [50, 0, 0], false)];
-    rows[0].output_val = vec![BabyBear::new(99), BabyBear::ZERO, BabyBear::ZERO];
+    rows[0].output_val = vec![KoalaBear::new(99), KoalaBear::ZERO, KoalaBear::ZERO];
     debug_check(&chip(), &trace(&rows)).expect_err("init output≠input should fail");
 }
 
@@ -278,8 +278,8 @@ fn invalid_forged_has_ever_written() {
 
     // Corrupt: set has_ever_written=1 on the read row (row 1)
     let width = memory_shard_width::<3>();
-    let cols: &mut MemoryShardCols<BabyBear, 3> = borrow_cols_mut(&mut t.values[width..2 * width]);
-    cols.has_ever_written = BabyBear::ONE;
+    let cols: &mut MemoryShardCols<KoalaBear, 3> = borrow_cols_mut(&mut t.values[width..2 * width]);
+    cols.has_ever_written = KoalaBear::ONE;
 
     debug_check(&chip(), &t).expect_err("forged has_ever_written should fail");
 }
@@ -291,31 +291,31 @@ fn invalid_table_id_change() {
     // Build a trace where table_id changes mid-trace.
     let width = memory_shard_width::<3>();
     let num_rows = 4;
-    let mut values = vec![BabyBear::ZERO; num_rows * width];
+    let mut values = vec![KoalaBear::ZERO; num_rows * width];
 
     // Row 0: init, table_id=0
     {
-        let cols: &mut MemoryShardCols<BabyBear, 3> = borrow_cols_mut(&mut values[0..width]);
-        cols.is_real = BabyBear::ONE;
-        cols.table_id = BabyBear::ZERO;
+        let cols: &mut MemoryShardCols<KoalaBear, 3> = borrow_cols_mut(&mut values[0..width]);
+        cols.is_real = KoalaBear::ONE;
+        cols.table_id = KoalaBear::ZERO;
         cols.key.populate(100);
-        cols.is_init = BabyBear::ONE;
-        cols.input_val = [BabyBear::new(50), BabyBear::ZERO, BabyBear::ZERO];
-        cols.output_val = [BabyBear::new(50), BabyBear::ZERO, BabyBear::ZERO];
-        cols.is_last_for_key = BabyBear::ONE;
+        cols.is_init = KoalaBear::ONE;
+        cols.input_val = [KoalaBear::new(50), KoalaBear::ZERO, KoalaBear::ZERO];
+        cols.output_val = [KoalaBear::new(50), KoalaBear::ZERO, KoalaBear::ZERO];
+        cols.is_last_for_key = KoalaBear::ONE;
     }
 
     // Row 1: init, table_id=1 (VIOLATION)
     {
-        let cols: &mut MemoryShardCols<BabyBear, 3> =
+        let cols: &mut MemoryShardCols<KoalaBear, 3> =
             borrow_cols_mut(&mut values[width..2 * width]);
-        cols.is_real = BabyBear::ONE;
-        cols.table_id = BabyBear::ONE; // Different table!
+        cols.is_real = KoalaBear::ONE;
+        cols.table_id = KoalaBear::ONE; // Different table!
         cols.key.populate(100);
-        cols.is_init = BabyBear::ONE;
-        cols.input_val = [BabyBear::new(50), BabyBear::ZERO, BabyBear::ZERO];
-        cols.output_val = [BabyBear::new(50), BabyBear::ZERO, BabyBear::ZERO];
-        cols.is_last_for_key = BabyBear::ONE;
+        cols.is_init = KoalaBear::ONE;
+        cols.input_val = [KoalaBear::new(50), KoalaBear::ZERO, KoalaBear::ZERO];
+        cols.output_val = [KoalaBear::new(50), KoalaBear::ZERO, KoalaBear::ZERO];
+        cols.is_last_for_key = KoalaBear::ONE;
     }
 
     // Populate IsZero witnesses for all rows (including padding)
@@ -325,14 +325,15 @@ fn invalid_table_id_change() {
         let next_key = if next_idx < 2 { 100u64 } else { 0 };
 
         let offset = i * width;
-        let cols: &mut MemoryShardCols<BabyBear, 3> =
+        let cols: &mut MemoryShardCols<KoalaBear, 3> =
             borrow_cols_mut(&mut values[offset..offset + width]);
 
-        let diff0 = BabyBear::new((next_key & 0x3FFF_FFFF) as u32)
-            - BabyBear::new((cur_key & 0x3FFF_FFFF) as u32);
-        let diff1 = BabyBear::new(((next_key >> 30) & 0x3FFF_FFFF) as u32)
-            - BabyBear::new(((cur_key >> 30) & 0x3FFF_FFFF) as u32);
-        let diff2 = BabyBear::new((next_key >> 60) as u32) - BabyBear::new((cur_key >> 60) as u32);
+        let diff0 = KoalaBear::new((next_key & 0x3FFF_FFFF) as u32)
+            - KoalaBear::new((cur_key & 0x3FFF_FFFF) as u32);
+        let diff1 = KoalaBear::new(((next_key >> 30) & 0x3FFF_FFFF) as u32)
+            - KoalaBear::new(((cur_key >> 30) & 0x3FFF_FFFF) as u32);
+        let diff2 =
+            KoalaBear::new((next_key >> 60) as u32) - KoalaBear::new((cur_key >> 60) as u32);
         cols.r_limb0_iz.populate(diff0);
         cols.r_limb1_iz.populate(diff1);
         cols.r_limb2_iz.populate(diff2);
@@ -358,32 +359,32 @@ fn valid_different_column_chip() {
 
 // ── Helper functions ──
 
-fn build_manual_key_ordering_violation() -> RowMajorMatrix<BabyBear> {
+fn build_manual_key_ordering_violation() -> RowMajorMatrix<KoalaBear> {
     let width = memory_shard_width::<3>();
     let num_rows = 4;
-    let mut values = vec![BabyBear::ZERO; num_rows * width];
+    let mut values = vec![KoalaBear::ZERO; num_rows * width];
 
     // Row 0: init, key=200
     {
-        let cols: &mut MemoryShardCols<BabyBear, 3> = borrow_cols_mut(&mut values[0..width]);
-        cols.is_real = BabyBear::ONE;
+        let cols: &mut MemoryShardCols<KoalaBear, 3> = borrow_cols_mut(&mut values[0..width]);
+        cols.is_real = KoalaBear::ONE;
         cols.key.populate(200);
-        cols.is_init = BabyBear::ONE;
-        cols.input_val = [BabyBear::new(1), BabyBear::ZERO, BabyBear::ZERO];
-        cols.output_val = [BabyBear::new(1), BabyBear::ZERO, BabyBear::ZERO];
-        cols.is_last_for_key = BabyBear::ONE;
+        cols.is_init = KoalaBear::ONE;
+        cols.input_val = [KoalaBear::new(1), KoalaBear::ZERO, KoalaBear::ZERO];
+        cols.output_val = [KoalaBear::new(1), KoalaBear::ZERO, KoalaBear::ZERO];
+        cols.is_last_for_key = KoalaBear::ONE;
     }
 
     // Row 1: init, key=100 (violation: 200 > 100)
     {
-        let cols: &mut MemoryShardCols<BabyBear, 3> =
+        let cols: &mut MemoryShardCols<KoalaBear, 3> =
             borrow_cols_mut(&mut values[width..2 * width]);
-        cols.is_real = BabyBear::ONE;
+        cols.is_real = KoalaBear::ONE;
         cols.key.populate(100);
-        cols.is_init = BabyBear::ONE;
-        cols.input_val = [BabyBear::new(2), BabyBear::ZERO, BabyBear::ZERO];
-        cols.output_val = [BabyBear::new(2), BabyBear::ZERO, BabyBear::ZERO];
-        cols.is_last_for_key = BabyBear::ONE;
+        cols.is_init = KoalaBear::ONE;
+        cols.input_val = [KoalaBear::new(2), KoalaBear::ZERO, KoalaBear::ZERO];
+        cols.output_val = [KoalaBear::new(2), KoalaBear::ZERO, KoalaBear::ZERO];
+        cols.is_last_for_key = KoalaBear::ONE;
     }
 
     // Populate IsZero witnesses
@@ -401,14 +402,15 @@ fn build_manual_key_ordering_violation() -> RowMajorMatrix<BabyBear> {
         };
 
         let offset = i * width;
-        let cols: &mut MemoryShardCols<BabyBear, 3> =
+        let cols: &mut MemoryShardCols<KoalaBear, 3> =
             borrow_cols_mut(&mut values[offset..offset + width]);
 
-        let diff0 = BabyBear::new((next_key & 0x3FFF_FFFF) as u32)
-            - BabyBear::new((cur_key & 0x3FFF_FFFF) as u32);
-        let diff1 = BabyBear::new(((next_key >> 30) & 0x3FFF_FFFF) as u32)
-            - BabyBear::new(((cur_key >> 30) & 0x3FFF_FFFF) as u32);
-        let diff2 = BabyBear::new((next_key >> 60) as u32) - BabyBear::new((cur_key >> 60) as u32);
+        let diff0 = KoalaBear::new((next_key & 0x3FFF_FFFF) as u32)
+            - KoalaBear::new((cur_key & 0x3FFF_FFFF) as u32);
+        let diff1 = KoalaBear::new(((next_key >> 30) & 0x3FFF_FFFF) as u32)
+            - KoalaBear::new(((cur_key >> 30) & 0x3FFF_FFFF) as u32);
+        let diff2 =
+            KoalaBear::new((next_key >> 60) as u32) - KoalaBear::new((cur_key >> 60) as u32);
         cols.r_limb0_iz.populate(diff0);
         cols.r_limb1_iz.populate(diff1);
         cols.r_limb2_iz.populate(diff2);

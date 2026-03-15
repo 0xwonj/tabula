@@ -1,8 +1,7 @@
 #![allow(missing_docs)]
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_baby_bear::BabyBear;
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
-use p3_matrix::Matrix;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_gadgets::{
@@ -33,60 +32,60 @@ impl<F> BaseAir<F> for IsZeroTestChip {
 impl<AB: AirBuilder> Air<AB> for IsZeroTestChip {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let row = main.row_slice(0).expect("row");
-        let cols: &IsZeroTestCols<AB::Var> = borrow_cols(&row);
-        constrain_is_zero(builder, cols.val.clone().into(), &cols.iz);
+        let local_row = main.current_slice();
+        let cols: &IsZeroTestCols<AB::Var> = borrow_cols(local_row);
+        constrain_is_zero(builder, cols.val.into(), &cols.iz);
     }
 }
 
-fn make_is_zero_trace(val: BabyBear) -> RowMajorMatrix<BabyBear> {
-    let mut values = vec![BabyBear::ZERO; 2 * IS_ZERO_WIDTH];
-    let row0: &mut IsZeroTestCols<BabyBear> = borrow_cols_mut(&mut values[..IS_ZERO_WIDTH]);
+fn make_is_zero_trace(val: KoalaBear) -> RowMajorMatrix<KoalaBear> {
+    let mut values = vec![KoalaBear::ZERO; 2 * IS_ZERO_WIDTH];
+    let row0: &mut IsZeroTestCols<KoalaBear> = borrow_cols_mut(&mut values[..IS_ZERO_WIDTH]);
     row0.val = val;
     row0.iz.populate(val);
-    let row1: &mut IsZeroTestCols<BabyBear> =
+    let row1: &mut IsZeroTestCols<KoalaBear> =
         borrow_cols_mut(&mut values[IS_ZERO_WIDTH..2 * IS_ZERO_WIDTH]);
-    row1.val = BabyBear::ZERO;
-    row1.iz.populate(BabyBear::ZERO);
+    row1.val = KoalaBear::ZERO;
+    row1.iz.populate(KoalaBear::ZERO);
     RowMajorMatrix::new(values, IS_ZERO_WIDTH)
 }
 
 #[test]
 fn is_zero_with_zero_value() {
-    let trace = make_is_zero_trace(BabyBear::ZERO);
+    let trace = make_is_zero_trace(KoalaBear::ZERO);
     debug_check(&IsZeroTestChip, &trace).expect("zero should pass");
 }
 
 #[test]
 fn is_zero_with_nonzero_value() {
-    let trace = make_is_zero_trace(BabyBear::new(42));
+    let trace = make_is_zero_trace(KoalaBear::new(42));
     debug_check(&IsZeroTestChip, &trace).expect("nonzero should pass");
 }
 
 #[test]
 fn is_zero_with_large_value() {
-    let trace = make_is_zero_trace(BabyBear::new(BabyBear::ORDER_U32 - 1));
+    let trace = make_is_zero_trace(KoalaBear::new(KoalaBear::ORDER_U32 - 1));
     debug_check(&IsZeroTestChip, &trace).expect("p-1 should pass");
 }
 
 #[test]
 fn is_zero_soundness_claim_zero_on_nonzero() {
-    let mut values = vec![BabyBear::ZERO; 2 * IS_ZERO_WIDTH];
-    let row: &mut IsZeroTestCols<BabyBear> = borrow_cols_mut(&mut values[..IS_ZERO_WIDTH]);
-    row.val = BabyBear::new(42);
-    row.iz.is_zero = BabyBear::ONE;
-    row.iz.inv = BabyBear::ZERO;
+    let mut values = vec![KoalaBear::ZERO; 2 * IS_ZERO_WIDTH];
+    let row: &mut IsZeroTestCols<KoalaBear> = borrow_cols_mut(&mut values[..IS_ZERO_WIDTH]);
+    row.val = KoalaBear::new(42);
+    row.iz.is_zero = KoalaBear::ONE;
+    row.iz.inv = KoalaBear::ZERO;
     let trace = RowMajorMatrix::new(values, IS_ZERO_WIDTH);
     debug_check(&IsZeroTestChip, &trace).expect_err("should fail: val*is_zero != 0");
 }
 
 #[test]
 fn is_zero_soundness_claim_nonzero_on_zero() {
-    let mut values = vec![BabyBear::ZERO; 2 * IS_ZERO_WIDTH];
-    let row: &mut IsZeroTestCols<BabyBear> = borrow_cols_mut(&mut values[..IS_ZERO_WIDTH]);
-    row.val = BabyBear::ZERO;
-    row.iz.is_zero = BabyBear::ZERO;
-    row.iz.inv = BabyBear::new(1);
+    let mut values = vec![KoalaBear::ZERO; 2 * IS_ZERO_WIDTH];
+    let row: &mut IsZeroTestCols<KoalaBear> = borrow_cols_mut(&mut values[..IS_ZERO_WIDTH]);
+    row.val = KoalaBear::ZERO;
+    row.iz.is_zero = KoalaBear::ZERO;
+    row.iz.inv = KoalaBear::new(1);
     let trace = RowMajorMatrix::new(values, IS_ZERO_WIDTH);
     debug_check(&IsZeroTestChip, &trace).expect_err("should fail: (1-is_zero)*(1-val*inv) != 0");
 }
@@ -112,17 +111,17 @@ impl<F> BaseAir<F> for U64TestChip {
 impl<AB: AirBuilder> Air<AB> for U64TestChip {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let row = main.row_slice(0).expect("row");
-        let cols: &U64TestCols<AB::Var> = borrow_cols(&row);
-        constrain_u64_decomposition(builder, &cols.limbs, cols.expected.clone().into());
+        let local_row = main.current_slice();
+        let cols: &U64TestCols<AB::Var> = borrow_cols(local_row);
+        constrain_u64_decomposition(builder, &cols.limbs, cols.expected.into());
     }
 }
 
-fn make_u64_trace(val: u64) -> RowMajorMatrix<BabyBear> {
+fn make_u64_trace(val: u64) -> RowMajorMatrix<KoalaBear> {
     let shift_30_u32: u32 = 1 << 30;
-    let mut values = vec![BabyBear::ZERO; 2 * U64_WIDTH];
-    let row: &mut U64TestCols<BabyBear> = borrow_cols_mut(&mut values[..U64_WIDTH]);
-    let shift_30 = BabyBear::new(shift_30_u32);
+    let mut values = vec![KoalaBear::ZERO; 2 * U64_WIDTH];
+    let row: &mut U64TestCols<KoalaBear> = borrow_cols_mut(&mut values[..U64_WIDTH]);
+    let shift_30 = KoalaBear::new(shift_30_u32);
     let shift_60 = shift_30 * shift_30;
     row.limbs.populate(val);
     row.expected = row.limbs.limb0 + row.limbs.limb1 * shift_30 + row.limbs.limb2 * shift_60;
@@ -150,14 +149,14 @@ fn u64_limbs_mid_value() {
 #[test]
 fn u64_limbs_soundness_wrong_limb() {
     let shift_30_u32: u32 = 1 << 30;
-    let mut values = vec![BabyBear::ZERO; 2 * U64_WIDTH];
-    let row: &mut U64TestCols<BabyBear> = borrow_cols_mut(&mut values[..U64_WIDTH]);
+    let mut values = vec![KoalaBear::ZERO; 2 * U64_WIDTH];
+    let row: &mut U64TestCols<KoalaBear> = borrow_cols_mut(&mut values[..U64_WIDTH]);
     let val = 42u64;
-    let shift_30 = BabyBear::new(shift_30_u32);
+    let shift_30 = KoalaBear::new(shift_30_u32);
     let shift_60 = shift_30 * shift_30;
     row.limbs.populate(val);
     row.expected = row.limbs.limb0 + row.limbs.limb1 * shift_30 + row.limbs.limb2 * shift_60;
-    row.limbs.limb0 = BabyBear::new(999);
+    row.limbs.limb0 = KoalaBear::new(999);
     let trace = RowMajorMatrix::new(values, U64_WIDTH);
     debug_check(&U64TestChip, &trace).expect_err("corrupted limb should fail");
 }
@@ -185,17 +184,17 @@ impl<F> BaseAir<F> for IneqTestChip {
 impl<AB: AirBuilder> Air<AB> for IneqTestChip {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let row = main.row_slice(0).expect("row");
-        let cols: &IneqTestCols<AB::Var> = borrow_cols(&row);
-        let mut when_real = builder.when(cols.is_real.clone());
+        let local_row = main.current_slice();
+        let cols: &IneqTestCols<AB::Var> = borrow_cols(local_row);
+        let mut when_real = builder.when(cols.is_real);
         constrain_strict_ineq(&mut when_real, &cols.a, &cols.b, &cols.ineq);
     }
 }
 
-fn make_ineq_trace(a: u64, b: u64) -> RowMajorMatrix<BabyBear> {
-    let mut values = vec![BabyBear::ZERO; 2 * INEQ_WIDTH];
-    let row: &mut IneqTestCols<BabyBear> = borrow_cols_mut(&mut values[..INEQ_WIDTH]);
-    row.is_real = BabyBear::ONE;
+fn make_ineq_trace(a: u64, b: u64) -> RowMajorMatrix<KoalaBear> {
+    let mut values = vec![KoalaBear::ZERO; 2 * INEQ_WIDTH];
+    let row: &mut IneqTestCols<KoalaBear> = borrow_cols_mut(&mut values[..INEQ_WIDTH]);
+    row.is_real = KoalaBear::ONE;
     row.a.populate(a);
     row.b.populate(b);
     row.ineq.populate(a, b);
@@ -234,13 +233,13 @@ fn strict_ineq_cross_limb_boundary() {
 
 #[test]
 fn strict_ineq_soundness_wrong_gap() {
-    let mut values = vec![BabyBear::ZERO; 2 * INEQ_WIDTH];
-    let row: &mut IneqTestCols<BabyBear> = borrow_cols_mut(&mut values[..INEQ_WIDTH]);
-    row.is_real = BabyBear::ONE;
+    let mut values = vec![KoalaBear::ZERO; 2 * INEQ_WIDTH];
+    let row: &mut IneqTestCols<KoalaBear> = borrow_cols_mut(&mut values[..INEQ_WIDTH]);
+    row.is_real = KoalaBear::ONE;
     row.a.populate(10);
     row.b.populate(20);
     row.ineq.populate(10, 20);
-    row.ineq.diff0 = BabyBear::new(999);
+    row.ineq.diff0 = KoalaBear::new(999);
     let trace = RowMajorMatrix::new(values, INEQ_WIDTH);
     debug_check(&IneqTestChip, &trace).expect_err("corrupted gap should fail");
 }
@@ -249,11 +248,11 @@ fn strict_ineq_soundness_wrong_gap() {
 #[should_panic(expected = "must be < b")]
 fn strict_ineq_populate_panics_on_equal() {
     let mut ineq = StrictIneq {
-        diff0: BabyBear::ZERO,
-        diff1: BabyBear::ZERO,
-        diff2: BabyBear::ZERO,
-        borrow0: BabyBear::ZERO,
-        borrow1: BabyBear::ZERO,
+        diff0: KoalaBear::ZERO,
+        diff1: KoalaBear::ZERO,
+        diff2: KoalaBear::ZERO,
+        borrow0: KoalaBear::ZERO,
+        borrow1: KoalaBear::ZERO,
     };
     ineq.populate(5, 5);
 }
@@ -262,11 +261,11 @@ fn strict_ineq_populate_panics_on_equal() {
 #[should_panic(expected = "must be < b")]
 fn strict_ineq_populate_panics_on_reversed() {
     let mut ineq = StrictIneq {
-        diff0: BabyBear::ZERO,
-        diff1: BabyBear::ZERO,
-        diff2: BabyBear::ZERO,
-        borrow0: BabyBear::ZERO,
-        borrow1: BabyBear::ZERO,
+        diff0: KoalaBear::ZERO,
+        diff1: KoalaBear::ZERO,
+        diff2: KoalaBear::ZERO,
+        borrow0: KoalaBear::ZERO,
+        borrow1: KoalaBear::ZERO,
     };
     ineq.populate(10, 5);
 }

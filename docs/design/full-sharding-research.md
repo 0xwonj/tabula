@@ -346,7 +346,7 @@ With full sharding, custom type support requires:
 4. **Shard chip instantiation**: `MemoryShard<W>`, `StateShard<W>` are already generic over W. MachineBuilder registers them.
 5. **Bus**: No special handling. Each column proof computes its own fingerprint with its own W.
 
-**What is NOT needed**: TypeEncoding registry, BabyBearCodec changes, Value enum extension. These are only needed if the global pipeline must dispatch on arbitrary types. With sharding, the column proof handles everything internally.
+**What is NOT needed**: TypeEncoding registry, KoalaBearCodec changes, Value enum extension. These are only needed if the global pipeline must dispatch on arbitrary types. With sharding, the column proof handles everything internally.
 
 ---
 
@@ -508,7 +508,7 @@ Soundness: cumsum_exec + Σ_j cumsum_col_j = 0
 
 This is verified arithmetically in the root proof. No STARK constraint needed — it's a direct EF4 equality check on public values.
 
-**Security level**: EF4 = BabyBear⁴ ≈ 2^124 bits. The probability of a false positive (accidental balance with incorrect accesses) is ~2^{-124}.
+**Security level**: EF4 = KoalaBear⁴ ≈ 2^124 bits. The probability of a false positive (accidental balance with incorrect accesses) is ~2^{-124}.
 
 ### 7.2 Per-Proof Internal Soundness
 

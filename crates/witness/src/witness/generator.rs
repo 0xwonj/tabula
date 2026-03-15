@@ -2,11 +2,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
-use tabula_commitment::{
-    BabyBearCodec, ColumnMeta, ColumnState, FieldHasher, HybridVC, NativeDigest,
-};
+use tabula_commitment::{ColumnMeta, ColumnState, FieldHasher, KoalaBearCodec, NativeDigest};
 use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
 use tabula_core::{BatchResult, ColId, OpKind, RowKey, TableId, TableSchema, ValueType};
@@ -18,7 +16,7 @@ use super::route::route_keys;
 use super::types::{AccessRow, BatchWitness, ColumnWitness, InitRow};
 
 /// Per-column writes: `(row_key, encoded_value)` pairs. `None` = delete.
-type ColumnWrites = Vec<(RowKey, Option<Vec<BabyBear>>)>;
+type ColumnWrites = Vec<(RowKey, Option<Vec<KoalaBear>>)>;
 
 /// Result of `build_column_witnesses`: per-column witnesses, flat column metas,
 /// and the post-batch column states.
@@ -32,17 +30,17 @@ type ColumnWitnessResult<H> = (
 ///
 /// Bridges the executor's `BatchResult` to proof-system trace tables
 /// by encoding values into field elements and computing state transitions.
-pub struct WitnessGenerator<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> {
-    vc: HybridVC<H>,
-    codec: BabyBearCodec,
+pub struct WitnessGenerator<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> {
+    hasher: H,
+    codec: KoalaBearCodec,
 }
 
-impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
-    /// Create a new witness generator.
-    pub fn new(vc: HybridVC<H>) -> Self {
+impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> WitnessGenerator<H> {
+    /// Create a new witness generator with the given field hasher.
+    pub fn new(hasher: H) -> Self {
         Self {
-            vc,
-            codec: BabyBearCodec,
+            hasher,
+            codec: KoalaBearCodec,
         }
     }
 
@@ -100,8 +98,8 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
         )?;
 
         // 7. Compute old and new state roots.
-        let old_state_root = compute_state_root(&self.vc, old_column_states)?;
-        let new_state_root = compute_state_root(&self.vc, &new_column_states)?;
+        let old_state_root = compute_state_root(&self.hasher, old_column_states)?;
+        let new_state_root = compute_state_root(&self.hasher, &new_column_states)?;
 
         Ok(BatchWitness {
             columns: column_witnesses,
@@ -140,7 +138,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
                 let writes = writes_by_col
                     .get(&(table, col))
                     .map_or(&[][..], Vec::as_slice);
-                self.vc.apply_column_writes(old_state, table, col, writes)
+                old_state.apply_writes(&self.hasher, table, col, writes)
             } else {
                 (old_state.clone(), com_old, None)
             };
@@ -290,7 +288,7 @@ impl<H: FieldHasher<F = BabyBear, Digest = NativeDigest>> WitnessGenerator<H> {
 
     /// Group writes from `write_set_final` by `(t,c)`, sorted by row key.
     ///
-    /// Returns writes as `(RowKey, Option<Vec<BabyBear>>)` — `None` for deletes.
+    /// Returns writes as `(RowKey, Option<Vec<KoalaBear>>)` — `None` for deletes.
     fn group_writes(
         &self,
         result: &BatchResult,

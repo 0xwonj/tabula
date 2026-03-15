@@ -19,6 +19,7 @@ use p3_uni_stark::StarkGenericConfig;
 use rayon::prelude::*;
 
 use tabula_core::error::TabulaError;
+use tabula_ir::PrecompileId;
 use tabula_stark::air::interaction::BusId;
 use tabula_stark::air::statement::PublicStatement;
 
@@ -43,6 +44,7 @@ pub struct TabulaMachine {
     config: TabulaStarkConfig,
     setups: ProofSetups,
     property_openings: Vec<Box<dyn PropertyOpening>>,
+    precompile_ids: BTreeSet<PrecompileId>,
 }
 
 impl fmt::Debug for TabulaMachine {
@@ -100,11 +102,13 @@ impl TabulaMachine {
         config: TabulaStarkConfig,
         setups: ProofSetups,
         property_openings: Vec<Box<dyn PropertyOpening>>,
+        precompile_ids: BTreeSet<PrecompileId>,
     ) -> Self {
         Self {
             config,
             setups,
             property_openings,
+            precompile_ids,
         }
     }
 
@@ -161,6 +165,14 @@ impl TabulaMachine {
     /// the correct opening implementation based on commitment compatibility.
     pub fn property_openings(&self) -> &[Box<dyn PropertyOpening>] {
         &self.property_openings
+    }
+
+    /// Precompile IDs registered for proving.
+    ///
+    /// Useful for verifying consistency with the executor's
+    /// [`PrecompileRegistry`] at application setup time.
+    pub fn precompile_ids(&self) -> &BTreeSet<PrecompileId> {
+        &self.precompile_ids
     }
 }
 
@@ -443,18 +455,18 @@ fn make_envelope(
 
 /// Observe a [`MainCommitment`] into the Fiat-Shamir transcript (proving).
 fn observe_commitment(challenger: &mut Challenger, commitment: &MainCommitment) {
-    if let Some(pp_c) = commitment.preprocessed {
+    if let Some(ref pp_c) = commitment.preprocessed {
         challenger.observe(pp_c);
     }
-    challenger.observe(commitment.main);
+    challenger.observe(&commitment.main);
 }
 
 /// Observe a sub-proof's commitments into the Fiat-Shamir transcript (verification).
 fn observe_sub_proof_commitment(challenger: &mut Challenger, envelope: &SubProofEnvelope) {
-    if let Some(pp_c) = envelope.preprocessed_commitment {
+    if let Some(ref pp_c) = envelope.preprocessed_commitment {
         challenger.observe(pp_c);
     }
-    challenger.observe(envelope.main_commitment);
+    challenger.observe(&envelope.main_commitment);
 }
 
 /// Verify a single sub-proof using pre-computed LogUp challenges.
@@ -471,10 +483,10 @@ fn verify_sub_proof(
         registry,
         vk,
         &envelope.chip_openings,
-        envelope.preprocessed_commitment,
-        envelope.main_commitment,
-        envelope.perm_commitment,
-        envelope.quotient_commitment,
+        envelope.preprocessed_commitment.clone(),
+        envelope.main_commitment.clone(),
+        envelope.perm_commitment.clone(),
+        envelope.quotient_commitment.clone(),
         &envelope.opening_proof,
         logup_challenges,
         challenger,

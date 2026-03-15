@@ -97,7 +97,7 @@ The PoseidonChip already processes all Poseidon permutations. StateColumn's runn
 **Idea**: Replace Poseidon hash chain with an order-independent algebraic accumulator embedded in the global memory chip.
 
 ```
-Com_i = Σ_j H(encode(key_j, value_j))    over EF4 (BabyBear⁴)
+Com_i = Σ_j H(encode(key_j, value_j))    over EF4 (KoalaBear⁴)
 ```
 
 Sum-based commitment is order-independent → no sorting needed → segment detection in GlobalMemoryChip suffices for accumulation.

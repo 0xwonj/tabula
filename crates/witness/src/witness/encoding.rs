@@ -7,11 +7,12 @@
 
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_commitment::{
-    ColumnState, DOMAIN_SSMC, FieldHasher, HybridVC, NativeDigest, encode_u64_limbs,
+    ColumnState, DOMAIN_SSMC, FieldHasher, NativeDigest, compute_leaf,
+    compute_state_root as sr_compute_state_root, compute_table_root, encode_u64_limbs,
 };
 use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
@@ -32,14 +33,14 @@ pub(crate) const SSMC_MAX_VALUE_FES: usize = 5;
 /// the `encode_trace` convention — the null flag gates the value, so
 /// the actual FE content is irrelevant.
 pub(crate) fn encode_value_with_null_flag(
-    codec: &impl ValueCodec<FieldRepr = BabyBear>,
+    codec: &impl ValueCodec<FieldRepr = KoalaBear>,
     value: &Value,
     is_null: bool,
     value_type: ValueType,
-) -> Result<(Vec<BabyBear>, bool), TabulaError> {
+) -> Result<(Vec<KoalaBear>, bool), TabulaError> {
     if is_null {
         let w = codec.field_elements_per(value_type);
-        Ok((vec![BabyBear::ZERO; w], true))
+        Ok((vec![KoalaBear::ZERO; w], true))
     } else {
         let fes = codec.encode(value)?;
         Ok((fes, false))
@@ -50,15 +51,15 @@ pub(crate) fn encode_value_with_null_flag(
 ///
 /// `None` maps to null (literal zeros). Delegates to `encode_value_with_null_flag`.
 pub(crate) fn encode_value(
-    codec: &impl ValueCodec<FieldRepr = BabyBear>,
+    codec: &impl ValueCodec<FieldRepr = KoalaBear>,
     value: &Option<Value>,
     value_type: ValueType,
-) -> Result<(Vec<BabyBear>, bool), TabulaError> {
+) -> Result<(Vec<KoalaBear>, bool), TabulaError> {
     match value {
         Some(v) => encode_value_with_null_flag(codec, v, false, value_type),
         None => {
             let w = codec.field_elements_per(value_type);
-            Ok((vec![BabyBear::ZERO; w], true))
+            Ok((vec![KoalaBear::ZERO; w], true))
         }
     }
 }
@@ -71,16 +72,16 @@ pub(crate) fn encode_value(
 pub(crate) fn build_ssmc_hash_input(
     table: TableId,
     col: ColId,
-    key_limbs: &[BabyBear],
-    value: &[BabyBear],
+    key_limbs: &[KoalaBear],
+    value: &[KoalaBear],
     prev: Option<&NativeDigest>,
-) -> [BabyBear; 16] {
-    let mut input = [BabyBear::ZERO; 16];
+) -> [KoalaBear; 16] {
+    let mut input = [KoalaBear::ZERO; 16];
     match prev {
         None => {
-            input[0] = BabyBear::new(DOMAIN_SSMC);
-            input[1] = BabyBear::new(table.0);
-            input[2] = BabyBear::new(col.0 as u32);
+            input[0] = KoalaBear::new(DOMAIN_SSMC);
+            input[1] = KoalaBear::new(table.0);
+            input[2] = KoalaBear::new(col.0 as u32);
             for (i, &limb) in key_limbs.iter().enumerate() {
                 input[3 + i] = limb;
             }
@@ -110,7 +111,7 @@ pub(crate) fn build_ssmc_hash_input(
 /// - continuation: `Poseidon(prev_hash[8], key[3], value, 0, ..., 0)`
 ///
 /// For SMT columns, the tree root is already the native commitment.
-pub(crate) fn proof_column_commitment<H: FieldHasher<F = BabyBear, Digest = NativeDigest>>(
+pub(crate) fn proof_column_commitment<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
     table: TableId,
     col: ColId,
     state: &ColumnState<H>,
@@ -161,24 +162,24 @@ pub(crate) fn proof_column_commitment<H: FieldHasher<F = BabyBear, Digest = Nati
 /// Compute the two-level state root from column states.
 ///
 /// Groups columns by table, computes per-column leaf hashes and per-table
-/// roots, then combines into a single state root via `HybridVC`.
-pub(crate) fn compute_state_root<H: FieldHasher<F = BabyBear, Digest = NativeDigest>>(
-    vc: &HybridVC<H>,
+/// roots, then combines into a single state root.
+pub(crate) fn compute_state_root<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
+    hasher: &H,
     column_states: &BTreeMap<(TableId, ColId), ColumnState<H>>,
 ) -> Result<NativeDigest, TabulaError> {
     // Group by table → columns.
     let mut tables: BTreeMap<TableId, BTreeMap<ColId, NativeDigest>> = BTreeMap::new();
     for (&(table, col), state) in column_states {
         let com = proof_column_commitment(table, col, state)?;
-        let leaf = vc.compute_leaf(table, col, state.scheme_tag(), &com);
+        let leaf = compute_leaf(hasher, table, col, state.scheme_tag(), &com);
         tables.entry(table).or_default().insert(col, leaf);
     }
 
     // table roots → state root.
     let mut table_roots = BTreeMap::new();
     for (table, col_leaves) in &tables {
-        table_roots.insert(*table, vc.compute_table_root(col_leaves));
+        table_roots.insert(*table, compute_table_root(hasher, col_leaves));
     }
 
-    Ok(vc.compute_state_root(&table_roots))
+    Ok(sr_compute_state_root(hasher, &table_roots))
 }

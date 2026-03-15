@@ -1,7 +1,7 @@
 //! Trace generation for the RangeCheck chip.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_stark::air::columns::borrow_cols_mut;
@@ -14,15 +14,15 @@ use super::columns::{RANGE_CHECK_SIZE, RANGE_CHECK_WIDTH, RangeCheckCols};
 ///
 /// Returns a `2^16`-row trace where row `i` has `value = i` and `multiplicity = 0`.
 /// The multiplicity column is filled during the proving phase based on actual lookups.
-pub fn generate_range_check_preprocessed() -> RowMajorMatrix<BabyBear> {
-    let mut values = vec![BabyBear::ZERO; RANGE_CHECK_SIZE * RANGE_CHECK_WIDTH];
+pub fn generate_range_check_preprocessed() -> RowMajorMatrix<KoalaBear> {
+    let mut values = vec![KoalaBear::ZERO; RANGE_CHECK_SIZE * RANGE_CHECK_WIDTH];
 
     for i in 0..RANGE_CHECK_SIZE {
         let offset = i * RANGE_CHECK_WIDTH;
-        let row: &mut RangeCheckCols<BabyBear> =
+        let row: &mut RangeCheckCols<KoalaBear> =
             borrow_cols_mut(&mut values[offset..offset + RANGE_CHECK_WIDTH]);
-        row.value = BabyBear::new(i as u32);
-        row.multiplicity = BabyBear::ZERO;
+        row.value = KoalaBear::new(i as u32);
+        row.multiplicity = KoalaBear::ZERO;
     }
 
     RowMajorMatrix::new(values, RANGE_CHECK_WIDTH)
@@ -33,15 +33,15 @@ pub fn generate_range_check_preprocessed() -> RowMajorMatrix<BabyBear> {
 /// `multiplicities[i]` = how many times value `i` is looked up across all chips.
 pub fn generate_range_check_trace(
     multiplicities: &[u32; RANGE_CHECK_SIZE],
-) -> RowMajorMatrix<BabyBear> {
-    let mut values = vec![BabyBear::ZERO; RANGE_CHECK_SIZE * RANGE_CHECK_WIDTH];
+) -> RowMajorMatrix<KoalaBear> {
+    let mut values = vec![KoalaBear::ZERO; RANGE_CHECK_SIZE * RANGE_CHECK_WIDTH];
 
     for (i, &mult) in multiplicities.iter().enumerate() {
         let offset = i * RANGE_CHECK_WIDTH;
-        let row: &mut RangeCheckCols<BabyBear> =
+        let row: &mut RangeCheckCols<KoalaBear> =
             borrow_cols_mut(&mut values[offset..offset + RANGE_CHECK_WIDTH]);
-        row.value = BabyBear::new(i as u32);
-        row.multiplicity = BabyBear::new(mult);
+        row.value = KoalaBear::new(i as u32);
+        row.multiplicity = KoalaBear::new(mult);
     }
 
     RowMajorMatrix::new(values, RANGE_CHECK_WIDTH)
@@ -50,7 +50,7 @@ pub fn generate_range_check_trace(
 impl TraceGenerator for RangeCheckChip {
     type Input = [u32; RANGE_CHECK_SIZE];
 
-    fn generate_trace(&self, input: &[u32; RANGE_CHECK_SIZE]) -> RowMajorMatrix<BabyBear> {
+    fn generate_trace(&self, input: &[u32; RANGE_CHECK_SIZE]) -> RowMajorMatrix<KoalaBear> {
         generate_range_check_trace(input)
     }
 }
@@ -91,7 +91,7 @@ impl BusConsumer for RangeCheckChip {
 
     fn collect(
         &self,
-        interactions: &[RecordedInteraction<BabyBear>],
+        interactions: &[RecordedInteraction<KoalaBear>],
         store: &mut WitnessStore,
     ) -> Result<(), TabulaError> {
         let mut mults = [0u32; RANGE_CHECK_SIZE];

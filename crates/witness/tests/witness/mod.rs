@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
-use tabula_commitment::{BabyBearCodec, ColumnState, HybridVC, MockFieldHasher};
+use tabula_commitment::{ColumnState, KoalaBearCodec, MockFieldHasher, scheme_tags};
 use tabula_core::traits::ValueCodec;
 use tabula_core::{
-    CellKey, ColId, ColumnDef, AccessEvent, OpKind, RowKey, TableId, TableSchema, Value,
-    ValueType,
+    AccessEvent, CellKey, ColId, ColumnDef, OpKind, RowKey, TableId, TableSchema, Value, ValueType,
 };
 
 use tabula_witness::WitnessGenerator;
@@ -15,12 +14,8 @@ mod generator;
 mod program_info;
 mod route;
 
-pub(super) fn mock_vc() -> HybridVC<MockFieldHasher> {
-    HybridVC::new(MockFieldHasher, 100)
-}
-
 pub(super) fn make_wg() -> WitnessGenerator<MockFieldHasher> {
-    WitnessGenerator::new(mock_vc())
+    WitnessGenerator::new(MockFieldHasher)
 }
 
 pub(super) fn t(n: u32) -> TableId {
@@ -63,26 +58,32 @@ pub(super) fn schemas(list: Vec<TableSchema>) -> BTreeMap<TableId, TableSchema> 
 }
 
 pub(super) fn empty_column_state(
-    vc: &HybridVC<MockFieldHasher>,
     table: u32,
     col: u16,
 ) -> ((TableId, ColId), ColumnState<MockFieldHasher>) {
-    let (state, _) = vc.commit_column(t(table), c(col), vec![]).unwrap();
+    let (state, _) = ColumnState::commit(
+        &MockFieldHasher,
+        t(table),
+        c(col),
+        vec![],
+        scheme_tags::SSMC,
+    )
+    .unwrap();
     ((t(table), c(col)), state)
 }
 
 pub(super) fn column_state_with(
-    vc: &HybridVC<MockFieldHasher>,
     table: u32,
     col: u16,
     entries: &[(u64, u64)],
 ) -> ((TableId, ColId), ColumnState<MockFieldHasher>) {
-    let codec = BabyBearCodec;
-    let enc: Vec<(RowKey, Vec<BabyBear>)> = entries
+    let codec = KoalaBearCodec;
+    let enc: Vec<(RowKey, Vec<KoalaBear>)> = entries
         .iter()
         .map(|&(k, v)| (r(k), codec.encode(&Value::U64(v)).unwrap()))
         .collect();
-    let (state, _) = vc.commit_column(t(table), c(col), enc).unwrap();
+    let (state, _) =
+        ColumnState::commit(&MockFieldHasher, t(table), c(col), enc, scheme_tags::SSMC).unwrap();
     ((t(table), c(col)), state)
 }
 
@@ -122,13 +123,7 @@ pub(super) fn write_event(
     }
 }
 
-pub(super) fn null_read_event(
-    table: u32,
-    col: u16,
-    row: u64,
-    time: u64,
-    _tx: u32,
-) -> AccessEvent {
+pub(super) fn null_read_event(table: u32, col: u16, row: u64, time: u64, _tx: u32) -> AccessEvent {
     AccessEvent {
         key: ck(table, col, row),
         op: OpKind::Read,

@@ -4,7 +4,7 @@
 //! - `columns.rs`: `ExecutionCols<T, W>` column struct + width constant
 //! - `air.rs`: `ExecutionChip` struct + `BaseAir` + `Air` (structural constraints + bus sends)
 //! - `trace.rs`: `generate_execution_trace()` (witness -> trace matrix)
-//! - `trace_utils.rs`: pure u64 <-> BabyBear limb conversion utilities
+//! - `trace_utils.rs`: pure u64 <-> KoalaBear limb conversion utilities
 //! - `trace_witness.rs`: per-opcode witness population helpers
 //! - `ops/`: per-opcode constraint modules (arith, mul, cmp, divmod, logic, control, hash)
 //! - `linkage.rs`: operand-to-slot linkage constraints

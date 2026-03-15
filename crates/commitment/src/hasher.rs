@@ -2,15 +2,15 @@
 
 use core::fmt::Debug;
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use crate::field::NativeDigest;
 
 /// Field-element-level hash abstraction.
 ///
 /// Distinct from `tabula_core::traits::Hasher` (which is byte-level).
-/// Used by SMT, SSMC, and HybridVC for native field-element hashing.
+/// Used by SMT, SSMC, and ColumnState for native field-element hashing.
 pub trait FieldHasher: Clone + Send + Sync {
     /// The field element type.
     type F: Clone + Copy + Default + Eq + Send + Sync;
@@ -38,15 +38,15 @@ pub trait FieldHasher: Clone + Send + Sync {
 pub struct MockFieldHasher;
 
 impl FieldHasher for MockFieldHasher {
-    type F = BabyBear;
+    type F = KoalaBear;
     type Digest = NativeDigest;
 
-    fn hash(&self, input: &[BabyBear]) -> NativeDigest {
-        let mut state = [BabyBear::ZERO; 8];
+    fn hash(&self, input: &[KoalaBear]) -> NativeDigest {
+        let mut state = [KoalaBear::ZERO; 8];
         for (i, &fe) in input.iter().enumerate() {
             let idx = i % 8;
             // Position-dependent mixing: not commutative, deterministic.
-            state[idx] = state[idx] * BabyBear::new(7) + fe + BabyBear::new(i as u32 + 1);
+            state[idx] = state[idx] * KoalaBear::new(7) + fe + KoalaBear::new(i as u32 + 1);
         }
         NativeDigest(state)
     }
@@ -58,9 +58,9 @@ impl FieldHasher for MockFieldHasher {
         self.hash(&combined)
     }
 
-    fn hash_domain(&self, tag: u32, input: &[BabyBear]) -> NativeDigest {
+    fn hash_domain(&self, tag: u32, input: &[KoalaBear]) -> NativeDigest {
         let mut prefixed = Vec::with_capacity(1 + input.len());
-        prefixed.push(BabyBear::new(tag));
+        prefixed.push(KoalaBear::new(tag));
         prefixed.extend_from_slice(input);
         self.hash(&prefixed)
     }
@@ -73,30 +73,30 @@ mod tests {
     #[test]
     fn mock_hash_deterministic() {
         let h = MockFieldHasher;
-        let input = [BabyBear::new(1), BabyBear::new(2), BabyBear::new(3)];
+        let input = [KoalaBear::new(1), KoalaBear::new(2), KoalaBear::new(3)];
         assert_eq!(h.hash(&input), h.hash(&input));
     }
 
     #[test]
     fn mock_hash_distinct_inputs() {
         let h = MockFieldHasher;
-        let a = [BabyBear::new(1), BabyBear::new(2)];
-        let b = [BabyBear::new(2), BabyBear::new(1)];
+        let a = [KoalaBear::new(1), KoalaBear::new(2)];
+        let b = [KoalaBear::new(2), KoalaBear::new(1)];
         assert_ne!(h.hash(&a), h.hash(&b));
     }
 
     #[test]
     fn mock_compress_deterministic() {
         let h = MockFieldHasher;
-        let left = NativeDigest([BabyBear::new(1); 8]);
-        let right = NativeDigest([BabyBear::new(2); 8]);
+        let left = NativeDigest([KoalaBear::new(1); 8]);
+        let right = NativeDigest([KoalaBear::new(2); 8]);
         assert_eq!(h.compress(&left, &right), h.compress(&left, &right));
     }
 
     #[test]
     fn mock_hash_domain_different_tags() {
         let h = MockFieldHasher;
-        let input = [BabyBear::new(42)];
+        let input = [KoalaBear::new(42)];
         let d1 = h.hash_domain(0x00, &input);
         let d2 = h.hash_domain(0x01, &input);
         assert_ne!(d1, d2);

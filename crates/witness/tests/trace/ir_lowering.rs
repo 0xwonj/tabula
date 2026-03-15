@@ -34,16 +34,18 @@ pub(super) fn compile_execute_witness(
     let static_tables = InMemoryStaticTables::new();
     let env = BatchEnv {
         hasher: &hasher,
-        sig_verifier: &MockSigVerifier,
+        sig_verifier: &NoopSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &static_tables,
         precompiles: None,
+        committed_state: None,
+        property_openings: None,
     };
     let result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
         .expect("batch execution");
 
-    let vc = HybridVC::new(PoseidonHasher::new(), 1024);
-    let codec = BabyBearCodec;
+    let commit_hasher = PoseidonHasher::new();
+    let codec = KoalaBearCodec;
 
     let mut entries_by_col: EncodedColumnEntries = BTreeMap::new();
     for &(table, col, row, value) in initial_cells {
@@ -60,7 +62,14 @@ pub(super) fn compile_execute_witness(
                 .remove(&(schema.id, col_def.id))
                 .unwrap_or_default();
             entries.sort_by_key(|(row, _)| *row);
-            let (state, _com) = vc.commit_column(schema.id, col_def.id, entries).unwrap();
+            let (state, _com) = ColumnState::commit(
+                &commit_hasher,
+                schema.id,
+                col_def.id,
+                entries,
+                scheme_tags::SSMC,
+            )
+            .unwrap();
             old_column_states.insert((schema.id, col_def.id), state);
         }
     }
@@ -71,7 +80,7 @@ pub(super) fn compile_execute_witness(
         .cloned()
         .map(|s| (s.id, s))
         .collect();
-    let wg = WitnessGenerator::new(vc);
+    let wg = WitnessGenerator::new(PoseidonHasher::new());
     let witness = wg
         .generate(&result, &schemas_by_id, &old_column_states)
         .expect("witness generation");
@@ -257,7 +266,13 @@ tx transfer(from: u64, to: u64, amount: u64) {
             rec.src2_slot_idx,
             rec.writes
                 .iter()
-                .map(|(s, v, n)| (s, v.iter().map(|f: &BabyBear| f.as_canonical_u32()).collect::<Vec<_>>(), n))
+                .map(|(s, v, n)| (
+                    s,
+                    v.iter()
+                        .map(|f: &KoalaBear| f.as_canonical_u32())
+                        .collect::<Vec<_>>(),
+                    n
+                ))
                 .collect::<Vec<_>>()
         );
     }

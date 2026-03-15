@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use tabula_commitment::{ColumnMeta, ColumnState, FieldHasher, MergeTrace, NativeDigest};
 use tabula_core::{CellKey, ColId, LogicalTime, TableId, TxResult, ValueType};
@@ -21,7 +21,7 @@ pub struct InitRow {
     /// The cell address.
     pub key: CellKey,
     /// Tier 1 ComEnc value (w(T) field elements). Canonical zero if null.
-    pub value_fes: Vec<BabyBear>,
+    pub value_fes: Vec<KoalaBear>,
     /// Whether the cell was absent in base state.
     pub val_is_null: bool,
 }
@@ -36,7 +36,7 @@ pub struct AccessRow {
     /// Whether this is a write (`true`) or read (`false`).
     pub is_write: bool,
     /// Tier 1 ComEnc value (w(T) field elements). Canonical zero if null.
-    pub value_fes: Vec<BabyBear>,
+    pub value_fes: Vec<KoalaBear>,
     /// Whether the value is null.
     pub val_is_null: bool,
     /// Transaction index within the batch.

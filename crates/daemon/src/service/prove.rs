@@ -1,39 +1,29 @@
 //! STARK proving pipeline for daemon-side proof generation.
 //!
-//! Mirrors the E2E test pipeline: execute → witness → shard → traces → prove → verify.
-//! Returns a serializable [`StarkProofSummary`] (the actual p3 proof is not serializable).
+//! Delegates to [`tabula_runtime`]'s proving pipeline for witness generation,
+//! trace building, and proving. Assembles the result into a serializable
+//! [`StarkProofSummary`].
 //!
 //! Gated behind the `stark` feature — see `mod.rs`.
 
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
-use p3_field::PrimeField32;
-use tabula_artifact::{ChipSummary, StarkProofSummary};
-use tabula_commitment::{
-    BabyBearCodec, ColumnState, HybridVC, NativeDigest, PoseidonHasher, scheme_tags,
-};
-use tabula_core::mock::InMemoryStaticTables;
-use tabula_core::traits::ValueCodec;
-use tabula_core::{Batch, ColId, RowKey, TableId, TableSchema};
+use tabula_artifact::StarkProofSummary;
+use tabula_core::{TableId, TableSchema};
 use tabula_driver::RegisteredProgram;
-use tabula_machine::{ColumnIdentity, ColumnSetupConfig, PublicStatement, TabulaMachine};
-use tabula_witness::trace::{partition_by_tier, prepare_shard_witness};
-use tabula_witness::{TraceBuilder, WitnessGenerator};
+use tabula_machine::TabulaMachine;
+use tabula_runtime::ProofSummary;
+use tabula_runtime::prove as rt_prove;
 
 use super::error::{ServiceError, ServiceResult};
 use super::execute::ExecutedBatch;
 use crate::protocol::error::ErrorCode;
-
-/// Hybrid VC threshold for SSMC vs SMT selection.
-const VC_THRESHOLD: usize = 1024;
 
 /// Generate a STARK proof for an executed batch and return a serializable summary.
 pub fn prove_batch(
     executed: &ExecutedBatch,
     registered: &RegisteredProgram,
 ) -> ServiceResult<StarkProofSummary> {
-    // 1. Reconstruct core types from executed batch.
     let schemas_by_id: BTreeMap<TableId, TableSchema> = registered
         .table_schemas
         .iter()
@@ -41,141 +31,60 @@ pub fn prove_batch(
         .map(|s| (s.id, s))
         .collect();
 
-    let execution_result = tabula_core::BatchResult {
-        read_set_old: executed.inner.read_set.clone(),
-        write_set_final: executed.inner.write_set.clone(),
-        txs: executed.inner.txs.clone(),
-    };
+    // 1. Build old column states.
+    let old_column_states =
+        rt_prove::build_old_column_states(&schemas_by_id, &executed.inner.state_before)
+            .map_err(map_runtime_error)?;
 
-    let batch = Batch {
-        transactions: executed
-            .batch_file
-            .transactions
-            .iter()
-            .map(|t| {
-                t.to_transaction()
-                    .map_err(|e| ServiceError::internal(ErrorCode::InternalError, e.to_string()))
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-    };
-
-    // 2. Build old_column_states from state file + schemas.
-    let old_column_states = build_old_column_states(&schemas_by_id, &executed.inner.state_before)
-        .map_err(|e| {
-        ServiceError::internal(ErrorCode::InternalError, format!("column state build: {e}"))
-    })?;
+    // 2. Reconstruct core types.
+    let batch_result = rt_prove::to_batch_result(&executed.inner);
+    let batch = rt_prove::convert_batch(&executed.batch_file).map_err(map_runtime_error)?;
 
     // 3. Generate witness.
-    let vc = HybridVC::new(PoseidonHasher::new(), VC_THRESHOLD);
-    let wg = WitnessGenerator::new(vc);
-    let witness = wg
-        .generate(&execution_result, &schemas_by_id, &old_column_states)
-        .map_err(|e| {
-            ServiceError::internal(ErrorCode::InternalError, format!("witness gen: {e}"))
-        })?;
+    let witness = rt_prove::generate_witness(&batch_result, &schemas_by_id, &old_column_states)
+        .map_err(map_runtime_error)?;
 
-    // 4. Build column configs and machine from witness metadata.
-    let column_metas: Vec<(TableId, ColId, tabula_commitment::ColumnMeta)> = witness
-        .columns
-        .iter()
-        .map(|col| (col.table, col.col, col.meta.clone()))
-        .collect();
+    // 4. Build machine from schemas.
+    let col_configs = derive_column_configs(&registered.table_schemas);
+    let machine =
+        TabulaMachine::new(&col_configs).map_err(|e| map_error(format!("machine: {e}")))?;
 
-    let col_configs: Vec<ColumnSetupConfig> = column_metas
-        .iter()
-        .map(|(t, c, meta)| ColumnSetupConfig {
-            table_id: *t,
-            col_id: *c,
-            scheme_tag: meta.tag,
-            receives_commitment: meta.tag == scheme_tags::SSMC,
-        })
-        .collect();
+    // 5. Build traces.
+    let traces = rt_prove::build_traces(
+        &machine,
+        &witness,
+        &registered.program,
+        &batch,
+        &batch_result,
+        &schemas_by_id,
+    )
+    .map_err(map_runtime_error)?;
 
-    let machine = TabulaMachine::new(&col_configs).map_err(|e| {
-        ServiceError::internal(ErrorCode::InternalError, format!("machine build: {e}"))
-    })?;
+    // 6. Extract proof metadata.
+    let column_identities = rt_prove::extract_column_identities(&witness);
+    let statement = rt_prove::extract_statement(&witness);
 
-    // 5. Build witness store + shard witness → partitioned stores → traces.
-    let store = TraceBuilder::<PoseidonHasher, 3>::new(&witness)
-        .prepare_witness_store(
-            &registered.program,
-            &batch,
-            &execution_result,
-            &schemas_by_id,
-            &InMemoryStaticTables::new(),
-            PoseidonHasher::new(),
-        )
-        .map_err(|e| {
-            ServiceError::internal(ErrorCode::InternalError, format!("witness store: {e}"))
-        })?;
-
-    let shard_witness = prepare_shard_witness::<PoseidonHasher, 3>(&witness).map_err(|e| {
-        ServiceError::internal(ErrorCode::InternalError, format!("shard witness: {e}"))
-    })?;
-
-    let stores = partition_by_tier(store, shard_witness);
-    let traces = machine.build_traces(stores).map_err(|e| {
-        ServiceError::internal(ErrorCode::InternalError, format!("trace build: {e}"))
-    })?;
-
-    // 6. Build column identities for proving.
-    let column_identities: Vec<ColumnIdentity> = column_metas
-        .iter()
-        .map(|(t, c, meta)| ColumnIdentity {
-            table_id: t.0,
-            col_id: c.0,
-            com_old: meta.com_old.0,
-            com_new: meta.com_new.0,
-        })
-        .collect();
-
-    // 7. Prove (timed).
-    let statement = PublicStatement {
-        old_root: witness.old_state_root,
-        new_root: witness.new_state_root,
-    };
-
+    // 7. Prove.
     let prove_start = std::time::Instant::now();
     let proof = machine
         .prove(traces, &column_identities, statement)
-        .map_err(|e| ServiceError::internal(ErrorCode::InternalError, format!("proving: {e}")))?;
+        .map_err(|e| map_error(format!("proving: {e}")))?;
     let prove_time_ms = prove_start.elapsed().as_millis() as u64;
 
-    // 8. Verify (timed).
+    // 8. Verify.
     let verify_start = std::time::Instant::now();
     let verified = machine.verify(&proof).is_ok();
     let verify_time_ms = verify_start.elapsed().as_millis() as u64;
 
-    // 9. Assemble summary from all sub-proofs.
-    let mut chips: Vec<ChipSummary> = Vec::new();
-    for opening in &proof.execution.chip_openings {
-        chips.push(ChipSummary {
-            name: opening.chip_id.to_string(),
-            trace_height: 1 << opening.degree_bits,
-        });
-    }
-    for col in &proof.columns {
-        for opening in &col.proof.chip_openings {
-            chips.push(ChipSummary {
-                name: opening.chip_id.to_string(),
-                trace_height: 1 << opening.degree_bits,
-            });
-        }
-    }
-    for opening in &proof.root.chip_openings {
-        chips.push(ChipSummary {
-            name: opening.chip_id.to_string(),
-            trace_height: 1 << opening.degree_bits,
-        });
-    }
-
+    // 9. Build summary.
+    let summary = ProofSummary::from_proof(&proof);
     Ok(StarkProofSummary {
         scheme: "stark_v1".to_string(),
         verified,
-        chip_count: chips.len(),
-        chips,
-        old_state_root: digest_to_hex_vec(&witness.old_state_root),
-        new_state_root: digest_to_hex_vec(&witness.new_state_root),
+        chip_count: summary.chip_count,
+        chips: summary.chips,
+        old_state_root: rt_prove::digest_to_hex(&witness.old_state_root),
+        new_state_root: rt_prove::digest_to_hex(&witness.new_state_root),
         prove_time_ms,
         verify_time_ms,
         statement_hash: String::new(),
@@ -202,58 +111,29 @@ pub fn mock_stark_summary() -> StarkProofSummary {
     }
 }
 
-/// Build `old_column_states` from state file cells and schemas.
-///
-/// Enumerates ALL schema columns (not just those with data) to ensure
-/// empty columns get proper commitments.
-fn build_old_column_states(
-    schemas: &BTreeMap<TableId, TableSchema>,
-    state_file: &tabula_artifact::StateFile,
-) -> Result<BTreeMap<(TableId, ColId), ColumnState<PoseidonHasher>>, String> {
-    let codec = BabyBearCodec;
-    let vc = HybridVC::new(PoseidonHasher::new(), VC_THRESHOLD);
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-    // Group state cells by (table, col).
-    type EncodedEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<BabyBear>)>>;
-    let mut entries_by_col: EncodedEntries = BTreeMap::new();
-
-    for cell in &state_file.cells {
-        if let Some(value) = &cell.value {
-            let encoded = codec.encode(value).map_err(|e| {
-                format!(
-                    "encode cell ({},{},{}): {e}",
-                    cell.table, cell.col, cell.row
-                )
-            })?;
-            entries_by_col
-                .entry((TableId(cell.table), ColId(cell.col)))
-                .or_default()
-                .push((RowKey(cell.row), encoded));
-        }
-    }
-
-    let mut result = BTreeMap::new();
-    for schema in schemas.values() {
-        for col_def in &schema.columns {
-            let mut entries = entries_by_col
-                .remove(&(schema.id, col_def.id))
-                .unwrap_or_default();
-            entries.sort_by_key(|(row, _)| *row);
-            let (state, _com) = vc
-                .commit_column(schema.id, col_def.id, entries)
-                .map_err(|e| e.to_string())?;
-            result.insert((schema.id, col_def.id), state);
-        }
-    }
-
-    Ok(result)
+fn derive_column_configs(schemas: &[TableSchema]) -> Vec<tabula_machine::ColumnSetupConfig> {
+    use tabula_commitment::scheme_tags;
+    schemas
+        .iter()
+        .flat_map(|s| {
+            s.columns
+                .iter()
+                .map(move |c| tabula_machine::ColumnSetupConfig {
+                    table_id: s.id,
+                    col_id: c.id,
+                    scheme_tag: scheme_tags::SSMC,
+                    receives_commitment: true,
+                })
+        })
+        .collect()
 }
 
-/// Convert a NativeDigest (8 BabyBear elements) to hex strings.
-fn digest_to_hex_vec(digest: &NativeDigest) -> Vec<String> {
-    digest
-        .0
-        .iter()
-        .map(|fe| format!("{:08x}", fe.as_canonical_u32()))
-        .collect()
+fn map_runtime_error(e: tabula_runtime::RuntimeError) -> ServiceError {
+    ServiceError::internal(ErrorCode::InternalError, e.to_string())
+}
+
+fn map_error(detail: String) -> ServiceError {
+    ServiceError::internal(ErrorCode::InternalError, detail)
 }

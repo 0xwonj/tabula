@@ -200,7 +200,7 @@ mod tests {
     fn insert_changes_root() {
         let mut tree = make_tree(16, DOMAIN_SMT);
         let empty_root = tree.root();
-        let leaf = MockFieldHasher.hash(&[p3_baby_bear::BabyBear::new(42)]);
+        let leaf = MockFieldHasher.hash(&[p3_koala_bear::KoalaBear::new(42)]);
         tree.insert(0, leaf);
         assert_ne!(tree.root(), empty_root);
     }
@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn insert_then_prove_membership() {
         let mut tree = make_tree(16, DOMAIN_SMT);
-        let leaf = MockFieldHasher.hash(&[p3_baby_bear::BabyBear::new(99)]);
+        let leaf = MockFieldHasher.hash(&[p3_koala_bear::KoalaBear::new(99)]);
         tree.insert(5, leaf);
         let proof = tree.prove(5);
         assert_eq!(proof.value, Some(leaf));
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn prove_absent_key_non_membership() {
         let mut tree = make_tree(16, DOMAIN_SMT);
-        let leaf = MockFieldHasher.hash(&[p3_baby_bear::BabyBear::new(1)]);
+        let leaf = MockFieldHasher.hash(&[p3_koala_bear::KoalaBear::new(1)]);
         tree.insert(0, leaf);
         let proof = tree.prove(1); // key 1 not inserted
         assert_eq!(proof.value, None);
@@ -243,7 +243,7 @@ mod tests {
         let empty_root = tree.root();
         // Use value 42 (not 1) to avoid collision with empty leaf hash:
         // empty_hashes[0] = hash_domain(DOMAIN_SMT=1, &[]) = hash(&[1]).
-        let leaf = MockFieldHasher.hash(&[p3_baby_bear::BabyBear::new(42)]);
+        let leaf = MockFieldHasher.hash(&[p3_koala_bear::KoalaBear::new(42)]);
         tree.insert(42, leaf);
         assert_ne!(tree.root(), empty_root);
         tree.remove(42);
@@ -255,7 +255,7 @@ mod tests {
         let mut tree = make_tree(16, DOMAIN_SMT);
         let h = MockFieldHasher;
         for i in 0..100u64 {
-            let leaf = h.hash(&[p3_baby_bear::BabyBear::new(i as u32)]);
+            let leaf = h.hash(&[p3_koala_bear::KoalaBear::new(i as u32)]);
             tree.insert(i, leaf);
         }
         for i in 0..100u64 {
@@ -272,7 +272,7 @@ mod tests {
         let mut tree = make_tree(16, DOMAIN_SMT);
         let h = MockFieldHasher;
         for i in 0..10u64 {
-            let leaf = h.hash(&[p3_baby_bear::BabyBear::new(i as u32)]);
+            let leaf = h.hash(&[p3_koala_bear::KoalaBear::new(i as u32)]);
             tree.insert(i * 100, leaf);
         }
         // Prove non-membership for keys not inserted.
@@ -293,7 +293,7 @@ mod tests {
     fn different_domain_tags_different_roots() {
         let mut t1 = make_tree(16, DOMAIN_SMT);
         let mut t2 = make_tree(16, DOMAIN_COL);
-        let leaf = MockFieldHasher.hash(&[p3_baby_bear::BabyBear::new(1)]);
+        let leaf = MockFieldHasher.hash(&[p3_koala_bear::KoalaBear::new(1)]);
         t1.insert(0, leaf);
         t2.insert(0, leaf);
         // Different domain tags → different empty hashes → different roots.
@@ -304,7 +304,7 @@ mod tests {
     fn different_depths_work() {
         for depth in [8, 16, 32] {
             let mut tree = make_tree(depth, DOMAIN_SMT);
-            let leaf = MockFieldHasher.hash(&[p3_baby_bear::BabyBear::new(1)]);
+            let leaf = MockFieldHasher.hash(&[p3_koala_bear::KoalaBear::new(1)]);
             tree.insert(0, leaf);
             let proof = tree.prove(0);
             assert_eq!(proof.siblings.len(), depth);
@@ -322,8 +322,8 @@ mod tests {
     fn update_value_changes_root() {
         let mut tree = make_tree(16, DOMAIN_SMT);
         let h = MockFieldHasher;
-        let v1 = h.hash(&[p3_baby_bear::BabyBear::new(1)]);
-        let v2 = h.hash(&[p3_baby_bear::BabyBear::new(2)]);
+        let v1 = h.hash(&[p3_koala_bear::KoalaBear::new(1)]);
+        let v2 = h.hash(&[p3_koala_bear::KoalaBear::new(2)]);
         tree.insert(5, v1);
         let root1 = tree.root();
         tree.insert(5, v2);
@@ -336,7 +336,7 @@ mod tests {
         let mut tree = make_tree(32, DOMAIN_TABLE);
         let h = MockFieldHasher;
         for i in 0..1000u64 {
-            let leaf = h.hash(&[p3_baby_bear::BabyBear::new(i as u32 + 1)]);
+            let leaf = h.hash(&[p3_koala_bear::KoalaBear::new(i as u32 + 1)]);
             tree.insert(i, leaf);
         }
         assert_eq!(tree.len(), 1000);
@@ -355,7 +355,7 @@ mod tests {
         let mut tree = make_tree(8, DOMAIN_SMT);
         assert!(tree.is_empty());
         assert_eq!(tree.len(), 0);
-        let leaf = MockFieldHasher.hash(&[p3_baby_bear::BabyBear::new(1)]);
+        let leaf = MockFieldHasher.hash(&[p3_koala_bear::KoalaBear::new(1)]);
         tree.insert(0, leaf);
         assert!(!tree.is_empty());
         assert_eq!(tree.len(), 1);

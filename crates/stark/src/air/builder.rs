@@ -8,7 +8,7 @@
 //! - `InteractionExtractor`: extracts symbolic descriptors for permutation trace generation
 //! - p3 builders: no-op impls (see `bridge.rs`)
 
-use p3_air::{AirBuilder, PairBuilder};
+use p3_air::AirBuilder;
 
 use super::interaction::AirInteraction;
 
@@ -21,10 +21,9 @@ use super::interaction::AirInteraction;
 /// collecting them for later verification, extracting static descriptors,
 /// or generating permutation trace entries.
 ///
-/// Extends [`PairBuilder`] to give all chips access to preprocessed columns
-/// (e.g. PoseidonChip round constants). Chips that don't use preprocessed
-/// columns simply ignore the `preprocessed()` method.
-pub trait InteractionAirBuilder: AirBuilder + PairBuilder {
+/// All chips have access to preprocessed columns via `AirBuilder::preprocessed()`.
+/// Chips that don't use preprocessed columns simply ignore it.
+pub trait InteractionAirBuilder: AirBuilder {
     /// Declare a send interaction (positive contribution to LogUp sum).
     ///
     /// The chip asserts that the tuple `(values, multiplicity)` appears

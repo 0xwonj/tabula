@@ -2,8 +2,8 @@
 //!
 //! Each function delegates to `InstructionBuilder` for a concise, readable body.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use crate::execution::{CmpOp, InstructionRecord, Opcode, u64_to_limbs};
 
@@ -199,13 +199,13 @@ pub fn make_hash(
 ) -> InstructionRecord {
     use crate::poseidon::constants::poseidon2_permutation;
 
-    let src1_fe: Vec<BabyBear> = src1.iter().map(|v| BabyBear::new(*v)).collect();
-    let src2_fe: Vec<BabyBear> = src2.iter().map(|v| BabyBear::new(*v)).collect();
+    let src1_fe: Vec<KoalaBear> = src1.iter().map(|v| KoalaBear::new(*v)).collect();
+    let src2_fe: Vec<KoalaBear> = src2.iter().map(|v| KoalaBear::new(*v)).collect();
 
     // Compose permutation input
-    let mut perm_input = [BabyBear::ZERO; 16];
-    perm_input[0] = BabyBear::new(domain_tag);
-    perm_input[1] = BabyBear::new(n);
+    let mut perm_input = [KoalaBear::ZERO; 16];
+    perm_input[0] = KoalaBear::new(domain_tag);
+    perm_input[1] = KoalaBear::new(n);
     perm_input[2] = src1_fe[0];
     perm_input[3] = src1_fe[1];
     perm_input[4] = src1_fe[2];
@@ -214,7 +214,7 @@ pub fn make_hash(
     perm_input[7] = src2_fe[2];
 
     let (_rounds, perm_output_full) = poseidon2_permutation(perm_input);
-    let perm_output: [BabyBear; 8] = core::array::from_fn(|i| perm_output_full[i]);
+    let perm_output: [KoalaBear; 8] = core::array::from_fn(|i| perm_output_full[i]);
     let dst_val = vec![perm_output[0], perm_output[1], perm_output[2]];
 
     InstructionBuilder::new(Opcode::Hash)
@@ -289,8 +289,8 @@ pub fn make_property_read(
     table: u32,
     col: u16,
     query_type: u8,
-    result_val: Vec<BabyBear>,
-    result_key: Vec<BabyBear>,
+    result_val: Vec<KoalaBear>,
+    result_key: Vec<KoalaBear>,
     is_null: bool,
 ) -> InstructionRecord {
     InstructionBuilder::new(Opcode::PropertyRead)

@@ -9,7 +9,7 @@ use tabula_artifact::{
     BatchFile, InstanceId, InstanceRecord, InstanceStatus, RunRecord, RunStatus, StateFile,
     SubmitRunCommand,
 };
-use tabula_core::mock::MockHasher;
+use tabula_core::mock::Blake3Hasher;
 
 use crate::protocol::error::ErrorCode;
 use crate::service::error::{ServiceError, ServiceResult};
@@ -72,7 +72,7 @@ impl super::LocalEngine {
                     program.registered,
                     &state_before,
                     batch_file,
-                    &MockHasher,
+                    &Blake3Hasher,
                 )?
             }
         };

@@ -134,7 +134,7 @@ pub fn HomePage() -> impl IntoView {
                         "Tables and columns are declared with explicit types. "
                         "Each column type has a known encoding width: "
                         "Bool occupies 1 field element, "
-                        "U64 and I64 occupy 3 (30+30+4 bit limb decomposition over BabyBear), "
+                        "U64 and I64 occupy 3 (30+30+4 bit limb decomposition over KoalaBear), "
                         "Bytes32 occupies 8 (native Poseidon2 digest elements). "
                         "Constraint chips are parameterized by width class\u{2014}"
                         "no runtime type dispatch, no worst-case-width padding."

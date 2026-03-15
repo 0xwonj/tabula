@@ -15,12 +15,12 @@
 The current type system forms a closed chain from application values down to AIR chips:
 
 ```
-Value(enum 4) → ValueType(enum 4) → BabyBearCodec(exhaustive match) → EncodingWidth → chip<W>
+Value(enum 4) → ValueType(enum 4) → KoalaBearCodec(exhaustive match) → EncodingWidth → chip<W>
                                                                         ↑ already open
 ```
 
 `Value` and `ValueType` are closed enums with 4 variants each (U64, I64, Bool, Bytes32).
-`BabyBearCodec` uses exhaustive `match` in `encode()`, `decode()`, and `field_elements_per()`.
+`KoalaBearCodec` uses exhaustive `match` in `encode()`, `decode()`, and `field_elements_per()`.
 Adding a new type requires modifying all three.
 
 The chain must be opened so that application developers can define new types (e.g., `FixedPoint128`, `Address20`, `OrderId`) without modifying Tabula's codebase — consistent with the [Zero-Modification Principle](extensibility-architecture.md#11-the-zero-modification-principle).
@@ -68,12 +68,12 @@ impl EncodingWidth {
 
 Already fully open. Application types can use `EncodingWidth(5)` or any width. This is the target state for the entire chain.
 
-### BabyBearCodec (closed implementation)
+### KoalaBearCodec (closed implementation)
 
 ```rust
 // crates/commitment/src/codec.rs
-impl ValueCodec for BabyBearCodec {
-    fn encode(&self, value: &Value) -> Result<Vec<BabyBear>, TabulaError> {
+impl ValueCodec for KoalaBearCodec {
+    fn encode(&self, value: &Value) -> Result<Vec<KoalaBear>, TabulaError> {
         match value {
             Value::Bool(b) => ...,
             Value::U64(n) => ...,
@@ -133,7 +133,7 @@ The exhaustive `match` sites (9 total) convert to registry lookups, which is the
 
 ## Design: TypeEncoding Trait
 
-A per-type encoding strategy that replaces the monolithic `BabyBearCodec` exhaustive matches:
+A per-type encoding strategy that replaces the monolithic `KoalaBearCodec` exhaustive matches:
 
 ```rust
 /// Defines how a type is encoded into field elements for proof circuits.
@@ -269,7 +269,7 @@ Option A remains available as a future extension if strong demand emerges.
 | `TypeTag` replacement | ~91 reference sites | Medium — mechanical refactor | None |
 | `TypeEncoding` trait | New trait + 4 core impls | Low — additive | TypeTag |
 | `TypeEncodingRegistry` | New registry, codec dispatch | Low — additive | TypeEncoding |
-| BabyBearCodec → registry | 3 exhaustive matches | Low — refactor | TypeEncoding |
+| KoalaBearCodec → registry | 3 exhaustive matches | Low — refactor | TypeEncoding |
 | Bus width (Option A) | All chip send/receive for Memory bus | High — AIR changes | TypeTag |
 | Bus width (Option B) | Full sharding adoption | Very High — architecture change | Sharding |
 | `Value::Custom` (if needed) | ~251 creation sites, Copy→Clone | High — cascading | Decision |

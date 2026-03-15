@@ -4,8 +4,8 @@
 //!
 //! - C9  StaticTableLookup: Execution → StaticTable (tested below)
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_chips::execution::air::ExecutionChip;
 use tabula_chips::execution::trace::generate_execution_trace;
@@ -33,7 +33,7 @@ fn c9_static_table_lookup_balance_multiple_lookups() {
         table_id: 7,
         col_id: 0,
         row_key: 100,
-        value: vec![BabyBear::new(42), BabyBear::ZERO, BabyBear::ZERO],
+        value: vec![KoalaBear::new(42), KoalaBear::ZERO, KoalaBear::ZERO],
         lookup_mult: 2,
     }];
     let static_trace = generate_static_table_trace::<3>(&static_rows);
@@ -55,8 +55,8 @@ use tabula_stark::chips::ChipId;
 #[test]
 fn c18_property_read_bus_balance_single_query() {
     // ExecutionChip sends one PropertyRead (MIN query, table=5, col=2).
-    let result_val = vec![BabyBear::new(42), BabyBear::ZERO, BabyBear::ZERO];
-    let result_key = vec![BabyBear::new(100), BabyBear::ZERO, BabyBear::ZERO];
+    let result_val = vec![KoalaBear::new(42), KoalaBear::ZERO, KoalaBear::ZERO];
+    let result_key = vec![KoalaBear::new(100), KoalaBear::ZERO, KoalaBear::ZERO];
 
     let exec_rec = make_property_read(
         0,
@@ -90,10 +90,10 @@ fn c18_property_read_bus_balance_single_query() {
 #[test]
 fn c18_property_read_bus_balance_multiple_queries() {
     // Two PropertyRead queries on the same column.
-    let val1 = vec![BabyBear::new(42), BabyBear::ZERO, BabyBear::ZERO];
-    let key1 = vec![BabyBear::new(100), BabyBear::ZERO, BabyBear::ZERO];
-    let val2 = vec![BabyBear::new(99), BabyBear::ZERO, BabyBear::ZERO];
-    let key2 = vec![BabyBear::new(200), BabyBear::ZERO, BabyBear::ZERO];
+    let val1 = vec![KoalaBear::new(42), KoalaBear::ZERO, KoalaBear::ZERO];
+    let key1 = vec![KoalaBear::new(100), KoalaBear::ZERO, KoalaBear::ZERO];
+    let val2 = vec![KoalaBear::new(99), KoalaBear::ZERO, KoalaBear::ZERO];
+    let key2 = vec![KoalaBear::new(200), KoalaBear::ZERO, KoalaBear::ZERO];
 
     let mut exec0 = make_property_read(0, 1, 2, 5, 2, 0, val1.clone(), key1.clone(), false);
     exec0.tx_index = 0;
@@ -128,8 +128,8 @@ fn c18_property_read_bus_balance_multiple_queries() {
 #[test]
 fn c18_property_read_bus_balance_null_result() {
     // PropertyRead query returning null.
-    let val = vec![BabyBear::ZERO, BabyBear::ZERO, BabyBear::ZERO];
-    let key = vec![BabyBear::ZERO, BabyBear::ZERO, BabyBear::ZERO];
+    let val = vec![KoalaBear::ZERO, KoalaBear::ZERO, KoalaBear::ZERO];
+    let key = vec![KoalaBear::ZERO, KoalaBear::ZERO, KoalaBear::ZERO];
 
     let exec_rec = make_property_read(0, 1, 2, 3, 1, 2, val.clone(), key.clone(), true);
     let exec_trace = generate_execution_trace::<3>(&[exec_rec]);

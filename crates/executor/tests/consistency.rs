@@ -2,7 +2,7 @@
 
 mod common;
 
-use tabula_core::{CellKey, AccessEvent, OpKind, TxResult, Value};
+use tabula_core::{AccessEvent, CellKey, OpKind, TxResult, Value};
 
 use tabula_executor::consistency::check_consistency;
 

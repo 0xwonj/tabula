@@ -4,10 +4,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
-use tabula_commitment::BabyBearCodec;
+use tabula_commitment::KoalaBearCodec;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{StaticTableProvider, ValueCodec};
 use tabula_core::{
@@ -44,9 +44,9 @@ pub fn lower_execution_records<const W: usize>(
         }
     }
 
-    let codec = BabyBearCodec;
+    let codec = KoalaBearCodec;
     let mut records = Vec::new();
-    let mut slot_vals = vec![vec![BabyBear::ZERO; W]; MAX_SLOTS];
+    let mut slot_vals = vec![vec![KoalaBear::ZERO; W]; MAX_SLOTS];
     let mut slot_nulls = [false; MAX_SLOTS];
     let mut slot_by_key: BTreeMap<CellKey, usize> = BTreeMap::new();
     let mut next_slot = 0usize;
@@ -144,8 +144,8 @@ pub fn lower_execution_records<const W: usize>(
                         tx_index,
                         effect_ordinal_in_tx: event.effect_ordinal_in_tx,
                         written_slots: vec![slot],
-                        src1_val: vec![BabyBear::ZERO; W],
-                        src2_val: vec![BabyBear::ZERO; W],
+                        src1_val: vec![KoalaBear::ZERO; W],
+                        src2_val: vec![KoalaBear::ZERO; W],
                         cond_val: false,
                         src1_slot_idx: None,
                         src2_slot_idx: None,
@@ -194,7 +194,7 @@ pub fn lower_execution_records<const W: usize>(
                         effect_ordinal_in_tx: event.effect_ordinal_in_tx,
                         written_slots: vec![],
                         src1_val: encoded.clone(),
-                        src2_val: vec![BabyBear::ZERO; W],
+                        src2_val: vec![KoalaBear::ZERO; W],
                         cond_val: false,
                         src1_slot_idx: Some(slot),
                         src2_slot_idx: None,
@@ -251,7 +251,7 @@ pub fn lower_program_batch<const W: usize>(
     empty_columns: &BTreeSet<(TableId, ColId)>,
 ) -> Result<LoweringOutput, TabulaError> {
     let type_map = build_type_map(schemas);
-    let codec = BabyBearCodec;
+    let codec = KoalaBearCodec;
 
     let mut all_records = Vec::new();
     let mut all_static_rows: BTreeMap<(u32, u16, u64), StaticTableRow> = BTreeMap::new();

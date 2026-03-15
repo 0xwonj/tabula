@@ -1,7 +1,7 @@
 //! Tests for permutation trace generation and challenge derivation.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -15,10 +15,10 @@ use super::trace::{compute_fingerprint_ef4, concat_traces};
 
 /// Generate a permutation trace from an interaction descriptor (test-only).
 fn generate_permutation_trace(
-    main_trace: &RowMajorMatrix<BabyBear>,
-    descriptor: &InteractionDescriptor<BabyBear>,
+    main_trace: &RowMajorMatrix<KoalaBear>,
+    descriptor: &InteractionDescriptor<KoalaBear>,
     challenges: [EF4; 2],
-) -> (RowMajorMatrix<BabyBear>, EF4) {
+) -> (RowMajorMatrix<KoalaBear>, EF4) {
     use p3_field::BasedVectorSpace;
 
     let [alpha, beta] = challenges;
@@ -31,9 +31,9 @@ fn generate_permutation_trace(
     );
 
     let perm_width = 4 * (num_interactions + 1);
-    let mut perm_values = vec![BabyBear::ZERO; height * perm_width];
+    let mut perm_values = vec![KoalaBear::ZERO; height * perm_width];
 
-    let all_interactions: Vec<&Interaction<BabyBear>> = descriptor
+    let all_interactions: Vec<&Interaction<KoalaBear>> = descriptor
         .sends
         .iter()
         .chain(descriptor.receives.iter())
@@ -54,10 +54,10 @@ fn generate_permutation_trace(
 
         for (j, interaction) in all_interactions.iter().enumerate() {
             let mult = interaction.multiplicity.eval(local, next);
-            if mult == BabyBear::ZERO {
+            if mult == KoalaBear::ZERO {
                 continue;
             }
-            let values: Vec<BabyBear> = interaction
+            let values: Vec<KoalaBear> = interaction
                 .values
                 .iter()
                 .map(|vpc| vpc.eval(local, next))
@@ -88,8 +88,8 @@ fn generate_permutation_trace(
     (RowMajorMatrix::new(perm_values, perm_width), cumsum)
 }
 
-fn bb(x: u64) -> BabyBear {
-    BabyBear::from_u64(x)
+fn bb(x: u64) -> KoalaBear {
+    KoalaBear::from_u64(x)
 }
 
 #[test]
@@ -115,10 +115,14 @@ fn fingerprint_ef4_different_bus() {
 }
 
 /// Compute a single chip's cumsum from debug recorded interactions.
-fn debug_chip_cumsum(interactions: &[RecordedInteraction<BabyBear>], alpha: EF4, beta: EF4) -> EF4 {
+fn debug_chip_cumsum(
+    interactions: &[RecordedInteraction<KoalaBear>],
+    alpha: EF4,
+    beta: EF4,
+) -> EF4 {
     let mut sum = EF4::ZERO;
     for i in interactions {
-        if i.multiplicity == BabyBear::ZERO {
+        if i.multiplicity == KoalaBear::ZERO {
             continue;
         }
         let fp = compute_fingerprint_ef4(&i.values, i.bus, alpha, beta);
@@ -296,9 +300,9 @@ fn concat_traces_correct_layout() {
     assert_eq!(combined.width(), 5);
     assert_eq!(combined.height(), 2);
 
-    let row0: Vec<BabyBear> = combined.row_slice(0).unwrap().to_vec();
+    let row0: Vec<KoalaBear> = combined.row_slice(0).unwrap().to_vec();
     assert_eq!(row0, vec![bb(1), bb(2), bb(10), bb(11), bb(12)]);
 
-    let row1: Vec<BabyBear> = combined.row_slice(1).unwrap().to_vec();
+    let row1: Vec<KoalaBear> = combined.row_slice(1).unwrap().to_vec();
     assert_eq!(row1, vec![bb(3), bb(4), bb(20), bb(21), bb(22)]);
 }

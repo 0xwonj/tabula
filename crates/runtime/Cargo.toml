@@ -1,0 +1,33 @@
+[package]
+name = "tabula-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tabula-core = { workspace = true }
+tabula-ir = { workspace = true }
+tabula-artifact = { workspace = true }
+tabula-executor = { workspace = true }
+
+# STARK proving dependencies (optional, behind `prove` feature)
+tabula-machine = { workspace = true, optional = true }
+tabula-witness = { workspace = true, optional = true }
+tabula-commitment = { workspace = true, optional = true, features = ["stark"] }
+p3-koala-bear = { workspace = true, optional = true }
+p3-field = { workspace = true, optional = true }
+
+[features]
+default = []
+prove = [
+    "dep:tabula-machine",
+    "dep:tabula-witness",
+    "dep:tabula-commitment",
+    "dep:p3-koala-bear",
+    "dep:p3-field",
+]
+
+[lints]
+workspace = true

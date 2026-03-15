@@ -48,7 +48,7 @@ Phase 2, then extract the public SDK in Phase 3. This avoids premature API stabi
 
 ```rust
 use p3_air::{Air, BaseAir};
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{ProverConstraintFolder, SymbolicAirBuilder, VerifierConstraintFolder};
@@ -61,7 +61,7 @@ If Tabula bumps p3 from 0.4 → 0.5, every external chip breaks because they imp
 ```rust
 // crates/machine/src/prelude.rs
 pub use p3_air::{Air, BaseAir, AirBuilder, PairBuilder};
-pub use p3_baby_bear::BabyBear;
+pub use p3_koala_bear::KoalaBear;
 pub use p3_field::{Field, PrimeCharacteristicRing, AbstractField};
 pub use p3_field::extension::BinomialExtensionField;
 pub use p3_matrix::dense::RowMajorMatrix;
@@ -248,7 +248,7 @@ Current width 278 → 280.
 // In crates/witness/src/trace/lowering.rs or similar:
 // When lowering Instruction::Call to InstructionRecord:
 //   - Set op_precompile = true
-//   - Set precompile_id = id.0 as BabyBear
+//   - Set precompile_id = id.0 as KoalaBear
 //   - Pack args into src slots, result into dst slot
 ```
 
@@ -431,8 +431,8 @@ Extension authors need to test their chips in isolation before integrating with 
 ///
 /// Convenience wrapper for extension chip testing.
 pub fn test_chip(
-    chip: &(impl BaseAir<BabyBear> + for<'a> Air<DebugConstraintBuilder<'a, BabyBear>>),
-    main_trace: &RowMajorMatrix<BabyBear>,
+    chip: &(impl BaseAir<KoalaBear> + for<'a> Air<DebugConstraintBuilder<'a, KoalaBear>>),
+    main_trace: &RowMajorMatrix<KoalaBear>,
 ) -> Result<(), String> {
     debug_check(chip, main_trace)
 }
@@ -444,7 +444,7 @@ add an example in the `prelude` module showing how to test a custom chip.
 ### F8. Preprocessed Trace Support for Custom Chips
 
 Custom chips may need preprocessed traces (like `PoseidonChip` uses for round constants).
-The current `TraceMap` supports `preprocessed: Option<RowMajorMatrix<BabyBear>>`, and
+The current `TraceMap` supports `preprocessed: Option<RowMajorMatrix<KoalaBear>>`, and
 `ChipSpec::preprocessed_width()` signals the width. This already works for external chips.
 
 **Proposed**: Document the preprocessed trace pattern in the prelude module with an example.

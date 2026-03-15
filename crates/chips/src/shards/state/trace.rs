@@ -1,10 +1,10 @@
 //! Trace generation for the StateShard chip.
 //!
 //! Converts per-column witness data (sorted by key) into a
-//! `RowMajorMatrix<BabyBear>` trace with two parallel hash chains.
+//! `RowMajorMatrix<KoalaBear>` trace with two parallel hash chains.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_gadgets::bool_fe;
@@ -66,15 +66,15 @@ pub struct StateShardRow {
     /// Source type (meaningful only for entry rows).
     pub source: EntrySource,
     /// Old value (zeros for write_only/gap).
-    pub old_val: Vec<BabyBear>,
+    pub old_val: Vec<KoalaBear>,
     /// New value (zeros for delete/gap).
-    pub new_val: Vec<BabyBear>,
+    pub new_val: Vec<KoalaBear>,
     /// Whether this column is touched in the batch.
     pub segment_is_touched: bool,
     /// Precomputed old hash chain accumulator.
-    pub old_hash_acc: [BabyBear; 8],
+    pub old_hash_acc: [KoalaBear; 8],
     /// Precomputed new hash chain accumulator.
-    pub new_hash_acc: [BabyBear; 8],
+    pub new_hash_acc: [KoalaBear; 8],
     /// Multiplicity for BaseStateEntry bus receive.
     pub read_mult: bool,
     /// Multiplicity for CoalescedWrite bus receive.
@@ -88,7 +88,7 @@ pub fn generate_state_shard_trace<const W: usize>(
     table_id: u32,
     col_id: u16,
     rows: &[StateShardRow],
-) -> RowMajorMatrix<BabyBear> {
+) -> RowMajorMatrix<KoalaBear> {
     debug_assert!(
         rows.windows(2).all(|w| w[0].key < w[1].key),
         "rows must be sorted by key"
@@ -97,7 +97,7 @@ pub fn generate_state_shard_trace<const W: usize>(
     let width = state_shard_width::<W>();
     let num_real = rows.len();
     let num_rows = (num_real + 1).next_power_of_two().max(2);
-    let mut values = vec![BabyBear::ZERO; num_rows * width];
+    let mut values = vec![KoalaBear::ZERO; num_rows * width];
 
     // Pass 1: populate base columns, hash chains, chain tracking.
     populate_base_and_chains::<W>(table_id, col_id, rows, width, &mut values);
@@ -117,25 +117,25 @@ fn populate_base_and_chains<const W: usize>(
     col_id: u16,
     rows: &[StateShardRow],
     width: usize,
-    values: &mut [BabyBear],
+    values: &mut [KoalaBear],
 ) {
     let mut seen_old = false;
     let mut seen_new = false;
     let mut seen_write = false;
-    let mut prev_old_hash_acc: Option<[BabyBear; 8]> = None;
-    let mut prev_new_hash_acc: Option<[BabyBear; 8]> = None;
+    let mut prev_old_hash_acc: Option<[KoalaBear; 8]> = None;
+    let mut prev_new_hash_acc: Option<[KoalaBear; 8]> = None;
 
     for (i, row) in rows.iter().enumerate() {
         assert_eq!(row.old_val.len(), W, "old_val length mismatch");
         assert_eq!(row.new_val.len(), W, "new_val length mismatch");
 
         let offset = i * width;
-        let cols: &mut StateShardCols<BabyBear, W> =
+        let cols: &mut StateShardCols<KoalaBear, W> =
             borrow_cols_mut(&mut values[offset..offset + width]);
 
-        cols.is_real = BabyBear::ONE;
-        cols.table_id = BabyBear::new(table_id);
-        cols.col_id = BabyBear::new(col_id as u32);
+        cols.is_real = KoalaBear::ONE;
+        cols.table_id = KoalaBear::new(table_id);
+        cols.col_id = KoalaBear::new(col_id as u32);
         cols.key.populate(row.key);
 
         cols.is_gap = bool_fe(row.is_gap);
@@ -208,7 +208,7 @@ fn populate_chain_tracking_flags<const W: usize>(
     rows: &[StateShardRow],
     num_real: usize,
     width: usize,
-    values: &mut [BabyBear],
+    values: &mut [KoalaBear],
 ) {
     // Backward pass: find last old/new entries.
     let mut found_last_old = false;
@@ -220,16 +220,16 @@ fn populate_chain_tracking_flags<const W: usize>(
         let in_new = !row.is_gap && row.source.in_new();
 
         let offset = i * width;
-        let cols: &mut StateShardCols<BabyBear, W> =
+        let cols: &mut StateShardCols<KoalaBear, W> =
             borrow_cols_mut(&mut values[offset..offset + width]);
 
         if in_old && !found_last_old {
-            cols.is_last_old_entry = BabyBear::ONE;
+            cols.is_last_old_entry = KoalaBear::ONE;
             found_last_old = true;
         }
 
         if in_new && !found_last_new {
-            cols.is_last_new_entry = BabyBear::ONE;
+            cols.is_last_new_entry = KoalaBear::ONE;
             found_last_new = true;
         }
     }
@@ -238,11 +238,11 @@ fn populate_chain_tracking_flags<const W: usize>(
     let mut past_last_old = false;
     for i in 0..num_real {
         let offset = i * width;
-        let cols: &mut StateShardCols<BabyBear, W> =
+        let cols: &mut StateShardCols<KoalaBear, W> =
             borrow_cols_mut(&mut values[offset..offset + width]);
 
-        if cols.is_last_old_entry == BabyBear::ONE {
-            cols.past_last_old_entry = BabyBear::ZERO;
+        if cols.is_last_old_entry == KoalaBear::ONE {
+            cols.past_last_old_entry = KoalaBear::ZERO;
             past_last_old = true;
         } else {
             cols.past_last_old_entry = bool_fe(past_last_old);
@@ -256,7 +256,7 @@ fn populate_ordering_witnesses<const W: usize>(
     num_real: usize,
     num_rows: usize,
     width: usize,
-    values: &mut [BabyBear],
+    values: &mut [KoalaBear],
 ) {
     for i in 0..num_rows {
         let next_idx = (i + 1) % num_rows;
@@ -268,7 +268,7 @@ fn populate_ordering_witnesses<const W: usize>(
             let cur_key = rows[i].key;
             let next_key = rows[next_idx].key;
             let offset = i * width;
-            let cols: &mut StateShardCols<BabyBear, W> =
+            let cols: &mut StateShardCols<KoalaBear, W> =
                 borrow_cols_mut(&mut values[offset..offset + width]);
             cols.key_ordering.populate(cur_key, next_key);
         }
@@ -284,7 +284,7 @@ pub struct StateShardInput {
 impl<const W: usize> TraceGenerator for StateShardChip<W> {
     type Input = StateShardInput;
 
-    fn generate_trace(&self, input: &StateShardInput) -> RowMajorMatrix<BabyBear> {
+    fn generate_trace(&self, input: &StateShardInput) -> RowMajorMatrix<KoalaBear> {
         generate_state_shard_trace::<W>(self.table_id(), self.col_id(), &input.rows)
     }
 }

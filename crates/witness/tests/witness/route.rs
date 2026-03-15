@@ -1,5 +1,5 @@
 use tabula_core::{
-    BatchResult, CellKey, ColId, AccessEvent, OpKind, RowKey, TableId, TxResult, Value,
+    AccessEvent, BatchResult, CellKey, ColId, OpKind, RowKey, TableId, TxResult, Value,
 };
 use tabula_witness::witness::route::{KeyRoute, route_keys};
 
@@ -46,7 +46,10 @@ fn read_only_keys_no_writes() {
     let k1 = ck(1, 0, 1);
     let k2 = ck(1, 0, 2);
     let result = BatchResult {
-        txs: vec![TxResult::success(vec![read_ev(k1, 1), read_ev(k2, 2)], vec![])],
+        txs: vec![TxResult::success(
+            vec![read_ev(k1, 1), read_ev(k2, 2)],
+            vec![],
+        )],
         ..empty_result()
     };
     let routes = route_keys(&result);
@@ -59,7 +62,10 @@ fn read_only_keys_no_writes() {
 fn sorted_memory_keys_with_writes() {
     let k1 = ck(1, 0, 1);
     let result = BatchResult {
-        txs: vec![TxResult::success(vec![read_ev(k1, 1), write_ev(k1, 2)], vec![])],
+        txs: vec![TxResult::success(
+            vec![read_ev(k1, 1), write_ev(k1, 2)],
+            vec![],
+        )],
         write_set_final: vec![(k1, Some(Value::U64(42)))],
         ..empty_result()
     };
@@ -129,7 +135,10 @@ fn deterministic_output() {
 fn read_of_written_key_is_sorted_memory() {
     let k = ck(1, 0, 1);
     let result = BatchResult {
-        txs: vec![TxResult::success(vec![read_ev(k, 1), write_ev(k, 2)], vec![])],
+        txs: vec![TxResult::success(
+            vec![read_ev(k, 1), write_ev(k, 2)],
+            vec![],
+        )],
         write_set_final: vec![(k, Some(Value::U64(100)))],
         ..empty_result()
     };
@@ -160,7 +169,10 @@ fn delete_routed_sorted_memory() {
     // write_set_final with None (delete) -> SortedMemory.
     let k = ck(1, 0, 1);
     let result = BatchResult {
-        txs: vec![TxResult::success(vec![read_ev(k, 1), write_ev(k, 2)], vec![])],
+        txs: vec![TxResult::success(
+            vec![read_ev(k, 1), write_ev(k, 2)],
+            vec![],
+        )],
         write_set_final: vec![(k, None)],
         ..empty_result()
     };

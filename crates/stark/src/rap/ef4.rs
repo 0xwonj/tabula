@@ -1,19 +1,21 @@
-//! EF4 (BabyBear^4) arithmetic helpers.
+//! EF4 (KoalaBear^4) arithmetic helpers.
 //!
-//! The quartic extension field uses the irreducible polynomial `X^4 - 11`.
-//! These helpers decompose EF4 values into 4 BabyBear coefficients and perform
-//! component-wise multiplication, used by the RAP constraint folders and
-//! permutation trace generation.
+//! The quartic extension field uses the irreducible polynomial `X^4 - W`
+//! where `W` is derived from [`KoalaBearParameters`]. These helpers decompose
+//! EF4 values into 4 KoalaBear coefficients and perform component-wise
+//! multiplication, used by the RAP constraint folders and permutation trace
+//! generation.
 
-use p3_baby_bear::BabyBear;
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Algebra, PrimeCharacteristicRing};
+use p3_koala_bear::{KoalaBear, KoalaBearParameters};
+use p3_monty_31::BinomialExtensionData;
 
 use crate::EF4;
 
 // ─── EF4 arithmetic helpers ─────────────────────────────────────────────────
 
-/// Extract 4 BabyBear coefficients from an EF4 value.
-pub fn ef4_coeffs(val: EF4) -> [BabyBear; 4] {
+/// Extract 4 KoalaBear coefficients from an EF4 value.
+pub fn ef4_coeffs(val: EF4) -> [KoalaBear; 4] {
     use p3_field::BasedVectorSpace;
     let s = val.as_basis_coefficients_slice();
     [s[0], s[1], s[2], s[3]]
@@ -21,19 +23,21 @@ pub fn ef4_coeffs(val: EF4) -> [BabyBear; 4] {
 
 /// Multiply two EF4 values decomposed into 4 components.
 ///
-/// Generic over the component type — works for `BabyBear` (concrete precomputation),
+/// Generic over the component type — works for `KoalaBear` (concrete precomputation),
 /// `PackedVal<SC>` (prover constraints), and `EF4` (verifier constraints).
 ///
-/// Uses the identity `X^4 = 11` in BabyBear^4 to reduce the product.
+/// Uses the identity `X^4 = W` (derived from [`KoalaBearParameters`]) to reduce
+/// the product. The `mul_w` method is optimized per-field (e.g. `3a = 2a + a`
+/// for KoalaBear where `W = 3`).
 pub fn ef4_mul<T>(a: &[T; 4], b: &[T; 4]) -> [T; 4]
 where
-    T: PrimeCharacteristicRing + Copy,
+    T: Algebra<KoalaBear> + Copy,
 {
-    let w = T::from_u64(11);
+    let mul_w = <KoalaBearParameters as BinomialExtensionData<4>>::mul_w::<T>;
 
-    let c0 = a[0] * b[0] + w * (a[1] * b[3] + a[2] * b[2] + a[3] * b[1]);
-    let c1 = a[0] * b[1] + a[1] * b[0] + w * (a[2] * b[3] + a[3] * b[2]);
-    let c2 = a[0] * b[2] + a[1] * b[1] + a[2] * b[0] + w * (a[3] * b[3]);
+    let c0 = a[0] * b[0] + mul_w(a[1] * b[3] + a[2] * b[2] + a[3] * b[1]);
+    let c1 = a[0] * b[1] + a[1] * b[0] + mul_w(a[2] * b[3] + a[3] * b[2]);
+    let c2 = a[0] * b[2] + a[1] * b[1] + a[2] * b[0] + mul_w(a[3] * b[3]);
     let c3 = a[0] * b[3] + a[1] * b[2] + a[2] * b[1] + a[3] * b[0];
 
     [c0, c1, c2, c3]
@@ -64,16 +68,16 @@ pub struct RowSelectors<T> {
 ///
 /// `f = α + tag + β·v[0] + β²·v[1] + …`
 ///
-/// Returns the 4 BabyBear-basis components of the fingerprint, evaluated
+/// Returns the 4 KoalaBear-basis components of the fingerprint, evaluated
 /// in the caller's expression type `T` (either `PackedVal` or `EF4`).
 pub fn compute_fingerprint_components<T>(
-    alpha_coeffs: [BabyBear; 4],
-    beta_coeffs: [BabyBear; 4],
+    alpha_coeffs: [KoalaBear; 4],
+    beta_coeffs: [KoalaBear; 4],
     tag: T,
     values: &[T],
 ) -> [T; 4]
 where
-    T: PrimeCharacteristicRing + Copy + From<BabyBear>,
+    T: Algebra<KoalaBear> + Copy,
 {
     let mut f: [T; 4] = [
         T::from(alpha_coeffs[0]) + tag,
@@ -127,9 +131,9 @@ where
 ///
 /// Returns `(alpha_powers, decomposed_alpha_powers)` where `alpha_powers`
 /// is in reverse order (highest power first) for Horner's method accumulation,
-/// and `decomposed_alpha_powers` splits each EF4 into its 4 BabyBear basis
+/// and `decomposed_alpha_powers` splits each EF4 into its 4 KoalaBear basis
 /// components (required by p3's `ProverConstraintFolder`).
-pub fn build_alpha_powers(alpha: EF4, count: usize) -> (Vec<EF4>, Vec<Vec<BabyBear>>) {
+pub fn build_alpha_powers(alpha: EF4, count: usize) -> (Vec<EF4>, Vec<Vec<KoalaBear>>) {
     use p3_field::BasedVectorSpace;
 
     let mut alpha_powers = Vec::with_capacity(count);
@@ -140,11 +144,11 @@ pub fn build_alpha_powers(alpha: EF4, count: usize) -> (Vec<EF4>, Vec<Vec<BabyBe
     }
     alpha_powers.reverse();
 
-    let decomposed: Vec<Vec<BabyBear>> = (0..<EF4 as BasedVectorSpace<BabyBear>>::DIMENSION)
+    let decomposed: Vec<Vec<KoalaBear>> = (0..<EF4 as BasedVectorSpace<KoalaBear>>::DIMENSION)
         .map(|i| {
             alpha_powers
                 .iter()
-                .map(|x| <EF4 as BasedVectorSpace<BabyBear>>::as_basis_coefficients_slice(x)[i])
+                .map(|x| <EF4 as BasedVectorSpace<KoalaBear>>::as_basis_coefficients_slice(x)[i])
                 .collect()
         })
         .collect();
@@ -157,8 +161,8 @@ mod tests {
     use super::*;
     use p3_field::BasedVectorSpace;
 
-    fn bb(x: u64) -> BabyBear {
-        BabyBear::from_u64(x)
+    fn bb(x: u64) -> KoalaBear {
+        KoalaBear::from_u64(x)
     }
 
     /// Verify that ef4_mul matches native EF4 multiplication.

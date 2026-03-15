@@ -173,8 +173,8 @@ fn core_transaction_types_are_send_sync() {
 #[test]
 fn core_execution_types_are_send_sync() {
     use tabula_core::{
-        AccessEvent, BatchResult, ETraceEventId, EmittedEvent, ExecutionConsistencyStatus,
-        OpKind, TxResult,
+        AccessEvent, BatchResult, ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, OpKind,
+        TxResult,
     };
 
     assert_send_sync::<AccessEvent>();
@@ -199,28 +199,28 @@ fn core_error_types_are_send_sync() {
 
 #[test]
 fn stark_interaction_types_are_send_sync() {
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use tabula_stark::air::interaction::{
         AirInteraction, ColumnRef, Interaction, InteractionDirection, VirtualPairCol,
     };
 
     assert_send_sync::<InteractionDirection>();
     assert_send_sync::<ColumnRef>();
-    assert_send_sync::<VirtualPairCol<BabyBear>>();
-    assert_send_sync::<Interaction<BabyBear>>();
-    assert_send_sync::<AirInteraction<BabyBear>>();
+    assert_send_sync::<VirtualPairCol<KoalaBear>>();
+    assert_send_sync::<Interaction<KoalaBear>>();
+    assert_send_sync::<AirInteraction<KoalaBear>>();
 }
 
 // ── STARK debug types ───────────────────────────────────────────────────────
 
 #[test]
 fn stark_debug_types_are_send_sync() {
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use tabula_stark::debug::{ChipRecord, ConstraintError, MultiChipError};
 
     assert_send_sync::<ConstraintError>();
     assert_send_sync::<MultiChipError>();
-    assert_send_sync::<ChipRecord<BabyBear>>();
+    assert_send_sync::<ChipRecord<KoalaBear>>();
 }
 
 // ── STARK keygen types ──────────────────────────────────────────────────────

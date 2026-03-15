@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId, TableSchema, Value};
@@ -181,7 +181,7 @@ fn pre_materialize_params<const W: usize>(
         let mut rec = ctx.empty_record(Opcode::Add);
         rec.written_slots = vec![slot];
         rec.src1_val = enc.clone();
-        rec.src2_val = vec![BabyBear::ZERO; W];
+        rec.src2_val = vec![KoalaBear::ZERO; W];
         rec.src1_slot_idx = Some(slot); // self-referential: src1 reads from the slot we write
         rec.src2_slot_idx = Some(zero_slot);
         rec.writes.push((slot, enc, false));

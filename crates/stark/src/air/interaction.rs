@@ -223,8 +223,8 @@ pub struct Interaction<F: Field> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p3_baby_bear::BabyBear;
     use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
 
     #[test]
     fn bus_id_tags_are_unique() {
@@ -250,24 +250,24 @@ mod tests {
 
     #[test]
     fn virtual_pair_col_single_local() {
-        let vpc = VirtualPairCol::<BabyBear>::single_local(2);
-        let local = [BabyBear::new(10), BabyBear::new(20), BabyBear::new(30)];
-        let next = [BabyBear::ZERO; 3];
-        assert_eq!(vpc.eval(&local, &next), BabyBear::new(30));
+        let vpc = VirtualPairCol::<KoalaBear>::single_local(2);
+        let local = [KoalaBear::new(10), KoalaBear::new(20), KoalaBear::new(30)];
+        let next = [KoalaBear::ZERO; 3];
+        assert_eq!(vpc.eval(&local, &next), KoalaBear::new(30));
     }
 
     #[test]
     fn virtual_pair_col_single_next() {
-        let vpc = VirtualPairCol::<BabyBear>::single_next(0);
-        let local = [BabyBear::ZERO; 3];
-        let next = [BabyBear::new(42), BabyBear::ZERO, BabyBear::ZERO];
-        assert_eq!(vpc.eval(&local, &next), BabyBear::new(42));
+        let vpc = VirtualPairCol::<KoalaBear>::single_next(0);
+        let local = [KoalaBear::ZERO; 3];
+        let next = [KoalaBear::new(42), KoalaBear::ZERO, KoalaBear::ZERO];
+        assert_eq!(vpc.eval(&local, &next), KoalaBear::new(42));
     }
 
     #[test]
     fn virtual_pair_col_constant() {
-        let vpc = VirtualPairCol::<BabyBear>::constant(BabyBear::new(99));
-        assert_eq!(vpc.eval(&[], &[]), BabyBear::new(99));
+        let vpc = VirtualPairCol::<KoalaBear>::constant(KoalaBear::new(99));
+        assert_eq!(vpc.eval(&[], &[]), KoalaBear::new(99));
     }
 
     #[test]
@@ -275,14 +275,14 @@ mod tests {
         // 5 * local[0] + 3 * next[1] + 7
         let vpc = VirtualPairCol {
             column_weights: vec![
-                (ColumnRef::Local(0), BabyBear::new(5)),
-                (ColumnRef::Next(1), BabyBear::new(3)),
+                (ColumnRef::Local(0), KoalaBear::new(5)),
+                (ColumnRef::Next(1), KoalaBear::new(3)),
             ],
-            constant: BabyBear::new(7),
+            constant: KoalaBear::new(7),
         };
-        let local = [BabyBear::new(10)];
-        let next = [BabyBear::ZERO, BabyBear::new(20)];
+        let local = [KoalaBear::new(10)];
+        let next = [KoalaBear::ZERO, KoalaBear::new(20)];
         // 5*10 + 3*20 + 7 = 50 + 60 + 7 = 117
-        assert_eq!(vpc.eval(&local, &next), BabyBear::new(117));
+        assert_eq!(vpc.eval(&local, &next), KoalaBear::new(117));
     }
 }

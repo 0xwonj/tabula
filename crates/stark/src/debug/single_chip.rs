@@ -3,22 +3,17 @@
 //! Evaluates local + transition constraints on a concrete trace.
 //! Any nonzero constraint value is a violation.
 
-use p3_air::Air;
+use p3_air::{Air, RowWindow};
 use p3_field::Field;
 use p3_matrix::Matrix;
-use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
-use p3_matrix::stack::VerticalPair;
+use p3_matrix::dense::RowMajorMatrix;
 
 use super::builder::DebugConstraintBuilder;
 use super::errors::ConstraintError;
 
-/// Create a zero-width preprocessed `VerticalPair` for chips without preprocessed columns.
-pub(super) fn empty_preprocessed<F: Field>()
--> VerticalPair<RowMajorMatrixView<'static, F>, RowMajorMatrixView<'static, F>> {
-    VerticalPair::new(
-        RowMajorMatrixView::new(&[], 0),
-        RowMajorMatrixView::new(&[], 0),
-    )
+/// Create a zero-width preprocessed `RowWindow`.
+fn empty_preprocessed<'a, F: Field>() -> RowWindow<'a, F> {
+    RowWindow::from_two_rows(&[], &[])
 }
 
 /// Verify that all AIR constraints are satisfied on a concrete trace.
@@ -48,7 +43,7 @@ where
 
 /// Verify AIR constraints with an optional preprocessed trace.
 ///
-/// Like [`debug_check`] but passes a preprocessed matrix to `PairBuilder::preprocessed()`.
+/// Like [`debug_check`] but passes a preprocessed matrix to `AirBuilder::preprocessed()`.
 pub fn debug_check_with_preprocessed<F, A>(
     air: &A,
     trace: &RowMajorMatrix<F>,
@@ -82,10 +77,7 @@ where
         let local = trace.row_slice(i).expect("row exists");
         let next = trace.row_slice(i_next).expect("row exists");
 
-        let main = VerticalPair::new(
-            RowMajorMatrixView::new_row(&*local),
-            RowMajorMatrixView::new_row(&*next),
-        );
+        let main = RowWindow::from_two_rows(&*local, &*next);
 
         // Bind preprocessed row slices at this scope level so they live long enough.
         let (prep_local_slice, prep_next_slice);
@@ -94,10 +86,7 @@ where
             prep_next_slice = prep_trace
                 .row_slice(i_next)
                 .expect("preprocessed row exists");
-            VerticalPair::new(
-                RowMajorMatrixView::new_row(&*prep_local_slice),
-                RowMajorMatrixView::new_row(&*prep_next_slice),
-            )
+            RowWindow::from_two_rows(&*prep_local_slice, &*prep_next_slice)
         } else {
             empty_preprocessed()
         };
@@ -146,10 +135,7 @@ where
         let local = trace.row_slice(i).expect("row exists");
         let next = trace.row_slice(i_next).expect("row exists");
 
-        let main = VerticalPair::new(
-            RowMajorMatrixView::new_row(&*local),
-            RowMajorMatrixView::new_row(&*next),
-        );
+        let main = RowWindow::from_two_rows(&*local, &*next);
 
         let mut builder = DebugConstraintBuilder {
             row_index: i,

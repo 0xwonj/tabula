@@ -13,8 +13,8 @@
 //! would miss.
 
 use p3_air::{Air, BaseAir};
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -28,8 +28,8 @@ use crate::debug::{
 
 /// Baseline evaluation result: (sends, receives) from debug constraint builder.
 type BaselineResult = (
-    Vec<RecordedInteraction<BabyBear>>,
-    Vec<RecordedInteraction<BabyBear>>,
+    Vec<RecordedInteraction<KoalaBear>>,
+    Vec<RecordedInteraction<KoalaBear>>,
 );
 
 /// Per-chip metadata produced by the keygen phase.
@@ -44,7 +44,7 @@ pub struct ChipKeygenInfo {
     /// Number of public values consumed by this chip.
     pub num_public_values: usize,
     /// Interaction descriptors extracted from column-scanning.
-    pub interactions: InteractionDescriptor<BabyBear>,
+    pub interactions: InteractionDescriptor<KoalaBear>,
 }
 
 /// Extract keygen info for a single chip.
@@ -56,17 +56,17 @@ pub fn keygen_chip<A>(chip: &A) -> ChipKeygenInfo
 where
     A: ?Sized
         + ChipSpec
-        + BaseAir<BabyBear>
-        + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+        + BaseAir<KoalaBear>
+        + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, KoalaBear>>,
 {
     let chip_id = chip.chip_id();
     let main_width = chip.width();
     let pp_width = chip.preprocessed_width();
-    let num_pvs = chip.num_public_values();
+    let num_pvs = BaseAir::<KoalaBear>::num_public_values(chip);
 
     let preprocessed = if pp_width > 0 {
         Some(RowMajorMatrix::new(
-            vec![BabyBear::ZERO; pp_width * PROBE_HEIGHT],
+            vec![KoalaBear::ZERO; pp_width * PROBE_HEIGHT],
             pp_width,
         ))
     } else {
@@ -111,17 +111,17 @@ const PROBE_HEIGHT: usize = 2;
 /// Evaluates the chip on a minimal (2-row) probe trace. Each column is set to `1`
 /// in turn to determine its contribution to each interaction field.
 ///
-/// Returns `(sends, receives)` as static [`Interaction<BabyBear>`] descriptors.
+/// Returns `(sends, receives)` as static [`Interaction<KoalaBear>`] descriptors.
 pub fn extract_interactions<A>(
     air: &A,
     main_width: usize,
-    preprocessed: Option<&RowMajorMatrix<BabyBear>>,
+    preprocessed: Option<&RowMajorMatrix<KoalaBear>>,
     num_public_values: usize,
-) -> (Vec<Interaction<BabyBear>>, Vec<Interaction<BabyBear>>)
+) -> (Vec<Interaction<KoalaBear>>, Vec<Interaction<KoalaBear>>)
 where
-    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, KoalaBear>>,
 {
-    let pvs = vec![BabyBear::ZERO; num_public_values];
+    let pvs = vec![KoalaBear::ZERO; num_public_values];
 
     // Phase 1: Evaluate with all-zero trace to establish baseline.
     let Some((baseline_sends, baseline_receives)) =
@@ -158,15 +158,15 @@ where
 pub fn count_interactions<A>(
     air: &A,
     main_width: usize,
-    preprocessed: Option<&RowMajorMatrix<BabyBear>>,
+    preprocessed: Option<&RowMajorMatrix<KoalaBear>>,
     num_public_values: usize,
 ) -> (usize, usize)
 where
-    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, KoalaBear>>,
 {
     let zero_trace =
-        RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * PROBE_HEIGHT], main_width);
-    let pvs = vec![BabyBear::ZERO; num_public_values];
+        RowMajorMatrix::new(vec![KoalaBear::ZERO; main_width * PROBE_HEIGHT], main_width);
+    let pvs = vec![KoalaBear::ZERO; num_public_values];
 
     let record = evaluate_chip_interactions_only(air, &zero_trace, preprocessed, &pvs);
 
@@ -193,16 +193,16 @@ where
 fn verify_extraction_soundness<A>(
     air: &A,
     main_width: usize,
-    preprocessed: Option<&RowMajorMatrix<BabyBear>>,
+    preprocessed: Option<&RowMajorMatrix<KoalaBear>>,
     num_public_values: usize,
-    sends: &[Interaction<BabyBear>],
-    receives: &[Interaction<BabyBear>],
+    sends: &[Interaction<KoalaBear>],
+    receives: &[Interaction<KoalaBear>],
 ) where
-    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, KoalaBear>>,
 {
     // Use deterministic "random" values so tests are reproducible.
     let random_trace = generate_deterministic_trace(main_width, PROBE_HEIGHT);
-    let pvs = vec![BabyBear::ZERO; num_public_values];
+    let pvs = vec![KoalaBear::ZERO; num_public_values];
 
     // If the chip fails on this trace (constraint violation), skip soundness check.
     // Column-scanning correctness is still ensured by the zero+probe evaluations.
@@ -268,13 +268,13 @@ fn verify_extraction_soundness<A>(
 }
 
 /// Generate a deterministic trace with varied but reproducible values.
-fn generate_deterministic_trace(width: usize, height: usize) -> RowMajorMatrix<BabyBear> {
+fn generate_deterministic_trace(width: usize, height: usize) -> RowMajorMatrix<KoalaBear> {
     let mut data = Vec::with_capacity(width * height);
     for row in 0..height {
         for col in 0..width {
             // Use a simple hash-like function to generate varied values.
             let val = ((row as u64 + 1) * 31 + (col as u64 + 1) * 97) % (1u64 << 30);
-            data.push(BabyBear::from_u64(val));
+            data.push(KoalaBear::from_u64(val));
         }
     }
     RowMajorMatrix::new(data, width)
@@ -289,14 +289,14 @@ fn generate_deterministic_trace(width: usize, height: usize) -> RowMajorMatrix<B
 fn eval_baseline<A>(
     air: &A,
     main_width: usize,
-    preprocessed: Option<&RowMajorMatrix<BabyBear>>,
-    pvs: &[BabyBear],
+    preprocessed: Option<&RowMajorMatrix<KoalaBear>>,
+    pvs: &[KoalaBear],
 ) -> Option<BaselineResult>
 where
-    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, KoalaBear>>,
 {
     let zero_trace =
-        RowMajorMatrix::new(vec![BabyBear::ZERO; main_width * PROBE_HEIGHT], main_width);
+        RowMajorMatrix::new(vec![KoalaBear::ZERO; main_width * PROBE_HEIGHT], main_width);
 
     let baseline_record = evaluate_chip_interactions_only(air, &zero_trace, preprocessed, pvs);
 
@@ -312,9 +312,9 @@ where
 
 /// Phase 2: Build initial [`Interaction`] descriptors from baseline constants.
 fn build_initial_descriptors(
-    baseline: &[RecordedInteraction<BabyBear>],
+    baseline: &[RecordedInteraction<KoalaBear>],
     direction: InteractionDirection,
-) -> Vec<Interaction<BabyBear>> {
+) -> Vec<Interaction<KoalaBear>> {
     baseline
         .iter()
         .map(|bi| Interaction {
@@ -341,14 +341,14 @@ fn build_initial_descriptors(
 fn scan_column_contributions<A>(
     air: &A,
     main_width: usize,
-    preprocessed: Option<&RowMajorMatrix<BabyBear>>,
-    pvs: &[BabyBear],
-    baseline_sends: &[RecordedInteraction<BabyBear>],
-    baseline_receives: &[RecordedInteraction<BabyBear>],
-    send_descriptors: &mut [Interaction<BabyBear>],
-    recv_descriptors: &mut [Interaction<BabyBear>],
+    preprocessed: Option<&RowMajorMatrix<KoalaBear>>,
+    pvs: &[KoalaBear],
+    baseline_sends: &[RecordedInteraction<KoalaBear>],
+    baseline_receives: &[RecordedInteraction<KoalaBear>],
+    send_descriptors: &mut [Interaction<KoalaBear>],
+    recv_descriptors: &mut [Interaction<KoalaBear>],
 ) where
-    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, KoalaBear>>,
 {
     // Scan local columns (row 0).
     for col in 0..main_width {
@@ -392,19 +392,19 @@ fn scan_column_contributions<A>(
 fn probe_single_column<A>(
     air: &A,
     main_width: usize,
-    preprocessed: Option<&RowMajorMatrix<BabyBear>>,
-    pvs: &[BabyBear],
+    preprocessed: Option<&RowMajorMatrix<KoalaBear>>,
+    pvs: &[KoalaBear],
     probe_index: usize,
     col_ref: ColumnRef,
-    baseline_sends: &[RecordedInteraction<BabyBear>],
-    baseline_receives: &[RecordedInteraction<BabyBear>],
-    send_descriptors: &mut [Interaction<BabyBear>],
-    recv_descriptors: &mut [Interaction<BabyBear>],
+    baseline_sends: &[RecordedInteraction<KoalaBear>],
+    baseline_receives: &[RecordedInteraction<KoalaBear>],
+    send_descriptors: &mut [Interaction<KoalaBear>],
+    recv_descriptors: &mut [Interaction<KoalaBear>],
 ) where
-    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, BabyBear>>,
+    A: ?Sized + for<'a> Air<crate::debug::DebugConstraintBuilder<'a, KoalaBear>>,
 {
-    let mut probe_data = vec![BabyBear::ZERO; main_width * PROBE_HEIGHT];
-    probe_data[probe_index] = BabyBear::ONE;
+    let mut probe_data = vec![KoalaBear::ZERO; main_width * PROBE_HEIGHT];
+    probe_data[probe_index] = KoalaBear::ONE;
     let probe_trace = RowMajorMatrix::new(probe_data, main_width);
 
     let probe_record = evaluate_chip_interactions_only(air, &probe_trace, preprocessed, pvs);
@@ -422,9 +422,9 @@ fn probe_single_column<A>(
 
 /// Update interaction descriptors by comparing probed values against baseline.
 fn update_descriptors(
-    probed: &[RecordedInteraction<BabyBear>],
-    baseline: &[RecordedInteraction<BabyBear>],
-    descriptors: &mut [Interaction<BabyBear>],
+    probed: &[RecordedInteraction<KoalaBear>],
+    baseline: &[RecordedInteraction<KoalaBear>],
+    descriptors: &mut [Interaction<KoalaBear>],
     col_ref: ColumnRef,
 ) {
     for (i, (probed_int, baseline_int)) in probed.iter().zip(baseline.iter()).enumerate() {
@@ -438,14 +438,14 @@ fn update_descriptors(
             .enumerate()
         {
             let weight = pval - bval;
-            if weight != BabyBear::ZERO && j < descriptors[i].values.len() {
+            if weight != KoalaBear::ZERO && j < descriptors[i].values.len() {
                 descriptors[i].values[j]
                     .column_weights
                     .push((col_ref, weight));
             }
         }
         let mult_weight = probed_int.multiplicity - baseline_int.multiplicity;
-        if mult_weight != BabyBear::ZERO {
+        if mult_weight != KoalaBear::ZERO {
             descriptors[i]
                 .multiplicity
                 .column_weights
@@ -455,7 +455,7 @@ fn update_descriptors(
 }
 
 /// Partition a chip record's interactions into per-row sends and receives.
-fn partition_per_row(record: &ChipRecord<BabyBear>) -> BaselineResult {
+fn partition_per_row(record: &ChipRecord<KoalaBear>) -> BaselineResult {
     let mut sends = Vec::new();
     let mut receives = Vec::new();
     for interaction in &record.interactions {

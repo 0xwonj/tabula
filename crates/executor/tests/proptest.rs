@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use proptest::prelude::*;
 
 use tabula_core::{
-    Batch, ColId, ColumnDef, OpKind, RowKey, TableId, TableSchema, Transaction,
-    TxTypeId, Value, ValueType,
+    Batch, ColId, ColumnDef, OpKind, RowKey, TableId, TableSchema, Transaction, TxTypeId, Value,
+    ValueType,
 };
 use tabula_ir::{ArithOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
 
@@ -221,6 +221,8 @@ proptest! {
             nonce_policy: &SeqNonce,
             static_tables: &EmptyStaticTables,
             precompiles: None,
+            committed_state: None,
+            property_openings: None,
         };
         let result = tabula_executor::batch::execute_batch(
             &batch, &prog, &snap, &env, &BTreeMap::new(),

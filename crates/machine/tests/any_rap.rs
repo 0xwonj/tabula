@@ -2,8 +2,8 @@
 //!
 //! Verifies that all chips used in the sharded architecture implement AnyRap.
 
-use p3_air::{Air, BaseAir};
-use p3_baby_bear::BabyBear;
+use p3_air::{Air, AirLayout, BaseAir};
+use p3_koala_bear::KoalaBear;
 use p3_uni_stark::SymbolicAirBuilder;
 
 use tabula_chips::execution::ExecutionChip;
@@ -43,7 +43,7 @@ fn execution_tier_chips_implement_any_rap() {
     assert_eq!(chips.len(), expected.len());
     for (chip, expected_id) in chips.iter().zip(expected.iter()) {
         assert_eq!(chip.chip_id(), *expected_id);
-        assert!(<dyn AnyRap as BaseAir<BabyBear>>::width(chip.as_ref()) > 0);
+        assert!(<dyn AnyRap as BaseAir<KoalaBear>>::width(chip.as_ref()) > 0);
     }
 }
 
@@ -66,7 +66,7 @@ fn column_tier_chips_implement_any_rap() {
     assert_eq!(chips.len(), expected.len());
     for (chip, expected_id) in chips.iter().zip(expected.iter()) {
         assert_eq!(chip.chip_id(), *expected_id);
-        assert!(<dyn AnyRap as BaseAir<BabyBear>>::width(chip.as_ref()) > 0);
+        assert!(<dyn AnyRap as BaseAir<KoalaBear>>::width(chip.as_ref()) > 0);
     }
 }
 
@@ -80,7 +80,7 @@ fn root_tier_chips_implement_any_rap() {
     assert_eq!(chips.len(), expected.len());
     for (chip, expected_id) in chips.iter().zip(expected.iter()) {
         assert_eq!(chip.chip_id(), *expected_id);
-        assert!(<dyn AnyRap as BaseAir<BabyBear>>::width(chip.as_ref()) > 0);
+        assert!(<dyn AnyRap as BaseAir<KoalaBear>>::width(chip.as_ref()) > 0);
     }
 }
 
@@ -95,18 +95,18 @@ fn eval_dispatch_via_dyn_any_rap() {
     assert_eq!(chip.chip_id(), core_chips::RANGE_CHECK);
     assert!(!chip.has_interactions());
 
-    let width = <dyn AnyRap as BaseAir<BabyBear>>::width(chip);
+    let width = <dyn AnyRap as BaseAir<KoalaBear>>::width(chip);
     assert_eq!(width, 2);
 
     // Eval with SymbolicAirBuilder via vtable dispatch.
-    let mut builder = SymbolicAirBuilder::<BabyBear>::new(
-        chip.preprocessed_width(),
-        width,
-        chip.num_public_values(),
-        0, // permutation_width (unused for symbolic constraint extraction)
-        0, // num_permutation_challenges
-    );
-    <dyn AnyRap as Air<SymbolicAirBuilder<BabyBear>>>::eval(chip, &mut builder);
+    let layout = AirLayout {
+        preprocessed_width: chip.preprocessed_width(),
+        main_width: width,
+        num_public_values: BaseAir::<KoalaBear>::num_public_values(chip),
+        ..Default::default()
+    };
+    let mut builder = SymbolicAirBuilder::<KoalaBear>::new(layout);
+    <dyn AnyRap as Air<SymbolicAirBuilder<KoalaBear>>>::eval(chip, &mut builder);
 
     // If we got here without panic, vtable dispatch works.
 }

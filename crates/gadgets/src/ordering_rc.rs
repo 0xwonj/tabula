@@ -6,7 +6,7 @@
 //! Used by SSMC (key_ordering), Merge (key_ordering), SortedMem (ordering).
 
 use p3_air::AirBuilder;
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use tabula_stark::air::builder::InteractionAirBuilder;
 use tabula_stark::air::interaction::{AirInteraction, core_buses};
@@ -34,7 +34,7 @@ pub struct OrderingRangeChecked<T> {
     pub diff2_bits: Limb2Bits<T>,
 }
 
-impl OrderingRangeChecked<BabyBear> {
+impl OrderingRangeChecked<KoalaBear> {
     /// Populate all columns proving `a < b`.
     ///
     /// # Panics
@@ -115,28 +115,28 @@ mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
 
-    fn zero_ordering() -> OrderingRangeChecked<BabyBear> {
+    fn zero_ordering() -> OrderingRangeChecked<KoalaBear> {
         OrderingRangeChecked {
             ineq: StrictIneq {
-                diff0: BabyBear::ZERO,
-                diff1: BabyBear::ZERO,
-                diff2: BabyBear::ZERO,
-                borrow0: BabyBear::ZERO,
-                borrow1: BabyBear::ZERO,
+                diff0: KoalaBear::ZERO,
+                diff1: KoalaBear::ZERO,
+                diff2: KoalaBear::ZERO,
+                borrow0: KoalaBear::ZERO,
+                borrow1: KoalaBear::ZERO,
             },
             diff0_halves: LimbHalves {
-                lo: BabyBear::ZERO,
-                hi: BabyBear::ZERO,
+                lo: KoalaBear::ZERO,
+                hi: KoalaBear::ZERO,
             },
             diff1_halves: LimbHalves {
-                lo: BabyBear::ZERO,
-                hi: BabyBear::ZERO,
+                lo: KoalaBear::ZERO,
+                hi: KoalaBear::ZERO,
             },
             diff2_bits: Limb2Bits {
-                b0: BabyBear::ZERO,
-                b1: BabyBear::ZERO,
-                b2: BabyBear::ZERO,
-                b3: BabyBear::ZERO,
+                b0: KoalaBear::ZERO,
+                b1: KoalaBear::ZERO,
+                b2: KoalaBear::ZERO,
+                b3: KoalaBear::ZERO,
             },
         }
     }
@@ -146,8 +146,8 @@ mod tests {
         let mut ord = zero_ordering();
         ord.populate(10, 11);
         // gap = 11 - 10 - 1 = 0
-        assert_eq!(ord.ineq.diff0, BabyBear::ZERO);
-        assert_eq!(ord.diff0_halves.lo, BabyBear::ZERO);
+        assert_eq!(ord.ineq.diff0, KoalaBear::ZERO);
+        assert_eq!(ord.diff0_halves.lo, KoalaBear::ZERO);
     }
 
     #[test]
@@ -158,12 +158,12 @@ mod tests {
         ord.populate(a, b);
         let gap = b - a - 1;
         let d0 = (gap & MASK_30) as u32;
-        assert_eq!(ord.ineq.diff0, BabyBear::new(d0));
+        assert_eq!(ord.ineq.diff0, KoalaBear::new(d0));
         // Halves should reconstruct
         let lo = d0 & ((1 << 15) - 1);
         let hi = d0 >> 15;
-        assert_eq!(ord.diff0_halves.lo, BabyBear::new(lo));
-        assert_eq!(ord.diff0_halves.hi, BabyBear::new(hi));
+        assert_eq!(ord.diff0_halves.lo, KoalaBear::new(lo));
+        assert_eq!(ord.diff0_halves.hi, KoalaBear::new(hi));
     }
 
     #[test]

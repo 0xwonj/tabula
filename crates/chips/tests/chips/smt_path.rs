@@ -1,7 +1,7 @@
 //! Tests for SmtColPathChip and SmtTablePathChip.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 
 use tabula_commitment::NativeDigest;
@@ -45,15 +45,15 @@ fn zero_siblings(depth: usize) -> Vec<NativeDigest> {
 }
 
 fn nonzero_digest(seed: u32) -> NativeDigest {
-    NativeDigest(core::array::from_fn(|i| BabyBear::new(seed + i as u32)))
+    NativeDigest(core::array::from_fn(|i| KoalaBear::new(seed + i as u32)))
 }
 
-fn table_path_public_values(trace: &p3_matrix::dense::RowMajorMatrix<BabyBear>) -> Vec<BabyBear> {
-    let mut pvs = vec![BabyBear::ZERO; SMT_TABLE_PATH_NUM_PUBLIC_VALUES];
+fn table_path_public_values(trace: &p3_matrix::dense::RowMajorMatrix<KoalaBear>) -> Vec<KoalaBear> {
+    let mut pvs = vec![KoalaBear::ZERO; SMT_TABLE_PATH_NUM_PUBLIC_VALUES];
     for i in 0..trace.height() {
         let row = trace.row_slice(i).expect("row exists");
-        let cols: &SmtTablePathCols<BabyBear> = borrow_cols(&row);
-        if cols.base.is_real == BabyBear::ONE && cols.base.is_root == BabyBear::ONE {
+        let cols: &SmtTablePathCols<KoalaBear> = borrow_cols(&row);
+        if cols.base.is_real == KoalaBear::ONE && cols.base.is_root == KoalaBear::ONE {
             pvs[SMT_TABLE_PATH_OLD_ROOT_PV_OFFSET..(SMT_TABLE_PATH_OLD_ROOT_PV_OFFSET + 8)]
                 .copy_from_slice(&cols.base.old_parent);
             pvs[SMT_TABLE_PATH_NEW_ROOT_PV_OFFSET..(SMT_TABLE_PATH_NEW_ROOT_PV_OFFSET + 8)]
@@ -158,7 +158,7 @@ fn col_path_records_c15_and_c16_interactions() {
         .filter(|i| {
             i.bus == core_buses::SMT_LEAF_DIGEST
                 && i.direction == InteractionDirection::Receive
-                && i.multiplicity != BabyBear::ZERO
+                && i.multiplicity != KoalaBear::ZERO
         })
         .collect();
     assert_eq!(c15.len(), 1, "should have 1 C15 receive (at leaf)");
@@ -170,7 +170,7 @@ fn col_path_records_c15_and_c16_interactions() {
         .filter(|i| {
             i.bus == core_buses::SMT_TABLE_ROOT
                 && i.direction == InteractionDirection::Send
-                && i.multiplicity != BabyBear::ZERO
+                && i.multiplicity != KoalaBear::ZERO
         })
         .collect();
     assert_eq!(c16.len(), 1, "should have 1 C16 send (at root)");
@@ -182,7 +182,7 @@ fn col_path_records_c15_and_c16_interactions() {
         .filter(|i| {
             i.bus == core_buses::POSEIDON_PERM
                 && i.direction == InteractionDirection::Send
-                && i.multiplicity != BabyBear::ZERO
+                && i.multiplicity != KoalaBear::ZERO
         })
         .collect();
     assert_eq!(c5.len(), 6, "should have 6 C5 sends (3 levels × 2 trees)");
@@ -226,7 +226,7 @@ fn table_path_invalid_public_root_binding() {
     };
     let trace = generate_smt_table_path_trace(&[witness]);
     let mut pvs = table_path_public_values(&trace);
-    pvs[SMT_TABLE_PATH_OLD_ROOT_PV_OFFSET] += BabyBear::ONE;
+    pvs[SMT_TABLE_PATH_OLD_ROOT_PV_OFFSET] += KoalaBear::ONE;
 
     debug_check_with_public_values(&SmtTablePathChip, &trace, &pvs)
         .expect_err("tampered old_root public value must fail root binding");
@@ -260,13 +260,13 @@ fn table_path_records_c16_receive() {
         .filter(|i| {
             i.bus == core_buses::SMT_TABLE_ROOT
                 && i.direction == InteractionDirection::Receive
-                && i.multiplicity != BabyBear::ZERO
+                && i.multiplicity != KoalaBear::ZERO
         })
         .collect();
     assert_eq!(c16.len(), 1, "should have 1 C16 receive (at leaf)");
     assert_eq!(
         c16[0].multiplicity,
-        BabyBear::new(3),
+        KoalaBear::new(3),
         "C16 receive multiplicity should be root_mult_witness=3"
     );
 }
@@ -274,7 +274,7 @@ fn table_path_records_c16_receive() {
 #[test]
 fn table_path_empty_trace() {
     let trace = generate_smt_table_path_trace(&[]);
-    let pvs = vec![BabyBear::ZERO; SMT_TABLE_PATH_NUM_PUBLIC_VALUES];
+    let pvs = vec![KoalaBear::ZERO; SMT_TABLE_PATH_NUM_PUBLIC_VALUES];
     debug_check_with_public_values(&SmtTablePathChip, &trace, &pvs)
         .expect("empty table path trace should pass");
 }
@@ -292,9 +292,9 @@ fn col_path_invalid_cannot_disable_root_send_on_last_real_row() {
     };
     let mut trace = generate_smt_col_path_trace(&[witness]);
     let row = trace.values.get_mut(0..SMT_COL_PATH_WIDTH).unwrap();
-    let cols: &mut SmtPathCols<BabyBear> = borrow_cols_mut(row);
-    cols.is_root = BabyBear::ZERO;
-    cols.next_is_new_path.populate(BabyBear::ZERO);
+    let cols: &mut SmtPathCols<KoalaBear> = borrow_cols_mut(row);
+    cols.is_root = KoalaBear::ZERO;
+    cols.next_is_new_path.populate(KoalaBear::ZERO);
 
     debug_check(&SmtColPathChip, &trace).expect_err("last real row without is_root must fail");
 }
@@ -316,9 +316,9 @@ fn table_path_invalid_cannot_disable_leaf_receive() {
     let mut trace = generate_smt_table_path_trace(&[witness]);
     let pvs = table_path_public_values(&trace);
     let row = trace.values.get_mut(0..SMT_TABLE_PATH_WIDTH).unwrap();
-    let cols: &mut SmtTablePathCols<BabyBear> = borrow_cols_mut(row);
-    cols.base.is_leaf = BabyBear::ZERO;
-    cols.root_mult_witness = BabyBear::ZERO;
+    let cols: &mut SmtTablePathCols<KoalaBear> = borrow_cols_mut(row);
+    cols.base.is_leaf = KoalaBear::ZERO;
+    cols.root_mult_witness = KoalaBear::ZERO;
 
     debug_check_with_public_values(&SmtTablePathChip, &trace, &pvs)
         .expect_err("path start without is_leaf must fail");

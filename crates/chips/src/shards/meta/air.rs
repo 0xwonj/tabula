@@ -25,9 +25,8 @@
 //! - C5 PoseidonPerm send (Com_empty + leaf_old + leaf_new)
 //! - C15 SmtLeafDigest send
 
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::Matrix;
 
 use tabula_gadgets::{constrain_constant_identity, constrain_is_real_prefix};
 use tabula_stark::air::builder::InteractionAirBuilder;
@@ -129,12 +128,10 @@ impl<F> BaseAir<F> for MetaShardChip {
 impl<AB: InteractionAirBuilder> Air<AB> for MetaShardChip {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local_row = main.row_slice(0).expect("trace must have at least one row");
-        let next_row = main
-            .row_slice(1)
-            .expect("trace must have at least two rows");
-        let local: &MetaShardCols<AB::Var> = borrow_cols(&local_row);
-        let next: &MetaShardCols<AB::Var> = borrow_cols(&next_row);
+        let local_row = main.current_slice();
+        let next_row = main.next_slice();
+        let local: &MetaShardCols<AB::Var> = borrow_cols(local_row);
+        let next: &MetaShardCols<AB::Var> = borrow_cols(next_row);
 
         // ── 1. Boolean constraints ──
         constrain_booleans(builder, local);

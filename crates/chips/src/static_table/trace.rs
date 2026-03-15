@@ -1,7 +1,7 @@
 //! Trace generation for the StaticTable chip.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_commitment::encode_u64_limbs;
@@ -20,7 +20,7 @@ pub struct StaticTableRow {
     /// Row key.
     pub row_key: u64,
     /// Value (field elements, length must match W).
-    pub value: Vec<BabyBear>,
+    pub value: Vec<KoalaBear>,
     /// Multiplicity of this row on C9 StaticTableLookup bus.
     ///
     /// Set to the number of matching `Lookup` sends in the Execution trace.
@@ -32,11 +32,11 @@ pub struct StaticTableRow {
 /// Rows are padded to the next power of two. Padding rows have `is_real = 0`.
 pub fn generate_static_table_trace<const W: usize>(
     rows: &[StaticTableRow],
-) -> RowMajorMatrix<BabyBear> {
+) -> RowMajorMatrix<KoalaBear> {
     let width = static_table_width::<W>();
     let num_real = rows.len();
     let num_rows = (num_real + 1).next_power_of_two().max(2);
-    let mut values = vec![BabyBear::ZERO; num_rows * width];
+    let mut values = vec![KoalaBear::ZERO; num_rows * width];
 
     for (i, row) in rows.iter().enumerate() {
         assert_eq!(
@@ -48,11 +48,11 @@ pub fn generate_static_table_trace<const W: usize>(
 
         let offset = i * width;
         let slice = &mut values[offset..offset + width];
-        let cols: &mut StaticTableCols<BabyBear, W> = borrow_cols_mut(slice);
+        let cols: &mut StaticTableCols<KoalaBear, W> = borrow_cols_mut(slice);
 
-        cols.is_real = BabyBear::ONE;
-        cols.table_id = BabyBear::new(row.table_id);
-        cols.col_id = BabyBear::new(row.col_id as u32);
+        cols.is_real = KoalaBear::ONE;
+        cols.table_id = KoalaBear::new(row.table_id);
+        cols.col_id = KoalaBear::new(row.col_id as u32);
 
         let limbs = encode_u64_limbs(row.row_key);
         cols.row_key.limb0 = limbs[0];
@@ -60,7 +60,7 @@ pub fn generate_static_table_trace<const W: usize>(
         cols.row_key.limb2 = limbs[2];
 
         cols.value.copy_from_slice(&row.value);
-        cols.lookup_mult_witness = BabyBear::new(row.lookup_mult);
+        cols.lookup_mult_witness = KoalaBear::new(row.lookup_mult);
     }
 
     RowMajorMatrix::new(values, width)
@@ -73,7 +73,7 @@ use tabula_stark::trace::TraceGenerator;
 impl<const W: usize> TraceGenerator for super::air::StaticTableChip<W> {
     type Input = [StaticTableRow];
 
-    fn generate_trace(&self, input: &[StaticTableRow]) -> RowMajorMatrix<BabyBear> {
+    fn generate_trace(&self, input: &[StaticTableRow]) -> RowMajorMatrix<KoalaBear> {
         generate_static_table_trace::<W>(input)
     }
 }

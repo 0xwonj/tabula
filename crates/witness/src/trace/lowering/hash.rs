@@ -1,5 +1,5 @@
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_core::error::TabulaError;
 use tabula_ir::ValueExpr;
@@ -32,9 +32,9 @@ pub(super) fn lower_hash<const W: usize>(
     let v1_enc = ctx.encode_padded(&v1)?;
 
     // Build Poseidon permutation input.
-    let mut perm_input = [BabyBear::ZERO; 16];
-    perm_input[0] = BabyBear::new(HASH_INSTRUCTION_DOMAIN_TAG);
-    perm_input[1] = BabyBear::new(HASH_INSTRUCTION_INPUT_COUNT);
+    let mut perm_input = [KoalaBear::ZERO; 16];
+    perm_input[0] = KoalaBear::new(HASH_INSTRUCTION_DOMAIN_TAG);
+    perm_input[1] = KoalaBear::new(HASH_INSTRUCTION_INPUT_COUNT);
     for (j, v) in v0_enc.iter().enumerate().take(W) {
         perm_input[2 + j] = *v;
     }
@@ -43,11 +43,11 @@ pub(super) fn lower_hash<const W: usize>(
     }
 
     let (_rounds, perm_output) = poseidon2_permutation(perm_input);
-    let digest: [BabyBear; 8] = core::array::from_fn(|i| perm_output[i]);
+    let digest: [KoalaBear; 8] = core::array::from_fn(|i| perm_output[i]);
 
     // Hash output is 8 FE (Bytes32 width). Pad to W.
     let mut dst_enc = digest.to_vec();
-    dst_enc.resize(W, BabyBear::ZERO);
+    dst_enc.resize(W, KoalaBear::ZERO);
 
     let slot = dst as usize;
     let exclude = [slot];
@@ -57,7 +57,7 @@ pub(super) fn lower_hash<const W: usize>(
     // For Hash, the result value is Bytes32 — store the digest as 8 FE in slot.
     let result_fes = digest.to_vec();
     let mut slot_enc = result_fes;
-    slot_enc.resize(W, BabyBear::ZERO);
+    slot_enc.resize(W, KoalaBear::ZERO);
 
     // Can't produce a proper Value for Bytes32 from FE; store None in Value slot.
     ctx.slots[slot] = None;

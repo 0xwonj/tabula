@@ -1,7 +1,7 @@
 //! Tests for the StateShard AIR chip.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_chips::shards::state::air::StateShardChip;
@@ -16,7 +16,7 @@ fn chip() -> StateShardChip<3> {
     StateShardChip::new(ChipId(100), 0, 0)
 }
 
-fn trace(rows: &[StateShardRow]) -> RowMajorMatrix<BabyBear> {
+fn trace(rows: &[StateShardRow]) -> RowMajorMatrix<KoalaBear> {
     generate_state_shard_trace::<3>(0, 0, rows)
 }
 
@@ -124,7 +124,7 @@ fn invalid_gap_with_nonzero_s1() {
 fn invalid_old_only_new_val_mismatch() {
     // old_only requires new_val = old_val, but we break it
     let mut rows = vec![ss_old_only(100, [50, 0, 0])];
-    rows[0].new_val = vec![BabyBear::new(99), BabyBear::ZERO, BabyBear::ZERO];
+    rows[0].new_val = vec![KoalaBear::new(99), KoalaBear::ZERO, KoalaBear::ZERO];
     debug_check(&chip(), &trace(&rows)).expect_err("old_only new≠old should fail");
 }
 
@@ -132,7 +132,7 @@ fn invalid_old_only_new_val_mismatch() {
 fn invalid_write_only_old_val_nonzero() {
     // write_only requires old_val = 0
     let mut rows = vec![ss_write_only(100, [75, 0, 0])];
-    rows[0].old_val = vec![BabyBear::new(50), BabyBear::ZERO, BabyBear::ZERO];
+    rows[0].old_val = vec![KoalaBear::new(50), KoalaBear::ZERO, KoalaBear::ZERO];
     debug_check(&chip(), &trace(&rows)).expect_err("write_only old≠0 should fail");
 }
 
@@ -140,7 +140,7 @@ fn invalid_write_only_old_val_nonzero() {
 fn invalid_delete_new_val_nonzero() {
     // delete requires new_val = 0
     let mut rows = vec![ss_delete(100, [50, 0, 0])];
-    rows[0].new_val = vec![BabyBear::new(99), BabyBear::ZERO, BabyBear::ZERO];
+    rows[0].new_val = vec![KoalaBear::new(99), KoalaBear::ZERO, KoalaBear::ZERO];
     debug_check(&chip(), &trace(&rows)).expect_err("delete new≠0 should fail");
 }
 

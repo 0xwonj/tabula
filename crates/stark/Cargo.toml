@@ -9,7 +9,8 @@ tabula-core = { workspace = true }
 tabula-commitment = { workspace = true, features = ["stark"] }
 thiserror = { workspace = true }
 p3-field = { workspace = true }
-p3-baby-bear = { workspace = true }
+p3-koala-bear = { workspace = true }
+p3-monty-31 = { workspace = true }
 p3-air = { workspace = true }
 p3-matrix = { workspace = true }
 p3-uni-stark = { workspace = true }

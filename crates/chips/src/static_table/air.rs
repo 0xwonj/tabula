@@ -4,8 +4,7 @@
 //! 1. `is_real` boolean + prefix (monotonic 1→0)
 //! 2. C9 StaticTableLookup receive with multiplicity witness
 
-use p3_air::{Air, BaseAir};
-use p3_matrix::Matrix;
+use p3_air::{Air, BaseAir, WindowAccess};
 
 use tabula_gadgets::constrain_is_real_prefix;
 use tabula_stark::air::builder::InteractionAirBuilder;
@@ -27,12 +26,10 @@ impl<F, const W: usize> BaseAir<F> for StaticTableChip<W> {
 impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for StaticTableChip<W> {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local_row = main.row_slice(0).expect("trace must have at least one row");
-        let next_row = main
-            .row_slice(1)
-            .expect("trace must have at least two rows");
-        let local: &StaticTableCols<AB::Var, W> = borrow_cols(&local_row);
-        let next: &StaticTableCols<AB::Var, W> = borrow_cols(&next_row);
+        let local_row = main.current_slice();
+        let next_row = main.next_slice();
+        let local: &StaticTableCols<AB::Var, W> = borrow_cols(local_row);
+        let next: &StaticTableCols<AB::Var, W> = borrow_cols(next_row);
 
         // ── 1. is_real prefix ──
         constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());

@@ -221,7 +221,7 @@ fn invalid_wrong_select_result() {
 #[test]
 fn invalid_wrong_not_result() {
     let mut records = vec![make_read(0, 0, 0, 100, 1, false), make_not(1, 0, true)];
-    records[1].writes[0].1 = vec![BabyBear::ONE, BabyBear::ZERO, BabyBear::ZERO];
+    records[1].writes[0].1 = vec![KoalaBear::ONE, KoalaBear::ZERO, KoalaBear::ZERO];
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong not result should fail");
 }
@@ -233,7 +233,7 @@ fn invalid_wrong_and_result() {
         make_read(1, 0, 0, 200, 0, false),
         make_and(2, 0, 1, true, false),
     ];
-    records[2].writes[0].1 = vec![BabyBear::ONE, BabyBear::ZERO, BabyBear::ZERO];
+    records[2].writes[0].1 = vec![KoalaBear::ONE, KoalaBear::ZERO, KoalaBear::ZERO];
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong and result should fail");
 }
@@ -245,7 +245,7 @@ fn invalid_wrong_or_result() {
         make_read(1, 0, 0, 200, 0, false),
         make_or(2, 0, 1, false, false),
     ];
-    records[2].writes[0].1 = vec![BabyBear::ONE, BabyBear::ZERO, BabyBear::ZERO];
+    records[2].writes[0].1 = vec![KoalaBear::ONE, KoalaBear::ZERO, KoalaBear::ZERO];
     let trace = generate_execution_trace::<W>(&records);
     debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong or result should fail");
 }
@@ -285,9 +285,9 @@ fn invalid_broken_slot_carry() {
     // Corrupt slot 0 on row 2 (the add instruction) to break carry
     let width = execution_width::<W>();
     let row2_offset = 2 * width;
-    let cols: &mut ExecutionCols<BabyBear, W> =
+    let cols: &mut ExecutionCols<KoalaBear, W> =
         borrow_cols_mut(&mut trace.values[row2_offset..row2_offset + width]);
-    cols.slots[0][0] = BabyBear::new(999);
+    cols.slots[0][0] = KoalaBear::new(999);
 
     debug_check(&ExecutionChip::<W>, &trace).expect_err("broken slot carry");
 }
@@ -403,9 +403,9 @@ fn soundness_double_opcode() {
     let mut trace = generate_execution_trace::<W>(&records);
     let width = execution_width::<W>();
     // Corrupt the add row (row 2) to also have op_and=1
-    let cols: &mut ExecutionCols<BabyBear, W> =
+    let cols: &mut ExecutionCols<KoalaBear, W> =
         borrow_cols_mut(&mut trace.values[2 * width..3 * width]);
-    cols.op_and = BabyBear::ONE;
+    cols.op_and = KoalaBear::ONE;
     debug_check(&ExecutionChip::<W>, &trace)
         .expect_err("two opcodes set should fail one-hot constraint");
 }
@@ -416,8 +416,8 @@ fn soundness_is_real_prefix_gap() {
     let mut trace = generate_execution_trace::<W>(&records);
     let width = execution_width::<W>();
     // Set row 0 is_real=0, keep row 1 is_real=1 → 0→1 violates prefix
-    let cols: &mut ExecutionCols<BabyBear, W> = borrow_cols_mut(&mut trace.values[0..width]);
-    cols.is_real = BabyBear::ZERO;
+    let cols: &mut ExecutionCols<KoalaBear, W> = borrow_cols_mut(&mut trace.values[0..width]);
+    cols.is_real = KoalaBear::ZERO;
     debug_check(&ExecutionChip::<W>, &trace)
         .expect_err("is_real 0→1 should fail prefix constraint");
 }
@@ -432,9 +432,9 @@ fn soundness_clock_mismatch() {
     let mut trace = generate_execution_trace::<W>(&records);
     let width = execution_width::<W>();
     // Forge row 1 clk = 0 (should be 1)
-    let cols: &mut ExecutionCols<BabyBear, W> =
+    let cols: &mut ExecutionCols<KoalaBear, W> =
         borrow_cols_mut(&mut trace.values[width..2 * width]);
-    cols.clk = BabyBear::ZERO;
+    cols.clk = KoalaBear::ZERO;
     debug_check(&ExecutionChip::<W>, &trace)
         .expect_err("clock mismatch should fail recurrence constraint");
 }

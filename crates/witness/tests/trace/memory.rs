@@ -2,16 +2,17 @@ use super::*;
 
 #[test]
 fn trace_builder_builds_valid_memory_traces() {
-    let vc = HybridVC::new(MockFieldHasher, 1024);
+    let hasher = MockFieldHasher;
     let table = TableId(1);
     let col = ColId(0);
 
     let old_entries = vec![(RowKey(10), encode_u64(50))];
-    let (old_state, _runtime_com_old) = vc.commit_column(table, col, old_entries).unwrap();
+    let (old_state, _runtime_com_old) =
+        ColumnState::commit(&hasher, table, col, old_entries, scheme_tags::SSMC).unwrap();
 
     let writes = vec![(RowKey(10), Some(encode_u64(50)))];
     let (new_state, _runtime_com_new, merge_trace) =
-        vc.apply_column_writes(&old_state, table, col, &writes);
+        old_state.apply_writes(&hasher, table, col, &writes);
     let com_old = chain_commit_single(1, 0, 10, &encode_u64(50));
     let com_new = chain_commit_single(1, 0, 10, &encode_u64(50));
 
@@ -73,7 +74,8 @@ fn trace_builder_builds_valid_memory_traces() {
         meta: meta.clone(),
     };
 
-    let (old_state_root, new_state_root) = single_column_roots(&vc, table, col, com_old, com_new);
+    let (old_state_root, new_state_root) =
+        single_column_roots(&hasher, table, col, com_old, com_new);
 
     let witness = BatchWitness {
         columns: vec![column_witness],
@@ -109,16 +111,17 @@ fn trace_builder_builds_valid_memory_traces() {
 
 #[test]
 fn trace_builder_builds_and_validates_all_chip_bundle() {
-    let vc = HybridVC::new(MockFieldHasher, 1024);
+    let hasher = MockFieldHasher;
     let table = TableId(1);
     let col = ColId(0);
 
     let old_entries = vec![(RowKey(10), encode_u64(50))];
-    let (old_state, _runtime_com_old) = vc.commit_column(table, col, old_entries).unwrap();
+    let (old_state, _runtime_com_old) =
+        ColumnState::commit(&hasher, table, col, old_entries, scheme_tags::SSMC).unwrap();
 
     let writes = vec![(RowKey(10), Some(encode_u64(50)))];
     let (new_state, _runtime_com_new, merge_trace) =
-        vc.apply_column_writes(&old_state, table, col, &writes);
+        old_state.apply_writes(&hasher, table, col, &writes);
     let com_old = chain_commit_single(1, 0, 10, &encode_u64(50));
     let com_new = chain_commit_single(1, 0, 10, &encode_u64(50));
 
@@ -223,8 +226,8 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
             tx_index: 0,
             effect_ordinal_in_tx: 0,
             written_slots: vec![0],
-            src1_val: vec![BabyBear::ZERO; 3],
-            src2_val: vec![BabyBear::ZERO; 3],
+            src1_val: vec![KoalaBear::ZERO; 3],
+            src2_val: vec![KoalaBear::ZERO; 3],
             cond_val: false,
             src1_slot_idx: None,
             src2_slot_idx: None,
@@ -250,7 +253,7 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
             effect_ordinal_in_tx: 1,
             written_slots: vec![],
             src1_val: encode_u64(50),
-            src2_val: vec![BabyBear::ZERO; 3],
+            src2_val: vec![KoalaBear::ZERO; 3],
             cond_val: false,
             src1_slot_idx: Some(0),
             src2_slot_idx: None,
@@ -361,17 +364,19 @@ tx touch(id: u64) {
     let static_tables = InMemoryStaticTables::new();
     let env = BatchEnv {
         hasher: &hasher,
-        sig_verifier: &MockSigVerifier,
+        sig_verifier: &NoopSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &static_tables,
         precompiles: None,
+        committed_state: None,
+        property_openings: None,
     };
     let execution_result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
         .expect("batch execution should succeed");
     assert_eq!(execution_result.successful_events().count(), 2);
 
-    let vc = HybridVC::new(PoseidonHasher::new(), 1024);
-    let codec = BabyBearCodec;
+    let commit_hasher = PoseidonHasher::new();
+    let codec = KoalaBearCodec;
 
     let mut entries_by_col: EncodedColumnEntries = BTreeMap::new();
     entries_by_col
@@ -386,7 +391,14 @@ tx touch(id: u64) {
                 .remove(&(schema.id, col.id))
                 .unwrap_or_default();
             entries.sort_by_key(|(row, _)| *row);
-            let (state, _com) = vc.commit_column(schema.id, col.id, entries).unwrap();
+            let (state, _com) = ColumnState::commit(
+                &commit_hasher,
+                schema.id,
+                col.id,
+                entries,
+                scheme_tags::SSMC,
+            )
+            .unwrap();
             old_column_states.insert((schema.id, col.id), state);
         }
     }
@@ -397,7 +409,7 @@ tx touch(id: u64) {
         .cloned()
         .map(|s| (s.id, s))
         .collect();
-    let wg = WitnessGenerator::new(vc);
+    let wg = WitnessGenerator::new(PoseidonHasher::new());
     let witness = wg
         .generate(&execution_result, &schemas_by_id, &old_column_states)
         .expect("witness generation should succeed");

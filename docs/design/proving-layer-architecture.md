@@ -27,7 +27,7 @@ tabula-stark (Layer 1: STARK Protocol)
 │   ├── challenges.rs — Fiat-Shamir challenge derivation (test-only)
 │   ├── trace.rs      — generate_permutation_trace_from_interactions(), compute_fingerprint_ef4()
 │   └── mod.rs        — PermutationError
-├── EF4               — pub type alias (BinomialExtensionField<BabyBear, 4>)
+├── EF4               — pub type alias (BinomialExtensionField<KoalaBear, 4>)
 └── rap/              — RAP constraint evaluation and EF4 helpers
     ├── ef4.rs        — ef4_coeffs(), ef4_mul(), RowSelectors, fingerprint/cumsum helpers, build_alpha_powers()
     ├── prover.rs     — RapProverFolder (AirBuilder wrapper for perm constraints)
@@ -59,10 +59,10 @@ Permutation trace math (EF4 fingerprints, phi columns, cumsum accumulation) is p
 
 ```rust
 pub fn generate_permutation_trace_from_interactions(
-    interactions: &[RecordedInteraction<BabyBear>],
+    interactions: &[RecordedInteraction<KoalaBear>],
     height: usize,
     challenges: [EF4; 2],
-) -> Result<(RowMajorMatrix<BabyBear>, EF4), PermutationError>;
+) -> Result<(RowMajorMatrix<KoalaBear>, EF4), PermutationError>;
 ```
 
 `PermutationError` is defined in `stark` (decoupled from `ProveError`). Machine's `ProveError` has `From<PermutationError>`.
@@ -72,8 +72,8 @@ pub fn generate_permutation_trace_from_interactions(
 `RapProverFolder` and `RapVerifierFolder` implement `AirBuilder` — they define how LogUp constraints are evaluated during quotient computation and verification. Decoupled from `TabulaStarkConfig` using direct type expressions:
 
 ```rust
-type PV = <BabyBear as Field>::Packing;
-type PC = <EF4 as ExtensionField<BabyBear>>::ExtensionPacking;
+type PV = <KoalaBear as Field>::Packing;
+type PC = <EF4 as ExtensionField<KoalaBear>>::ExtensionPacking;
 ```
 
 ## Quotient Computation (in `machine`)

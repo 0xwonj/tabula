@@ -1,5 +1,5 @@
-use p3_baby_bear::{BabyBear, default_babybear_poseidon2_16};
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::{KoalaBear, default_koalabear_poseidon2_16};
 use p3_symmetric::Permutation;
 
 use tabula_chips::poseidon::air::PoseidonChip;
@@ -35,21 +35,21 @@ fn valid_two_permutations() {
 
 #[test]
 fn valid_all_padding() {
-    let inputs: Vec<[BabyBear; WIDTH]> = vec![];
+    let inputs: Vec<[KoalaBear; WIDTH]> = vec![];
     let trace = generate_poseidon_trace(&inputs);
     debug_check(&PoseidonChip, &trace).expect("all-padding should pass");
 }
 
 #[test]
 fn valid_zero_input() {
-    let inputs = vec![[BabyBear::ZERO; WIDTH]];
+    let inputs = vec![[KoalaBear::ZERO; WIDTH]];
     let trace = generate_poseidon_trace(&inputs);
     debug_check(&PoseidonChip, &trace).expect("zero input should pass");
 }
 
 #[test]
 fn trace_output_matches_p3() {
-    let p3_perm = default_babybear_poseidon2_16();
+    let p3_perm = default_koalabear_poseidon2_16();
     let input = poseidon_test_input(42);
     let mut expected = input;
     p3_perm.permute_mut(&mut expected);
@@ -89,8 +89,8 @@ fn invalid_corrupted_main_rc_vs_preprocessed() {
 
     // Corrupt rc[0] on main trace row 0 → mismatch with preprocessed
     let width = poseidon_width();
-    let cols: &mut PoseidonCols<BabyBear> = borrow_cols_mut(&mut trace.values[0..width]);
-    cols.rc[0] += BabyBear::ONE;
+    let cols: &mut PoseidonCols<KoalaBear> = borrow_cols_mut(&mut trace.values[0..width]);
+    cols.rc[0] += KoalaBear::ONE;
 
     debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep))
         .expect_err("main trace rc mismatch with preprocessed should fail");
@@ -103,9 +103,9 @@ fn invalid_corrupted_preprocessed_rc() {
     let mut prep = generate_poseidon_preprocessed(inputs.len());
 
     // Corrupt preprocessed rc[0] on row 0
-    let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+    let cols: &mut PoseidonPreprocessedCols<KoalaBear> =
         borrow_cols_mut(&mut prep.values[0..POSEIDON_PREPROCESSED_WIDTH]);
-    cols.rc[0] += BabyBear::ONE;
+    cols.rc[0] += KoalaBear::ONE;
 
     debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep))
         .expect_err("corrupted preprocessed rc should fail");
@@ -118,9 +118,9 @@ fn invalid_wrong_is_full_round_preprocessed() {
     let mut prep = generate_poseidon_preprocessed(inputs.len());
 
     // Flip is_full_round on preprocessed row 0 (which IS a full round)
-    let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+    let cols: &mut PoseidonPreprocessedCols<KoalaBear> =
         borrow_cols_mut(&mut prep.values[0..POSEIDON_PREPROCESSED_WIDTH]);
-    cols.is_full_round = BabyBear::ZERO; // should be 1
+    cols.is_full_round = KoalaBear::ZERO; // should be 1
 
     debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep))
         .expect_err("wrong is_full_round in preprocessed should fail");
@@ -134,8 +134,8 @@ fn invalid_corrupted_sbox_y2() {
     let mut trace = generate_poseidon_trace(&inputs);
 
     let width = poseidon_width();
-    let cols: &mut PoseidonCols<BabyBear> = borrow_cols_mut(&mut trace.values[0..width]);
-    cols.sbox_y2[0] = BabyBear::new(999);
+    let cols: &mut PoseidonCols<KoalaBear> = borrow_cols_mut(&mut trace.values[0..width]);
+    cols.sbox_y2[0] = KoalaBear::new(999);
 
     debug_check(&PoseidonChip, &trace).expect_err("corrupted sbox_y2 should fail");
 }
@@ -146,8 +146,8 @@ fn invalid_corrupted_sbox_y3() {
     let mut trace = generate_poseidon_trace(&inputs);
 
     let width = poseidon_width();
-    let cols: &mut PoseidonCols<BabyBear> = borrow_cols_mut(&mut trace.values[0..width]);
-    cols.sbox_y3[0] = BabyBear::new(888);
+    let cols: &mut PoseidonCols<KoalaBear> = borrow_cols_mut(&mut trace.values[0..width]);
+    cols.sbox_y3[0] = KoalaBear::new(888);
 
     debug_check(&PoseidonChip, &trace).expect_err("corrupted sbox_y3 should fail");
 }
@@ -158,8 +158,8 @@ fn invalid_corrupted_state_transition() {
     let mut trace = generate_poseidon_trace(&inputs);
 
     let width = poseidon_width();
-    let cols: &mut PoseidonCols<BabyBear> = borrow_cols_mut(&mut trace.values[width..2 * width]);
-    cols.state[0] = BabyBear::new(777);
+    let cols: &mut PoseidonCols<KoalaBear> = borrow_cols_mut(&mut trace.values[width..2 * width]);
+    cols.state[0] = KoalaBear::new(777);
 
     debug_check(&PoseidonChip, &trace).expect_err("corrupted state transition should fail");
 }
@@ -170,8 +170,8 @@ fn invalid_corrupted_full_round_sbox() {
     let mut trace = generate_poseidon_trace(&inputs);
 
     let width = poseidon_width();
-    let cols: &mut PoseidonCols<BabyBear> = borrow_cols_mut(&mut trace.values[0..width]);
-    cols.sbox_y2[5] = BabyBear::new(666);
+    let cols: &mut PoseidonCols<KoalaBear> = borrow_cols_mut(&mut trace.values[0..width]);
+    cols.sbox_y2[5] = KoalaBear::new(666);
 
     debug_check(&PoseidonChip, &trace)
         .expect_err("corrupted full-round sbox for element 5 should fail");
@@ -183,8 +183,8 @@ fn invalid_broken_round_counter() {
     let mut trace = generate_poseidon_trace(&inputs);
 
     let width = poseidon_width();
-    let cols: &mut PoseidonCols<BabyBear> = borrow_cols_mut(&mut trace.values[width..2 * width]);
-    cols.round_ctr = BabyBear::new(5);
+    let cols: &mut PoseidonCols<KoalaBear> = borrow_cols_mut(&mut trace.values[width..2 * width]);
+    cols.round_ctr = KoalaBear::new(5);
 
     debug_check(&PoseidonChip, &trace).expect_err("wrong round counter should fail");
 }
@@ -193,16 +193,16 @@ fn invalid_broken_round_counter() {
 
 #[test]
 fn round_constants_count() {
-    assert_eq!(TOTAL_ROUNDS, 21);
+    assert_eq!(TOTAL_ROUNDS, 28);
     for r in 0..TOTAL_ROUNDS {
         let rc = round_constants(r);
         if is_full_round(r) {
-            assert!(rc.iter().any(|x| *x != BabyBear::ZERO));
+            assert!(rc.iter().any(|x| *x != KoalaBear::ZERO));
         } else {
             for (i, val) in rc.iter().enumerate().skip(1) {
                 assert_eq!(
                     *val,
-                    BabyBear::ZERO,
+                    KoalaBear::ZERO,
                     "partial round {r} has nonzero rc[{i}]"
                 );
             }
@@ -214,15 +214,15 @@ fn round_constants_count() {
 fn internal_diag_nonzero() {
     let diag = internal_diag_minus_1();
     for (i, d) in diag.iter().enumerate() {
-        assert_ne!(*d, BabyBear::ZERO, "diag[{i}] should be nonzero");
+        assert_ne!(*d, KoalaBear::ZERO, "diag[{i}] should be nonzero");
     }
 }
 
 #[test]
 fn permutation_matches_p3_constants() {
-    let p3_perm = default_babybear_poseidon2_16();
+    let p3_perm = default_koalabear_poseidon2_16();
 
-    let input: [BabyBear; 16] = core::array::from_fn(|i| BabyBear::new(i as u32 + 1));
+    let input: [KoalaBear; 16] = core::array::from_fn(|i| KoalaBear::new(i as u32 + 1));
     let mut p3_output = input;
     p3_perm.permute_mut(&mut p3_output);
 
@@ -232,13 +232,13 @@ fn permutation_matches_p3_constants() {
 
 #[test]
 fn sbox_correct() {
-    let x = BabyBear::new(42);
+    let x = KoalaBear::new(42);
     let si = sbox_with_intermediates(x);
     assert_eq!(si.y, x);
     assert_eq!(si.y2, x * x);
     assert_eq!(si.y3, x * x * x);
-    let expected = x * x * x * (x * x) * (x * x);
-    assert_eq!(si.out, expected);
+    // d=3: sbox_out = y^3
+    assert_eq!(si.out, x * x * x);
 }
 
 // ── T13: Poseidon round flip ──
@@ -261,15 +261,15 @@ fn invalid_round_flip_full_to_partial() {
 
     // Flip row 0: full → partial
     {
-        let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+        let cols: &mut PoseidonPreprocessedCols<KoalaBear> =
             borrow_cols_mut(&mut prep.values[0..prep_width]);
-        cols.is_full_round = BabyBear::ZERO;
+        cols.is_full_round = KoalaBear::ZERO;
     }
     // Flip row 4: partial → full
     {
-        let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+        let cols: &mut PoseidonPreprocessedCols<KoalaBear> =
             borrow_cols_mut(&mut prep.values[4 * prep_width..5 * prep_width]);
-        cols.is_full_round = BabyBear::ONE;
+        cols.is_full_round = KoalaBear::ONE;
     }
 
     debug_check_with_preprocessed(&PoseidonChip, &trace, Some(&prep)).expect_err(
@@ -290,25 +290,25 @@ fn invalid_round_constants_swapped_between_rounds() {
     let prep_width = POSEIDON_PREPROCESSED_WIDTH;
 
     // Read RC from row 0 and row 1.
-    let rc0: [BabyBear; 16] = {
-        let cols: &PoseidonPreprocessedCols<BabyBear> =
+    let rc0: [KoalaBear; 16] = {
+        let cols: &PoseidonPreprocessedCols<KoalaBear> =
             borrow_cols_mut(&mut prep.values[0..prep_width]);
         cols.rc
     };
-    let rc1: [BabyBear; 16] = {
-        let cols: &PoseidonPreprocessedCols<BabyBear> =
+    let rc1: [KoalaBear; 16] = {
+        let cols: &PoseidonPreprocessedCols<KoalaBear> =
             borrow_cols_mut(&mut prep.values[prep_width..2 * prep_width]);
         cols.rc
     };
 
     // Write rc1 into row 0 and rc0 into row 1.
     {
-        let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+        let cols: &mut PoseidonPreprocessedCols<KoalaBear> =
             borrow_cols_mut(&mut prep.values[0..prep_width]);
         cols.rc = rc1;
     }
     {
-        let cols: &mut PoseidonPreprocessedCols<BabyBear> =
+        let cols: &mut PoseidonPreprocessedCols<KoalaBear> =
             borrow_cols_mut(&mut prep.values[prep_width..2 * prep_width]);
         cols.rc = rc0;
     }

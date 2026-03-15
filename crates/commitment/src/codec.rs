@@ -1,7 +1,7 @@
-//! BabyBear value codec: Tier 1 (ComEnc) encoding for field-element commitments.
+//! KoalaBear value codec: Tier 1 (ComEnc) encoding for field-element commitments.
 
-use p3_baby_bear::BabyBear;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_koala_bear::KoalaBear;
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
@@ -9,7 +9,7 @@ use tabula_core::{Value, ValueType, zero_value};
 
 use crate::field::{decode_u64_limbs, encode_u64_limbs};
 
-/// Tier 1 (ComEnc) codec: encodes `Value` into BabyBear field elements.
+/// Tier 1 (ComEnc) codec: encodes `Value` into KoalaBear field elements.
 ///
 /// Width table:
 /// - Bool   → 1 FE (`{0, 1}`)
@@ -17,10 +17,10 @@ use crate::field::{decode_u64_limbs, encode_u64_limbs};
 /// - I64    → 3 FE (offset encoding: `val + 2^63` → 3-limb U64)
 /// - Bytes32 → 8 FE (4 LE bytes per FE, rejecting non-canonical chunks)
 #[derive(Clone, Debug)]
-pub struct BabyBearCodec;
+pub struct KoalaBearCodec;
 
 /// Tier 2 (TraceEnc) width: `w(T) + 1` (value FEs + val_is_null flag).
-pub fn trace_width(codec: &BabyBearCodec, value_type: ValueType) -> usize {
+pub fn trace_width(codec: &KoalaBearCodec, value_type: ValueType) -> usize {
     codec.field_elements_per(value_type) + 1
 }
 
@@ -32,16 +32,16 @@ pub fn encode_trace(
     value: &Value,
     is_null: bool,
     value_type: ValueType,
-    codec: &BabyBearCodec,
-) -> Result<Vec<BabyBear>, TabulaError> {
+    codec: &KoalaBearCodec,
+) -> Result<Vec<KoalaBear>, TabulaError> {
     let w = codec.field_elements_per(value_type);
     let mut fes = Vec::with_capacity(w + 1);
     if is_null {
-        fes.resize(w, BabyBear::ZERO);
-        fes.push(BabyBear::ONE);
+        fes.resize(w, KoalaBear::ZERO);
+        fes.push(KoalaBear::ONE);
     } else {
         fes.extend(codec.encode(value)?);
-        fes.push(BabyBear::ZERO);
+        fes.push(KoalaBear::ZERO);
     }
     Ok(fes)
 }
@@ -50,9 +50,9 @@ pub fn encode_trace(
 ///
 /// Returns `(value, is_null)`. When null, returns the canonical zero value.
 pub fn decode_trace(
-    fes: &[BabyBear],
+    fes: &[KoalaBear],
     value_type: ValueType,
-    codec: &BabyBearCodec,
+    codec: &KoalaBearCodec,
 ) -> Result<(Value, bool), TabulaError> {
     let expected = trace_width(codec, value_type);
     if fes.len() != expected {
@@ -74,13 +74,13 @@ pub fn decode_trace(
     }
 }
 
-impl ValueCodec for BabyBearCodec {
-    type FieldRepr = BabyBear;
+impl ValueCodec for KoalaBearCodec {
+    type FieldRepr = KoalaBear;
 
-    fn encode(&self, value: &Value) -> Result<Vec<BabyBear>, TabulaError> {
+    fn encode(&self, value: &Value) -> Result<Vec<KoalaBear>, TabulaError> {
         Ok(match value {
             Value::Bool(b) => {
-                vec![if *b { BabyBear::ONE } else { BabyBear::ZERO }]
+                vec![if *b { KoalaBear::ONE } else { KoalaBear::ZERO }]
             }
             Value::U64(n) => encode_u64_limbs(*n).to_vec(),
             Value::I64(n) => {
@@ -93,13 +93,13 @@ impl ValueCodec for BabyBearCodec {
                 let mut fes = Vec::with_capacity(8);
                 for (i, chunk) in b.chunks_exact(4).enumerate() {
                     let val = u32::from_le_bytes(chunk.try_into().unwrap());
-                    if val >= BabyBear::ORDER_U32 {
+                    if val >= KoalaBear::ORDER_U32 {
                         return Err(TabulaError::FieldEncodingError(format!(
-                            "Bytes32 chunk {i}: {val} >= BabyBear modulus {}",
-                            BabyBear::ORDER_U32
+                            "Bytes32 chunk {i}: {val} >= KoalaBear modulus {}",
+                            KoalaBear::ORDER_U32
                         )));
                     }
-                    fes.push(BabyBear::new(val));
+                    fes.push(KoalaBear::new(val));
                 }
                 fes
             }
@@ -108,7 +108,7 @@ impl ValueCodec for BabyBearCodec {
 
     fn decode(
         &self,
-        field_elements: &[BabyBear],
+        field_elements: &[KoalaBear],
         target_type: ValueType,
     ) -> Result<Value, TabulaError> {
         let expected = self.field_elements_per(target_type);
@@ -131,14 +131,14 @@ impl ValueCodec for BabyBearCodec {
                 }
             }
             ValueType::U64 => {
-                let limbs: &[BabyBear; 3] = field_elements
+                let limbs: &[KoalaBear; 3] = field_elements
                     .try_into()
                     .map_err(|_| TabulaError::FieldEncodingError("expected 3 FEs".into()))?;
                 let val = decode_u64_limbs(limbs)?;
                 Ok(Value::U64(val))
             }
             ValueType::I64 => {
-                let limbs: &[BabyBear; 3] = field_elements
+                let limbs: &[KoalaBear; 3] = field_elements
                     .try_into()
                     .map_err(|_| TabulaError::FieldEncodingError("expected 3 FEs".into()))?;
                 let offset = decode_u64_limbs(limbs)?;
@@ -170,7 +170,7 @@ mod tests {
     use crate::field::decode_u64_limbs;
 
     fn round_trip(value: Value, ty: ValueType) {
-        let codec = BabyBearCodec;
+        let codec = KoalaBearCodec;
         let fes = codec.encode(&value).unwrap();
         assert_eq!(
             fes.len(),
@@ -216,16 +216,16 @@ mod tests {
 
     #[test]
     fn bytes32_non_canonical_rejected() {
-        let codec = BabyBearCodec;
+        let codec = KoalaBearCodec;
         let mut bytes = [0u8; 32];
         // Set first 4 bytes to ORDER_U32 (non-canonical).
-        bytes[0..4].copy_from_slice(&BabyBear::ORDER_U32.to_le_bytes());
+        bytes[0..4].copy_from_slice(&KoalaBear::ORDER_U32.to_le_bytes());
         assert!(codec.encode(&Value::Bytes32(bytes)).is_err());
     }
 
     #[test]
     fn i64_offset_preserves_ordering() {
-        let codec = BabyBearCodec;
+        let codec = KoalaBearCodec;
         let pairs: &[(i64, i64)] = &[
             (i64::MIN, i64::MIN + 1),
             (-1, 0),
@@ -236,8 +236,8 @@ mod tests {
         for &(a, b) in pairs {
             let fes_a = codec.encode(&Value::I64(a)).unwrap();
             let fes_b = codec.encode(&Value::I64(b)).unwrap();
-            let arr_a: &[BabyBear; 3] = fes_a.as_slice().try_into().unwrap();
-            let arr_b: &[BabyBear; 3] = fes_b.as_slice().try_into().unwrap();
+            let arr_a: &[KoalaBear; 3] = fes_a.as_slice().try_into().unwrap();
+            let arr_b: &[KoalaBear; 3] = fes_b.as_slice().try_into().unwrap();
             let offset_a = decode_u64_limbs(arr_a).unwrap();
             let offset_b = decode_u64_limbs(arr_b).unwrap();
             assert!(
@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn width_correctness() {
-        let codec = BabyBearCodec;
+        let codec = KoalaBearCodec;
         assert_eq!(codec.field_elements_per(ValueType::Bool), 1);
         assert_eq!(codec.field_elements_per(ValueType::U64), 3);
         assert_eq!(codec.field_elements_per(ValueType::I64), 3);
@@ -258,23 +258,23 @@ mod tests {
 
     #[test]
     fn decode_wrong_width_rejected() {
-        let codec = BabyBearCodec;
-        let fes = vec![BabyBear::ZERO; 2];
+        let codec = KoalaBearCodec;
+        let fes = vec![KoalaBear::ZERO; 2];
         assert!(codec.decode(&fes, ValueType::Bool).is_err());
         assert!(codec.decode(&fes, ValueType::U64).is_err());
     }
 
     #[test]
     fn decode_bool_non_binary_rejected() {
-        let codec = BabyBearCodec;
-        let fes = vec![BabyBear::new(2)];
+        let codec = KoalaBearCodec;
+        let fes = vec![KoalaBear::new(2)];
         assert!(codec.decode(&fes, ValueType::Bool).is_err());
     }
 
     // ── Tier 2 (TraceEnc) tests ──────────────────────────────────────────
 
     fn trace_round_trip(value: Value, is_null: bool, ty: ValueType) {
-        let codec = BabyBearCodec;
+        let codec = KoalaBearCodec;
         let fes = super::encode_trace(&value, is_null, ty, &codec).unwrap();
         assert_eq!(fes.len(), super::trace_width(&codec, ty));
         let (decoded, decoded_null) = super::decode_trace(&fes, ty, &codec).unwrap();
@@ -314,7 +314,7 @@ mod tests {
 
     #[test]
     fn trace_width_correct() {
-        let codec = BabyBearCodec;
+        let codec = KoalaBearCodec;
         assert_eq!(super::trace_width(&codec, ValueType::Bool), 2); // 1 + 1
         assert_eq!(super::trace_width(&codec, ValueType::U64), 4); // 3 + 1
         assert_eq!(super::trace_width(&codec, ValueType::I64), 4); // 3 + 1
@@ -324,30 +324,30 @@ mod tests {
     #[test]
     fn trace_null_i64_canonical_zero() {
         // I64 null must encode as (0,0,0,1), NOT as offset-encoded I64(0) = (0,0,8,1)
-        let codec = BabyBearCodec;
+        let codec = KoalaBearCodec;
         let fes = super::encode_trace(&Value::I64(0), true, ValueType::I64, &codec).unwrap();
         // First 3 FEs should all be zero (canonical zero), not offset-encoded
-        assert_eq!(fes[0], BabyBear::ZERO);
-        assert_eq!(fes[1], BabyBear::ZERO);
-        assert_eq!(fes[2], BabyBear::ZERO);
-        assert_eq!(fes[3], BabyBear::ONE); // null flag
+        assert_eq!(fes[0], KoalaBear::ZERO);
+        assert_eq!(fes[1], KoalaBear::ZERO);
+        assert_eq!(fes[2], KoalaBear::ZERO);
+        assert_eq!(fes[3], KoalaBear::ONE); // null flag
     }
 
     #[test]
     fn trace_non_null_i64_uses_offset_encoding() {
-        let codec = BabyBearCodec;
+        let codec = KoalaBearCodec;
         let fes = super::encode_trace(&Value::I64(0), false, ValueType::I64, &codec).unwrap();
         // I64(0) → offset 2^63 → (0, 0, 8) via limb encoding
-        let limbs: &[BabyBear; 3] = fes[..3].try_into().unwrap();
+        let limbs: &[KoalaBear; 3] = fes[..3].try_into().unwrap();
         let offset = decode_u64_limbs(limbs).unwrap();
         assert_eq!(offset, 1u64 << 63);
-        assert_eq!(fes[3], BabyBear::ZERO); // not null
+        assert_eq!(fes[3], KoalaBear::ZERO); // not null
     }
 
     #[test]
     fn trace_decode_wrong_width_rejected() {
-        let codec = BabyBearCodec;
-        let fes = vec![BabyBear::ZERO; 3]; // Wrong width for Bool (should be 2)
+        let codec = KoalaBearCodec;
+        let fes = vec![KoalaBear::ZERO; 3]; // Wrong width for Bool (should be 2)
         assert!(super::decode_trace(&fes, ValueType::Bool, &codec).is_err());
     }
 }

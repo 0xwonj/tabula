@@ -79,7 +79,7 @@ pub enum TabulaError {
     #[error("borsh encoding error: {0}")]
     BorshEncodingError(String),
 
-    /// Field-element codec error (limb ranges, BabyBear canonical checks).
+    /// Field-element codec error (limb ranges, KoalaBear canonical checks).
     #[error("field encoding error: {0}")]
     FieldEncodingError(String),
 

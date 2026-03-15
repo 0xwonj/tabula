@@ -54,9 +54,9 @@ pub struct StarkProofSummary {
     pub chip_count: usize,
     /// Per-chip summaries.
     pub chips: Vec<ChipSummary>,
-    /// Old state root (8 BabyBear field elements as hex strings).
+    /// Old state root (8 KoalaBear field elements as hex strings).
     pub old_state_root: Vec<String>,
-    /// New state root (8 BabyBear field elements as hex strings).
+    /// New state root (8 KoalaBear field elements as hex strings).
     pub new_state_root: Vec<String>,
     /// Proving time in milliseconds.
     pub prove_time_ms: u64,

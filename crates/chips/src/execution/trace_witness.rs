@@ -4,15 +4,15 @@
 //! `InstructionRecord` data. They are called from the main trace generation
 //! loop in `trace.rs`.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_gadgets::bool_fe;
 use tabula_gadgets::integer::{MASK_30, SHIFT_30_U32};
 
 use super::columns::ExecutionCols;
 use super::trace::{CmpOp, InstructionRecord, Opcode};
-use super::trace_utils::{babybear_to_u32, reconstruct_u64_from_limbs, u64_to_limbs};
+use super::trace_utils::{koalabear_to_u32, reconstruct_u64_from_limbs, u64_to_limbs};
 
 /// Set the opcode one-hot selector for the given opcode.
 pub(super) fn set_opcode_selectors<T: PrimeCharacteristicRing, const W: usize>(
@@ -39,23 +39,23 @@ pub(super) fn set_opcode_selectors<T: PrimeCharacteristicRing, const W: usize>(
 
 /// Populate carry columns for Add/Sub.
 pub(super) fn populate_arith_carry<const W: usize>(
-    cols: &mut ExecutionCols<BabyBear, W>,
+    cols: &mut ExecutionCols<KoalaBear, W>,
     rec: &InstructionRecord,
 ) {
     if rec.src1_val.len() < 3 || rec.src2_val.len() < 3 {
         return;
     }
 
-    // Extract raw u32 values from BabyBear
+    // Extract raw u32 values from KoalaBear
     let s1 = [
-        babybear_to_u32(rec.src1_val[0]),
-        babybear_to_u32(rec.src1_val[1]),
-        babybear_to_u32(rec.src1_val[2]),
+        koalabear_to_u32(rec.src1_val[0]),
+        koalabear_to_u32(rec.src1_val[1]),
+        koalabear_to_u32(rec.src1_val[2]),
     ];
     let s2 = [
-        babybear_to_u32(rec.src2_val[0]),
-        babybear_to_u32(rec.src2_val[1]),
-        babybear_to_u32(rec.src2_val[2]),
+        koalabear_to_u32(rec.src2_val[0]),
+        koalabear_to_u32(rec.src2_val[1]),
+        koalabear_to_u32(rec.src2_val[2]),
     ];
 
     match rec.opcode {
@@ -65,16 +65,16 @@ pub(super) fn populate_arith_carry<const W: usize>(
             let c0 = if sum0 >= (1u64 << 30) { 1u32 } else { 0 };
             let sum1 = s1[1] as u64 + s2[1] as u64 + c0 as u64;
             let c1 = if sum1 >= (1u64 << 30) { 1u32 } else { 0 };
-            cols.carry0 = BabyBear::new(c0);
-            cols.carry1 = BabyBear::new(c1);
+            cols.carry0 = KoalaBear::new(c0);
+            cols.carry1 = KoalaBear::new(c1);
         }
         Opcode::Sub => {
             // Borrow from limb subtractions
             let b0 = if s1[0] < s2[0] { 1u32 } else { 0 };
             let eff1_src1 = s1[1] as i64 - b0 as i64;
             let b1 = if eff1_src1 < s2[1] as i64 { 1u32 } else { 0 };
-            cols.carry0 = BabyBear::new(b0);
-            cols.carry1 = BabyBear::new(b1);
+            cols.carry0 = KoalaBear::new(b0);
+            cols.carry1 = KoalaBear::new(b1);
         }
         _ => {}
     }
@@ -82,18 +82,18 @@ pub(super) fn populate_arith_carry<const W: usize>(
 
 /// Populate Cmp witness columns: sub-selectors, lt/eq witnesses, inequality proof.
 pub(super) fn populate_cmp_witness<const W: usize>(
-    cols: &mut ExecutionCols<BabyBear, W>,
+    cols: &mut ExecutionCols<KoalaBear, W>,
     rec: &InstructionRecord,
     cmp_op: CmpOp,
 ) {
     // Set cmp sub-selector
     match cmp_op {
-        CmpOp::Eq => cols.cmp.is_eq = BabyBear::ONE,
-        CmpOp::Ne => cols.cmp.is_ne = BabyBear::ONE,
-        CmpOp::Lt => cols.cmp.is_lt = BabyBear::ONE,
-        CmpOp::Lte => cols.cmp.is_lte = BabyBear::ONE,
-        CmpOp::Gt => cols.cmp.is_gt = BabyBear::ONE,
-        CmpOp::Gte => cols.cmp.is_gte = BabyBear::ONE,
+        CmpOp::Eq => cols.cmp.is_eq = KoalaBear::ONE,
+        CmpOp::Ne => cols.cmp.is_ne = KoalaBear::ONE,
+        CmpOp::Lt => cols.cmp.is_lt = KoalaBear::ONE,
+        CmpOp::Lte => cols.cmp.is_lte = KoalaBear::ONE,
+        CmpOp::Gt => cols.cmp.is_gt = KoalaBear::ONE,
+        CmpOp::Gte => cols.cmp.is_gte = KoalaBear::ONE,
     }
 
     // Reconstruct u64 operands from limbs
@@ -108,10 +108,10 @@ pub(super) fn populate_cmp_witness<const W: usize>(
 
     // Per-limb IsZero for equality detection (avoids field reconstruction collision).
     let limb0_diff = rec.src1_val[0] - rec.src2_val[0];
-    let limb1_diff = rec.src1_val.get(1).copied().unwrap_or(BabyBear::ZERO)
-        - rec.src2_val.get(1).copied().unwrap_or(BabyBear::ZERO);
-    let limb2_diff = rec.src1_val.get(2).copied().unwrap_or(BabyBear::ZERO)
-        - rec.src2_val.get(2).copied().unwrap_or(BabyBear::ZERO);
+    let limb1_diff = rec.src1_val.get(1).copied().unwrap_or(KoalaBear::ZERO)
+        - rec.src2_val.get(1).copied().unwrap_or(KoalaBear::ZERO);
+    let limb2_diff = rec.src1_val.get(2).copied().unwrap_or(KoalaBear::ZERO)
+        - rec.src2_val.get(2).copied().unwrap_or(KoalaBear::ZERO);
     cols.cmp.eq_limb0_iz.populate(limb0_diff);
     cols.cmp.eq_limb1_iz.populate(limb1_diff);
     cols.cmp.eq_limb2_iz.populate(limb2_diff);
@@ -132,17 +132,17 @@ pub(super) fn populate_cmp_witness<const W: usize>(
 
 /// Populate Mul carry columns: carry chain for u64 multiplication.
 pub(super) fn populate_mul_carry<const W: usize>(
-    cols: &mut ExecutionCols<BabyBear, W>,
+    cols: &mut ExecutionCols<KoalaBear, W>,
     rec: &InstructionRecord,
 ) {
     if rec.src1_val.len() < 3 || rec.src2_val.len() < 3 {
         return;
     }
 
-    let a0 = babybear_to_u32(rec.src1_val[0]) as u64;
-    let a1 = babybear_to_u32(rec.src1_val[1]) as u64;
-    let b0 = babybear_to_u32(rec.src2_val[0]) as u64;
-    let b1 = babybear_to_u32(rec.src2_val[1]) as u64;
+    let a0 = koalabear_to_u32(rec.src1_val[0]) as u64;
+    let a1 = koalabear_to_u32(rec.src1_val[1]) as u64;
+    let b0 = koalabear_to_u32(rec.src2_val[0]) as u64;
+    let b1 = koalabear_to_u32(rec.src2_val[1]) as u64;
 
     // T0 = a0*b0, carry0 = T0 >> 30
     let t0 = a0 * b0;
@@ -152,15 +152,15 @@ pub(super) fn populate_mul_carry<const W: usize>(
     let t1_plus_c0 = a0 * b1 + a1 * b0 + c0;
     let c1 = t1_plus_c0 >> 30;
 
-    cols.mul.c0 = BabyBear::new(c0 as u32);
+    cols.mul.c0 = KoalaBear::new(c0 as u32);
     cols.mul.c0_halves.populate(c0 as u32);
-    cols.mul.c1_lo = BabyBear::new((c1 & 0xFFFF) as u32);
-    cols.mul.c1_hi = BabyBear::new((c1 >> 16) as u32);
+    cols.mul.c1_lo = KoalaBear::new((c1 & 0xFFFF) as u32);
+    cols.mul.c1_hi = KoalaBear::new((c1 >> 16) as u32);
 }
 
 /// Populate DivMod columns: carry chain for q*rhs + remainder bound.
 pub(super) fn populate_divmod<const W: usize>(
-    cols: &mut ExecutionCols<BabyBear, W>,
+    cols: &mut ExecutionCols<KoalaBear, W>,
     rec: &InstructionRecord,
 ) {
     if rec.src1_val.len() < 3 || rec.src2_val.len() < 3 {
@@ -173,7 +173,7 @@ pub(super) fn populate_divmod<const W: usize>(
 
     if rhs == 0 {
         // Non-zero divisor check will fail -- just populate IsZero witness
-        cols.divmod.rhs_iz.populate(BabyBear::ZERO);
+        cols.divmod.rhs_iz.populate(KoalaBear::ZERO);
         return;
     }
 
@@ -182,14 +182,14 @@ pub(super) fn populate_divmod<const W: usize>(
 
     // Carry chain for q * rhs + rem (matches AIR identity: q*d + rem = lhs)
     let q_limbs = u64_to_limbs(q);
-    let q0 = babybear_to_u32(q_limbs[0]) as u64;
-    let q1 = babybear_to_u32(q_limbs[1]) as u64;
-    let d0 = babybear_to_u32(rec.src2_val[0]) as u64;
-    let d1 = babybear_to_u32(rec.src2_val[1]) as u64;
+    let q0 = koalabear_to_u32(q_limbs[0]) as u64;
+    let q1 = koalabear_to_u32(q_limbs[1]) as u64;
+    let d0 = koalabear_to_u32(rec.src2_val[0]) as u64;
+    let d1 = koalabear_to_u32(rec.src2_val[1]) as u64;
 
     let rem_limbs = u64_to_limbs(rem);
-    let rem0 = babybear_to_u32(rem_limbs[0]) as u64;
-    let rem1 = babybear_to_u32(rem_limbs[1]) as u64;
+    let rem0 = koalabear_to_u32(rem_limbs[0]) as u64;
+    let rem1 = koalabear_to_u32(rem_limbs[1]) as u64;
 
     // AIR: q0*d0 + rem0 = l0 + c0 * 2^30
     let t0 = q0 * d0 + rem0;
@@ -199,10 +199,10 @@ pub(super) fn populate_divmod<const W: usize>(
     let t1_plus_c0 = q0 * d1 + q1 * d0 + rem1 + c0;
     let c1 = t1_plus_c0 >> 30;
 
-    cols.divmod.c0 = BabyBear::new(c0 as u32);
+    cols.divmod.c0 = KoalaBear::new(c0 as u32);
     cols.divmod.c0_halves.populate(c0 as u32);
-    cols.divmod.c1_lo = BabyBear::new((c1 & 0xFFFF) as u32);
-    cols.divmod.c1_hi = BabyBear::new((c1 >> 16) as u32);
+    cols.divmod.c1_lo = KoalaBear::new((c1 & 0xFFFF) as u32);
+    cols.divmod.c1_hi = KoalaBear::new((c1 >> 16) as u32);
 
     // Remainder bound: rem < rhs
     cols.divmod.rem_ineq.populate(rem, rhs);
@@ -215,7 +215,7 @@ pub(super) fn populate_divmod<const W: usize>(
     cols.divmod.rem_diff2_bits.populate(d2_gap);
 
     // Non-zero divisor: IsZero on combined rhs
-    let shift_30 = BabyBear::new(SHIFT_30_U32);
+    let shift_30 = KoalaBear::new(SHIFT_30_U32);
     let shift_60 = shift_30 * shift_30;
     let rhs_combined = rec.src2_val[0] + rec.src2_val[1] * shift_30 + rec.src2_val[2] * shift_60;
     cols.divmod.rhs_iz.populate(rhs_combined);

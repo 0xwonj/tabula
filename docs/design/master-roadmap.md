@@ -47,7 +47,7 @@ Six properties constrain the architecture:
 
 | Non-Goal | Rationale |
 |----------|-----------|
-| Base field change | BabyBear is fixed. The entire ecosystem (p3, chips, encoding) depends on it. |
+| Base field change | KoalaBear is fixed. The entire ecosystem (p3, chips, encoding) depends on it. |
 | General-purpose computation | Tabula is a state machine framework, not a zkVM. No arbitrary binary execution. |
 | Recursive proofs as prerequisite | Recursion is a future extension. The architecture works without it. |
 | GPU/hardware acceleration | Implementation detail of trace builders. Not an architectural concern. |

@@ -28,8 +28,9 @@
 | Parallelization + batch inversion (Tier 1b) | rayon P-1..P-5 (quotient, perm trace, sub-proof, trace build, verify) + Montgomery batch inversion |
 | Type foundation | Closed ValueType enum, soundness fixes (boolean constraints, W≥3 const assert, null encoding), dead code removed |
 | Extensibility API | ChipExtension + MachineBuilder + prelude, ColumnScheme (SSMC/SMT), PropertyOpening trait |
+| KoalaBear migration | BabyBear→KoalaBear field migration, EF4 W=3 fix, p3-monty-31 mul_w, FRI max_log_arity=2, doc/comment cleanup |
 
-927 tests passing across workspace. Zero failures.
+All tests passing across workspace. Zero failures.
 
 ---
 

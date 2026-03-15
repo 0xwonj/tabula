@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use tabula_commitment::BabyBearCodec;
+use tabula_commitment::KoalaBearCodec;
 use tabula_core::traits::ValueCodec;
-use tabula_core::{ColId, AccessEvent, BatchResult, OpKind, TxResult, Value};
+use tabula_core::{AccessEvent, BatchResult, ColId, OpKind, TxResult, Value};
 
 use super::*;
 
@@ -11,14 +11,17 @@ use super::*;
 #[test]
 fn init_rows_from_read_set_present() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 10), Some(Value::U64(42)))],
         write_set_final: vec![],
-        txs: vec![TxResult::success(vec![read_event(1, 0, 10, 42, 1, 0)], vec![])],
+        txs: vec![TxResult::success(
+            vec![read_event(1, 0, 10, 42, 1, 0)],
+            vec![],
+        )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(10, 42)])].into();
+    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(10, 42)])].into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
 
     assert_eq!(witness.columns.len(), 1);
@@ -31,7 +34,7 @@ fn init_rows_from_read_set_present() {
 #[test]
 fn init_rows_from_read_set_null() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 5), None)],
         write_set_final: vec![(ck(1, 0, 5), Some(Value::U64(99)))],
@@ -44,14 +47,14 @@ fn init_rows_from_read_set_null() {
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [empty_column_state(&vc, 1, 0)].into();
+    let states: BTreeMap<_, _> = [empty_column_state(1, 0)].into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
 
     let col_w = &witness.columns[0];
     assert_eq!(col_w.init_rows.len(), 1);
     assert!(col_w.init_rows[0].val_is_null);
     // Canonical zero: encoded U64(0)
-    let codec = BabyBearCodec;
+    let codec = KoalaBearCodec;
     let expected_fes = codec.encode(&Value::U64(0)).unwrap();
     assert_eq!(col_w.init_rows[0].value_fes, expected_fes);
 }
@@ -59,7 +62,7 @@ fn init_rows_from_read_set_null() {
 #[test]
 fn init_rows_sorted_by_key() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     let result = BatchResult {
         read_set_old: vec![
             (ck(1, 0, 30), Some(Value::U64(3))),
@@ -77,8 +80,7 @@ fn init_rows_sorted_by_key() {
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> =
-        [column_state_with(&vc, 1, 0, &[(10, 1), (20, 2), (30, 3)])].into();
+    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(10, 1), (20, 2), (30, 3)])].into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
 
     let rows = &witness.columns[0].init_rows;
@@ -91,7 +93,7 @@ fn init_rows_sorted_by_key() {
 #[test]
 fn init_rows_multi_column() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     let result = BatchResult {
         read_set_old: vec![
             (ck(1, 0, 1), Some(Value::U64(10))),
@@ -105,8 +107,8 @@ fn init_rows_multi_column() {
     };
     let schema = schemas(vec![u64_schema(1, &[0, 1])]);
     let states: BTreeMap<_, _> = [
-        column_state_with(&vc, 1, 0, &[(1, 10)]),
-        column_state_with(&vc, 1, 1, &[(1, 20)]),
+        column_state_with(1, 0, &[(1, 10)]),
+        column_state_with(1, 1, &[(1, 20)]),
     ]
     .into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
@@ -118,7 +120,7 @@ fn init_rows_multi_column() {
 #[test]
 fn access_rows_read_write() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(20)))],
@@ -131,7 +133,7 @@ fn access_rows_read_write() {
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10)])].into();
+    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
 
     let access = &witness.columns[0].access_rows;
@@ -143,14 +145,17 @@ fn access_rows_read_write() {
 #[test]
 fn access_rows_null_read() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 5), None)],
         write_set_final: vec![],
-        txs: vec![TxResult::success(vec![null_read_event(1, 0, 5, 1, 0)], vec![])],
+        txs: vec![TxResult::success(
+            vec![null_read_event(1, 0, 5, 1, 0)],
+            vec![],
+        )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [empty_column_state(&vc, 1, 0)].into();
+    let states: BTreeMap<_, _> = [empty_column_state(1, 0)].into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
 
     let access = &witness.columns[0].access_rows;
@@ -161,14 +166,17 @@ fn access_rows_null_read() {
 #[test]
 fn access_rows_time_carried_through() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![],
-        txs: vec![TxResult::success(vec![read_event(1, 0, 1, 10, 42, 0)], vec![])],
+        txs: vec![TxResult::success(
+            vec![read_event(1, 0, 1, 10, 42, 0)],
+            vec![],
+        )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10)])].into();
+    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
 
     assert_eq!(witness.columns[0].access_rows[0].time, 42);
@@ -177,7 +185,7 @@ fn access_rows_time_carried_through() {
 #[test]
 fn access_rows_multi_tx() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(30)))],
@@ -199,7 +207,7 @@ fn access_rows_multi_tx() {
         ],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10)])].into();
+    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
 
     let access = &witness.columns[0].access_rows;
@@ -213,7 +221,7 @@ fn access_rows_multi_tx() {
 #[test]
 fn column_witness_single_write() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(20)))],
@@ -226,7 +234,7 @@ fn column_witness_single_write() {
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10)])].into();
+    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
 
     let col_w = &witness.columns[0];
@@ -237,7 +245,7 @@ fn column_witness_single_write() {
 #[test]
 fn column_witness_delete() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![(ck(1, 0, 1), None)],
@@ -257,7 +265,7 @@ fn column_witness_delete() {
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(&vc, 1, 0, &[(1, 10)])].into();
+    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
 
     let col_w = &witness.columns[0];
@@ -269,7 +277,7 @@ fn column_witness_delete() {
 #[test]
 fn column_witness_untouched() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     // Access col 0, but col 1 is untouched
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
@@ -284,8 +292,8 @@ fn column_witness_untouched() {
     };
     let schema = schemas(vec![u64_schema(1, &[0, 1])]);
     let states: BTreeMap<_, _> = [
-        column_state_with(&vc, 1, 0, &[(1, 10)]),
-        column_state_with(&vc, 1, 1, &[(1, 99)]),
+        column_state_with(1, 0, &[(1, 10)]),
+        column_state_with(1, 1, &[(1, 99)]),
     ]
     .into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
@@ -305,7 +313,7 @@ fn column_witness_untouched() {
 #[test]
 fn column_meta_empty_to_nonempty() {
     let wg = make_wg();
-    let vc = mock_vc();
+
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), None)],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(42)))],
@@ -318,7 +326,7 @@ fn column_meta_empty_to_nonempty() {
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [empty_column_state(&vc, 1, 0)].into();
+    let states: BTreeMap<_, _> = [empty_column_state(1, 0)].into();
     let witness = wg.generate(&result, &schema, &states).unwrap();
 
     let meta = &witness.columns[0].meta;

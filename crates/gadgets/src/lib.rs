@@ -47,10 +47,10 @@ pub use ordering_rc::{
     send_ordering_range_checks,
 };
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
-/// Convert a `bool` to a `BabyBear` field element (1 or 0).
-pub fn bool_fe(b: bool) -> BabyBear {
-    if b { BabyBear::ONE } else { BabyBear::ZERO }
+/// Convert a `bool` to a `KoalaBear` field element (1 or 0).
+pub fn bool_fe(b: bool) -> KoalaBear {
+    if b { KoalaBear::ONE } else { KoalaBear::ZERO }
 }

@@ -2,13 +2,14 @@
 //!
 //! Registration pipeline: `canonicalize` → `typecheck` → `validate`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_core::error::TabulaError;
 use tabula_core::{TableId, TableSchema, TxTypeId};
 
-use crate::TxTypeDef;
+use crate::instruction::PrecompileId;
 use crate::pass::{BodyTypeInfo, canonicalize, typecheck, validate};
+use crate::{Instruction, TxTypeDef};
 
 /// Holds registered transaction type definitions.
 #[derive(Debug, Clone)]
@@ -66,6 +67,41 @@ impl Program {
     /// Return the table schemas.
     pub fn schemas(&self) -> &BTreeMap<TableId, TableSchema> {
         &self.schemas
+    }
+
+    /// Collect all `TableId` values referenced by state-accessing instructions.
+    ///
+    /// Scans all tx bodies for `Read`, `Write`, and `PropertyRead` instructions.
+    /// `Lookup` (static table) references are excluded — those are validated
+    /// separately via `StaticTableProvider`.
+    pub fn referenced_table_ids(&self) -> BTreeSet<TableId> {
+        let mut ids = BTreeSet::new();
+        for def in self.types.values() {
+            for instr in &def.body {
+                match instr {
+                    Instruction::Read { table, .. }
+                    | Instruction::Write { table, .. }
+                    | Instruction::PropertyRead { table, .. } => {
+                        ids.insert(*table);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        ids
+    }
+
+    /// Collect all `PrecompileId` values referenced by `Precompile` instructions.
+    pub fn referenced_precompile_ids(&self) -> BTreeSet<PrecompileId> {
+        let mut ids = BTreeSet::new();
+        for def in self.types.values() {
+            for instr in &def.body {
+                if let Instruction::Precompile { id, .. } = instr {
+                    ids.insert(*id);
+                }
+            }
+        }
+        ids
     }
 }
 

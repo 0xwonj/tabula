@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_chips::shards::memory::trace::MemoryShardRow;
 use tabula_commitment::{FieldHasher, NativeDigest};
@@ -27,11 +27,11 @@ pub(crate) struct InterTxOrderRow {
     /// True if this tx wrote the key.
     pub has_write: bool,
     /// Input value (base state for init; previous output for access).
-    pub input_val: Vec<BabyBear>,
+    pub input_val: Vec<KoalaBear>,
     /// Input is-null flag.
     pub input_is_null: bool,
     /// Output value (same as input for init/read-only; written value for write).
-    pub output_val: Vec<BabyBear>,
+    pub output_val: Vec<KoalaBear>,
     /// Output is-null flag.
     pub output_is_null: bool,
 }
@@ -56,11 +56,11 @@ pub(super) fn build_inter_tx_rows<H, const W: usize>(
     column: &ColumnWitness<H>,
 ) -> Result<Vec<InterTxOrderRow>, TabulaError>
 where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     let mut keys = BTreeSet::new();
 
-    let mut init_by_key: BTreeMap<RowKey, (Vec<BabyBear>, bool)> = BTreeMap::new();
+    let mut init_by_key: BTreeMap<RowKey, (Vec<KoalaBear>, bool)> = BTreeMap::new();
     for init in &column.init_rows {
         if init.value_fes.len() != W {
             return Err(TabulaError::ProofError {
@@ -102,7 +102,7 @@ where
             .push(access);
     }
 
-    let zero = vec![BabyBear::ZERO; W];
+    let zero = vec![KoalaBear::ZERO; W];
     let mut rows = Vec::new();
 
     for key in keys {

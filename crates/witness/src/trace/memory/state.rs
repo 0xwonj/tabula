@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_chips::shards::state::trace::{EntrySource, StateShardRow};
 use tabula_commitment::{ColumnState, FieldHasher, NativeDigest};
@@ -26,15 +26,15 @@ pub(crate) struct StateColumnRow {
     /// Source type (meaningful only for entry rows).
     pub source: EntrySource,
     /// Old value (zeros for write_only/gap).
-    pub old_val: Vec<BabyBear>,
+    pub old_val: Vec<KoalaBear>,
     /// New value (zeros for delete/gap).
-    pub new_val: Vec<BabyBear>,
+    pub new_val: Vec<KoalaBear>,
     /// Per-segment: 1 if this column is touched in the batch.
     pub segment_is_touched: bool,
     /// Precomputed old hash chain accumulator.
-    pub old_hash_acc: [BabyBear; 8],
+    pub old_hash_acc: [KoalaBear; 8],
     /// Precomputed new hash chain accumulator.
-    pub new_hash_acc: [BabyBear; 8],
+    pub new_hash_acc: [KoalaBear; 8],
     /// Multiplicity for ReadAccess bus (C1 receive).
     pub read_mult: bool,
     /// Multiplicity for WriteAccess bus (C4 receive).
@@ -62,7 +62,7 @@ pub(super) fn build_state_rows<H, const W: usize>(
     column: &ColumnWitness<H>,
 ) -> Result<Vec<StateColumnRow>, TabulaError>
 where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     let old_entries = ssmc_entries::<H>(&column.old_state)?;
     let new_entries = ssmc_entries::<H>(&column.new_state)?;
@@ -93,8 +93,8 @@ where
             (None, None) => continue,
         };
 
-        let old_val = old_opt.unwrap_or_else(|| vec![BabyBear::ZERO; W]);
-        let new_val = new_opt.unwrap_or_else(|| vec![BabyBear::ZERO; W]);
+        let old_val = old_opt.unwrap_or_else(|| vec![KoalaBear::ZERO; W]);
+        let new_val = new_opt.unwrap_or_else(|| vec![KoalaBear::ZERO; W]);
 
         if old_val.len() != W || new_val.len() != W {
             return Err(TabulaError::ProofError {
@@ -115,8 +115,8 @@ where
             old_val,
             new_val,
             segment_is_touched: column.meta.is_touched,
-            old_hash_acc: [BabyBear::ZERO; 8],
-            new_hash_acc: [BabyBear::ZERO; 8],
+            old_hash_acc: [KoalaBear::ZERO; 8],
+            new_hash_acc: [KoalaBear::ZERO; 8],
             read_mult: true,
             write_mult: in_write,
         });
@@ -129,9 +129,9 @@ pub(super) fn sort_state_rows(rows: &mut [StateColumnRow]) {
     rows.sort_by_key(|r| (r.table_id, r.col_id, r.key));
 }
 
-fn ssmc_entries<H>(state: &ColumnState<H>) -> Result<BTreeMap<RowKey, Vec<BabyBear>>, TabulaError>
+fn ssmc_entries<H>(state: &ColumnState<H>) -> Result<BTreeMap<RowKey, Vec<KoalaBear>>, TabulaError>
 where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     match state {
         ColumnState::Ssmc(list) => Ok(list

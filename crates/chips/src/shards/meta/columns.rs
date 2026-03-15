@@ -9,7 +9,7 @@
 
 use tabula_stark::air::columns::num_cols;
 
-/// Number of BabyBear field elements in a NativeDigest.
+/// Number of KoalaBear field elements in a NativeDigest.
 pub const DIGEST_WIDTH: usize = 8;
 
 /// Column layout for the MetaShard AIR.

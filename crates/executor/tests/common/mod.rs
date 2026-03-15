@@ -182,6 +182,8 @@ pub fn test_env() -> tabula_executor::batch::BatchEnv<'static> {
         nonce_policy: &SeqNonce,
         static_tables: &TestStaticTables,
         precompiles: None,
+        committed_state: None,
+        property_openings: None,
     }
 }
 

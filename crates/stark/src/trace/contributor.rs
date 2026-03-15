@@ -159,9 +159,9 @@ pub mod witness_labels {
     pub const SMT_COL_PATHS: &str = "smt_col_paths";
     /// `Vec<SmtTablePathWitness>` — SMT table-level path witnesses.
     pub const SMT_TABLE_PATHS: &str = "smt_table_paths";
-    /// `Vec<BabyBear>` — SmtTablePath public values (old/new root).
+    /// `Vec<KoalaBear>` — SmtTablePath public values (old/new root).
     pub const SMT_TABLE_PVS: &str = "smt_table_pvs";
-    /// `Vec<[BabyBear; 16]>` — Poseidon permutation inputs (collected from Phase 0+1).
+    /// `Vec<[KoalaBear; 16]>` — Poseidon permutation inputs (collected from Phase 0+1).
     pub const POSEIDON_INPUTS: &str = "poseidon_inputs";
     /// `Box<[u32; RANGE_CHECK_SIZE]>` — range check multiplicities (collected from Phase 0+1).
     pub const RANGE_CHECK_MULTS: &str = "range_check_mults";

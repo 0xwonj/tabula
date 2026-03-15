@@ -1,5 +1,5 @@
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_chips::execution::air::ExecutionChip;
 use tabula_chips::execution::columns::{EXECUTION_STANDARD_WIDTH, ExecutionCols, execution_width};

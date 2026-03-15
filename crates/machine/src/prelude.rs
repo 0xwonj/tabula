@@ -5,7 +5,7 @@
 //!
 //! # What's included
 //!
-//! - **p3 types**: `Air`, `AirBuilder`, `BaseAir`, `BabyBear`,
+//! - **p3 types**: `Air`, `AirBuilder`, `BaseAir`, `KoalaBear`,
 //!   `PrimeCharacteristicRing`, `RowMajorMatrix`, `Matrix`
 //! - **Tabula chip framework**: `ChipSpec`, `ChipId`, `ChipIdAllocator`,
 //!   `BusId`, `InteractionAirBuilder`, `TraceContributor`, `TracePhase`,
@@ -17,8 +17,8 @@
 
 // p3 types for AIR constraint writing.
 pub use p3_air::{Air, AirBuilder, BaseAir};
-pub use p3_baby_bear::BabyBear;
 pub use p3_field::PrimeCharacteristicRing;
+pub use p3_koala_bear::KoalaBear;
 pub use p3_matrix::Matrix;
 pub use p3_matrix::dense::RowMajorMatrix;
 

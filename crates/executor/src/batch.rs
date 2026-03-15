@@ -5,13 +5,14 @@ use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateSnapshot, StaticTableProvider};
-use tabula_core::{BatchResult, Batch, TxResult, Value};
+use tabula_core::{Batch, BatchResult, TxResult, Value};
 
 use tabula_ir::{ParamDef, Program};
 
 use crate::interpreter;
 use crate::overlay::Overlay;
 use crate::precompile::PrecompileRegistry;
+use crate::property::{CommittedStateProvider, PropertyOpeningRegistry};
 
 /// Validate transaction parameters against the schema definition.
 fn validate_params(params: &[Value], schema: &[ParamDef]) -> Result<(), TabulaError> {
@@ -46,6 +47,10 @@ pub struct BatchEnv<'a> {
     pub static_tables: &'a dyn StaticTableProvider,
     /// Optional precompile handlers for custom instructions.
     pub precompiles: Option<&'a PrecompileRegistry>,
+    /// Optional committed state for PropertyRead instructions.
+    pub committed_state: Option<&'a dyn CommittedStateProvider>,
+    /// Optional property opening registry for PropertyRead resolution.
+    pub property_openings: Option<&'a PropertyOpeningRegistry>,
 }
 
 /// Execute a batch of transactions against a state snapshot.
@@ -68,8 +73,8 @@ pub fn execute_batch<S: StateSnapshot>(
         static_tables: env.static_tables,
         schemas: program.schemas(),
         precompiles: env.precompiles,
-        committed_state: None,
-        property_openings: None,
+        committed_state: env.committed_state,
+        property_openings: env.property_openings,
     };
 
     for (tx_idx, tx) in batch.transactions.iter().enumerate() {

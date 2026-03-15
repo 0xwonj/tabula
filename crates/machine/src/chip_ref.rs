@@ -1,11 +1,10 @@
 //! Sized adapter for `&dyn AnyRap` to satisfy Plonky3's `A: Sized` requirement.
 //!
 //! [`ChipRef`] wraps a borrowed trait object with optional preprocessed trace
-//! data, implementing all `BaseAir`, `BaseAirWithPublicValues`, and `Air<AB>`
-//! bounds via delegation. This lets us pass dynamic chips to p3 functions.
+//! data, implementing all `BaseAir` and `Air<AB>` bounds via delegation. This lets us pass dynamic chips to p3 functions.
 
-use p3_air::{Air, BaseAir, BaseAirWithPublicValues};
-use p3_baby_bear::BabyBear;
+use p3_air::{Air, BaseAir};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{ProverConstraintFolder, SymbolicAirBuilder, VerifierConstraintFolder};
 
@@ -26,7 +25,7 @@ use tabula_stark::rap::verifier::RapVerifierFolder;
 /// dynamic dispatch with p3's generic APIs.
 pub struct ChipRef<'a> {
     air: &'a dyn AnyRap,
-    preprocessed: Option<RowMajorMatrix<BabyBear>>,
+    preprocessed: Option<RowMajorMatrix<KoalaBear>>,
 }
 
 impl<'a> ChipRef<'a> {
@@ -39,7 +38,7 @@ impl<'a> ChipRef<'a> {
     }
 
     /// Attach preprocessed trace data (for the prover).
-    pub fn with_preprocessed(mut self, trace: RowMajorMatrix<BabyBear>) -> Self {
+    pub fn with_preprocessed(mut self, trace: RowMajorMatrix<KoalaBear>) -> Self {
         self.preprocessed = Some(trace);
         self
     }
@@ -52,26 +51,24 @@ impl<'a> ChipRef<'a> {
 
 // ── BaseAir delegation ─────────────────────────────────────────────────────
 
-impl BaseAir<BabyBear> for ChipRef<'_> {
+impl BaseAir<KoalaBear> for ChipRef<'_> {
     fn width(&self) -> usize {
-        <dyn AnyRap as BaseAir<BabyBear>>::width(self.air)
+        <dyn AnyRap as BaseAir<KoalaBear>>::width(self.air)
     }
 
-    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<BabyBear>> {
+    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<KoalaBear>> {
         self.preprocessed.clone()
     }
-}
 
-impl BaseAirWithPublicValues<BabyBear> for ChipRef<'_> {
     fn num_public_values(&self) -> usize {
-        self.air.num_public_values()
+        <dyn AnyRap as BaseAir<KoalaBear>>::num_public_values(self.air)
     }
 }
 
 // ── Air<AB> delegation for each builder type ────────────────────────────────
 
-impl Air<SymbolicAirBuilder<BabyBear>> for ChipRef<'_> {
-    fn eval(&self, builder: &mut SymbolicAirBuilder<BabyBear>) {
+impl Air<SymbolicAirBuilder<KoalaBear>> for ChipRef<'_> {
+    fn eval(&self, builder: &mut SymbolicAirBuilder<KoalaBear>) {
         self.air.eval(builder);
     }
 }
@@ -82,8 +79,8 @@ impl<'b> Air<ProverConstraintFolder<'b, TabulaStarkConfig>> for ChipRef<'_> {
     }
 }
 
-impl<'b> Air<p3_uni_stark::DebugConstraintBuilder<'b, BabyBear>> for ChipRef<'_> {
-    fn eval(&self, builder: &mut p3_uni_stark::DebugConstraintBuilder<'b, BabyBear>) {
+impl<'b> Air<p3_uni_stark::DebugConstraintBuilder<'b, KoalaBear>> for ChipRef<'_> {
+    fn eval(&self, builder: &mut p3_uni_stark::DebugConstraintBuilder<'b, KoalaBear>) {
         self.air.eval(builder);
     }
 }
@@ -94,8 +91,8 @@ impl<'b> Air<VerifierConstraintFolder<'b, TabulaStarkConfig>> for ChipRef<'_> {
     }
 }
 
-impl<'b> Air<tabula_stark::debug::DebugConstraintBuilder<'b, BabyBear>> for ChipRef<'_> {
-    fn eval(&self, builder: &mut tabula_stark::debug::DebugConstraintBuilder<'b, BabyBear>) {
+impl<'b> Air<tabula_stark::debug::DebugConstraintBuilder<'b, KoalaBear>> for ChipRef<'_> {
+    fn eval(&self, builder: &mut tabula_stark::debug::DebugConstraintBuilder<'b, KoalaBear>) {
         self.air.eval(builder);
     }
 }

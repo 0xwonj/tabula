@@ -6,7 +6,7 @@
 //! Used for SSMC/Merge keys, SortedMem r/tau, Execution access_r/tau_rc.
 
 use p3_air::AirBuilder;
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use tabula_stark::air::builder::InteractionAirBuilder;
 use tabula_stark::air::interaction::{AirInteraction, core_buses};
@@ -24,7 +24,7 @@ use super::integer::{
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct KeyRangeChecked<T> {
-    /// The u64 value as 3 BabyBear limbs (30+30+4).
+    /// The u64 value as 3 KoalaBear limbs (30+30+4).
     pub limbs: U64Limbs<T>,
     /// Half-decomposition of limbs.limb0.
     pub l0_halves: LimbHalves<T>,
@@ -34,7 +34,7 @@ pub struct KeyRangeChecked<T> {
     pub limb2_bits: Limb2Bits<T>,
 }
 
-impl KeyRangeChecked<BabyBear> {
+impl KeyRangeChecked<KoalaBear> {
     /// Populate all columns from a u64 value.
     pub fn populate(&mut self, val: u64) {
         self.limbs.populate(val);
@@ -100,92 +100,92 @@ mod tests {
     fn key_rc_populate_zero() {
         let mut key = KeyRangeChecked {
             limbs: U64Limbs {
-                limb0: BabyBear::ZERO,
-                limb1: BabyBear::ZERO,
-                limb2: BabyBear::ZERO,
+                limb0: KoalaBear::ZERO,
+                limb1: KoalaBear::ZERO,
+                limb2: KoalaBear::ZERO,
             },
             l0_halves: LimbHalves {
-                lo: BabyBear::ZERO,
-                hi: BabyBear::ZERO,
+                lo: KoalaBear::ZERO,
+                hi: KoalaBear::ZERO,
             },
             l1_halves: LimbHalves {
-                lo: BabyBear::ZERO,
-                hi: BabyBear::ZERO,
+                lo: KoalaBear::ZERO,
+                hi: KoalaBear::ZERO,
             },
             limb2_bits: Limb2Bits {
-                b0: BabyBear::ZERO,
-                b1: BabyBear::ZERO,
-                b2: BabyBear::ZERO,
-                b3: BabyBear::ZERO,
+                b0: KoalaBear::ZERO,
+                b1: KoalaBear::ZERO,
+                b2: KoalaBear::ZERO,
+                b3: KoalaBear::ZERO,
             },
         };
         key.populate(0);
-        assert_eq!(key.limbs.limb0, BabyBear::ZERO);
-        assert_eq!(key.l0_halves.lo, BabyBear::ZERO);
-        assert_eq!(key.l0_halves.hi, BabyBear::ZERO);
+        assert_eq!(key.limbs.limb0, KoalaBear::ZERO);
+        assert_eq!(key.l0_halves.lo, KoalaBear::ZERO);
+        assert_eq!(key.l0_halves.hi, KoalaBear::ZERO);
     }
 
     #[test]
     fn key_rc_populate_value() {
         let mut key = KeyRangeChecked {
             limbs: U64Limbs {
-                limb0: BabyBear::ZERO,
-                limb1: BabyBear::ZERO,
-                limb2: BabyBear::ZERO,
+                limb0: KoalaBear::ZERO,
+                limb1: KoalaBear::ZERO,
+                limb2: KoalaBear::ZERO,
             },
             l0_halves: LimbHalves {
-                lo: BabyBear::ZERO,
-                hi: BabyBear::ZERO,
+                lo: KoalaBear::ZERO,
+                hi: KoalaBear::ZERO,
             },
             l1_halves: LimbHalves {
-                lo: BabyBear::ZERO,
-                hi: BabyBear::ZERO,
+                lo: KoalaBear::ZERO,
+                hi: KoalaBear::ZERO,
             },
             limb2_bits: Limb2Bits {
-                b0: BabyBear::ZERO,
-                b1: BabyBear::ZERO,
-                b2: BabyBear::ZERO,
-                b3: BabyBear::ZERO,
+                b0: KoalaBear::ZERO,
+                b1: KoalaBear::ZERO,
+                b2: KoalaBear::ZERO,
+                b3: KoalaBear::ZERO,
             },
         };
         let val: u64 = (1 << 15) + 42; // l0 = 42 + 2^15, halves: lo=42, hi=1
         key.populate(val);
-        assert_eq!(key.l0_halves.lo, BabyBear::new(42));
-        assert_eq!(key.l0_halves.hi, BabyBear::new(1));
+        assert_eq!(key.l0_halves.lo, KoalaBear::new(42));
+        assert_eq!(key.l0_halves.hi, KoalaBear::new(1));
     }
 
     #[test]
     fn key_rc_populate_large() {
         let mut key = KeyRangeChecked {
             limbs: U64Limbs {
-                limb0: BabyBear::ZERO,
-                limb1: BabyBear::ZERO,
-                limb2: BabyBear::ZERO,
+                limb0: KoalaBear::ZERO,
+                limb1: KoalaBear::ZERO,
+                limb2: KoalaBear::ZERO,
             },
             l0_halves: LimbHalves {
-                lo: BabyBear::ZERO,
-                hi: BabyBear::ZERO,
+                lo: KoalaBear::ZERO,
+                hi: KoalaBear::ZERO,
             },
             l1_halves: LimbHalves {
-                lo: BabyBear::ZERO,
-                hi: BabyBear::ZERO,
+                lo: KoalaBear::ZERO,
+                hi: KoalaBear::ZERO,
             },
             limb2_bits: Limb2Bits {
-                b0: BabyBear::ZERO,
-                b1: BabyBear::ZERO,
-                b2: BabyBear::ZERO,
-                b3: BabyBear::ZERO,
+                b0: KoalaBear::ZERO,
+                b1: KoalaBear::ZERO,
+                b2: KoalaBear::ZERO,
+                b3: KoalaBear::ZERO,
             },
         };
         let val: u64 = u64::MAX;
         key.populate(val);
         // limb2 = val >> 60 = 15
-        assert_eq!(key.limbs.limb2, BabyBear::new(15));
+        assert_eq!(key.limbs.limb2, KoalaBear::new(15));
         // limb0 = val & MASK_30 = 2^30 - 1
         let mask30 = (1u64 << 30) - 1;
-        assert_eq!(key.limbs.limb0, BabyBear::new(mask30 as u32));
+        assert_eq!(key.limbs.limb0, KoalaBear::new(mask30 as u32));
         // l0_halves: lo = (2^30-1) & 0x7FFF = 2^15-1, hi = (2^30-1) >> 15 = 2^15-1
-        assert_eq!(key.l0_halves.lo, BabyBear::new((1 << 15) - 1));
-        assert_eq!(key.l0_halves.hi, BabyBear::new((1 << 15) - 1));
+        assert_eq!(key.l0_halves.lo, KoalaBear::new((1 << 15) - 1));
+        assert_eq!(key.l0_halves.hi, KoalaBear::new((1 << 15) - 1));
     }
 }

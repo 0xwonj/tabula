@@ -1,8 +1,8 @@
 //! RAP constraint folder for the verifier phase.
 
-use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder};
-use p3_baby_bear::BabyBear;
+use p3_air::{AirBuilder, RowWindow};
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrixView;
 
@@ -25,12 +25,10 @@ pub struct RapVerifierFolder<'a> {
     /// Full combined trace (main ∥ perm) — used internally for phi access.
     full_trace:
         p3_matrix::stack::VerticalPair<RowMajorMatrixView<'a, EF4>, RowMajorMatrixView<'a, EF4>>,
-    /// Preprocessed OOD values (if any).
-    preprocessed: Option<
-        p3_matrix::stack::VerticalPair<RowMajorMatrixView<'a, EF4>, RowMajorMatrixView<'a, EF4>>,
-    >,
+    /// Preprocessed OOD values window.
+    preprocessed_window: RowWindow<'a, EF4>,
     /// Public values.
-    public_values: &'a [BabyBear],
+    public_values: &'a [KoalaBear],
     /// Selectors at OOD point.
     is_first_row: EF4,
     is_last_row: EF4,
@@ -71,7 +69,7 @@ impl<'a> RapVerifierFolder<'a> {
                 RowMajorMatrixView<'a, EF4>,
             >,
         >,
-        public_values: &'a [BabyBear],
+        public_values: &'a [KoalaBear],
         is_first_row: EF4,
         is_last_row: EF4,
         is_transition: EF4,
@@ -80,10 +78,13 @@ impl<'a> RapVerifierFolder<'a> {
         challenges: [EF4; 2],
         main_width: usize,
     ) -> Self {
+        let preprocessed_window = preprocessed
+            .map(|vp| RowWindow::from_two_rows(vp.top.values, vp.bottom.values))
+            .unwrap_or_else(|| RowWindow::from_two_rows(&[], &[]));
         Self {
             main_truncated,
             full_trace,
-            preprocessed,
+            preprocessed_window,
             public_values,
             is_first_row,
             is_last_row,
@@ -150,7 +151,7 @@ impl<'a> RapVerifierFolder<'a> {
 
         // Compute fingerprint via shared helper.
         let [alpha, beta] = self.challenges;
-        let tag = EF4::from(BabyBear::from_u64(interaction.bus.tag() as u64));
+        let tag = EF4::from(KoalaBear::from_u64(interaction.bus.tag() as u64));
         let f = compute_fingerprint_components(
             ef4_coeffs(alpha),
             ef4_coeffs(beta),
@@ -194,17 +195,23 @@ fn read_ef4_components<T: Copy>(row: &[T], offset: usize) -> [T; 4] {
     ]
 }
 
-type VF4View<'a> =
-    p3_matrix::stack::VerticalPair<RowMajorMatrixView<'a, EF4>, RowMajorMatrixView<'a, EF4>>;
-
 impl<'a> AirBuilder for RapVerifierFolder<'a> {
-    type F = BabyBear;
+    type F = KoalaBear;
     type Expr = EF4;
     type Var = EF4;
-    type M = VF4View<'a>;
+    type PreprocessedWindow = RowWindow<'a, EF4>;
+    type MainWindow = RowWindow<'a, EF4>;
+    type PublicVar = KoalaBear;
 
-    fn main(&self) -> Self::M {
-        self.main_truncated
+    fn main(&self) -> Self::MainWindow {
+        RowWindow::from_two_rows(
+            self.main_truncated.top.values,
+            self.main_truncated.bottom.values,
+        )
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        &self.preprocessed_window
     }
 
     fn is_first_row(&self) -> Self::Expr {
@@ -222,21 +229,6 @@ impl<'a> AirBuilder for RapVerifierFolder<'a> {
     fn assert_zero<I: Into<Self::Expr>>(&mut self, _x: I) {
         // No-op: main constraints are handled in Phase 1.
     }
-}
-
-impl<'a> PairBuilder for RapVerifierFolder<'a> {
-    fn preprocessed(&self) -> Self::M {
-        self.preprocessed.unwrap_or_else(|| {
-            p3_matrix::stack::VerticalPair::new(
-                RowMajorMatrixView::new(&[], 0),
-                RowMajorMatrixView::new(&[], 0),
-            )
-        })
-    }
-}
-
-impl<'a> AirBuilderWithPublicValues for RapVerifierFolder<'a> {
-    type PublicVar = BabyBear;
 
     fn public_values(&self) -> &[Self::PublicVar] {
         self.public_values

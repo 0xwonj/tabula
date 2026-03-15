@@ -7,8 +7,8 @@
 //! Used by SSMC and Merge chips.
 
 use p3_air::AirBuilder;
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use super::integer::{MASK_30, U64Limbs};
 
@@ -26,23 +26,23 @@ pub struct HashChainInput<T> {
     pub perm_input: [T; 16],
 }
 
-/// Decompose a u64 key into 3 BabyBear limbs (30+30+4).
-fn decompose_key(key: u64) -> [BabyBear; 3] {
+/// Decompose a u64 key into 3 KoalaBear limbs (30+30+4).
+fn decompose_key(key: u64) -> [KoalaBear; 3] {
     [
-        BabyBear::new((key & MASK_30) as u32),
-        BabyBear::new(((key >> 30) & MASK_30) as u32),
-        BabyBear::new((key >> 60) as u32),
+        KoalaBear::new((key & MASK_30) as u32),
+        KoalaBear::new(((key >> 30) & MASK_30) as u32),
+        KoalaBear::new((key >> 60) as u32),
     ]
 }
 
-impl HashChainInput<BabyBear> {
+impl HashChainInput<KoalaBear> {
     /// Populate first-entry input: `[0x00, table_id, col_id, key[3], value[W], 0..]`.
-    pub fn populate_first(&mut self, table_id: u32, col_id: u32, key: u64, value: &[BabyBear]) {
+    pub fn populate_first(&mut self, table_id: u32, col_id: u32, key: u64, value: &[KoalaBear]) {
         let key_limbs = decompose_key(key);
-        self.perm_input = [BabyBear::ZERO; 16];
+        self.perm_input = [KoalaBear::ZERO; 16];
         // perm_input[0] = 0x00 (domain tag)
-        self.perm_input[1] = BabyBear::new(table_id);
-        self.perm_input[2] = BabyBear::new(col_id);
+        self.perm_input[1] = KoalaBear::new(table_id);
+        self.perm_input[2] = KoalaBear::new(col_id);
         self.perm_input[3] = key_limbs[0];
         self.perm_input[4] = key_limbs[1];
         self.perm_input[5] = key_limbs[2];
@@ -54,12 +54,12 @@ impl HashChainInput<BabyBear> {
     /// Populate continuation input: `[prev_hash_acc[8], key[3], value[W], 0..]`.
     pub fn populate_continuation(
         &mut self,
-        prev_hash_acc: &[BabyBear; 8],
+        prev_hash_acc: &[KoalaBear; 8],
         key: u64,
-        value: &[BabyBear],
+        value: &[KoalaBear],
     ) {
         let key_limbs = decompose_key(key);
-        self.perm_input = [BabyBear::ZERO; 16];
+        self.perm_input = [KoalaBear::ZERO; 16];
         self.perm_input[..8].copy_from_slice(prev_hash_acc);
         self.perm_input[8] = key_limbs[0];
         self.perm_input[9] = key_limbs[1];
@@ -180,78 +180,78 @@ mod tests {
     #[test]
     fn hash_chain_populate_first() {
         let mut hc = HashChainInput {
-            perm_input: [BabyBear::ZERO; 16],
+            perm_input: [KoalaBear::ZERO; 16],
         };
-        let value = vec![BabyBear::new(10), BabyBear::new(20), BabyBear::new(30)];
+        let value = vec![KoalaBear::new(10), KoalaBear::new(20), KoalaBear::new(30)];
         hc.populate_first(1, 2, 42, &value);
-        assert_eq!(hc.perm_input[0], BabyBear::ZERO); // domain tag
-        assert_eq!(hc.perm_input[1], BabyBear::new(1)); // table_id
-        assert_eq!(hc.perm_input[2], BabyBear::new(2)); // col_id
-        assert_eq!(hc.perm_input[3], BabyBear::new(42)); // key limb0
-        assert_eq!(hc.perm_input[4], BabyBear::ZERO); // key limb1
-        assert_eq!(hc.perm_input[5], BabyBear::ZERO); // key limb2
-        assert_eq!(hc.perm_input[6], BabyBear::new(10)); // value[0]
-        assert_eq!(hc.perm_input[7], BabyBear::new(20)); // value[1]
-        assert_eq!(hc.perm_input[8], BabyBear::new(30)); // value[2]
+        assert_eq!(hc.perm_input[0], KoalaBear::ZERO); // domain tag
+        assert_eq!(hc.perm_input[1], KoalaBear::new(1)); // table_id
+        assert_eq!(hc.perm_input[2], KoalaBear::new(2)); // col_id
+        assert_eq!(hc.perm_input[3], KoalaBear::new(42)); // key limb0
+        assert_eq!(hc.perm_input[4], KoalaBear::ZERO); // key limb1
+        assert_eq!(hc.perm_input[5], KoalaBear::ZERO); // key limb2
+        assert_eq!(hc.perm_input[6], KoalaBear::new(10)); // value[0]
+        assert_eq!(hc.perm_input[7], KoalaBear::new(20)); // value[1]
+        assert_eq!(hc.perm_input[8], KoalaBear::new(30)); // value[2]
         // Remaining should be zero padding
         for i in 9..16 {
-            assert_eq!(hc.perm_input[i], BabyBear::ZERO);
+            assert_eq!(hc.perm_input[i], KoalaBear::ZERO);
         }
     }
 
     #[test]
     fn hash_chain_populate_continuation() {
         let mut hc = HashChainInput {
-            perm_input: [BabyBear::ZERO; 16],
+            perm_input: [KoalaBear::ZERO; 16],
         };
         let prev = [
-            BabyBear::new(100),
-            BabyBear::new(101),
-            BabyBear::new(102),
-            BabyBear::new(103),
-            BabyBear::new(104),
-            BabyBear::new(105),
-            BabyBear::new(106),
-            BabyBear::new(107),
+            KoalaBear::new(100),
+            KoalaBear::new(101),
+            KoalaBear::new(102),
+            KoalaBear::new(103),
+            KoalaBear::new(104),
+            KoalaBear::new(105),
+            KoalaBear::new(106),
+            KoalaBear::new(107),
         ];
-        let value = vec![BabyBear::new(50), BabyBear::new(60), BabyBear::new(70)];
+        let value = vec![KoalaBear::new(50), KoalaBear::new(60), KoalaBear::new(70)];
         hc.populate_continuation(&prev, 99, &value);
         // perm_input[0..8] = prev_hash_acc
         for (i, p) in prev.iter().enumerate() {
             assert_eq!(hc.perm_input[i], *p);
         }
         // perm_input[8..11] = key limbs
-        assert_eq!(hc.perm_input[8], BabyBear::new(99));
-        assert_eq!(hc.perm_input[9], BabyBear::ZERO);
-        assert_eq!(hc.perm_input[10], BabyBear::ZERO);
+        assert_eq!(hc.perm_input[8], KoalaBear::new(99));
+        assert_eq!(hc.perm_input[9], KoalaBear::ZERO);
+        assert_eq!(hc.perm_input[10], KoalaBear::ZERO);
         // perm_input[11..14] = value
-        assert_eq!(hc.perm_input[11], BabyBear::new(50));
-        assert_eq!(hc.perm_input[12], BabyBear::new(60));
-        assert_eq!(hc.perm_input[13], BabyBear::new(70));
+        assert_eq!(hc.perm_input[11], KoalaBear::new(50));
+        assert_eq!(hc.perm_input[12], KoalaBear::new(60));
+        assert_eq!(hc.perm_input[13], KoalaBear::new(70));
         // Remaining padding
-        assert_eq!(hc.perm_input[14], BabyBear::ZERO);
-        assert_eq!(hc.perm_input[15], BabyBear::ZERO);
+        assert_eq!(hc.perm_input[14], KoalaBear::ZERO);
+        assert_eq!(hc.perm_input[15], KoalaBear::ZERO);
     }
 
     #[test]
     fn hash_chain_first_matches_ssmc_pattern() {
         // Verify our output matches the existing compose_ssmc_perm_input
         let mut hc = HashChainInput {
-            perm_input: [BabyBear::ZERO; 16],
+            perm_input: [KoalaBear::ZERO; 16],
         };
         let table_id = 5u32;
         let col_id = 3u32;
         let key = (1u64 << 30) + 7; // multi-limb key
-        let value = vec![BabyBear::new(1), BabyBear::new(2), BabyBear::new(3)];
+        let value = vec![KoalaBear::new(1), KoalaBear::new(2), KoalaBear::new(3)];
         hc.populate_first(table_id, col_id, key, &value);
 
         // Verify key decomposition
         let mask30 = (1u64 << 30) - 1;
-        assert_eq!(hc.perm_input[3], BabyBear::new((key & mask30) as u32));
+        assert_eq!(hc.perm_input[3], KoalaBear::new((key & mask30) as u32));
         assert_eq!(
             hc.perm_input[4],
-            BabyBear::new(((key >> 30) & mask30) as u32)
+            KoalaBear::new(((key >> 30) & mask30) as u32)
         );
-        assert_eq!(hc.perm_input[5], BabyBear::new((key >> 60) as u32));
+        assert_eq!(hc.perm_input[5], KoalaBear::new((key >> 60) as u32));
     }
 }

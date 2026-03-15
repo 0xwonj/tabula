@@ -9,7 +9,7 @@
 
 ## Context
 
-Tabula's prover uses Plonky3 (p3 0.4) over BabyBear with FRI-based polynomial commitment. The proving pipeline has 11 phases: trace generation, NTT, Merkle commitment, challenge sampling, permutation trace generation, permutation NTT + commit, quotient polynomial computation, quotient NTT + commit, FRI fold, FRI query, and proof serialization.
+Tabula's prover uses Plonky3 (p3 0.4) over KoalaBear with FRI-based polynomial commitment. The proving pipeline has 11 phases: trace generation, NTT, Merkle commitment, challenge sampling, permutation trace generation, permutation NTT + commit, quotient polynomial computation, quotient NTT + commit, FRI fold, FRI query, and proof serialization.
 
 After constraint common subexpression elimination removes `eval()` as the bottleneck, NTT and hashing become dominant, consuming 60-90% of remaining proving time. The current configuration uses Poseidon2 for both in-circuit hashing (PoseidonChip AIR constraints) and Merkle tree commitment, with `log_blowup=3`, fold-by-2, and `num_queries=2` (test-friendly, not production).
 
@@ -27,15 +27,15 @@ Expected impact: ~30% total proving time reduction. This is a configuration chan
 
 ### Implementation
 
-`Blake3FieldHasher` and `Blake3FieldCompressor` in `machine/src/blake3_pcs.rs` wrap BLAKE3 to operate in BabyBear field-element space, producing `[BabyBear; 8]` digests. Each 4-byte chunk of the 32-byte BLAKE3 output is read as little-endian `u32` and reduced mod p. This keeps compatibility with `DuplexChallenger<Perm16, 16, 4>` which only observes `Hash<F, F, N>` commitments.
+`Blake3FieldHasher` and `Blake3FieldCompressor` in `machine/src/blake3_pcs.rs` wrap BLAKE3 to operate in KoalaBear field-element space, producing `[KoalaBear; 8]` digests. Each 4-byte chunk of the 32-byte BLAKE3 output is read as little-endian `u32` and reduced mod p. This keeps compatibility with `DuplexChallenger<Perm16, 16, 4>` which only observes `Hash<F, F, N>` commitments.
 
-The MMCS type uses scalar `BabyBear` packing (not `PackedBabyBear`) — BLAKE3's native speed compensates for the loss of SIMD leaf hashing. Poseidon2 remains for Fiat-Shamir (DuplexChallenger) and in-circuit hashing (PoseidonChip).
+The MMCS type uses scalar `KoalaBear` packing (not `PackedKoalaBear`) — BLAKE3's native speed compensates for the loss of SIMD leaf hashing. Poseidon2 remains for Fiat-Shamir (DuplexChallenger) and in-circuit hashing (PoseidonChip).
 
 ---
 
 ## Batch Inversion for Permutation Trace
 
-LogUp permutation trace generation computes `phi = multiplicity / fingerprint` for each interaction on each row. The fingerprint is an EF4 (BabyBear quartic extension) element, and EF4 division costs approximately 20 BabyBear multiplications per division.
+LogUp permutation trace generation computes `phi = multiplicity / fingerprint` for each interaction on each row. The fingerprint is an EF4 (KoalaBear quartic extension) element, and EF4 division costs approximately 20 KoalaBear multiplications per division.
 
 Montgomery batch inversion replaces N independent inversions with a single inversion plus 3(N-1) multiplications. The technique:
 
@@ -133,11 +133,11 @@ Radix-4 (or Radix-2-squared) butterflies process four elements per stage instead
 
 ## SIMD Vectorization Gaps
 
-Plonky3 provides `PackedBabyBear` for SIMD acceleration: 8 elements on AVX2, 16 on AVX-512, 4 on NEON. Constraint evaluation already uses SIMD via `PackedVal` — Plonky3's `eval()` framework processes multiple rows simultaneously through packed field types.
+Plonky3 provides `PackedKoalaBear` for SIMD acceleration: 8 elements on AVX2, 16 on AVX-512, 4 on NEON. Constraint evaluation already uses SIMD via `PackedVal` — Plonky3's `eval()` framework processes multiple rows simultaneously through packed field types.
 
 Current gaps where SIMD is not utilized:
 
-- **Trace generation**: All chip `generate_trace()` implementations operate on scalar `BabyBear` values, processing one row at a time.
+- **Trace generation**: All chip `generate_trace()` implementations operate on scalar `KoalaBear` values, processing one row at a time.
 - **Permutation trace generation**: Fingerprint computation and phi accumulation are scalar.
 
 Permutation trace vectorization computes fingerprints for 4 or 8 rows simultaneously using packed EF4 arithmetic. The fingerprint `alpha - (beta^0 * v_0 + beta^1 * v_1 + ... + beta^k * v_k)` is a polynomial evaluation that vectorizes naturally across rows.
@@ -158,7 +158,7 @@ Platform support:
 
 ## GPU Offloading Strategy
 
-NTT and Merkle tree construction are excellent GPU candidates: they are embarrassingly parallel, have high arithmetic intensity, and dominate proving time. The ICICLE library (Ingonyama) provides GPU-accelerated NTT and Merkle tree construction for BabyBear, with Plonky3 integration via the AIR-ICICLE adapter.
+NTT and Merkle tree construction are excellent GPU candidates: they are embarrassingly parallel, have high arithmetic intensity, and dominate proving time. The ICICLE library (Ingonyama) provides GPU-accelerated NTT and Merkle tree construction for KoalaBear, with Plonky3 integration via the AIR-ICICLE adapter.
 
 ### Offloading Tiers
 
@@ -178,7 +178,7 @@ Expected impact: 5-20x on PCS phases.
 
 ## GKR for LogUp
 
-The current LogUp implementation accumulates permutation sums via committed polynomial traces — each chip has permutation columns (phi, cumulative sum) that are NTT'd and Merkle-committed alongside the main trace. Per-chip permutation width is `4 × (interactions + 1)` BabyBear columns (EF4 representation). This adds O(N log N) prover cost for the NTT and O(N) commitment cost for the additional columns.
+The current LogUp implementation accumulates permutation sums via committed polynomial traces — each chip has permutation columns (phi, cumulative sum) that are NTT'd and Merkle-committed alongside the main trace. Per-chip permutation width is `4 × (interactions + 1)` KoalaBear columns (EF4 representation). This adds O(N log N) prover cost for the NTT and O(N) commitment cost for the additional columns.
 
 The GKR (Goldwasser-Kalai-Rothblum) sum-check protocol replaces committed accumulation with an interactive proof of the multilinear sum. The prover cost drops to O(N) (linear scan, no NTT), and the permutation trace commitment is eliminated entirely.
 
@@ -194,7 +194,7 @@ The GKR (Goldwasser-Kalai-Rothblum) sum-check protocol replaces committed accumu
 
 ### Ecosystem status
 
-GKR-based LogUp is used by Stwo (StarkWare) on Circle STARKs with M31 field. However, **no FRI+BabyBear production implementation exists**. OpenVM and SP1 (the two major Plonky3-based systems) still use committed permutation traces. Plonky3 v0.4 has no built-in sum-check or GKR support — custom implementation required.
+GKR-based LogUp is used by Stwo (StarkWare) on Circle STARKs with M31 field. However, **no FRI+KoalaBear production implementation exists**. OpenVM and SP1 (the two major Plonky3-based systems) still use committed permutation traces. Plonky3 v0.4 has no built-in sum-check or GKR support — custom implementation required.
 
 ### Code impact
 

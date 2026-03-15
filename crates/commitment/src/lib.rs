@@ -2,7 +2,7 @@
 //!
 //! This crate computes cryptographic commitments to state: Poseidon hashing,
 //! Sparse Merkle Trees (SMT), Small Sparse Map Commitments (SSMC), and
-//! hybrid state commitment dispatch.
+//! state commitment structures.
 //!
 //! All Plonky3 dependencies are behind the `stark` feature flag.
 //! Without the feature, this crate compiles as an empty shell.
@@ -16,8 +16,6 @@ mod field;
 #[cfg(feature = "stark")]
 mod hasher;
 #[cfg(feature = "stark")]
-mod hybrid;
-#[cfg(feature = "stark")]
 mod poseidon;
 #[cfg(feature = "stark")]
 mod smt;
@@ -29,7 +27,7 @@ mod ssmc_merge;
 mod state_root;
 
 #[cfg(feature = "stark")]
-pub use codec::{BabyBearCodec, decode_trace, encode_trace, trace_width};
+pub use codec::{KoalaBearCodec, decode_trace, encode_trace, trace_width};
 #[cfg(feature = "stark")]
 pub use column_meta::{ColumnMeta, ColumnState, scheme_tags};
 #[cfg(feature = "stark")]
@@ -40,8 +38,6 @@ pub use field::{
 };
 #[cfg(feature = "stark")]
 pub use hasher::{FieldHasher, MockFieldHasher};
-#[cfg(feature = "stark")]
-pub use hybrid::HybridVC;
 #[cfg(feature = "stark")]
 pub use poseidon::PoseidonHasher;
 #[cfg(feature = "stark")]

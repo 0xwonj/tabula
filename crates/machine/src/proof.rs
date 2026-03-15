@@ -10,8 +10,8 @@
 
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_stark::air::interaction::BusId;
 use tabula_stark::air::statement::PublicStatement;
@@ -62,9 +62,9 @@ pub struct ColumnIdentity {
     /// Column identifier.
     pub col_id: u16,
     /// Old commitment digest.
-    pub com_old: [BabyBear; 8],
+    pub com_old: [KoalaBear; 8],
     /// New commitment digest.
-    pub com_new: [BabyBear; 8],
+    pub com_new: [KoalaBear; 8],
 }
 
 // ── Sub-Proof Types ──────────────────────────────────────────────────────────
@@ -156,7 +156,7 @@ pub struct ChipOpening {
     /// log2(number of quotient chunks).
     pub log_quotient_chunks: usize,
     /// Public values for this chip.
-    pub public_values: Vec<BabyBear>,
+    pub public_values: Vec<KoalaBear>,
 }
 
 // ── Cross-Proof Balance ──────────────────────────────────────────────────────
@@ -167,7 +167,7 @@ pub struct ChipOpening {
 /// Returns the first imbalanced `(BusId, coefficients)` if any.
 pub(crate) fn check_cross_proof_bus_balance<'a>(
     cumsum_maps: impl Iterator<Item = &'a BTreeMap<BusId, EF4>>,
-) -> Result<(), (BusId, [BabyBear; 4])> {
+) -> Result<(), (BusId, [KoalaBear; 4])> {
     let mut totals: BTreeMap<BusId, EF4> = BTreeMap::new();
     for map in cumsum_maps {
         for (&bus, &cs) in map {
@@ -223,7 +223,7 @@ pub enum ProveError {
         /// Which bus has the imbalance.
         bus_id: BusId,
         /// The nonzero cumsum coefficients.
-        cumsum: [BabyBear; 4],
+        cumsum: [KoalaBear; 4],
     },
     /// Cross-proof bus cumsum does not balance across all proof instances.
     #[error("cross-proof bus imbalance: {bus_id}, total = {total:?}")]
@@ -231,7 +231,7 @@ pub enum ProveError {
         /// Which bus has the imbalance.
         bus_id: BusId,
         /// The nonzero total cumsum.
-        total: [BabyBear; 4],
+        total: [KoalaBear; 4],
     },
 }
 
@@ -284,7 +284,7 @@ pub enum VerificationError {
         /// Which bus has the imbalance.
         bus_id: BusId,
         /// The nonzero total cumsum.
-        total: [BabyBear; 4],
+        total: [KoalaBear; 4],
     },
     /// Internal bus within a sub-proof does not balance.
     #[error("internal bus imbalance in {tier}: {bus_id}, cumsum = {cumsum:?}")]
@@ -294,6 +294,6 @@ pub enum VerificationError {
         /// Which bus has the imbalance.
         bus_id: BusId,
         /// The nonzero cumsum.
-        cumsum: [BabyBear; 4],
+        cumsum: [KoalaBear; 4],
     },
 }

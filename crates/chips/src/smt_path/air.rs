@@ -15,9 +15,8 @@
 //! 8. Identity constancy: bind_table_id, bind_key constant within path
 //! 9. Path structure: is_leaf at path start, is_root before boundary
 
-use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir, BaseAirWithPublicValues};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::Matrix;
 
 use tabula_gadgets::{constrain_is_real_prefix, constrain_is_zero};
 use tabula_stark::air::builder::InteractionAirBuilder;
@@ -50,6 +49,10 @@ impl<F> BaseAir<F> for SmtTablePathChip {
     fn width(&self) -> usize {
         SMT_TABLE_PATH_WIDTH
     }
+
+    fn num_public_values(&self) -> usize {
+        SMT_TABLE_PATH_NUM_PUBLIC_VALUES
+    }
 }
 
 /// Public value offset for the old state root digest (8 field elements).
@@ -58,12 +61,6 @@ pub const SMT_TABLE_PATH_OLD_ROOT_PV_OFFSET: usize = 0;
 pub const SMT_TABLE_PATH_NEW_ROOT_PV_OFFSET: usize = SMT_TABLE_PATH_OLD_ROOT_PV_OFFSET + 8;
 /// Number of public values consumed by SmtTablePath (old_root + new_root).
 pub const SMT_TABLE_PATH_NUM_PUBLIC_VALUES: usize = SMT_TABLE_PATH_NEW_ROOT_PV_OFFSET + 8;
-
-impl<F> BaseAirWithPublicValues<F> for SmtTablePathChip {
-    fn num_public_values(&self) -> usize {
-        SMT_TABLE_PATH_NUM_PUBLIC_VALUES
-    }
-}
 
 // ── Core constraint logic (shared) ──
 
@@ -233,12 +230,10 @@ fn constrain_smt_path_core<AB: InteractionAirBuilder>(
 impl<AB: InteractionAirBuilder> Air<AB> for SmtColPathChip {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local_row = main.row_slice(0).expect("trace must have at least one row");
-        let next_row = main
-            .row_slice(1)
-            .expect("trace must have at least two rows");
-        let local: &SmtPathCols<AB::Var> = borrow_cols(&local_row);
-        let next: &SmtPathCols<AB::Var> = borrow_cols(&next_row);
+        let local_row = main.current_slice();
+        let next_row = main.next_slice();
+        let local: &SmtPathCols<AB::Var> = borrow_cols(local_row);
+        let next: &SmtPathCols<AB::Var> = borrow_cols(next_row);
 
         // Core constraints
         constrain_smt_path_core(builder, local, next);
@@ -266,16 +261,14 @@ impl<AB: InteractionAirBuilder> Air<AB> for SmtColPathChip {
 
 impl<AB> Air<AB> for SmtTablePathChip
 where
-    AB: InteractionAirBuilder + AirBuilderWithPublicValues,
+    AB: InteractionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local_row = main.row_slice(0).expect("trace must have at least one row");
-        let next_row = main
-            .row_slice(1)
-            .expect("trace must have at least two rows");
-        let local: &SmtTablePathCols<AB::Var> = borrow_cols(&local_row);
-        let next: &SmtTablePathCols<AB::Var> = borrow_cols(&next_row);
+        let local_row = main.current_slice();
+        let next_row = main.next_slice();
+        let local: &SmtTablePathCols<AB::Var> = borrow_cols(local_row);
+        let next: &SmtTablePathCols<AB::Var> = borrow_cols(next_row);
 
         // Core constraints on base columns
         constrain_smt_path_core(builder, &local.base, &next.base);
@@ -297,7 +290,7 @@ where
 
 fn constrain_state_root_public_values<AB>(builder: &mut AB, local: &SmtPathCols<AB::Var>)
 where
-    AB: AirBuilder + AirBuilderWithPublicValues,
+    AB: AirBuilder,
 {
     let (old_root_pvs, new_root_pvs) = {
         let pvs = builder.public_values();

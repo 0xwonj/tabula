@@ -5,8 +5,8 @@
 
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use tabula_core::{ColId, TableId};
 
@@ -22,7 +22,7 @@ use crate::smt::SparseMerkleTree;
 /// `compress([0x10, t, c, tag, 0, 0, 0, 0], com[8])`
 ///
 /// The left half carries the domain tag + identity; the right half is the commitment.
-pub fn compute_leaf<H: FieldHasher<F = BabyBear, Digest = NativeDigest>>(
+pub fn compute_leaf<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
     hasher: &H,
     table: TableId,
     col: ColId,
@@ -31,14 +31,14 @@ pub fn compute_leaf<H: FieldHasher<F = BabyBear, Digest = NativeDigest>>(
 ) -> NativeDigest {
     let tag_val: u32 = tag as u32;
     let left = NativeDigest([
-        BabyBear::new(DOMAIN_LEAF),
-        BabyBear::new(table.0),
-        BabyBear::new(col.0 as u32),
-        BabyBear::new(tag_val),
-        BabyBear::ZERO,
-        BabyBear::ZERO,
-        BabyBear::ZERO,
-        BabyBear::ZERO,
+        KoalaBear::new(DOMAIN_LEAF),
+        KoalaBear::new(table.0),
+        KoalaBear::new(col.0 as u32),
+        KoalaBear::new(tag_val),
+        KoalaBear::ZERO,
+        KoalaBear::ZERO,
+        KoalaBear::ZERO,
+        KoalaBear::ZERO,
     ]);
     hasher.compress(&left, commitment)
 }
@@ -46,7 +46,7 @@ pub fn compute_leaf<H: FieldHasher<F = BabyBear, Digest = NativeDigest>>(
 /// Build column-level SMT from column leaves.
 ///
 /// `SMT_cols(depth=16, domain=DOMAIN_COL)`.
-pub fn compute_table_root<H: FieldHasher<F = BabyBear, Digest = NativeDigest>>(
+pub fn compute_table_root<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
     hasher: &H,
     col_leaves: &BTreeMap<ColId, NativeDigest>,
 ) -> NativeDigest {
@@ -60,7 +60,7 @@ pub fn compute_table_root<H: FieldHasher<F = BabyBear, Digest = NativeDigest>>(
 /// Build table-level SMT from table roots.
 ///
 /// `SMT_tables(depth=30, domain=DOMAIN_TABLE)`.
-pub fn compute_state_root<H: FieldHasher<F = BabyBear, Digest = NativeDigest>>(
+pub fn compute_state_root<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
     hasher: &H,
     table_roots: &BTreeMap<TableId, NativeDigest>,
 ) -> NativeDigest {

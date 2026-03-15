@@ -4,13 +4,13 @@
 //! - **Standard**: chips without interactions (single-phase constraint folding)
 //! - **RAP**: chips with interactions (two-phase: inner chip + permutation constraints)
 
-use p3_air::Air;
-use p3_baby_bear::BabyBear;
+use p3_air::{Air, RowWindow};
 use p3_commit::PolynomialSpace;
-use p3_field::{PackedFieldExtension, PackedValue, PrimeCharacteristicRing};
+use p3_field::{BasedVectorSpace, PackedFieldExtension, PackedValue, PrimeCharacteristicRing};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
-use p3_uni_stark::{PackedChallenge, PackedVal, ProverConstraintFolder};
+use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
+use p3_uni_stark::{PackedVal, ProverConstraintFolder};
 
 use tabula_stark::rap::ef4::build_alpha_powers;
 use tabula_stark::rap::prover::RapProverFolder;
@@ -29,15 +29,64 @@ pub(crate) struct ChipQuotientInfo {
     pub cumsum_final: EF4,
 }
 
+/// Decompose EF4 alpha powers into per-dimension base-field coefficient vectors.
+///
+/// For SIMD-friendly constraint folding: given `[alpha^{k}, alpha^{k-1}, ...]`,
+/// returns `D` vectors where `result[d][i]` is the d-th basis coefficient of `powers[i]`.
+fn decompose_alpha_powers(powers: &[EF4]) -> Vec<Vec<KoalaBear>> {
+    (0..<EF4 as BasedVectorSpace<KoalaBear>>::DIMENSION)
+        .map(|d| {
+            powers
+                .iter()
+                .map(|x| x.as_basis_coefficients_slice()[d])
+                .collect()
+        })
+        .collect()
+}
+
+/// Build decomposed alpha powers for base-field-only constraints.
+///
+/// All chip constraints are emitted in the base field, so we construct
+/// the decomposition directly: for each basis dimension d, the d-th
+/// coordinate of alpha^{N-1-i} for each constraint i.
+fn build_base_alpha_powers(alpha: EF4, count: usize) -> (Vec<Vec<KoalaBear>>, Vec<EF4>) {
+    let mut alpha_powers: Vec<EF4> = alpha.powers().collect_n(count);
+    alpha_powers.reverse();
+
+    let base_alpha_powers = decompose_alpha_powers(&alpha_powers);
+
+    // No extension-field constraints from the AIR.
+    let ext_alpha_powers: Vec<EF4> = Vec::new();
+
+    (base_alpha_powers, ext_alpha_powers)
+}
+
+/// Build the preprocessed view + window from an optional preprocessed matrix.
+///
+/// Returns `(view, window)` where `view` is zero-width if no preprocessed
+/// trace exists, and `window` wraps the view's two rows.
+fn build_preprocessed_view<'a>(
+    preprocessed: &'a Option<RowMajorMatrix<PackedVal<TabulaStarkConfig>>>,
+) -> (
+    RowMajorMatrixView<'a, PackedVal<TabulaStarkConfig>>,
+    RowWindow<'a, PackedVal<TabulaStarkConfig>>,
+) {
+    let view = preprocessed
+        .as_ref()
+        .map_or_else(|| RowMajorMatrixView::new(&[], 0), |m| m.as_view());
+    let window = RowWindow::from_view(&view);
+    (view, window)
+}
+
 /// Compute quotient values for a chip without LogUp interactions.
 ///
 /// Uses a single-phase `ProverConstraintFolder` over the full main trace.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn compute_quotient_standard<M: Matrix<BabyBear> + Sync>(
+pub(crate) fn compute_quotient_standard<M: Matrix<KoalaBear> + Sync>(
     air: &ChipRef<'_>,
     main_on_q: &M,
     pp_on_q: Option<&M>,
-    public_values: &[BabyBear],
+    public_values: &[KoalaBear],
     trace_domain: PcsDomain,
     quotient_domain: PcsDomain,
     alpha: EF4,
@@ -54,15 +103,14 @@ pub(crate) fn compute_quotient_standard<M: Matrix<BabyBear> + Sync>(
 
     type PV = PackedVal<TabulaStarkConfig>;
     for _ in quotient_size..PV::WIDTH {
-        sels.is_first_row.push(BabyBear::default());
-        sels.is_last_row.push(BabyBear::default());
-        sels.is_transition.push(BabyBear::default());
-        sels.inv_vanishing.push(BabyBear::default());
+        sels.is_first_row.push(KoalaBear::default());
+        sels.is_last_row.push(KoalaBear::default());
+        sels.is_transition.push(KoalaBear::default());
+        sels.inv_vanishing.push(KoalaBear::default());
     }
 
-    let (alpha_powers, decomposed_alpha_powers) = build_alpha_powers(alpha, constraint_count);
+    let (base_alpha_powers, ext_alpha_powers) = build_base_alpha_powers(alpha, constraint_count);
 
-    type PC = PackedChallenge<TabulaStarkConfig>;
     let mut result = Vec::with_capacity(quotient_size);
     let mut i_start = 0;
 
@@ -81,22 +129,26 @@ pub(crate) fn compute_quotient_standard<M: Matrix<BabyBear> + Sync>(
             let pp_width = pp.width();
             RowMajorMatrix::new(pp.vertically_packed_row_pair(i_start, next_step), pp_width)
         });
+        let (pp_view, pp_window) = build_preprocessed_view(&preprocessed);
 
         let mut folder = ProverConstraintFolder {
             main: main_mat.as_view(),
-            preprocessed: preprocessed.as_ref().map(|m| m.as_view()),
+            preprocessed: pp_view,
+            preprocessed_window: pp_window,
             public_values,
             is_first_row,
             is_last_row,
             is_transition,
-            alpha_powers: &alpha_powers,
-            decomposed_alpha_powers: &decomposed_alpha_powers,
-            accumulator: PC::ZERO,
+            base_alpha_powers: &base_alpha_powers,
+            ext_alpha_powers: &ext_alpha_powers,
+            base_constraints: Vec::with_capacity(constraint_count),
+            ext_constraints: Vec::new(),
             constraint_index: 0,
+            constraint_count,
         };
         air.eval(&mut folder);
 
-        let quotient = folder.accumulator * inv_vanishing;
+        let quotient = folder.finalize_constraints() * inv_vanishing;
         let batch_size = std::cmp::min(quotient_size - i_start, PV::WIDTH);
         for idx in 0..batch_size {
             result.push(quotient.extract(idx));
@@ -112,14 +164,14 @@ pub(crate) fn compute_quotient_standard<M: Matrix<BabyBear> + Sync>(
 ///
 /// Uses two-phase evaluation:
 /// - Phase 1: `ProverConstraintFolder` on truncated (main-only) view
-/// - Phase 2: `RapProverFolder` on full (main ∥ perm) view
+/// - Phase 2: `RapProverFolder` on full (main || perm) view
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
+pub(crate) fn compute_quotient_rap<M: Matrix<KoalaBear> + Sync>(
     air: &ChipRef<'_>,
     main_on_q: &M,
     perm_on_q: &M,
     pp_on_q: Option<&M>,
-    public_values: &[BabyBear],
+    public_values: &[KoalaBear],
     trace_domain: PcsDomain,
     quotient_domain: PcsDomain,
     alpha: EF4,
@@ -142,15 +194,21 @@ pub(crate) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
 
     type PV = PackedVal<TabulaStarkConfig>;
     for _ in quotient_size..PV::WIDTH {
-        sels.is_first_row.push(BabyBear::default());
-        sels.is_last_row.push(BabyBear::default());
-        sels.is_transition.push(BabyBear::default());
-        sels.inv_vanishing.push(BabyBear::default());
+        sels.is_first_row.push(KoalaBear::default());
+        sels.is_last_row.push(KoalaBear::default());
+        sels.is_transition.push(KoalaBear::default());
+        sels.inv_vanishing.push(KoalaBear::default());
     }
 
-    let (alpha_powers, decomposed_alpha_powers) = build_alpha_powers(alpha, total_count);
+    // Full alpha powers for all N constraints (Phase 1 + Phase 2).
+    // Phase 1 uses the first M entries (highest powers: alpha^{N-1}, ..., alpha^{N-M}).
+    // Phase 2 uses entries M..N (lower powers: alpha^{N-M-1}, ..., 1).
+    let (rap_alpha_powers, _) = build_alpha_powers(alpha, total_count);
 
-    type PC = PackedChallenge<TabulaStarkConfig>;
+    // Build decomposed base-field powers for Phase 1 from the first inner_count entries.
+    let base_alpha_powers = decompose_alpha_powers(&rap_alpha_powers[..inner_count]);
+    let ext_alpha_powers_inner: Vec<EF4> = Vec::new();
+
     let mut result = Vec::with_capacity(quotient_size);
     let mut i_start = 0;
 
@@ -169,7 +227,7 @@ pub(crate) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
         // Truncated view: main columns only
         let truncated_main = RowMajorMatrix::new(main_packed.clone(), main_width);
 
-        // Full view: main ∥ perm (concatenate local parts, then next parts)
+        // Full view: main || perm (concatenate local parts, then next parts)
         let mut full_data = Vec::with_capacity(2 * combined_width);
         full_data.extend_from_slice(&main_packed[..main_width]);
         full_data.extend_from_slice(&perm_packed[..perm_width]);
@@ -181,19 +239,23 @@ pub(crate) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
             let pp_width = pp.width();
             RowMajorMatrix::new(pp.vertically_packed_row_pair(i_start, next_step), pp_width)
         });
+        let (pp_view, pp_window) = build_preprocessed_view(&preprocessed);
 
         // Phase 1: Inner chip constraints (truncated view)
         let mut folder1 = ProverConstraintFolder {
             main: truncated_main.as_view(),
-            preprocessed: preprocessed.as_ref().map(|m| m.as_view()),
+            preprocessed: pp_view,
+            preprocessed_window: pp_window,
             public_values,
             is_first_row,
             is_last_row,
             is_transition,
-            alpha_powers: &alpha_powers,
-            decomposed_alpha_powers: &decomposed_alpha_powers,
-            accumulator: PC::ZERO,
+            base_alpha_powers: &base_alpha_powers,
+            ext_alpha_powers: &ext_alpha_powers_inner,
+            base_constraints: Vec::with_capacity(inner_count),
+            ext_constraints: Vec::new(),
             constraint_index: 0,
+            constraint_count: inner_count,
         };
         air.eval(&mut folder1);
 
@@ -201,6 +263,9 @@ pub(crate) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
             folder1.constraint_index, inner_count,
             "inner chip produced unexpected constraint count"
         );
+
+        // Finalize Phase 1 to get the accumulated constraint value.
+        let phase1_acc = folder1.finalize_constraints();
 
         // Phase 2: RAP constraints (full view via RapProverFolder)
         let mut rap_folder = RapProverFolder::new(
@@ -211,9 +276,9 @@ pub(crate) fn compute_quotient_rap<M: Matrix<BabyBear> + Sync>(
             is_first_row,
             is_last_row,
             is_transition,
-            &alpha_powers,
-            folder1.accumulator,
-            folder1.constraint_index,
+            &rap_alpha_powers,
+            phase1_acc,
+            inner_count,
             logup_challenges,
             main_width,
         );

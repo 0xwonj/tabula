@@ -1,8 +1,8 @@
 //! RAP constraint folder for the prover phase.
 
-use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder};
-use p3_baby_bear::BabyBear;
+use p3_air::{AirBuilder, RowWindow};
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrixView;
 
@@ -15,9 +15,9 @@ use super::ef4::{
 };
 
 /// Packed base field (platform-optimized).
-type PV = <BabyBear as Field>::Packing;
+type PV = <KoalaBear as Field>::Packing;
 /// Packed extension field (for challenge accumulation).
-type PC = <EF4 as ExtensionField<BabyBear>>::ExtensionPacking;
+type PC = <EF4 as ExtensionField<KoalaBear>>::ExtensionPacking;
 
 /// Constraint folder for Phase 2 (RAP constraints) of the prover.
 ///
@@ -32,10 +32,10 @@ pub struct RapProverFolder<'a> {
     main_truncated: RowMajorMatrixView<'a, PV>,
     /// Full combined trace view (main ∥ perm) — used internally for phi access.
     full_trace: RowMajorMatrixView<'a, PV>,
-    /// Preprocessed columns (if any).
-    preprocessed: Option<RowMajorMatrixView<'a, PV>>,
+    /// Preprocessed columns window.
+    preprocessed_window: RowWindow<'a, PV>,
     /// Public values.
-    public_values: &'a [BabyBear],
+    public_values: &'a [KoalaBear],
     /// Selectors.
     is_first_row: PV,
     is_last_row: PV,
@@ -70,7 +70,7 @@ impl<'a> RapProverFolder<'a> {
         main_truncated: RowMajorMatrixView<'a, PV>,
         full_trace: RowMajorMatrixView<'a, PV>,
         preprocessed: Option<RowMajorMatrixView<'a, PV>>,
-        public_values: &'a [BabyBear],
+        public_values: &'a [KoalaBear],
         is_first_row: PV,
         is_last_row: PV,
         is_transition: PV,
@@ -80,10 +80,13 @@ impl<'a> RapProverFolder<'a> {
         challenges: [EF4; 2],
         main_width: usize,
     ) -> Self {
+        let preprocessed_window = preprocessed
+            .map(|v| RowWindow::from_view(&v))
+            .unwrap_or_else(|| RowWindow::from_two_rows(&[], &[]));
         Self {
             main_truncated,
             full_trace,
-            preprocessed,
+            preprocessed_window,
             public_values,
             is_first_row,
             is_last_row,
@@ -158,7 +161,7 @@ impl<'a> RapProverFolder<'a> {
 
         // Compute fingerprint via shared helper.
         let [alpha, beta] = self.challenges;
-        let tag = PV::from(BabyBear::from_u64(interaction.bus.tag() as u64));
+        let tag = PV::from(KoalaBear::from_u64(interaction.bus.tag() as u64));
         let f = compute_fingerprint_components(
             ef4_coeffs(alpha),
             ef4_coeffs(beta),
@@ -203,13 +206,19 @@ fn read_ef4_components<T: Copy>(row: &[T], offset: usize) -> [T; 4] {
 }
 
 impl<'a> AirBuilder for RapProverFolder<'a> {
-    type F = BabyBear;
+    type F = KoalaBear;
     type Expr = PV;
     type Var = PV;
-    type M = RowMajorMatrixView<'a, PV>;
+    type PreprocessedWindow = RowWindow<'a, PV>;
+    type MainWindow = RowWindow<'a, PV>;
+    type PublicVar = KoalaBear;
 
-    fn main(&self) -> Self::M {
-        self.main_truncated
+    fn main(&self) -> Self::MainWindow {
+        RowWindow::from_view(&self.main_truncated)
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        &self.preprocessed_window
     }
 
     fn is_first_row(&self) -> Self::Expr {
@@ -227,17 +236,6 @@ impl<'a> AirBuilder for RapProverFolder<'a> {
     fn assert_zero<I: Into<Self::Expr>>(&mut self, _x: I) {
         // No-op: main constraints are handled in Phase 1.
     }
-}
-
-impl<'a> PairBuilder for RapProverFolder<'a> {
-    fn preprocessed(&self) -> Self::M {
-        self.preprocessed
-            .unwrap_or_else(|| RowMajorMatrixView::new(&[], 0))
-    }
-}
-
-impl<'a> AirBuilderWithPublicValues for RapProverFolder<'a> {
-    type PublicVar = BabyBear;
 
     fn public_values(&self) -> &[Self::PublicVar] {
         self.public_values

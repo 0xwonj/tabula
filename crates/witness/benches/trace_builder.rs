@@ -4,17 +4,18 @@ use std::collections::BTreeMap;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
-use tabula_commitment::{BabyBearCodec, HybridVC, PoseidonHasher};
-use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
+use tabula_commitment::{ColumnState, KoalaBearCodec, PoseidonHasher, scheme_tags};
 use tabula_core::traits::ValueCodec;
 use tabula_core::{Batch, CellKey, ColId, RowKey, TableId, Transaction, TxTypeId, Value};
+use tabula_core::{InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce};
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_ir::Program;
 use tabula_lang::compile;
 use tabula_witness::TraceBuilder;
 use tabula_witness::WitnessGenerator;
 
-type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<p3_baby_bear::BabyBear>)>>;
+type EncodedColumnEntries =
+    BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<p3_koala_bear::KoalaBear>)>>;
 
 /// Shared setup: compile → execute → generate witness.
 struct BenchSetup {
@@ -51,16 +52,18 @@ fn setup(
     let static_tables = InMemoryStaticTables::new();
     let env = BatchEnv {
         hasher: &hasher,
-        sig_verifier: &MockSigVerifier,
+        sig_verifier: &NoopSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &static_tables,
         precompiles: None,
+        committed_state: None,
+        property_openings: None,
     };
     let result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
         .expect("batch execution");
 
-    let vc = HybridVC::new(PoseidonHasher::new(), 1024);
-    let codec = BabyBearCodec;
+    let commit_hasher = PoseidonHasher::new();
+    let codec = KoalaBearCodec;
 
     let mut entries_by_col: EncodedColumnEntries = BTreeMap::new();
     for &(table, col, row, value) in initial_cells {
@@ -77,7 +80,14 @@ fn setup(
                 .remove(&(schema.id, col_def.id))
                 .unwrap_or_default();
             entries.sort_by_key(|(row, _)| *row);
-            let (state, _com) = vc.commit_column(schema.id, col_def.id, entries).unwrap();
+            let (state, _com) = ColumnState::commit(
+                &commit_hasher,
+                schema.id,
+                col_def.id,
+                entries,
+                scheme_tags::SSMC,
+            )
+            .unwrap();
             old_column_states.insert((schema.id, col_def.id), state);
         }
     }
@@ -88,7 +98,7 @@ fn setup(
         .cloned()
         .map(|s| (s.id, s))
         .collect();
-    let wg = WitnessGenerator::new(vc);
+    let wg = WitnessGenerator::new(PoseidonHasher::new());
     let witness = wg
         .generate(&result, &schemas_by_id, &old_column_states)
         .expect("witness generation");

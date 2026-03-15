@@ -1,6 +1,6 @@
 //! SSMC: Sorted Sparse Map Commitment for small columns.
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, RowKey, TableId};
@@ -16,7 +16,7 @@ pub struct SsmcEntry {
     /// The row key.
     pub key: RowKey,
     /// The ComEnc-encoded value (w(T) field elements).
-    pub value: Vec<BabyBear>,
+    pub value: Vec<KoalaBear>,
 }
 
 /// A sorted list of (key, value) entries for a single (table, col).
@@ -71,7 +71,7 @@ impl SsmcList {
     }
 
     /// Insert a single entry, maintaining sort order. Overwrites if key exists.
-    pub fn insert(&mut self, key: RowKey, value: Vec<BabyBear>) {
+    pub fn insert(&mut self, key: RowKey, value: Vec<KoalaBear>) {
         match self.entries.binary_search_by_key(&key, |e| e.key) {
             Ok(i) => self.entries[i].value = value,
             Err(i) => self.entries.insert(i, SsmcEntry { key, value }),
@@ -118,12 +118,12 @@ impl SsmcList {
     /// Compute the SSMC commitment.
     ///
     /// Formula: `hash([DOMAIN_SSMC, t, c, n, k_0[0..3], v_0[0..w], k_1[0..3], ...])`
-    pub fn commit<H: FieldHasher<F = BabyBear>>(&self, hasher: &H) -> SsmcCommitment<H::Digest> {
+    pub fn commit<H: FieldHasher<F = KoalaBear>>(&self, hasher: &H) -> SsmcCommitment<H::Digest> {
         let domain = crate::field::DOMAIN_SSMC;
         let mut input = Vec::new();
-        input.push(BabyBear::new(self.table.0));
-        input.push(BabyBear::new(self.col.0 as u32));
-        input.push(BabyBear::new(self.entries.len() as u32));
+        input.push(KoalaBear::new(self.table.0));
+        input.push(KoalaBear::new(self.col.0 as u32));
+        input.push(KoalaBear::new(self.entries.len() as u32));
         for entry in &self.entries {
             let key_limbs = encode_u64_limbs(entry.key.0);
             input.extend_from_slice(&key_limbs);
@@ -137,10 +137,10 @@ impl SsmcList {
 mod tests {
     use super::*;
     use crate::hasher::MockFieldHasher;
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
 
-    fn val(n: u32) -> Vec<BabyBear> {
-        vec![BabyBear::new(n)]
+    fn val(n: u32) -> Vec<KoalaBear> {
+        vec![KoalaBear::new(n)]
     }
 
     fn entry(key: u64, n: u32) -> SsmcEntry {

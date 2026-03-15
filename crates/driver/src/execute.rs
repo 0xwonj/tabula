@@ -1,115 +1,21 @@
-//! Canonical batch execution pipeline.
+//! Canonical batch execution pipeline (delegated to [`tabula_runtime`]).
 //!
-//! Provides [`run_batch`] — the single entry-point for executing a transaction
-//! batch against a program and state. Both the CLI and daemon delegate here
-//! instead of assembling the pipeline independently.
+//! The actual implementation lives in the `tabula-runtime` crate. This module
+//! re-exports core types and provides a thin wrapper that converts
+//! [`RuntimeError`](tabula_runtime::RuntimeError) to [`DriverError`] for
+//! backward compatibility.
 
-use std::collections::BTreeMap;
-
-use tabula_artifact::{BatchFile, StateFile, merge_output_state_cells, normalize_state};
-use tabula_core::mock::{InMemoryState, InMemoryStaticTables, MockSigVerifier, SequentialNonce};
-use tabula_core::traits::Hasher;
-use tabula_core::{
-    Batch, CellKey, ExecutionConsistencyStatus, TxResult, Value,
-};
-use tabula_executor::batch::{BatchEnv, execute_batch};
-use tabula_executor::consistency::check_consistency_status;
-use tabula_ir::Program;
+pub use tabula_runtime::{BatchInput, ExecutedBatch};
 
 use crate::error::DriverError;
 
-/// Inputs for batch execution (all immutable references).
-pub struct BatchInput<'a> {
-    /// The registered IR program.
-    pub program: &'a Program,
-    /// Pre-execution state.
-    pub state: &'a StateFile,
-    /// Transaction batch.
-    pub batch: &'a BatchFile,
-    /// Hasher implementation (MockHasher for CLI, PoseidonHasher for STARK).
-    pub hasher: &'a dyn Hasher,
-}
-
-/// Result of executing a batch through the canonical pipeline.
-#[derive(Debug, Clone)]
-pub struct ExecutedBatch {
-    /// Normalized pre-state.
-    pub state_before: StateFile,
-    /// Post-execution state.
-    pub state_after: StateFile,
-    /// Per-transaction results (each carries its own access trace and emitted events).
-    pub txs: Vec<TxResult>,
-    /// Read set from base state.
-    pub read_set: Vec<(CellKey, Option<Value>)>,
-    /// Final write set.
-    pub write_set: Vec<(CellKey, Option<Value>)>,
-    /// Consistency check result.
-    pub consistency: ExecutionConsistencyStatus,
-}
-
 /// Execute a batch through the canonical pipeline.
 ///
-/// Steps:
-/// 1. Normalize state
-/// 2. Build in-memory state snapshot
-/// 3. Convert transactions
-/// 4. Execute batch
-/// 5. Check consistency
-/// 6. Merge output state
+/// Delegates to [`tabula_runtime::run_batch`] and maps runtime errors to
+/// [`DriverError`] so existing consumers (CLI, daemon) continue to work
+/// without changes.
 pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, DriverError> {
-    // 1. Normalize state.
-    let normalized = normalize_state(input.state).map_err(DriverError::InvalidState)?;
-
-    // 2. Build in-memory state snapshot.
-    let mut state_store = InMemoryState::new();
-    for cell in &normalized.cells {
-        let (key, value) = cell.to_cell_pair().map_err(DriverError::InvalidState)?;
-        state_store.set(key, value);
-    }
-
-    // 3. Convert transactions.
-    let transactions: Vec<_> = input
-        .batch
-        .transactions
-        .iter()
-        .map(|t| t.to_transaction().map_err(DriverError::InvalidBatch))
-        .collect::<Result<_, _>>()?;
-    let batch = Batch { transactions };
-
-    // 4. Execute.
-    let st = InMemoryStaticTables::new();
-    let env = BatchEnv {
-        hasher: input.hasher,
-        sig_verifier: &MockSigVerifier,
-        nonce_policy: &SequentialNonce,
-        static_tables: &st,
-        precompiles: None,
-    };
-
-    let result = execute_batch(&batch, input.program, &state_store, &env, &BTreeMap::new())
-        .map_err(|e| DriverError::Execution {
-            source: e,
-            instruction_index: None,
-            tx_index: None,
-        })?;
-
-    // 5. Consistency check.
-    let all_events: Vec<_> = result.successful_events().cloned().collect();
-    let consistency = check_consistency_status(&all_events, &result.read_set_old, &result.txs);
-
-    // 6. Merge output state.
-    let state_after = StateFile {
-        cells: merge_output_state_cells(&normalized.cells, &result.write_set_final),
-    };
-
-    Ok(ExecutedBatch {
-        state_before: normalized,
-        state_after,
-        txs: result.txs,
-        read_set: result.read_set_old,
-        write_set: result.write_set_final,
-        consistency,
-    })
+    tabula_runtime::run_batch(input).map_err(DriverError::from)
 }
 
 #[cfg(test)]
@@ -117,7 +23,7 @@ mod tests {
     use super::*;
     use tabula_artifact::StateCell;
     use tabula_core::Value;
-    use tabula_core::mock::MockHasher;
+    use tabula_core::mock::Blake3Hasher;
 
     use crate::example::transfer_example_bundle;
     use crate::register::{MetadataPolicy, register_program_sources};
@@ -132,7 +38,7 @@ mod tests {
             program: &registered.program,
             state: &bundle.state,
             batch: &bundle.batch,
-            hasher: &MockHasher,
+            hasher: &Blake3Hasher,
         })
         .expect("run_batch");
 
@@ -154,7 +60,7 @@ mod tests {
 
         assert!(matches!(
             executed.consistency,
-            ExecutionConsistencyStatus::Passed
+            tabula_core::ExecutionConsistencyStatus::Passed
         ));
     }
 
@@ -164,7 +70,7 @@ mod tests {
         let registered =
             register_program_sources(&bundle.program, MetadataPolicy::Optional).expect("register");
 
-        let bad_state = StateFile {
+        let bad_state = tabula_artifact::StateFile {
             cells: vec![StateCell {
                 table: 0,
                 row: 0,
@@ -177,7 +83,7 @@ mod tests {
             program: &registered.program,
             state: &bad_state,
             batch: &bundle.batch,
-            hasher: &MockHasher,
+            hasher: &Blake3Hasher,
         })
         .expect_err("invalid state should fail");
         assert!(matches!(err, DriverError::InvalidState(_)));
@@ -189,7 +95,7 @@ mod tests {
         let registered =
             register_program_sources(&bundle.program, MetadataPolicy::Optional).expect("register");
 
-        let empty_batch = BatchFile {
+        let empty_batch = tabula_artifact::BatchFile {
             transactions: vec![],
         };
 
@@ -197,7 +103,7 @@ mod tests {
             program: &registered.program,
             state: &bundle.state,
             batch: &empty_batch,
-            hasher: &MockHasher,
+            hasher: &Blake3Hasher,
         })
         .expect("run_batch");
 

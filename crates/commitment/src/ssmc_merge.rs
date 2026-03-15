@@ -1,6 +1,6 @@
 //! SSMC 3-way merge algorithm: old list + write set -> new list.
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use tabula_core::{ColId, RowKey, TableId};
 
@@ -28,11 +28,11 @@ pub struct MergeStep {
     /// Source classification.
     pub source: MergeSource,
     /// Value from old list (None if write_only).
-    pub old_val: Option<Vec<BabyBear>>,
+    pub old_val: Option<Vec<KoalaBear>>,
     /// Value from write set (None if old_only or delete).
-    pub write_val: Option<Vec<BabyBear>>,
+    pub write_val: Option<Vec<KoalaBear>>,
     /// Value in new list (None if deleted).
-    pub new_val: Option<Vec<BabyBear>>,
+    pub new_val: Option<Vec<KoalaBear>>,
     /// Whether this key appears in the new list.
     pub in_new: bool,
 }
@@ -49,9 +49,9 @@ pub struct MergeTrace {
 /// 3-way merge: old list + write set -> new list + commitment + trace.
 ///
 /// `writes` is a sorted list of (key, Option<value>). `None` value = delete.
-pub fn merge<H: FieldHasher<F = BabyBear>>(
+pub fn merge<H: FieldHasher<F = KoalaBear>>(
     old: &SsmcList,
-    writes: &[(RowKey, Option<Vec<BabyBear>>)],
+    writes: &[(RowKey, Option<Vec<KoalaBear>>)],
     table: TableId,
     col: ColId,
     hasher: &H,
@@ -171,10 +171,10 @@ pub fn merge<H: FieldHasher<F = BabyBear>>(
 mod tests {
     use super::*;
     use crate::hasher::MockFieldHasher;
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
 
-    fn val(n: u32) -> Vec<BabyBear> {
-        vec![BabyBear::new(n)]
+    fn val(n: u32) -> Vec<KoalaBear> {
+        vec![KoalaBear::new(n)]
     }
 
     fn entry(key: u64, n: u32) -> SsmcEntry {
@@ -189,7 +189,7 @@ mod tests {
         let h = MockFieldHasher;
         let old =
             SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 10), entry(1, 20)]).unwrap();
-        let writes: Vec<(RowKey, Option<Vec<BabyBear>>)> = vec![];
+        let writes: Vec<(RowKey, Option<Vec<KoalaBear>>)> = vec![];
         let (new_list, _, trace) = merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 2);
         assert_eq!(trace.steps.len(), 2);
@@ -227,7 +227,7 @@ mod tests {
     fn merge_delete() {
         let h = MockFieldHasher;
         let old = SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 10)]).unwrap();
-        let writes: Vec<(RowKey, Option<Vec<BabyBear>>)> = vec![(RowKey(0), None)];
+        let writes: Vec<(RowKey, Option<Vec<KoalaBear>>)> = vec![(RowKey(0), None)];
         let (new_list, _, trace) = merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 0);
         assert_eq!(trace.steps[0].source, MergeSource::Both);
@@ -286,7 +286,7 @@ mod tests {
         let h = MockFieldHasher;
         let old =
             SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 1), entry(1, 2)]).unwrap();
-        let writes: Vec<(RowKey, Option<Vec<BabyBear>>)> = vec![];
+        let writes: Vec<(RowKey, Option<Vec<KoalaBear>>)> = vec![];
         let (new_list, c_new, _) = merge(&old, &writes, TableId(1), ColId(0), &h);
         // New list should equal old list.
         assert_eq!(new_list.len(), old.len());

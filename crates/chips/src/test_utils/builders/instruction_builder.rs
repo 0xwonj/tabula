@@ -3,8 +3,8 @@
 //! Provides a chainable API so test factory functions can construct
 //! records in 3-8 lines instead of 20-30 lines of struct-literal boilerplate.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
 use crate::execution::{InstructionRecord, Opcode, u64_to_limbs};
 use tabula_gadgets::bool_fe;
@@ -50,8 +50,8 @@ impl InstructionBuilder {
         self
     }
 
-    /// Set src1 operand with raw BabyBear field elements.
-    pub fn src1_fe(mut self, slot: usize, val: Vec<BabyBear>) -> Self {
+    /// Set src1 operand with raw KoalaBear field elements.
+    pub fn src1_fe(mut self, slot: usize, val: Vec<KoalaBear>) -> Self {
         self.inner.src1_slot_idx = Some(slot);
         self.inner.src1_val = val;
         self
@@ -64,8 +64,8 @@ impl InstructionBuilder {
         self
     }
 
-    /// Set src2 operand with raw BabyBear field elements.
-    pub fn src2_fe(mut self, slot: usize, val: Vec<BabyBear>) -> Self {
+    /// Set src2 operand with raw KoalaBear field elements.
+    pub fn src2_fe(mut self, slot: usize, val: Vec<KoalaBear>) -> Self {
         self.inner.src2_slot_idx = Some(slot);
         self.inner.src2_val = val;
         self
@@ -95,24 +95,28 @@ impl InstructionBuilder {
 
     /// Add a slot write: u64 value (converted to limbs), not null.
     pub fn write(mut self, slot: usize, val: u64) -> Self {
-        self.inner.writes.push((slot, u64_to_limbs(val).to_vec(), false));
+        self.inner
+            .writes
+            .push((slot, u64_to_limbs(val).to_vec(), false));
         self
     }
 
-    /// Add a slot write with raw BabyBear field elements.
-    pub fn write_fe(mut self, slot: usize, val: Vec<BabyBear>, is_null: bool) -> Self {
+    /// Add a slot write with raw KoalaBear field elements.
+    pub fn write_fe(mut self, slot: usize, val: Vec<KoalaBear>, is_null: bool) -> Self {
         self.inner.writes.push((slot, val, is_null));
         self
     }
 
     /// Add a null slot write: u64 value with is_null = true.
     pub fn write_null(mut self, slot: usize, val: u64) -> Self {
-        self.inner.writes.push((slot, u64_to_limbs(val).to_vec(), true));
+        self.inner
+            .writes
+            .push((slot, u64_to_limbs(val).to_vec(), true));
         self
     }
 
     /// Set hash permutation input/output.
-    pub fn hash_perm(mut self, input: [BabyBear; 16], output: [BabyBear; 8]) -> Self {
+    pub fn hash_perm(mut self, input: [KoalaBear; 16], output: [KoalaBear; 8]) -> Self {
         self.inner.hash_perm_input = Some(input);
         self.inner.hash_perm_output = Some(output);
         self
@@ -134,8 +138,8 @@ impl InstructionBuilder {
     pub fn property_read(
         mut self,
         query_type: u8,
-        result_val: Vec<BabyBear>,
-        result_key: Vec<BabyBear>,
+        result_val: Vec<KoalaBear>,
+        result_key: Vec<KoalaBear>,
         is_null: bool,
     ) -> Self {
         self.inner.property_query_type = Some(query_type);
@@ -151,7 +155,7 @@ impl InstructionBuilder {
     }
 }
 
-/// Helper: build a boolean BabyBear triple `[bool_fe(v), 0, 0]`.
-pub fn bool_val(v: bool) -> Vec<BabyBear> {
-    vec![bool_fe(v), BabyBear::ZERO, BabyBear::ZERO]
+/// Helper: build a boolean KoalaBear triple `[bool_fe(v), 0, 0]`.
+pub fn bool_val(v: bool) -> Vec<KoalaBear> {
+    vec![bool_fe(v), KoalaBear::ZERO, KoalaBear::ZERO]
 }

@@ -5,7 +5,7 @@
 //! A blanket impl covers every chip that satisfies the bounds.
 
 use p3_air::{Air, BaseAir};
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use crate::chips::ChipSpec;
 use crate::debug::DebugConstraintBuilder;
@@ -16,7 +16,7 @@ use crate::trace::contributor::TraceContributor;
 /// Combines:
 /// - [`ChipSpec`] — chip identity and metadata
 /// - [`TraceContributor`] — phase-ordered trace generation
-/// - [`BaseAir<BabyBear>`] — trace width queries
+/// - [`BaseAir<KoalaBear>`] — trace width queries
 /// - [`Air<DebugConstraintBuilder>`] — constraint evaluation for interaction recording
 ///
 /// Used as `&dyn DynChip` or `Box<dyn DynChip>` to iterate over heterogeneous
@@ -44,7 +44,12 @@ use crate::trace::contributor::TraceContributor;
 /// Labels for Dependent-phase chips are populated automatically by the
 /// orchestrator's [`BusConsumer::collect()`] step between Phase 1 and Phase 2.
 pub trait DynChip:
-    ChipSpec + TraceContributor + BaseAir<BabyBear> + for<'a> Air<DebugConstraintBuilder<'a, BabyBear>>
+    ChipSpec
+    + TraceContributor
+    + BaseAir<KoalaBear>
+    + for<'a> Air<DebugConstraintBuilder<'a, KoalaBear>>
+    + Send
+    + Sync
 {
 }
 
@@ -52,7 +57,9 @@ pub trait DynChip:
 impl<T> DynChip for T where
     T: ChipSpec
         + TraceContributor
-        + BaseAir<BabyBear>
-        + for<'a> Air<DebugConstraintBuilder<'a, BabyBear>>
+        + BaseAir<KoalaBear>
+        + for<'a> Air<DebugConstraintBuilder<'a, KoalaBear>>
+        + Send
+        + Sync
 {
 }

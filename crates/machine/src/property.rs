@@ -37,7 +37,7 @@
 
 use std::any::Any;
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use tabula_core::RowKey;
 
 use crate::extension::ChipExtension;
@@ -60,7 +60,7 @@ pub trait PropertyWitness: Send + Sync {
     /// The query result as field elements.
     ///
     /// Encoding matches the column's [`EncodingWidth`](tabula_stark::trace::EncodingWidth).
-    fn value(&self) -> &[BabyBear];
+    fn value(&self) -> &[KoalaBear];
 
     /// The key satisfying the property (e.g., the minimum key).
     ///
@@ -125,9 +125,9 @@ pub trait PropertyWitness: Send + Sync {
 ///     }
 ///     fn prove(
 ///         &self,
-///         commitment_digest: &[BabyBear],
+///         commitment_digest: &[KoalaBear],
 ///         query: &PropertyQuery,
-///         state: &[(RowKey, &[BabyBear], bool)],
+///         state: &[(RowKey, &[KoalaBear], bool)],
 ///     ) -> Result<Box<dyn PropertyWitness>, PropertyError> {
 ///         // ... produce witness proving result against committed state
 ///     }
@@ -166,9 +166,9 @@ pub trait PropertyOpening: Send + Sync {
     /// is inconsistent with the commitment.
     fn prove(
         &self,
-        commitment_digest: &[BabyBear],
+        commitment_digest: &[KoalaBear],
         query: &PropertyQuery,
-        state: &[(RowKey, &[BabyBear], bool)],
+        state: &[(RowKey, &[KoalaBear], bool)],
     ) -> Result<Box<dyn PropertyWitness>, PropertyError>;
 
     /// Verifier chips for the **column tier** (Tier 2).

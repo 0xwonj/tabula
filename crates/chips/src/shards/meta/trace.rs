@@ -1,10 +1,10 @@
 //! Trace generation for the MetaShard chip.
 //!
-//! Converts a single `MetaShardRow` into a `RowMajorMatrix<BabyBear>` trace.
+//! Converts a single `MetaShardRow` into a `RowMajorMatrix<KoalaBear>` trace.
 //! Each MetaShard has at most 1 real row (one `(t, c)` column metadata entry).
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_commitment::{DOMAIN_LEAF, NativeDigest};
@@ -45,32 +45,32 @@ pub fn generate_meta_shard_trace(
     col_id: u16,
     scheme_tag: u16,
     row: Option<&MetaShardRow>,
-) -> RowMajorMatrix<BabyBear> {
+) -> RowMajorMatrix<KoalaBear> {
     let width = META_SHARD_WIDTH;
     // Minimum 2 rows for Plonky3 transition constraints.
     let num_rows = 2;
-    let mut values = vec![BabyBear::ZERO; num_rows * width];
+    let mut values = vec![KoalaBear::ZERO; num_rows * width];
 
     if let Some(r) = row {
-        let cols: &mut MetaShardCols<BabyBear> = borrow_cols_mut(&mut values[0..width]);
+        let cols: &mut MetaShardCols<KoalaBear> = borrow_cols_mut(&mut values[0..width]);
 
-        cols.is_real = BabyBear::ONE;
-        cols.table_id = BabyBear::new(table_id);
-        cols.col_id = BabyBear::new(col_id as u32);
+        cols.is_real = KoalaBear::ONE;
+        cols.table_id = KoalaBear::new(table_id);
+        cols.col_id = KoalaBear::new(col_id as u32);
         cols.com_old = r.com_old.0;
         cols.com_new = r.com_new.0;
         cols.is_empty_old = bool_fe(r.is_empty_old);
         cols.is_empty_new = bool_fe(r.is_empty_new);
         cols.is_touched = bool_fe(r.is_touched);
-        cols.empty_read_mult = BabyBear::new(r.empty_read_count);
+        cols.empty_read_mult = KoalaBear::new(r.empty_read_count);
 
         // Com_empty verification
         let has_empty = r.is_empty_old || r.is_empty_new;
         cols.has_empty_check = bool_fe(has_empty);
         if has_empty {
-            let mut perm_input = [BabyBear::ZERO; 16];
-            perm_input[1] = BabyBear::new(table_id);
-            perm_input[2] = BabyBear::new(col_id as u32);
+            let mut perm_input = [KoalaBear::ZERO; 16];
+            perm_input[1] = KoalaBear::new(table_id);
+            perm_input[2] = KoalaBear::new(col_id as u32);
             cols.empty_perm_input = perm_input;
 
             let (_rounds, perm_output_full) = poseidon2_permutation(perm_input);
@@ -79,13 +79,13 @@ pub fn generate_meta_shard_trace(
 
         // Leaf digest
         {
-            let tag_fe = BabyBear::new(scheme_tag as u32);
+            let tag_fe = KoalaBear::new(scheme_tag as u32);
 
             // Old leaf: [0x10, t, c, tag, 0,0,0,0, com_old[8]]
-            let mut leaf_input_old = [BabyBear::ZERO; 16];
-            leaf_input_old[0] = BabyBear::new(DOMAIN_LEAF);
-            leaf_input_old[1] = BabyBear::new(table_id);
-            leaf_input_old[2] = BabyBear::new(col_id as u32);
+            let mut leaf_input_old = [KoalaBear::ZERO; 16];
+            leaf_input_old[0] = KoalaBear::new(DOMAIN_LEAF);
+            leaf_input_old[1] = KoalaBear::new(table_id);
+            leaf_input_old[2] = KoalaBear::new(col_id as u32);
             leaf_input_old[3] = tag_fe;
             leaf_input_old[8..16].copy_from_slice(&r.com_old.0);
             cols.leaf_perm_input_old = leaf_input_old;
@@ -93,10 +93,10 @@ pub fn generate_meta_shard_trace(
             cols.leaf_digest_old = core::array::from_fn(|j| perm_out_old[j]);
 
             // New leaf: [0x10, t, c, tag, 0,0,0,0, com_new[8]]
-            let mut leaf_input_new = [BabyBear::ZERO; 16];
-            leaf_input_new[0] = BabyBear::new(DOMAIN_LEAF);
-            leaf_input_new[1] = BabyBear::new(table_id);
-            leaf_input_new[2] = BabyBear::new(col_id as u32);
+            let mut leaf_input_new = [KoalaBear::ZERO; 16];
+            leaf_input_new[0] = KoalaBear::new(DOMAIN_LEAF);
+            leaf_input_new[1] = KoalaBear::new(table_id);
+            leaf_input_new[2] = KoalaBear::new(col_id as u32);
             leaf_input_new[3] = tag_fe;
             leaf_input_new[8..16].copy_from_slice(&r.com_new.0);
             cols.leaf_perm_input_new = leaf_input_new;
@@ -115,7 +115,7 @@ use tabula_stark::trace::TraceGenerator;
 impl TraceGenerator for super::air::MetaShardChip {
     type Input = Option<MetaShardRow>;
 
-    fn generate_trace(&self, input: &Option<MetaShardRow>) -> RowMajorMatrix<BabyBear> {
+    fn generate_trace(&self, input: &Option<MetaShardRow>) -> RowMajorMatrix<KoalaBear> {
         generate_meta_shard_trace(
             self.table_id(),
             self.col_id(),

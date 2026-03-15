@@ -1,7 +1,7 @@
 //! Tests for the PropertyVerifier AIR chip.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -18,15 +18,15 @@ fn chip() -> PropertyVerifierChip<3> {
     PropertyVerifierChip::new(ChipId(100), 0, 0)
 }
 
-fn trace(records: &[PropertyReadRecord]) -> RowMajorMatrix<BabyBear> {
+fn trace(records: &[PropertyReadRecord]) -> RowMajorMatrix<KoalaBear> {
     generate_property_verifier_trace::<3>(0, 0, records)
 }
 
 fn record(query_type: u8, key: u64, val: u64, is_null: bool) -> PropertyReadRecord {
     PropertyReadRecord {
         query_type,
-        result_val: vec![BabyBear::new(val as u32), BabyBear::ZERO, BabyBear::ZERO],
-        result_key: vec![BabyBear::new(key as u32), BabyBear::ZERO, BabyBear::ZERO],
+        result_val: vec![KoalaBear::new(val as u32), KoalaBear::ZERO, KoalaBear::ZERO],
+        result_key: vec![KoalaBear::new(key as u32), KoalaBear::ZERO, KoalaBear::ZERO],
         is_null,
     }
 }
@@ -114,10 +114,10 @@ fn valid_empty_records() {
 #[test]
 fn invalid_is_real_not_boolean() {
     let width = property_verifier_width::<3>();
-    let mut values = vec![BabyBear::ZERO; 2 * width];
+    let mut values = vec![KoalaBear::ZERO; 2 * width];
 
-    let cols: &mut PropertyVerifierCols<BabyBear, 3> = borrow_cols_mut(&mut values[0..width]);
-    cols.is_real = BabyBear::TWO; // NOT boolean
+    let cols: &mut PropertyVerifierCols<KoalaBear, 3> = borrow_cols_mut(&mut values[0..width]);
+    cols.is_real = KoalaBear::TWO; // NOT boolean
 
     let t = RowMajorMatrix::new(values, width);
     debug_check(&chip(), &t).expect_err("is_real=2 should fail");
@@ -126,11 +126,11 @@ fn invalid_is_real_not_boolean() {
 #[test]
 fn invalid_is_null_not_boolean() {
     let width = property_verifier_width::<3>();
-    let mut values = vec![BabyBear::ZERO; 2 * width];
+    let mut values = vec![KoalaBear::ZERO; 2 * width];
 
-    let cols: &mut PropertyVerifierCols<BabyBear, 3> = borrow_cols_mut(&mut values[0..width]);
-    cols.is_real = BabyBear::ONE;
-    cols.is_null = BabyBear::TWO; // NOT boolean
+    let cols: &mut PropertyVerifierCols<KoalaBear, 3> = borrow_cols_mut(&mut values[0..width]);
+    cols.is_real = KoalaBear::ONE;
+    cols.is_null = KoalaBear::TWO; // NOT boolean
 
     let t = RowMajorMatrix::new(values, width);
     debug_check(&chip(), &t).expect_err("is_null=2 should fail");
@@ -140,13 +140,13 @@ fn invalid_is_null_not_boolean() {
 fn invalid_is_real_prefix_violation() {
     // Row 0: is_real=0, Row 1: is_real=1 → violates monotonic 1→0 prefix
     let width = property_verifier_width::<3>();
-    let mut values = vec![BabyBear::ZERO; 4 * width];
+    let mut values = vec![KoalaBear::ZERO; 4 * width];
 
     // Row 0: padding (is_real=0)
     // Row 1: real (is_real=1) → prefix violation
-    let cols1: &mut PropertyVerifierCols<BabyBear, 3> =
+    let cols1: &mut PropertyVerifierCols<KoalaBear, 3> =
         borrow_cols_mut(&mut values[width..2 * width]);
-    cols1.is_real = BabyBear::ONE;
+    cols1.is_real = KoalaBear::ONE;
 
     let t = RowMajorMatrix::new(values, width);
     debug_check(&chip(), &t).expect_err("prefix violation should fail");
@@ -155,18 +155,18 @@ fn invalid_is_real_prefix_violation() {
 #[test]
 fn invalid_table_id_change() {
     let width = property_verifier_width::<3>();
-    let mut values = vec![BabyBear::ZERO; 4 * width];
+    let mut values = vec![KoalaBear::ZERO; 4 * width];
 
     // Row 0: table_id=0
-    let cols0: &mut PropertyVerifierCols<BabyBear, 3> = borrow_cols_mut(&mut values[0..width]);
-    cols0.is_real = BabyBear::ONE;
-    cols0.table_id = BabyBear::ZERO;
+    let cols0: &mut PropertyVerifierCols<KoalaBear, 3> = borrow_cols_mut(&mut values[0..width]);
+    cols0.is_real = KoalaBear::ONE;
+    cols0.table_id = KoalaBear::ZERO;
 
     // Row 1: table_id=1 (VIOLATION)
-    let cols1: &mut PropertyVerifierCols<BabyBear, 3> =
+    let cols1: &mut PropertyVerifierCols<KoalaBear, 3> =
         borrow_cols_mut(&mut values[width..2 * width]);
-    cols1.is_real = BabyBear::ONE;
-    cols1.table_id = BabyBear::ONE;
+    cols1.is_real = KoalaBear::ONE;
+    cols1.table_id = KoalaBear::ONE;
 
     let t = RowMajorMatrix::new(values, width);
     debug_check(&chip(), &t).expect_err("table_id change should fail");
@@ -175,18 +175,18 @@ fn invalid_table_id_change() {
 #[test]
 fn invalid_col_id_change() {
     let width = property_verifier_width::<3>();
-    let mut values = vec![BabyBear::ZERO; 4 * width];
+    let mut values = vec![KoalaBear::ZERO; 4 * width];
 
     // Row 0: col_id=0
-    let cols0: &mut PropertyVerifierCols<BabyBear, 3> = borrow_cols_mut(&mut values[0..width]);
-    cols0.is_real = BabyBear::ONE;
-    cols0.col_id = BabyBear::ZERO;
+    let cols0: &mut PropertyVerifierCols<KoalaBear, 3> = borrow_cols_mut(&mut values[0..width]);
+    cols0.is_real = KoalaBear::ONE;
+    cols0.col_id = KoalaBear::ZERO;
 
     // Row 1: col_id=5 (VIOLATION)
-    let cols1: &mut PropertyVerifierCols<BabyBear, 3> =
+    let cols1: &mut PropertyVerifierCols<KoalaBear, 3> =
         borrow_cols_mut(&mut values[width..2 * width]);
-    cols1.is_real = BabyBear::ONE;
-    cols1.col_id = BabyBear::new(5);
+    cols1.is_real = KoalaBear::ONE;
+    cols1.col_id = KoalaBear::new(5);
 
     let t = RowMajorMatrix::new(values, width);
     debug_check(&chip(), &t).expect_err("col_id change should fail");

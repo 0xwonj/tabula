@@ -13,6 +13,7 @@ members = [
     "crates/machine",
     "crates/lang",
     "crates/artifact",
+    "crates/runtime",
     "crates/driver",
     "crates/cli",
     "crates/daemon",
@@ -44,6 +45,7 @@ tabula-witness = { path = "crates/witness" }
 tabula-machine = { path = "crates/machine" }
 tabula-lang = { path = "crates/lang" }
 tabula-artifact = { path = "crates/artifact" }
+tabula-runtime = { path = "crates/runtime" }
 tabula-driver = { path = "crates/driver" }
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -54,20 +56,21 @@ borsh = { version = "1", features = ["derive"] }
 blake3 = "1"
 sha2 = "0.10"
 
-# Plonky3 (BabyBear + Poseidon2 + AIR + STARK)
-p3-field = "0.4"
-p3-baby-bear = "0.4"
-p3-poseidon2 = "0.4"
-p3-symmetric = "0.4"
-p3-air = "0.4"
-p3-matrix = "0.4"
-p3-uni-stark = "0.4"
-p3-commit = "0.4"
-p3-fri = "0.4"
-p3-challenger = "0.4"
-p3-dft = "0.4"
-p3-merkle-tree = "0.4"
-p3-blake3 = "0.4"
+# Plonky3
+p3-field = "0.5"
+p3-koala-bear = "0.5"
+p3-monty-31 = "0.5"
+p3-poseidon2 = "0.5"
+p3-symmetric = "0.5"
+p3-air = "0.5"
+p3-matrix = "0.5"
+p3-uni-stark = "0.5"
+p3-commit = "0.5"
+p3-fri = "0.5"
+p3-challenger = "0.5"
+p3-dft = "0.5"
+p3-merkle-tree = "0.5"
+p3-blake3 = "0.5"
 
 # Parallelism
 rayon = "1.10"

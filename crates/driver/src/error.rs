@@ -79,3 +79,32 @@ pub enum DriverError {
         tx_index: Option<u32>,
     },
 }
+
+impl From<tabula_runtime::RuntimeError> for DriverError {
+    fn from(err: tabula_runtime::RuntimeError) -> Self {
+        match err {
+            tabula_runtime::RuntimeError::InvalidState(e) => Self::InvalidState(e),
+            tabula_runtime::RuntimeError::InvalidBatch(e) => Self::InvalidBatch(e),
+            tabula_runtime::RuntimeError::Execution {
+                source,
+                instruction_index,
+                tx_index,
+            } => Self::Execution {
+                source,
+                instruction_index,
+                tx_index,
+            },
+            // Proving variants (feature-gated in RuntimeError) are never produced
+            // by the driver's execute-only path; map to generic execution error.
+            #[allow(unreachable_patterns)]
+            other => Self::Execution {
+                source: tabula_core::error::TabulaError::ProofError {
+                    phase: "runtime",
+                    detail: other.to_string(),
+                },
+                instruction_index: None,
+                tx_index: None,
+            },
+        }
+    }
+}

@@ -24,7 +24,7 @@ domain (state commitments + memory consistency, not a general-purpose VM).
 | **GlobalSSMC** | §4.2 SSMC | 27 (W=3) | sorted uniqueness, hash chain acc, boundary | ✅ M8 (556L) |
 | **GlobalMerge** | §4.2 merge | 34 (W=3) | source encoding, merge correctness, in_new, hash | ✅ M8 (658L) |
 | **Execution** | §6, §8.7 | 118 (W=3,S=16) | 12 opcodes, SSA slot carry, clock, arith carry | ✅ M8 (1,175L) |
-| **Poseidon** | §4.2 hash | 69 | width-16 Poseidon2, S-box x^7, MDS | ✅ M8 (862L) |
+| **Poseidon** | §4.2 hash | 69 | width-16 Poseidon2, S-box x^3, MDS | ✅ M8 (862L) |
 | **RangeCheck** | §4.2.R | 2 | preprocessed table [0, 2^16), LogUp soundness | ✅ M7 (132L) |
 | **SmtPath** | §4.2 SMT | ~15 | 64-level Merkle path, leaf hash | Deferred |
 
@@ -110,7 +110,7 @@ chips/sorted_mem/
   ├── mod.rs          Re-exports: pub use columns::*, air::*, trace::*
   ├── columns.rs      Column struct + WIDTH + gadget structs (if chip-specific)
   ├── air.rs          Chip struct + BaseAir + Air (constraints only)
-  └── trace.rs        generate_*_trace() (witness → concrete BabyBear matrix)
+  └── trace.rs        generate_*_trace() (witness → concrete KoalaBear matrix)
 ```
 
 **Why these three specifically?**
@@ -143,7 +143,7 @@ Each gadget bundles three things:
 ```rust
 // gadgets/integer.rs
 
-/// 30+30+4 BabyBear limb decomposition of u64 (§4.2.R).
+/// 30+30+4 KoalaBear limb decomposition of u64 (§4.2.R).
 ///
 /// Embeddable in any chip's column struct.
 #[repr(C)]
@@ -153,12 +153,12 @@ pub struct U64Limbs<T> {
     pub x2: T,  // [0, 16)
 }
 
-impl U64Limbs<BabyBear> {
+impl U64Limbs<KoalaBear> {
     /// Populate witness from a u64 value.
     pub fn populate(&mut self, val: u64) {
-        self.x0 = BabyBear::new((val & 0x3FFF_FFFF) as u32);
-        self.x1 = BabyBear::new(((val >> 30) & 0x3FFF_FFFF) as u32);
-        self.x2 = BabyBear::new((val >> 60) as u32);
+        self.x0 = KoalaBear::new((val & 0x3FFF_FFFF) as u32);
+        self.x1 = KoalaBear::new(((val >> 30) & 0x3FFF_FFFF) as u32);
+        self.x2 = KoalaBear::new((val >> 60) as u32);
     }
 }
 
@@ -210,7 +210,7 @@ impl<AB: AirBuilder> Air<AB> for GlobalSortedMemChip {
 
 ```rust
 // chips/sorted_mem/trace.rs
-impl GlobalSortedMemCols<BabyBear> {
+impl GlobalSortedMemCols<KoalaBear> {
     // Use the gadget's populate method
     row.row_key.populate(access.key.row.0);
 }
@@ -257,15 +257,15 @@ Each chip provides a standalone `generate_*_trace()` function:
 // Signature pattern (not a trait — each chip has different inputs)
 pub fn generate_sorted_mem_trace(
     columns: &[ColumnWitness<impl FieldHasher>],
-) -> RowMajorMatrix<BabyBear>;
+) -> RowMajorMatrix<KoalaBear>;
 
 pub fn generate_column_meta_trace(
     metas: &[ColumnMeta],
-) -> RowMajorMatrix<BabyBear>;
+) -> RowMajorMatrix<KoalaBear>;
 
 pub fn generate_ssmc_trace(
     columns: &[ColumnWitness<impl FieldHasher>],
-) -> RowMajorMatrix<BabyBear>;
+) -> RowMajorMatrix<KoalaBear>;
 ```
 
 **Why not a unified trait?** Each chip needs different slices of `BatchWitness`.
@@ -276,7 +276,7 @@ A thin orchestrator at proving time (M9) calls each function:
 
 ```rust
 // Future M9 code (not implemented now)
-pub fn generate_all_traces(witness: &BatchWitness<H>) -> Vec<RowMajorMatrix<BabyBear>> {
+pub fn generate_all_traces(witness: &BatchWitness<H>) -> Vec<RowMajorMatrix<KoalaBear>> {
     vec![
         generate_column_meta_trace(&witness.column_metas),
         generate_sorted_mem_trace(&witness.columns),

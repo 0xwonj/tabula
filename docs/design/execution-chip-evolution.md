@@ -234,7 +234,7 @@ Tabula already uses the coprocessor pattern for three chips:
 - **RangeCheckChip** (bus 8): Preprocessed lookup table, 2 columns
 - **StaticTableChip** (bus 9): Static table lookups
 
-Level 3 extends this proven pattern to arithmetic operations. The bus protocol is identical: LogUp with shared challenge pair (alpha, beta) over BabyBear^4.
+Level 3 extends this proven pattern to arithmetic operations. The bus protocol is identical: LogUp with shared challenge pair (alpha, beta) over KoalaBear^4.
 
 ---
 
@@ -324,7 +324,7 @@ Outputs of Arith, Cmp, Not, And, Or, Select, and Hash are never null (the operat
 
 ### Range-Bounded Carry Elision
 
-When abstract interpretation over the program's value ranges proves that an arithmetic operation cannot overflow a single BabyBear limb, the carry columns (`carry0`, `carry1`) are provably zero and can be elided. For example, adding a Bool (0 or 1) to a U64 whose range is known to be below `2^30 - 1` produces no carry.
+When abstract interpretation over the program's value ranges proves that an arithmetic operation cannot overflow a single KoalaBear limb, the carry columns (`carry0`, `carry1`) are provably zero and can be elided. For example, adding a Bool (0 or 1) to a U64 whose range is known to be below `2^30 - 1` produces no carry.
 
 ### Algebraic Identities
 

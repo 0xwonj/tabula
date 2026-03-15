@@ -1,7 +1,7 @@
 //! Column layout for the PoseidonChip AIR.
 //!
 //! One row per Poseidon2 round. 21 rows per permutation invocation.
-//! State width is fixed at 16 (Poseidon2-BabyBear-16).
+//! State width is fixed at 16 (Poseidon2-KoalaBear-16).
 
 use tabula_stark::air::columns::num_cols;
 

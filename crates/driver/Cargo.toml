@@ -11,12 +11,15 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 blake3 = { workspace = true }
 thiserror = { workspace = true }
-tabula-core = { workspace = true, features = ["test-utils"] }
+tabula-core = { workspace = true }
 tabula-contract = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-lang = { workspace = true }
 tabula-artifact = { workspace = true }
-tabula-executor = { workspace = true }
+tabula-runtime = { workspace = true }
+
+[dev-dependencies]
+tabula-core = { workspace = true, features = ["test-utils"] }
 
 [lints]
 workspace = true

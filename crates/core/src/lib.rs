@@ -4,6 +4,8 @@ pub mod error;
 mod event;
 #[cfg(any(feature = "test-utils", test))]
 pub mod mock;
+mod nonce;
+mod sig;
 mod state;
 pub mod traits;
 mod tx;
@@ -24,3 +26,8 @@ pub use event::{
     AccessEvent, BatchResult, ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, LogicalTime,
     OpKind, PrecompileIo, PropertyReadResult, TxResult,
 };
+
+// ── Default implementations ──
+pub use nonce::SequentialNonce;
+pub use sig::NoopSigVerifier;
+pub use state::in_memory::{InMemoryState, InMemoryStaticTables};

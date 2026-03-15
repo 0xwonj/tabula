@@ -1,10 +1,10 @@
 //! Trace generation for the MemoryShard chip.
 //!
 //! Converts per-column witness data (sorted rows by key, then tx_index)
-//! into a `RowMajorMatrix<BabyBear>` trace.
+//! into a `RowMajorMatrix<KoalaBear>` trace.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_gadgets::bool_fe;
@@ -31,11 +31,11 @@ pub struct MemoryShardRow {
     /// True if this tx wrote the key.
     pub has_write: bool,
     /// Input value (base state for init; previous output for access).
-    pub input_val: Vec<BabyBear>,
+    pub input_val: Vec<KoalaBear>,
     /// Input is-null flag.
     pub input_is_null: bool,
     /// Output value (same as input for init/read-only; written value for write).
-    pub output_val: Vec<BabyBear>,
+    pub output_val: Vec<KoalaBear>,
     /// Output is-null flag.
     pub output_is_null: bool,
 }
@@ -49,11 +49,11 @@ pub fn generate_memory_shard_trace<const W: usize>(
     table_id: u32,
     col_id: u16,
     rows: &[MemoryShardRow],
-) -> RowMajorMatrix<BabyBear> {
+) -> RowMajorMatrix<KoalaBear> {
     let width = memory_shard_width::<W>();
     let num_real = rows.len();
     let num_rows = (num_real + 1).next_power_of_two().max(2);
-    let mut values = vec![BabyBear::ZERO; num_rows * width];
+    let mut values = vec![KoalaBear::ZERO; num_rows * width];
 
     // Pass 1: populate identity, key, values, flags.
     populate_base_columns::<W>(table_id, col_id, rows, width, &mut values);
@@ -73,21 +73,21 @@ fn populate_base_columns<const W: usize>(
     col_id: u16,
     rows: &[MemoryShardRow],
     width: usize,
-    values: &mut [BabyBear],
+    values: &mut [KoalaBear],
 ) {
     for (i, row) in rows.iter().enumerate() {
         assert_eq!(row.input_val.len(), W, "input_val length mismatch");
         assert_eq!(row.output_val.len(), W, "output_val length mismatch");
 
         let offset = i * width;
-        let cols: &mut MemoryShardCols<BabyBear, W> =
+        let cols: &mut MemoryShardCols<KoalaBear, W> =
             borrow_cols_mut(&mut values[offset..offset + width]);
 
-        cols.is_real = BabyBear::ONE;
-        cols.table_id = BabyBear::new(table_id);
-        cols.col_id = BabyBear::new(col_id as u32);
+        cols.is_real = KoalaBear::ONE;
+        cols.table_id = KoalaBear::new(table_id);
+        cols.col_id = KoalaBear::new(col_id as u32);
         cols.key.populate(row.key);
-        cols.tx_index = BabyBear::new(row.tx_index);
+        cols.tx_index = KoalaBear::new(row.tx_index);
         cols.is_init = bool_fe(row.is_init);
         cols.has_read = bool_fe(row.has_read);
         cols.has_write = bool_fe(row.has_write);
@@ -109,7 +109,7 @@ fn populate_chain_tracking<const W: usize>(
     rows: &[MemoryShardRow],
     num_real: usize,
     width: usize,
-    values: &mut [BabyBear],
+    values: &mut [KoalaBear],
 ) {
     // has_ever_written: forward scan within key chains
     let mut ever_written = false;
@@ -126,7 +126,7 @@ fn populate_chain_tracking<const W: usize>(
         }
 
         let offset = i * width;
-        let cols: &mut MemoryShardCols<BabyBear, W> =
+        let cols: &mut MemoryShardCols<KoalaBear, W> =
             borrow_cols_mut(&mut values[offset..offset + width]);
         cols.has_ever_written = bool_fe(ever_written);
     }
@@ -136,7 +136,7 @@ fn populate_chain_tracking<const W: usize>(
         let is_last = i + 1 >= num_real || rows[i].key != rows[i + 1].key;
 
         let offset = i * width;
-        let cols: &mut MemoryShardCols<BabyBear, W> =
+        let cols: &mut MemoryShardCols<KoalaBear, W> =
             borrow_cols_mut(&mut values[offset..offset + width]);
         cols.is_last_for_key = bool_fe(is_last);
     }
@@ -151,7 +151,7 @@ fn populate_ordering_witnesses<const W: usize>(
     num_real: usize,
     num_rows: usize,
     width: usize,
-    values: &mut [BabyBear],
+    values: &mut [KoalaBear],
 ) {
     for i in 0..num_rows {
         let next_idx = (i + 1) % num_rows;
@@ -163,15 +163,15 @@ fn populate_ordering_witnesses<const W: usize>(
             0
         };
 
-        let limb0_diff = BabyBear::new((next_key & 0x3FFF_FFFF) as u32)
-            - BabyBear::new((cur_key & 0x3FFF_FFFF) as u32);
-        let limb1_diff = BabyBear::new(((next_key >> 30) & 0x3FFF_FFFF) as u32)
-            - BabyBear::new(((cur_key >> 30) & 0x3FFF_FFFF) as u32);
+        let limb0_diff = KoalaBear::new((next_key & 0x3FFF_FFFF) as u32)
+            - KoalaBear::new((cur_key & 0x3FFF_FFFF) as u32);
+        let limb1_diff = KoalaBear::new(((next_key >> 30) & 0x3FFF_FFFF) as u32)
+            - KoalaBear::new(((cur_key >> 30) & 0x3FFF_FFFF) as u32);
         let limb2_diff =
-            BabyBear::new((next_key >> 60) as u32) - BabyBear::new((cur_key >> 60) as u32);
+            KoalaBear::new((next_key >> 60) as u32) - KoalaBear::new((cur_key >> 60) as u32);
 
         let cur_offset = i * width;
-        let cols: &mut MemoryShardCols<BabyBear, W> =
+        let cols: &mut MemoryShardCols<KoalaBear, W> =
             borrow_cols_mut(&mut values[cur_offset..cur_offset + width]);
 
         cols.r_limb0_iz.populate(limb0_diff);
@@ -195,7 +195,7 @@ fn populate_ordering_witnesses<const W: usize>(
                     next_tx > cur_tx,
                     "tx_index must strictly increase: {cur_tx} -> {next_tx}"
                 );
-                cols.tx_diff = BabyBear::new(next_tx - cur_tx - 1);
+                cols.tx_diff = KoalaBear::new(next_tx - cur_tx - 1);
             }
         }
     }
@@ -212,7 +212,7 @@ pub struct MemoryShardInput {
 impl<const W: usize> TraceGenerator for MemoryShardChip<W> {
     type Input = MemoryShardInput;
 
-    fn generate_trace(&self, input: &MemoryShardInput) -> RowMajorMatrix<BabyBear> {
+    fn generate_trace(&self, input: &MemoryShardInput) -> RowMajorMatrix<KoalaBear> {
         generate_memory_shard_trace::<W>(self.table_id(), self.col_id(), &input.rows)
     }
 }

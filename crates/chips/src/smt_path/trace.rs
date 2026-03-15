@@ -1,7 +1,7 @@
 //! Trace generation for SmtPathChip.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_commitment::NativeDigest;
@@ -43,32 +43,32 @@ pub struct SmtTablePathWitness {
 
 /// Populate shared SmtPathCols for one level (row) of a Merkle path.
 fn populate_path_row(
-    cols: &mut SmtPathCols<BabyBear>,
+    cols: &mut SmtPathCols<KoalaBear>,
     level: usize,
     depth: usize,
     witness: &SmtPathWitness,
     old_node: NativeDigest,
     new_node: NativeDigest,
 ) -> (NativeDigest, NativeDigest) {
-    cols.is_real = BabyBear::ONE;
+    cols.is_real = KoalaBear::ONE;
     cols.path_bit = if witness.path_bits[level] {
-        BabyBear::ONE
+        KoalaBear::ONE
     } else {
-        BabyBear::ZERO
+        KoalaBear::ZERO
     };
     cols.is_leaf = if level == 0 {
-        BabyBear::ONE
+        KoalaBear::ONE
     } else {
-        BabyBear::ZERO
+        KoalaBear::ZERO
     };
     cols.is_root = if level == depth - 1 {
-        BabyBear::ONE
+        KoalaBear::ONE
     } else {
-        BabyBear::ZERO
+        KoalaBear::ZERO
     };
 
-    cols.bind_table_id = BabyBear::new(witness.table_id);
-    cols.bind_key = BabyBear::new(witness.key);
+    cols.bind_table_id = KoalaBear::new(witness.table_id);
+    cols.bind_key = KoalaBear::new(witness.key);
 
     let old_sib = witness.old_siblings[level];
     let new_sib = witness.new_siblings[level];
@@ -80,7 +80,7 @@ fn populate_path_row(
     let bit = witness.path_bits[level];
 
     // Mux for old tree
-    let mut old_perm_input = [BabyBear::ZERO; 16];
+    let mut old_perm_input = [KoalaBear::ZERO; 16];
     for i in 0..DIGEST_WIDTH {
         if bit {
             old_perm_input[i] = old_sib.0[i]; // left = sibling
@@ -97,7 +97,7 @@ fn populate_path_row(
     cols.old_parent = old_parent.0;
 
     // Mux for new tree
-    let mut new_perm_input = [BabyBear::ZERO; 16];
+    let mut new_perm_input = [KoalaBear::ZERO; 16];
     for i in 0..DIGEST_WIDTH {
         if bit {
             new_perm_input[i] = new_sib.0[i];
@@ -120,14 +120,14 @@ fn populate_path_row(
     let key_acc: u64 = (0..=level)
         .map(|j| if witness.path_bits[j] { 1u64 << j } else { 0 })
         .sum();
-    cols.key_acc = BabyBear::new(key_acc as u32);
-    cols.level_power = BabyBear::new(power as u32);
+    cols.key_acc = KoalaBear::new(key_acc as u32);
+    cols.level_power = KoalaBear::new(power as u32);
 
     // Path boundary detection: is_root means next row is new path
     let is_root_val = if level == depth - 1 {
-        BabyBear::ONE
+        KoalaBear::ONE
     } else {
-        BabyBear::ZERO
+        KoalaBear::ZERO
     };
     cols.next_is_new_path.populate(is_root_val);
 
@@ -138,13 +138,13 @@ fn populate_path_row(
 }
 
 /// Generate an SmtColPath trace from witness data.
-pub fn generate_smt_col_path_trace(witnesses: &[SmtPathWitness]) -> RowMajorMatrix<BabyBear> {
+pub fn generate_smt_col_path_trace(witnesses: &[SmtPathWitness]) -> RowMajorMatrix<KoalaBear> {
     let width = SMT_COL_PATH_WIDTH;
 
     // Total real rows = sum of depths
     let num_real: usize = witnesses.iter().map(|w| w.old_siblings.len()).sum();
     let num_rows = (num_real + 1).next_power_of_two().max(2);
-    let mut values = vec![BabyBear::ZERO; num_rows * width];
+    let mut values = vec![KoalaBear::ZERO; num_rows * width];
 
     let mut row_idx = 0;
     for witness in witnesses {
@@ -158,7 +158,7 @@ pub fn generate_smt_col_path_trace(witnesses: &[SmtPathWitness]) -> RowMajorMatr
         for level in 0..depth {
             let offset = row_idx * width;
             let row = &mut values[offset..offset + width];
-            let cols: &mut SmtPathCols<BabyBear> = borrow_cols_mut(row);
+            let cols: &mut SmtPathCols<KoalaBear> = borrow_cols_mut(row);
 
             let (old_parent, new_parent) =
                 populate_path_row(cols, level, depth, witness, old_node, new_node);
@@ -175,8 +175,8 @@ pub fn generate_smt_col_path_trace(witnesses: &[SmtPathWitness]) -> RowMajorMatr
     for i in num_real..num_rows {
         let offset = i * width;
         let row = &mut values[offset..offset + width];
-        let cols: &mut SmtPathCols<BabyBear> = borrow_cols_mut(row);
-        cols.next_is_new_path.populate(BabyBear::ZERO);
+        let cols: &mut SmtPathCols<KoalaBear> = borrow_cols_mut(row);
+        cols.next_is_new_path.populate(KoalaBear::ZERO);
     }
 
     RowMajorMatrix::new(values, width)
@@ -185,12 +185,12 @@ pub fn generate_smt_col_path_trace(witnesses: &[SmtPathWitness]) -> RowMajorMatr
 /// Generate an SmtTablePath trace from witness data.
 pub fn generate_smt_table_path_trace(
     witnesses: &[SmtTablePathWitness],
-) -> RowMajorMatrix<BabyBear> {
+) -> RowMajorMatrix<KoalaBear> {
     let width = SMT_TABLE_PATH_WIDTH;
 
     let num_real: usize = witnesses.iter().map(|w| w.path.old_siblings.len()).sum();
     let num_rows = (num_real + 1).next_power_of_two().max(2);
-    let mut values = vec![BabyBear::ZERO; num_rows * width];
+    let mut values = vec![KoalaBear::ZERO; num_rows * width];
 
     let mut row_idx = 0;
     for witness in witnesses {
@@ -204,7 +204,7 @@ pub fn generate_smt_table_path_trace(
         for level in 0..depth {
             let offset = row_idx * width;
             let row = &mut values[offset..offset + width];
-            let cols: &mut SmtTablePathCols<BabyBear> = borrow_cols_mut(row);
+            let cols: &mut SmtTablePathCols<KoalaBear> = borrow_cols_mut(row);
 
             let (old_parent, new_parent) = populate_path_row(
                 &mut cols.base,
@@ -217,7 +217,7 @@ pub fn generate_smt_table_path_trace(
 
             // root_mult_witness only matters at leaf level
             if level == 0 {
-                cols.root_mult_witness = BabyBear::new(witness.root_mult);
+                cols.root_mult_witness = KoalaBear::new(witness.root_mult);
             }
 
             old_node = old_parent;
@@ -230,8 +230,8 @@ pub fn generate_smt_table_path_trace(
     for i in num_real..num_rows {
         let offset = i * width;
         let row = &mut values[offset..offset + width];
-        let cols: &mut SmtTablePathCols<BabyBear> = borrow_cols_mut(row);
-        cols.base.next_is_new_path.populate(BabyBear::ZERO);
+        let cols: &mut SmtTablePathCols<KoalaBear> = borrow_cols_mut(row);
+        cols.base.next_is_new_path.populate(KoalaBear::ZERO);
     }
 
     RowMajorMatrix::new(values, width)
@@ -244,7 +244,7 @@ use tabula_stark::trace::TraceGenerator;
 impl TraceGenerator for super::air::SmtColPathChip {
     type Input = [SmtPathWitness];
 
-    fn generate_trace(&self, input: &[SmtPathWitness]) -> RowMajorMatrix<BabyBear> {
+    fn generate_trace(&self, input: &[SmtPathWitness]) -> RowMajorMatrix<KoalaBear> {
         generate_smt_col_path_trace(input)
     }
 }
@@ -252,7 +252,7 @@ impl TraceGenerator for super::air::SmtColPathChip {
 impl TraceGenerator for super::air::SmtTablePathChip {
     type Input = [SmtTablePathWitness];
 
-    fn generate_trace(&self, input: &[SmtTablePathWitness]) -> RowMajorMatrix<BabyBear> {
+    fn generate_trace(&self, input: &[SmtTablePathWitness]) -> RowMajorMatrix<KoalaBear> {
         generate_smt_table_path_trace(input)
     }
 }
@@ -290,7 +290,7 @@ impl TraceContributor for super::air::SmtTablePathChip {
         map.insert_entry(self.chip_id(), entry);
 
         // SmtTablePath also carries public values (old/new state root).
-        let pvs = store.get::<Vec<BabyBear>>(witness_labels::SMT_TABLE_PVS)?;
+        let pvs = store.get::<Vec<KoalaBear>>(witness_labels::SMT_TABLE_PVS)?;
         map.set_public_values(self.chip_id(), pvs.clone());
         Ok(())
     }

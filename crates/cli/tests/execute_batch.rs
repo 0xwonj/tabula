@@ -1,10 +1,11 @@
 //! Integration tests: multi-tx batch execution with mixed outcomes and determinism.
 
-use tabula_core::mock::*;
+use tabula_core::mock::Blake3Hasher;
 use tabula_core::{
     Batch, CellKey, ColId, ColumnDef, RowKey, TableId, TableSchema, Transaction, TxResult,
     TxTypeId, Value, ValueType,
 };
+use tabula_core::{InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce};
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency;
 use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, Program, RowExpr, TxTypeDef, ValueExpr};
@@ -139,11 +140,13 @@ fn test_multi_tx_mixed_outcomes() {
 
     let st = InMemoryStaticTables::new();
     let env = BatchEnv {
-        hasher: &MockHasher,
-        sig_verifier: &MockSigVerifier,
+        hasher: &Blake3Hasher,
+        sig_verifier: &NoopSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &st,
         precompiles: None,
+        committed_state: None,
+        property_openings: None,
     };
     let result = execute_batch(
         &batch,
@@ -208,11 +211,13 @@ fn test_deterministic_execution() {
 
     let st = InMemoryStaticTables::new();
     let env = BatchEnv {
-        hasher: &MockHasher,
-        sig_verifier: &MockSigVerifier,
+        hasher: &Blake3Hasher,
+        sig_verifier: &NoopSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &st,
         precompiles: None,
+        committed_state: None,
+        property_openings: None,
     };
     let r1 = execute_batch(
         &batch,
@@ -260,11 +265,13 @@ fn test_consistency_passes_for_valid_batch() {
 
     let st = InMemoryStaticTables::new();
     let env = BatchEnv {
-        hasher: &MockHasher,
-        sig_verifier: &MockSigVerifier,
+        hasher: &Blake3Hasher,
+        sig_verifier: &NoopSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &st,
         precompiles: None,
+        committed_state: None,
+        property_openings: None,
     };
     let result = execute_batch(
         &batch,

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use tabula_commitment::{
     COL_STATE_SMT_DEPTH, ColumnMeta, DOMAIN_COL, DOMAIN_TABLE, FieldHasher, NativeDigest,
@@ -67,7 +67,7 @@ pub(super) fn validate_smt_path_shapes(
 /// Build a [`PublicStatement`] from batch witness state roots.
 pub(super) fn smt_table_public_statement<H>(witness: &BatchWitness<H>) -> PublicStatement
 where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     PublicStatement {
         old_root: witness.old_state_root,
@@ -89,7 +89,7 @@ pub fn build_smt_paths<H>(
     hasher: H,
 ) -> Result<(Vec<SmtPathWitness>, Vec<SmtTablePathWitness>), TabulaError>
 where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     // Group metas by table.
     let mut by_table: BTreeMap<TableId, Vec<&ColumnMeta>> = BTreeMap::new();

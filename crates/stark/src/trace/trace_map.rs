@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::chips::ChipId;
@@ -14,16 +14,16 @@ use crate::chips::ChipId;
 #[derive(Debug, Clone)]
 pub struct TraceEntry {
     /// Main trace matrix.
-    pub main: RowMajorMatrix<BabyBear>,
+    pub main: RowMajorMatrix<KoalaBear>,
     /// Preprocessed trace matrix (e.g. Poseidon round constants).
-    pub preprocessed: Option<RowMajorMatrix<BabyBear>>,
+    pub preprocessed: Option<RowMajorMatrix<KoalaBear>>,
     /// Public values for this chip (empty for most chips).
-    pub public_values: Vec<BabyBear>,
+    pub public_values: Vec<KoalaBear>,
 }
 
 impl TraceEntry {
     /// Create a trace entry with only a main trace (no preprocessed, no public values).
-    pub fn main_only(main: RowMajorMatrix<BabyBear>) -> Self {
+    pub fn main_only(main: RowMajorMatrix<KoalaBear>) -> Self {
         Self {
             main,
             preprocessed: None,
@@ -49,7 +49,7 @@ impl TraceMap {
     }
 
     /// Insert a main trace for a chip.
-    pub fn insert(&mut self, id: ChipId, main: RowMajorMatrix<BabyBear>) {
+    pub fn insert(&mut self, id: ChipId, main: RowMajorMatrix<KoalaBear>) {
         self.entries.insert(
             id,
             TraceEntry {
@@ -64,8 +64,8 @@ impl TraceMap {
     pub fn insert_with_preprocessed(
         &mut self,
         id: ChipId,
-        main: RowMajorMatrix<BabyBear>,
-        preprocessed: RowMajorMatrix<BabyBear>,
+        main: RowMajorMatrix<KoalaBear>,
+        preprocessed: RowMajorMatrix<KoalaBear>,
     ) {
         self.entries.insert(
             id,
@@ -83,7 +83,7 @@ impl TraceMap {
     ///
     /// Debug-asserts that `id` exists in the map. In release builds,
     /// silently does nothing if the chip is absent.
-    pub fn set_public_values(&mut self, id: ChipId, pvs: Vec<BabyBear>) {
+    pub fn set_public_values(&mut self, id: ChipId, pvs: Vec<KoalaBear>) {
         debug_assert!(
             self.entries.contains_key(&id),
             "set_public_values: chip '{id}' not found in TraceMap"

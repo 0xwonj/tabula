@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use tabula_commitment::{FieldHasher, NativeDigest};
 use tabula_core::error::TabulaError;
@@ -23,7 +23,7 @@ use state::{build_state_rows, sort_state_rows};
 
 fn build_empty_read_mults<H>(witness: &BatchWitness<H>) -> BTreeMap<(TableId, ColId), u32>
 where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     let mut mults = BTreeMap::new();
     for column in &witness.columns {
@@ -60,7 +60,7 @@ pub fn prepare_shard_witness<H, const W: usize>(
     witness: &BatchWitness<H>,
 ) -> Result<SsmcWitness, TabulaError>
 where
-    H: FieldHasher<F = BabyBear, Digest = NativeDigest>,
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     let empty_read_mults = build_empty_read_mults::<H>(witness);
     let mut ssmc_witness = SsmcWitness::default();

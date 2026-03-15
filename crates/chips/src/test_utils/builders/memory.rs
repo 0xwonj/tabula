@@ -2,8 +2,8 @@
 //!
 //! Covers `MemoryShardRow`, `StateShardRow`, `ColumnMeta`, and Poseidon helpers.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use tabula_commitment::{ColumnMeta, NativeDigest, scheme_tags};
 use tabula_core::{ColId, TableId};
 
@@ -11,13 +11,13 @@ use crate::shards::state::trace::EntrySource;
 
 // ── Shared value helper ──
 
-/// Convert a `[u32; 3]` array to `Vec<BabyBear>`.
-fn fe_vals(v: [u32; 3]) -> Vec<BabyBear> {
-    v.iter().map(|x| BabyBear::new(*x)).collect()
+/// Convert a `[u32; 3]` array to `Vec<KoalaBear>`.
+fn fe_vals(v: [u32; 3]) -> Vec<KoalaBear> {
+    v.iter().map(|x| KoalaBear::new(*x)).collect()
 }
 
-fn fe_zeros() -> Vec<BabyBear> {
-    vec![BabyBear::ZERO; 3]
+fn fe_zeros() -> Vec<KoalaBear> {
+    vec![KoalaBear::ZERO; 3]
 }
 
 // ── MemoryShard builder ──
@@ -160,8 +160,8 @@ pub fn ss_old_only(key: u64, val: [u32; 3]) -> StateShardRow {
         old_val: fe_vals(val),
         new_val: fe_vals(val),
         segment_is_touched: false,
-        old_hash_acc: [BabyBear::ZERO; 8],
-        new_hash_acc: [BabyBear::ZERO; 8],
+        old_hash_acc: [KoalaBear::ZERO; 8],
+        new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
     }
@@ -176,8 +176,8 @@ pub fn ss_write_only(key: u64, val: [u32; 3]) -> StateShardRow {
         old_val: fe_zeros(),
         new_val: fe_vals(val),
         segment_is_touched: true,
-        old_hash_acc: [BabyBear::ZERO; 8],
-        new_hash_acc: [BabyBear::ZERO; 8],
+        old_hash_acc: [KoalaBear::ZERO; 8],
+        new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
     }
@@ -192,8 +192,8 @@ pub fn ss_both(key: u64, old: [u32; 3], new: [u32; 3]) -> StateShardRow {
         old_val: fe_vals(old),
         new_val: fe_vals(new),
         segment_is_touched: true,
-        old_hash_acc: [BabyBear::ZERO; 8],
-        new_hash_acc: [BabyBear::ZERO; 8],
+        old_hash_acc: [KoalaBear::ZERO; 8],
+        new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
     }
@@ -208,8 +208,8 @@ pub fn ss_delete(key: u64, old: [u32; 3]) -> StateShardRow {
         old_val: fe_vals(old),
         new_val: fe_zeros(),
         segment_is_touched: true,
-        old_hash_acc: [BabyBear::ZERO; 8],
-        new_hash_acc: [BabyBear::ZERO; 8],
+        old_hash_acc: [KoalaBear::ZERO; 8],
+        new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
     }
@@ -224,8 +224,8 @@ pub fn ss_gap(key: u64) -> StateShardRow {
         old_val: fe_zeros(),
         new_val: fe_zeros(),
         segment_is_touched: false,
-        old_hash_acc: [BabyBear::ZERO; 8],
-        new_hash_acc: [BabyBear::ZERO; 8],
+        old_hash_acc: [KoalaBear::ZERO; 8],
+        new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
     }
@@ -256,6 +256,6 @@ pub fn meta_entry(
 // ── Poseidon ──
 
 /// Build a deterministic Poseidon test input from a seed.
-pub fn poseidon_test_input(seed: u32) -> [BabyBear; 16] {
-    core::array::from_fn(|i| BabyBear::new(seed + i as u32))
+pub fn poseidon_test_input(seed: u32) -> [KoalaBear; 16] {
+    core::array::from_fn(|i| KoalaBear::new(seed + i as u32))
 }

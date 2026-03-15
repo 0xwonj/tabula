@@ -6,7 +6,7 @@
 /// Default value encoding width for core chip instantiation.
 ///
 /// All core chips use `W = DEFAULT_VALUE_WIDTH` as the const generic parameter.
-/// This corresponds to the U64/I64 encoding (30+30+4 bit split → 3 BabyBear limbs).
+/// This corresponds to the U64/I64 encoding (30+30+4 bit split → 3 KoalaBear limbs).
 /// Application chips may use different widths via [`EncodingWidth`](crate::trace::EncodingWidth).
 pub const DEFAULT_VALUE_WIDTH: usize = 3;
 

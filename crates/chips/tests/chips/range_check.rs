@@ -1,5 +1,5 @@
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 
 use tabula_chips::range_check::{
@@ -25,14 +25,14 @@ fn preprocessed_table_size() {
 fn preprocessed_table_values() {
     let trace = generate_range_check_preprocessed();
     // Spot check first, last, and middle
-    let row_0: &RangeCheckCols<BabyBear> = borrow_cols(&trace.values[0..RANGE_CHECK_WIDTH]);
-    assert_eq!(row_0.value, BabyBear::ZERO);
+    let row_0: &RangeCheckCols<KoalaBear> = borrow_cols(&trace.values[0..RANGE_CHECK_WIDTH]);
+    assert_eq!(row_0.value, KoalaBear::ZERO);
 
     let last = RANGE_CHECK_SIZE - 1;
     let offset = last * RANGE_CHECK_WIDTH;
-    let row_last: &RangeCheckCols<BabyBear> =
+    let row_last: &RangeCheckCols<KoalaBear> =
         borrow_cols(&trace.values[offset..offset + RANGE_CHECK_WIDTH]);
-    assert_eq!(row_last.value, BabyBear::new(last as u32));
+    assert_eq!(row_last.value, KoalaBear::new(last as u32));
 }
 
 #[test]
@@ -40,9 +40,9 @@ fn preprocessed_table_multiplicities_zero() {
     let trace = generate_range_check_preprocessed();
     for i in 0..RANGE_CHECK_SIZE {
         let offset = i * RANGE_CHECK_WIDTH;
-        let row: &RangeCheckCols<BabyBear> =
+        let row: &RangeCheckCols<KoalaBear> =
             borrow_cols(&trace.values[offset..offset + RANGE_CHECK_WIDTH]);
-        assert_eq!(row.multiplicity, BabyBear::ZERO);
+        assert_eq!(row.multiplicity, KoalaBear::ZERO);
     }
 }
 

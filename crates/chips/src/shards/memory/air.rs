@@ -25,9 +25,8 @@
 //! - C14 CoalescedWrite send (last-for-key with write)
 //! - C8 RangeCheck sends
 
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::Matrix;
 
 use tabula_gadgets::{
     constrain_constant_identity, constrain_is_real_prefix, constrain_is_zero, constrain_key_halves,
@@ -97,12 +96,10 @@ impl<F, const W: usize> BaseAir<F> for MemoryShardChip<W> {
 impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for MemoryShardChip<W> {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local_row = main.row_slice(0).expect("trace must have at least one row");
-        let next_row = main
-            .row_slice(1)
-            .expect("trace must have at least two rows");
-        let local: &MemoryShardCols<AB::Var, W> = borrow_cols(&local_row);
-        let next: &MemoryShardCols<AB::Var, W> = borrow_cols(&next_row);
+        let local_row = main.current_slice();
+        let next_row = main.next_slice();
+        let local: &MemoryShardCols<AB::Var, W> = borrow_cols(local_row);
+        let next: &MemoryShardCols<AB::Var, W> = borrow_cols(next_row);
 
         let is_real: AB::Expr = local.is_real.clone().into();
         let both_real: AB::Expr = is_real.clone() * next.is_real.clone().into();

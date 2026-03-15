@@ -4,7 +4,7 @@
 //! The default `build_entry()` composes main + optional preprocessed
 //! into a complete [`TraceEntry`].
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::chips::ChipSpec;
@@ -21,10 +21,10 @@ pub trait TraceGenerator: ChipSpec {
     type Input: ?Sized;
 
     /// Generate the main execution trace.
-    fn generate_trace(&self, input: &Self::Input) -> RowMajorMatrix<BabyBear>;
+    fn generate_trace(&self, input: &Self::Input) -> RowMajorMatrix<KoalaBear>;
 
     /// Generate preprocessed trace (round constants, etc.). Default: none.
-    fn generate_preprocessed(&self, _input: &Self::Input) -> Option<RowMajorMatrix<BabyBear>> {
+    fn generate_preprocessed(&self, _input: &Self::Input) -> Option<RowMajorMatrix<KoalaBear>> {
         None
     }
 

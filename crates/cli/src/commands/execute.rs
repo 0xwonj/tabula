@@ -1,7 +1,7 @@
 //! Handler for the `execute` subcommand.
 
 use tabula_artifact::{BatchFile, StateFile};
-use tabula_core::mock::MockHasher;
+use tabula_core::mock::Blake3Hasher;
 use tabula_driver::{BatchInput, run_batch};
 
 use crate::io::{ExecutionOutput, StateCell, load_json, write_json};
@@ -26,7 +26,7 @@ pub fn cmd_execute(
         program: &registered.program,
         state: &state_file,
         batch: &batch_file,
-        hasher: &MockHasher,
+        hasher: &Blake3Hasher,
     })?;
 
     if let Some(out_path) = output_state_path {

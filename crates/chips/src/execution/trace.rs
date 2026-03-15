@@ -1,12 +1,12 @@
 //! Trace generation for the ExecutionChip.
 //!
-//! Converts instruction records into a `RowMajorMatrix<BabyBear>` trace.
+//! Converts instruction records into a `RowMajorMatrix<KoalaBear>` trace.
 //!
 //! Utility functions live in `trace_utils.rs`; witness population helpers
 //! live in `trace_witness.rs`.
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_gadgets::bool_fe;
@@ -87,9 +87,9 @@ pub struct InstructionRecord {
     /// Which slots this instruction writes to.
     pub written_slots: Vec<usize>,
     /// Source operand 1 values (W field elements).
-    pub src1_val: Vec<BabyBear>,
+    pub src1_val: Vec<KoalaBear>,
     /// Source operand 2 values (W field elements).
-    pub src2_val: Vec<BabyBear>,
+    pub src2_val: Vec<KoalaBear>,
     /// Condition value for Select (boolean).
     pub cond_val: bool,
     /// Which slot src1 reads from (for operand-to-slot linkage).
@@ -105,7 +105,7 @@ pub struct InstructionRecord {
     /// For access instructions: row key.
     pub access_r: Option<u64>,
     /// For access instructions: value (W field elements).
-    pub access_val: Option<Vec<BabyBear>>,
+    pub access_val: Option<Vec<KoalaBear>>,
     /// For access instructions: null flag.
     pub access_is_null: Option<bool>,
     /// Per-slot write outputs: `(slot_index, value_fes, is_null)`.
@@ -114,11 +114,11 @@ pub struct InstructionRecord {
     /// DivMod has 2 entries (quotient, remainder).
     /// PropertyRead has 3 entries (value, key, is_null flag).
     /// Write/Assert/Emit have 0 entries (no new slot values).
-    pub writes: Vec<(usize, Vec<BabyBear>, bool)>,
+    pub writes: Vec<(usize, Vec<KoalaBear>, bool)>,
     /// For Hash: precomputed Poseidon permutation input (16 FE).
-    pub hash_perm_input: Option<[BabyBear; 16]>,
+    pub hash_perm_input: Option<[KoalaBear; 16]>,
     /// For Hash: precomputed Poseidon permutation output (8 FE).
-    pub hash_perm_output: Option<[BabyBear; 8]>,
+    pub hash_perm_output: Option<[KoalaBear; 8]>,
     /// For Read: whether the column being read is empty.
     pub is_empty_col: bool,
     /// For Precompile: the precompile identifier.
@@ -126,9 +126,9 @@ pub struct InstructionRecord {
     /// For PropertyRead: query type discriminant (PropertyQueryKind ordinal).
     pub property_query_type: Option<u8>,
     /// For PropertyRead: result value (W field elements).
-    pub property_result_val: Vec<BabyBear>,
+    pub property_result_val: Vec<KoalaBear>,
     /// For PropertyRead: result key as u64 limbs (W field elements).
-    pub property_result_key: Vec<BabyBear>,
+    pub property_result_key: Vec<KoalaBear>,
     /// For PropertyRead: result null flag.
     pub property_result_is_null: bool,
 }
@@ -140,8 +140,8 @@ impl Default for InstructionRecord {
             tx_index: 0,
             effect_ordinal_in_tx: 0,
             written_slots: vec![],
-            src1_val: vec![BabyBear::ZERO; 3],
-            src2_val: vec![BabyBear::ZERO; 3],
+            src1_val: vec![KoalaBear::ZERO; 3],
+            src2_val: vec![KoalaBear::ZERO; 3],
             cond_val: false,
             src1_slot_idx: None,
             src2_slot_idx: None,
@@ -169,32 +169,32 @@ impl Default for InstructionRecord {
 /// Returns a power-of-2 padded `RowMajorMatrix`.
 pub fn generate_execution_trace<const W: usize>(
     records: &[InstructionRecord],
-) -> RowMajorMatrix<BabyBear> {
+) -> RowMajorMatrix<KoalaBear> {
     let width = execution_width::<W>();
     let num_real = records.len();
     let num_rows = (num_real + 1).next_power_of_two().max(2);
-    let mut values = vec![BabyBear::ZERO; num_rows * width];
+    let mut values = vec![KoalaBear::ZERO; num_rows * width];
 
     // Running state
-    let mut slot_vals = [[BabyBear::ZERO; W]; MAX_SLOTS];
-    let mut slot_nulls = [BabyBear::ZERO; MAX_SLOTS];
+    let mut slot_vals = [[KoalaBear::ZERO; W]; MAX_SLOTS];
+    let mut slot_nulls = [KoalaBear::ZERO; MAX_SLOTS];
     let mut clk: u32 = 0;
 
     for (i, rec) in records.iter().enumerate() {
         let offset = i * width;
-        let cols: &mut ExecutionCols<BabyBear, W> =
+        let cols: &mut ExecutionCols<KoalaBear, W> =
             borrow_cols_mut(&mut values[offset..offset + width]);
 
-        cols.is_real = BabyBear::ONE;
-        cols.tx_index = BabyBear::new(rec.tx_index);
-        cols.effect_ordinal_in_tx = BabyBear::new(rec.effect_ordinal_in_tx);
+        cols.is_real = KoalaBear::ONE;
+        cols.tx_index = KoalaBear::new(rec.tx_index);
+        cols.effect_ordinal_in_tx = KoalaBear::new(rec.effect_ordinal_in_tx);
 
         // Set opcode one-hot
         set_opcode_selectors(cols, rec.opcode);
 
         let is_access = matches!(rec.opcode, Opcode::Read | Opcode::Write);
         cols.is_access = bool_fe(is_access);
-        cols.clk = BabyBear::new(clk);
+        cols.clk = KoalaBear::new(clk);
 
         // Populate access columns for Read, Write, and Lookup.
         // Only Read/Write set is_access and advance the clock.
@@ -212,10 +212,10 @@ pub fn generate_execution_trace<const W: usize>(
 
         if uses_access_cols {
             if let Some(t) = rec.access_t {
-                cols.access_t = BabyBear::new(t);
+                cols.access_t = KoalaBear::new(t);
             }
             if let Some(c) = rec.access_c {
-                cols.access_c = BabyBear::new(c as u32);
+                cols.access_c = KoalaBear::new(c as u32);
             }
             if let Some(r) = rec.access_r {
                 cols.access_r.populate(r);
@@ -241,25 +241,25 @@ pub fn generate_execution_trace<const W: usize>(
 
         // Arith sub-selectors
         if rec.opcode == Opcode::Sub {
-            cols.arith_is_sub = BabyBear::ONE;
+            cols.arith_is_sub = KoalaBear::ONE;
         }
         if rec.opcode == Opcode::Mul {
-            cols.arith_is_mul = BabyBear::ONE;
+            cols.arith_is_mul = KoalaBear::ONE;
         }
 
         // Operand-to-slot selectors
         if let Some(s) = rec.src1_slot_idx {
             assert!(s < MAX_SLOTS, "src1_slot_idx {s} >= MAX_SLOTS");
-            cols.src1_sel[s] = BabyBear::ONE;
+            cols.src1_sel[s] = KoalaBear::ONE;
             cols.src1_is_null = slot_nulls[s];
         }
         if let Some(s) = rec.src2_slot_idx {
             assert!(s < MAX_SLOTS, "src2_slot_idx {s} >= MAX_SLOTS");
-            cols.src2_sel[s] = BabyBear::ONE;
+            cols.src2_sel[s] = KoalaBear::ONE;
         }
         if let Some(s) = rec.cond_slot_idx {
             assert!(s < MAX_SLOTS, "cond_slot_idx {s} >= MAX_SLOTS");
-            cols.cond_sel[s] = BabyBear::ONE;
+            cols.cond_sel[s] = KoalaBear::ONE;
         }
 
         // Arithmetic carry (for Add/Sub)
@@ -278,7 +278,7 @@ pub fn generate_execution_trace<const W: usize>(
             // Populate divmod_q_sel: first written slot is quotient
             if let Some(&q_slot) = rec.written_slots.first() {
                 assert!(q_slot < MAX_SLOTS, "divmod q_slot {q_slot} >= MAX_SLOTS");
-                cols.divmod.q_sel[q_slot] = BabyBear::ONE;
+                cols.divmod.q_sel[q_slot] = KoalaBear::ONE;
             }
         }
 
@@ -301,13 +301,13 @@ pub fn generate_execution_trace<const W: usize>(
         if rec.opcode == Opcode::Precompile
             && let Some(id) = rec.precompile_id
         {
-            cols.precompile_id = BabyBear::from_u32(id as u32);
+            cols.precompile_id = KoalaBear::from_u32(id as u32);
         }
 
         // PropertyRead columns
         if rec.opcode == Opcode::PropertyRead {
             if let Some(qt) = rec.property_query_type {
-                cols.property_query_type = BabyBear::new(qt as u32);
+                cols.property_query_type = KoalaBear::new(qt as u32);
             }
             for (j, v) in rec.property_result_val.iter().enumerate().take(W) {
                 cols.property_result_val[j] = *v;
@@ -330,15 +330,15 @@ pub fn generate_execution_trace<const W: usize>(
                     key_slot < MAX_SLOTS,
                     "property key_slot {key_slot} >= MAX_SLOTS"
                 );
-                cols.property_val_sel[val_slot] = BabyBear::ONE;
-                cols.property_key_sel[key_slot] = BabyBear::ONE;
+                cols.property_val_sel[val_slot] = KoalaBear::ONE;
+                cols.property_key_sel[key_slot] = KoalaBear::ONE;
             }
         }
 
         // Slot written flags
         for &s in &rec.written_slots {
             assert!(s < MAX_SLOTS, "slot index {s} >= MAX_SLOTS ({MAX_SLOTS})");
-            cols.slot_written[s] = BabyBear::ONE;
+            cols.slot_written[s] = KoalaBear::ONE;
         }
 
         // Update slot values from writes
@@ -366,7 +366,7 @@ use tabula_stark::trace::TraceGenerator;
 impl<const W: usize> TraceGenerator for super::air::ExecutionChip<W> {
     type Input = [InstructionRecord];
 
-    fn generate_trace(&self, input: &[InstructionRecord]) -> RowMajorMatrix<BabyBear> {
+    fn generate_trace(&self, input: &[InstructionRecord]) -> RowMajorMatrix<KoalaBear> {
         generate_execution_trace::<W>(input)
     }
 }

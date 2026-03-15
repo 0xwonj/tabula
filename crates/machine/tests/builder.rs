@@ -2,6 +2,7 @@
 
 use tabula_commitment::scheme_tags;
 use tabula_core::{ColId, RowKey, TableId};
+use tabula_ir::PrecompileId;
 use tabula_machine::prelude::*;
 use tabula_machine::{ColumnSetupConfig, MachineBuilder, SetupError, SmtRootProof, TabulaMachine};
 use tabula_stark::chips::core_chips;
@@ -157,7 +158,7 @@ mod test_extension {
         }
 
         fn contribute(&self, _store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {
-            let trace = RowMajorMatrix::new(vec![BabyBear::ZERO; 2], 2);
+            let trace = RowMajorMatrix::new(vec![KoalaBear::ZERO; 2], 2);
             map.insert(self.chip_id(), trace);
             Ok(())
         }
@@ -245,6 +246,60 @@ fn builder_extension_with_columns() {
     // Column tier does NOT have extension chip (extensions are execution-tier only).
     let col_ids = &machine.setups().columns[0].1.registry.chip_ids();
     assert!(!col_ids.contains(&DUMMY_CHIP_ID));
+}
+
+// ── Precompile registration ──────────────────────────────────────────────────
+
+#[test]
+fn builder_with_precompile_registers_extension() {
+    use test_extension::{DUMMY_CHIP_ID, DummyExtension};
+
+    let id = PrecompileId(0x0004);
+    let machine = TabulaMachine::builder()
+        .with_precompile(id, DummyExtension)
+        .build()
+        .expect("builder with precompile");
+
+    // Extension chip registered in execution tier.
+    let exec_ids = machine.setups().execution.registry.chip_ids();
+    assert!(exec_ids.contains(&DUMMY_CHIP_ID));
+    assert_eq!(exec_ids.len(), 5); // 4 core + 1 precompile
+
+    // PrecompileId tracked.
+    assert!(machine.precompile_ids().contains(&id));
+    assert_eq!(machine.precompile_ids().len(), 1);
+}
+
+#[test]
+fn builder_with_multiple_precompiles() {
+    use test_extension::DummyExtension;
+
+    // Use DummyExtension for one, and a ConsumerExtension for another.
+    // (They have different ChipIds so no conflict.)
+    use test_bus_consumer_extension::ConsumerExtension;
+
+    let machine = TabulaMachine::builder()
+        .with_precompile(PrecompileId(0x0001), DummyExtension)
+        .with_precompile(PrecompileId(0x0002), ConsumerExtension)
+        .build()
+        .expect("builder with multiple precompiles");
+
+    assert_eq!(machine.precompile_ids().len(), 2);
+    assert!(machine.precompile_ids().contains(&PrecompileId(0x0001)));
+    assert!(machine.precompile_ids().contains(&PrecompileId(0x0002)));
+
+    // Both extensions registered.
+    assert_eq!(
+        machine.setups().execution.registry.chip_ids().len(),
+        6 // 4 core + 2 precompile extensions
+    );
+}
+
+#[test]
+fn builder_precompile_ids_empty_by_default() {
+    let machine = TabulaMachine::builder().build().expect("default builder");
+
+    assert!(machine.precompile_ids().is_empty());
 }
 
 // ── Column Schemes ────────────────────────────────────────────────────────────
@@ -340,20 +395,20 @@ fn builder_mixed_schemes() {
 mod test_property {
     use std::any::Any;
 
-    use p3_baby_bear::BabyBear;
     use p3_field::{PrimeCharacteristicRing, PrimeField32};
+    use p3_koala_bear::KoalaBear;
     use tabula_commitment::scheme_tags;
     use tabula_core::RowKey;
     use tabula_machine::property::*;
 
     /// A test witness that always returns a single-element value.
     struct TestWitness {
-        value: Vec<BabyBear>,
+        value: Vec<KoalaBear>,
         null: bool,
     }
 
     impl PropertyWitness for TestWitness {
-        fn value(&self) -> &[BabyBear] {
+        fn value(&self) -> &[KoalaBear] {
             &self.value
         }
 
@@ -397,9 +452,9 @@ mod test_property {
 
         fn prove(
             &self,
-            _commitment_digest: &[BabyBear],
+            _commitment_digest: &[KoalaBear],
             query: &PropertyQuery,
-            state: &[(RowKey, &[BabyBear], bool)],
+            state: &[(RowKey, &[KoalaBear], bool)],
         ) -> Result<Box<dyn PropertyWitness>, PropertyError> {
             let supported = self.supported_queries();
             if !supported.contains(&query.kind()) {
@@ -423,7 +478,7 @@ mod test_property {
             };
 
             Ok(Box::new(TestWitness {
-                value: vec![BabyBear::new(u64::from(row_key) as u32)],
+                value: vec![KoalaBear::new(u64::from(row_key) as u32)],
                 null: false,
             }))
         }
@@ -447,9 +502,9 @@ mod test_property {
 
         fn prove(
             &self,
-            _commitment_digest: &[BabyBear],
+            _commitment_digest: &[KoalaBear],
             query: &PropertyQuery,
-            _state: &[(RowKey, &[BabyBear], bool)],
+            _state: &[(RowKey, &[KoalaBear], bool)],
         ) -> Result<Box<dyn PropertyWitness>, PropertyError> {
             let supported = self.supported_queries();
             if !supported.contains(&query.kind()) {
@@ -460,7 +515,7 @@ mod test_property {
             }
 
             Ok(Box::new(TestWitness {
-                value: vec![BabyBear::ZERO],
+                value: vec![KoalaBear::ZERO],
                 null: true,
             }))
         }
@@ -484,9 +539,9 @@ mod test_property {
 
         fn prove(
             &self,
-            _commitment_digest: &[BabyBear],
+            _commitment_digest: &[KoalaBear],
             _query: &PropertyQuery,
-            _state: &[(RowKey, &[BabyBear], bool)],
+            _state: &[(RowKey, &[KoalaBear], bool)],
         ) -> Result<Box<dyn PropertyWitness>, PropertyError> {
             unreachable!("should not be called")
         }
@@ -510,9 +565,9 @@ mod test_property {
 
         fn prove(
             &self,
-            _commitment_digest: &[BabyBear],
+            _commitment_digest: &[KoalaBear],
             _query: &PropertyQuery,
-            _state: &[(RowKey, &[BabyBear], bool)],
+            _state: &[(RowKey, &[KoalaBear], bool)],
         ) -> Result<Box<dyn PropertyWitness>, PropertyError> {
             unreachable!("should not be called")
         }
@@ -559,16 +614,16 @@ fn builder_with_multiple_property_openings() {
 
 #[test]
 fn property_opening_prove_minimum() {
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use tabula_machine::PropertyQuery;
     use test_property::TestMinMaxOpening;
 
     let opening = TestMinMaxOpening;
 
-    let v1 = [BabyBear::new(100)];
-    let v2 = [BabyBear::new(200)];
-    let v3 = [BabyBear::new(50)];
-    let state: Vec<(RowKey, &[BabyBear], bool)> = vec![
+    let v1 = [KoalaBear::new(100)];
+    let v2 = [KoalaBear::new(200)];
+    let v3 = [KoalaBear::new(50)];
+    let state: Vec<(RowKey, &[KoalaBear], bool)> = vec![
         (RowKey(10), &v1, false),
         (RowKey(20), &v2, false),
         (RowKey(5), &v3, false),
@@ -579,8 +634,8 @@ fn property_opening_prove_minimum() {
         .expect("prove minimum");
 
     assert!(!witness.is_null());
-    // Minimum row key is RowKey(5) → BabyBear::new(5).
-    assert_eq!(witness.value(), &[BabyBear::new(5)]);
+    // Minimum row key is RowKey(5) → KoalaBear::new(5).
+    assert_eq!(witness.value(), &[KoalaBear::new(5)]);
 }
 
 #[test]
@@ -724,7 +779,7 @@ mod test_mismatch_extension {
             TracePhase::INDEPENDENT
         }
         fn contribute(&self, _store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {
-            let trace = RowMajorMatrix::new(vec![BabyBear::ZERO; 1], 1);
+            let trace = RowMajorMatrix::new(vec![KoalaBear::ZERO; 1], 1);
             map.insert(self.chip_id(), trace);
             Ok(())
         }
@@ -763,7 +818,7 @@ mod test_mismatch_extension {
             TracePhase::INDEPENDENT
         }
         fn contribute(&self, _store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {
-            let trace = RowMajorMatrix::new(vec![BabyBear::ZERO; 1], 1);
+            let trace = RowMajorMatrix::new(vec![KoalaBear::ZERO; 1], 1);
             map.insert(self.chip_id(), trace);
             Ok(())
         }
@@ -804,7 +859,7 @@ fn builder_rejects_mismatched_chip_ids() {
 // ── L5: Extension bus_consumers registration ──────────────────────────────────
 
 mod test_bus_consumer_extension {
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use tabula_core::error::TabulaError;
     use tabula_machine::prelude::*;
     use tabula_stark::debug::RecordedInteraction;
@@ -843,7 +898,7 @@ mod test_bus_consumer_extension {
             TracePhase::DEPENDENT
         }
         fn contribute(&self, _store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {
-            let trace = RowMajorMatrix::new(vec![BabyBear::ZERO; 1], 1);
+            let trace = RowMajorMatrix::new(vec![KoalaBear::ZERO; 1], 1);
             map.insert(self.chip_id(), trace);
             Ok(())
         }
@@ -855,7 +910,7 @@ mod test_bus_consumer_extension {
         }
         fn collect(
             &self,
-            _interactions: &[RecordedInteraction<BabyBear>],
+            _interactions: &[RecordedInteraction<KoalaBear>],
             _store: &mut WitnessStore,
         ) -> Result<(), TabulaError> {
             Ok(())

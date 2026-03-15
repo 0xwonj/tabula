@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 
-use tabula_commitment::BabyBearCodec;
+use tabula_commitment::KoalaBearCodec;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{StaticTableProvider, ValueCodec};
 use tabula_core::{AccessEvent, ColId, PrecompileIo, PropertyReadResult, RowKey, TableId, Value};
@@ -22,8 +22,8 @@ pub(super) struct LoweringContext<'a, const W: usize> {
     // ── Slot state ──────────────────────────────────────────────────────
     /// Value-level slot contents (for resolution).
     pub(super) slots: Vec<Option<Value>>,
-    /// Encoded slot contents (BabyBear FEs for trace).
-    pub(super) slot_fes: Vec<Vec<BabyBear>>,
+    /// Encoded slot contents (KoalaBear FEs for trace).
+    pub(super) slot_fes: Vec<Vec<KoalaBear>>,
     /// Slot null flags.
     pub(super) slot_nulls: Vec<bool>,
     /// Tracks which slots have been explicitly written within this tx.
@@ -55,7 +55,7 @@ pub(super) struct LoweringContext<'a, const W: usize> {
     /// Transaction parameters.
     pub(super) params: &'a [Value],
     /// Value codec.
-    pub(super) codec: &'a BabyBearCodec,
+    pub(super) codec: &'a KoalaBearCodec,
     /// Stored precompile I/O pairs from execution (consumed sequentially).
     pub(super) precompile_ios: &'a [PrecompileIo],
     /// Index into `precompile_ios` for the next Precompile instruction.
@@ -76,14 +76,14 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         static_tables: &'a dyn StaticTableProvider,
         empty_columns: &'a BTreeSet<(TableId, ColId)>,
         params: &'a [Value],
-        codec: &'a BabyBearCodec,
+        codec: &'a KoalaBearCodec,
         num_instructions: usize,
         precompile_ios: &'a [PrecompileIo],
         property_reads_stored: &'a [PropertyReadResult],
     ) -> Self {
         Self {
             slots: vec![None; MAX_SLOTS],
-            slot_fes: vec![vec![BabyBear::ZERO; W]; MAX_SLOTS],
+            slot_fes: vec![vec![KoalaBear::ZERO; W]; MAX_SLOTS],
             slot_nulls: vec![false; MAX_SLOTS],
             slot_initialized: vec![false; MAX_SLOTS],
             max_slot: 0,
@@ -175,7 +175,7 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
     pub(super) fn resolve_slot_idx(
         &self,
         expr: &ValueExpr,
-        encoded: &[BabyBear],
+        encoded: &[KoalaBear],
         is_null: bool,
         exclude_slots: &[usize],
     ) -> Result<Option<usize>, TabulaError> {
@@ -204,7 +204,7 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         &mut self,
         slot: usize,
         value: Value,
-        encoded: Vec<BabyBear>,
+        encoded: Vec<KoalaBear>,
         is_null: bool,
     ) -> Result<(), TabulaError> {
         if slot >= MAX_SLOTS {
@@ -224,9 +224,9 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
     }
 
     /// Encode a `Value` and pad to exactly `W` field elements.
-    pub(super) fn encode_padded(&self, value: &Value) -> Result<Vec<BabyBear>, TabulaError> {
+    pub(super) fn encode_padded(&self, value: &Value) -> Result<Vec<KoalaBear>, TabulaError> {
         let mut fes = self.codec.encode(value)?;
-        fes.resize(W, BabyBear::ZERO);
+        fes.resize(W, KoalaBear::ZERO);
         Ok(fes)
     }
 
@@ -237,8 +237,8 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
             tx_index: self.tx_index,
             effect_ordinal_in_tx: self.effect_ordinal,
             written_slots: vec![],
-            src1_val: vec![BabyBear::ZERO; W],
-            src2_val: vec![BabyBear::ZERO; W],
+            src1_val: vec![KoalaBear::ZERO; W],
+            src2_val: vec![KoalaBear::ZERO; W],
             cond_val: false,
             src1_slot_idx: None,
             src2_slot_idx: None,

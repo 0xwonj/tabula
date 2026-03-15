@@ -1,7 +1,7 @@
-//! BabyBear field helpers: NativeDigest, domain tags, limb encoding.
+//! KoalaBear field helpers: NativeDigest, domain tags, limb encoding.
 
-use p3_baby_bear::BabyBear;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_koala_bear::KoalaBear;
 
 use tabula_core::Digest;
 use tabula_core::error::TabulaError;
@@ -31,27 +31,27 @@ pub const COL_STATE_SMT_DEPTH: usize = 16;
 
 /// Depth for the table-level state SMT (`SMT_tables`).
 ///
-/// 2^30 ≈ 1B tables, sufficient. 2^31 > BabyBear p, so depth 32 is unsafe.
+/// 2^30 ≈ 1B tables, sufficient. 2^31 > KoalaBear p, so depth 32 is unsafe.
 pub const TABLE_STATE_SMT_DEPTH: usize = 30;
 
 // ── NativeDigest ────────────────────────────────────────────────────────────
 
-/// 8 BabyBear field elements — canonical Poseidon2 output.
+/// 8 KoalaBear field elements — canonical Poseidon2 output.
 ///
 /// This is the primary hash representation inside the commitment layer.
 /// Convert to `Digest` (`[u8; 32]`) at system boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NativeDigest(pub [BabyBear; 8]);
+pub struct NativeDigest(pub [KoalaBear; 8]);
 
 impl Default for NativeDigest {
     fn default() -> Self {
-        Self([BabyBear::ZERO; 8])
+        Self([KoalaBear::ZERO; 8])
     }
 }
 
 impl NativeDigest {
     /// The all-zeros digest.
-    pub const ZERO: Self = Self([BabyBear::ZERO; 8]);
+    pub const ZERO: Self = Self([KoalaBear::ZERO; 8]);
 
     /// Convert to byte-level Digest (32 bytes, 4 LE bytes per FE).
     pub fn to_bytes(&self) -> Digest {
@@ -64,19 +64,19 @@ impl NativeDigest {
 
     /// Convert from byte-level Digest. Rejects non-canonical values (>= p).
     pub fn from_bytes(bytes: &Digest) -> Result<Self, TabulaError> {
-        let mut fes = [BabyBear::ZERO; 8];
+        let mut fes = [KoalaBear::ZERO; 8];
         for i in 0..8 {
             let chunk: [u8; 4] = bytes[i * 4..i * 4 + 4]
                 .try_into()
                 .expect("slice is exactly 4 bytes");
             let val = u32::from_le_bytes(chunk);
-            if val >= BabyBear::ORDER_U32 {
+            if val >= KoalaBear::ORDER_U32 {
                 return Err(TabulaError::FieldEncodingError(format!(
-                    "non-canonical BabyBear at index {i}: {val} >= {}",
-                    BabyBear::ORDER_U32
+                    "non-canonical KoalaBear at index {i}: {val} >= {}",
+                    KoalaBear::ORDER_U32
                 )));
             }
-            fes[i] = BabyBear::new(val);
+            fes[i] = KoalaBear::new(val);
         }
         Ok(NativeDigest(fes))
     }
@@ -84,28 +84,28 @@ impl NativeDigest {
 
 // ── U64 limb encoding ───────────────────────────────────────────────────────
 
-/// Encode a u64 into 3 BabyBear limbs.
+/// Encode a u64 into 3 KoalaBear limbs.
 ///
 /// Decomposition (30+30+4 bits):
 /// - x0 = bits \[0..30)  in \[0, 2^30)
 /// - x1 = bits \[30..60) in \[0, 2^30)
 /// - x2 = bits \[60..64) in \[0, 16)
 ///
-/// All three are < p (2^30 = 1073741824 < p = 2013265921), so no modular
-/// reduction occurs in BabyBear::new(). This guarantees round-trip correctness.
+/// All three are < p (2^30 = 1073741824 < p = 2130706433), so no modular
+/// reduction occurs in KoalaBear::new(). This guarantees round-trip correctness.
 ///
 /// See proof-spec §4.2.R for the normative definition and rationale.
-pub fn encode_u64_limbs(val: u64) -> [BabyBear; 3] {
+pub fn encode_u64_limbs(val: u64) -> [KoalaBear; 3] {
     let x0 = (val & 0x3FFF_FFFF) as u32;
     let x1 = ((val >> 30) & 0x3FFF_FFFF) as u32;
     let x2 = (val >> 60) as u32;
-    [BabyBear::new(x0), BabyBear::new(x1), BabyBear::new(x2)]
+    [KoalaBear::new(x0), KoalaBear::new(x1), KoalaBear::new(x2)]
 }
 
-/// Decode 3 BabyBear limbs back to u64.
+/// Decode 3 KoalaBear limbs back to u64.
 ///
 /// Returns an error if limb values are out of the expected ranges.
-pub fn decode_u64_limbs(limbs: &[BabyBear; 3]) -> Result<u64, TabulaError> {
+pub fn decode_u64_limbs(limbs: &[KoalaBear; 3]) -> Result<u64, TabulaError> {
     let x0 = limbs[0].as_canonical_u32();
     let x1 = limbs[1].as_canonical_u32();
     let x2 = limbs[2].as_canonical_u32();
@@ -141,14 +141,14 @@ mod tests {
     #[test]
     fn native_digest_round_trip() {
         let fes = [
-            BabyBear::new(0),
-            BabyBear::new(1),
-            BabyBear::new(2),
-            BabyBear::new(100),
-            BabyBear::new(999_999),
-            BabyBear::new(BabyBear::ORDER_U32 - 1),
-            BabyBear::new(0x1234_5678 % BabyBear::ORDER_U32),
-            BabyBear::new(42),
+            KoalaBear::new(0),
+            KoalaBear::new(1),
+            KoalaBear::new(2),
+            KoalaBear::new(100),
+            KoalaBear::new(999_999),
+            KoalaBear::new(KoalaBear::ORDER_U32 - 1),
+            KoalaBear::new(0x1234_5678 % KoalaBear::ORDER_U32),
+            KoalaBear::new(42),
         ];
         let digest = NativeDigest(fes);
         let bytes = digest.to_bytes();
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn native_digest_from_bytes_rejects_non_canonical() {
         let mut bytes = [0u8; 32];
-        bytes[0..4].copy_from_slice(&BabyBear::ORDER_U32.to_le_bytes());
+        bytes[0..4].copy_from_slice(&KoalaBear::ORDER_U32.to_le_bytes());
         assert!(NativeDigest::from_bytes(&bytes).is_err());
     }
 
