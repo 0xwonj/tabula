@@ -1,10 +1,41 @@
 //! Tests for ChipRegistry, TabulaMachine, and proof setup.
 
-mod common;
-
 use tabula_chips::range_check::RangeCheckChip;
-use tabula_core::{ColId, TableId};
-use tabula_machine::{ChipRegistry, SetupError, TabulaMachine, default_config};
+use tabula_core::{ColId, SchemeId, TableId};
+use tabula_machine::{
+    ChipRegistry, ColumnChipSet, ProofColumn, SetupError, TabulaMachine, default_config,
+};
+use tabula_stark::chips::ChipIdAllocator;
+
+struct DummyProofColumn {
+    table_id: TableId,
+    col_id: ColId,
+}
+
+impl ProofColumn for DummyProofColumn {
+    fn name(&self) -> &str {
+        "dummy"
+    }
+
+    fn table_id(&self) -> TableId {
+        self.table_id
+    }
+
+    fn col_id(&self) -> ColId {
+        self.col_id
+    }
+
+    fn scheme_id(&self) -> SchemeId {
+        SchemeId(0x1000)
+    }
+
+    fn create_chips(&self, _alloc: &mut ChipIdAllocator) -> Result<ColumnChipSet, SetupError> {
+        Ok(ColumnChipSet {
+            airs: vec![],
+            dyn_chips: vec![],
+        })
+    }
+}
 
 // ── ChipRegistry standalone ────────────────────────────────────────────────
 
@@ -37,46 +68,45 @@ fn registry_validate_ok() {
 
 #[test]
 fn machine_new_creates_valid_machine() {
-    use tabula_commitment::scheme_tags;
-    use tabula_machine::ColumnSetupConfig;
-
-    let col_configs = vec![ColumnSetupConfig {
+    let columns = vec![std::sync::Arc::new(DummyProofColumn {
         table_id: TableId(0),
         col_id: ColId(0),
-        scheme_tag: scheme_tags::SSMC,
-        receives_commitment: true,
-    }];
+    }) as std::sync::Arc<dyn ProofColumn>];
 
-    let machine = TabulaMachine::new(&col_configs).expect("machine creation");
-    let setups = machine.setups();
+    let machine = TabulaMachine::new(columns.clone()).expect("machine creation");
+    let setups = machine.setup().proof_setups();
 
     // Execution tier: 4 chips
     assert_eq!(setups.execution.registry.chip_ids().len(), 4);
-    // One column tier: 6 chips
+    // One column tier: backend-added Poseidon + RangeCheck only.
     assert_eq!(setups.columns.len(), 1);
-    assert_eq!(setups.columns[0].1.registry.chip_ids().len(), 6);
+    assert_eq!(setups.columns[0].1.registry.chip_ids().len(), 2);
     // Root tier: 4 chips
     assert_eq!(setups.root.registry.chip_ids().len(), 4);
 }
 
 #[test]
 fn with_config_uses_custom_config() {
-    use tabula_commitment::scheme_tags;
-    use tabula_machine::ColumnSetupConfig;
-
-    let col_configs = vec![ColumnSetupConfig {
+    let columns = vec![std::sync::Arc::new(DummyProofColumn {
         table_id: TableId(0),
         col_id: ColId(0),
-        scheme_tag: scheme_tags::SSMC,
-        receives_commitment: true,
-    }];
+    }) as std::sync::Arc<dyn ProofColumn>];
 
     let custom_config = default_config();
     let machine =
-        TabulaMachine::with_config(&col_configs, custom_config).expect("machine with config");
+        TabulaMachine::with_config(columns.clone(), custom_config).expect("machine with config");
 
     // Machine should be functional with custom config.
-    assert_eq!(machine.setups().execution.registry.chip_ids().len(), 4);
+    assert_eq!(
+        machine
+            .setup()
+            .proof_setups()
+            .execution
+            .registry
+            .chip_ids()
+            .len(),
+        4
+    );
 }
 
 // ── RootProof trait ─────────────────────────────────────────────────────────

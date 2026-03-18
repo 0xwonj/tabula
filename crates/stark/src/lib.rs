@@ -13,7 +13,6 @@ mod bridge;
 pub mod air;
 pub mod chips;
 pub mod debug;
-pub mod gadgets;
 pub mod permutation;
 pub mod rap;
 pub mod trace;

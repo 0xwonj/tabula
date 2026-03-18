@@ -16,23 +16,22 @@ pub(crate) fn constrain_not<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let op_not: AB::Expr = local.op_not.clone().into();
+    let op_not: AB::Expr = local.op_not.into();
 
     // Boolean input: src1_val[0] ∈ {0, 1}
-    let src1: AB::Expr = local.src1_val[0].clone().into();
+    let src1: AB::Expr = local.src1_val[0].into();
     builder.assert_zero(is_real.clone() * op_not.clone() * src1.clone() * (src1 - AB::Expr::ONE));
 
     for s in 0..MAX_SLOTS {
-        let gate: AB::Expr =
-            is_real.clone() * op_not.clone() * local.slot_written[s].clone().into();
+        let gate: AB::Expr = is_real.clone() * op_not.clone() * local.slot_written[s].into();
 
         // Limb 0: dst = 1 - src1
-        let expected: AB::Expr = AB::Expr::ONE - local.src1_val[0].clone().into();
-        builder.assert_zero(gate.clone() * (local.slots[s][0].clone().into() - expected));
+        let expected: AB::Expr = AB::Expr::ONE - local.src1_val[0].into();
+        builder.assert_zero(gate.clone() * (local.slots[s][0].into() - expected));
 
         // Higher limbs must be zero
         for i in 1..W {
-            builder.assert_zero(gate.clone() * local.slots[s][i].clone().into());
+            builder.assert_zero(gate.clone() * local.slots[s][i].into());
         }
     }
 }
@@ -48,26 +47,24 @@ pub(crate) fn constrain_and<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let op_and: AB::Expr = local.op_and.clone().into();
+    let op_and: AB::Expr = local.op_and.into();
 
     // Boolean inputs: src1_val[0], src2_val[0] ∈ {0, 1}
-    let src1: AB::Expr = local.src1_val[0].clone().into();
+    let src1: AB::Expr = local.src1_val[0].into();
     builder.assert_zero(is_real.clone() * op_and.clone() * src1.clone() * (src1 - AB::Expr::ONE));
-    let src2: AB::Expr = local.src2_val[0].clone().into();
+    let src2: AB::Expr = local.src2_val[0].into();
     builder.assert_zero(is_real.clone() * op_and.clone() * src2.clone() * (src2 - AB::Expr::ONE));
 
     for s in 0..MAX_SLOTS {
-        let gate: AB::Expr =
-            is_real.clone() * op_and.clone() * local.slot_written[s].clone().into();
+        let gate: AB::Expr = is_real.clone() * op_and.clone() * local.slot_written[s].into();
 
         // Limb 0: dst = src1 * src2
-        let expected: AB::Expr =
-            local.src1_val[0].clone().into() * local.src2_val[0].clone().into();
-        builder.assert_zero(gate.clone() * (local.slots[s][0].clone().into() - expected));
+        let expected: AB::Expr = local.src1_val[0].into() * local.src2_val[0].into();
+        builder.assert_zero(gate.clone() * (local.slots[s][0].into() - expected));
 
         // Higher limbs must be zero
         for i in 1..W {
-            builder.assert_zero(gate.clone() * local.slots[s][i].clone().into());
+            builder.assert_zero(gate.clone() * local.slots[s][i].into());
         }
     }
 }
@@ -83,26 +80,26 @@ pub(crate) fn constrain_or<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let op_or: AB::Expr = local.op_or.clone().into();
+    let op_or: AB::Expr = local.op_or.into();
 
     // Boolean inputs: src1_val[0], src2_val[0] ∈ {0, 1}
-    let src1: AB::Expr = local.src1_val[0].clone().into();
+    let src1: AB::Expr = local.src1_val[0].into();
     builder.assert_zero(is_real.clone() * op_or.clone() * src1.clone() * (src1 - AB::Expr::ONE));
-    let src2: AB::Expr = local.src2_val[0].clone().into();
+    let src2: AB::Expr = local.src2_val[0].into();
     builder.assert_zero(is_real.clone() * op_or.clone() * src2.clone() * (src2 - AB::Expr::ONE));
 
     for s in 0..MAX_SLOTS {
-        let gate: AB::Expr = is_real.clone() * op_or.clone() * local.slot_written[s].clone().into();
+        let gate: AB::Expr = is_real.clone() * op_or.clone() * local.slot_written[s].into();
 
         // Limb 0: dst = src1 + src2 - src1 * src2
-        let s1: AB::Expr = local.src1_val[0].clone().into();
-        let s2: AB::Expr = local.src2_val[0].clone().into();
+        let s1: AB::Expr = local.src1_val[0].into();
+        let s2: AB::Expr = local.src2_val[0].into();
         let expected: AB::Expr = s1.clone() + s2.clone() - s1 * s2;
-        builder.assert_zero(gate.clone() * (local.slots[s][0].clone().into() - expected));
+        builder.assert_zero(gate.clone() * (local.slots[s][0].into() - expected));
 
         // Higher limbs must be zero
         for i in 1..W {
-            builder.assert_zero(gate.clone() * local.slots[s][i].clone().into());
+            builder.assert_zero(gate.clone() * local.slots[s][i].into());
         }
     }
 }

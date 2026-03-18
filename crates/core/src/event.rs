@@ -75,6 +75,17 @@ pub struct PrecompileIo {
     pub outputs: Vec<Value>,
 }
 
+/// Canonical result of evaluating a property query against committed state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PropertyQueryResult {
+    /// The resolved value.
+    pub value: Value,
+    /// The key at which the value was found (None if not applicable).
+    pub key: Option<RowKey>,
+    /// Whether the result is null (no matching row).
+    pub is_null: bool,
+}
+
 /// Result of a PropertyRead instruction execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PropertyReadResult {

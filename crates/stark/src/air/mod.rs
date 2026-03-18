@@ -11,6 +11,7 @@ pub mod columns;
 pub mod descriptor;
 pub mod interaction;
 pub mod keygen;
+pub mod primitives;
 pub mod statement;
 
 pub use builder::InteractionAirBuilder;

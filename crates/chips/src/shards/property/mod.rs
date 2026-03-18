@@ -1,12 +1,12 @@
-//! PropertyVerifier shard chip for structural query verification.
+//! SSMC property shard chip.
 //!
-//! Receives from the `PROPERTY_READ` external bus and verifies property
-//! query results against committed column state. Lives in Tier 2 (column
-//! proof) alongside Memory/State/Meta shard chips.
+//! This module holds the scheme-owned property verifier for SSMC-backed
+//! columns. It consumes execution-side `PROPERTY_READ` claims together with
+//! old-state anchors emitted by the SSMC column tiers.
 
 pub mod air;
 pub mod columns;
 pub mod trace;
 
-pub use air::PropertyVerifierChip;
+pub use air::SsmcPropertyChip;
 pub use trace::{PROPERTY_READ_WITNESS_LABEL, PropertyReadRecord};

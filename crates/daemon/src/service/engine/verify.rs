@@ -1,11 +1,12 @@
 //! Run verification logic.
 
-use tabula_artifact::{RunRecord, RunStatus, VerifyOutcome};
+use tabula_artifact::ExecutionStatement;
 
 use crate::protocol::error::ErrorCode;
 use crate::service::error::{ServiceError, ServiceResult};
+use crate::service::receipt::now_ms;
 use crate::service::receipt::verify_receipt;
-use crate::service::receipt::{self, now_ms};
+use crate::service::{RunRecord, RunStatus, VerifyOutcome};
 
 use super::helpers::write_guard;
 
@@ -38,15 +39,17 @@ impl super::LocalEngine {
             ServiceError::unprocessable(ErrorCode::ExecutionError, "run has no proof to verify")
         })?;
 
-        let components = receipt::StatementComponents {
+        let statement = ExecutionStatement {
             program_hash: run.program_hash.clone(),
             state_hash: run.state_hash_before.clone(),
             batch_hash: run.batch_hash.clone(),
             state_after_hash: run.state_hash_after.clone(),
             metadata_hash: run.metadata_hash.clone(),
+            old_state_root: vec![],
+            new_state_root: vec![],
         };
 
-        let verification = verify_receipt(proof, &components, &run.statement_hash);
+        let verification = verify_receipt(proof, &statement, &run.statement_hash);
         apply_verification(
             run,
             verification.verified,

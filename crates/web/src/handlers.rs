@@ -15,7 +15,7 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 
 use crate::api::ApiClient;
-use crate::models::{BatchFile, StateCell, StateFile, VerifyReport};
+use crate::models::{StateEntry, StateSnapshot, TransactionBatch, TransactionInput, VerifyReport};
 use crate::state::AppSignals;
 use crate::templates::template_workspace;
 use crate::utils::{
@@ -373,7 +373,7 @@ pub(crate) fn load_template(s: AppSignals) -> impl Fn(&'static str) + Clone + 's
 pub(crate) fn add_state_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone + 'static {
     move |_| {
         let artifact = s.program_artifact.get();
-        let mut state = parse_state(&s.state_json.get()).unwrap_or(StateFile { cells: vec![] });
+        let mut state = parse_state(&s.state_json.get()).unwrap_or(StateSnapshot { cells: vec![] });
 
         if let Some(ref art) = artifact {
             if let Some(schema) = art.table_schemas.first() {
@@ -386,7 +386,7 @@ pub(crate) fn add_state_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clo
                     .map(|r| r + 1)
                     .unwrap_or(0);
                 for col_def in &schema.columns {
-                    state.cells.push(StateCell {
+                    state.cells.push(StateEntry {
                         table: schema.id.0,
                         row: next_row,
                         col: col_def.id.0,
@@ -395,7 +395,7 @@ pub(crate) fn add_state_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clo
                 }
             }
         } else {
-            state.cells.push(StateCell {
+            state.cells.push(StateEntry {
                 table: 0,
                 row: 0,
                 col: 0,
@@ -413,7 +413,7 @@ pub(crate) fn add_state_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clo
 pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone + 'static {
     move |_| {
         let artifact = s.program_artifact.get();
-        let mut batch = parse_batch(&s.batch_json.get()).unwrap_or(BatchFile {
+        let mut batch = parse_batch(&s.batch_json.get()).unwrap_or(TransactionBatch {
             transactions: vec![],
         });
 
@@ -426,7 +426,7 @@ pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                     .iter()
                     .map(|p| default_value_for_type(&format!("{:?}", p.value_type)))
                     .collect();
-                batch.transactions.push(crate::models::TxInput {
+                batch.transactions.push(TransactionInput {
                     tx_type: tx_def.id.0,
                     params,
                     sender: "01".repeat(32),
@@ -434,7 +434,7 @@ pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                 });
             }
         } else {
-            batch.transactions.push(crate::models::TxInput {
+            batch.transactions.push(TransactionInput {
                 tx_type: 0,
                 params: vec![CoreValue::U64(0)],
                 sender: "01".repeat(32),

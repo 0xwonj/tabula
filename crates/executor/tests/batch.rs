@@ -423,7 +423,7 @@ fn multi_sender_independent_nonces() {
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
     assert_eq!(result.txs.len(), 4);
-    assert!(result.txs.iter().all(|tx| tx.is_success()));
+    assert!(result.txs.iter().all(TxResult::is_success));
 }
 
 #[test]

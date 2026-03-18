@@ -117,7 +117,7 @@ where
         let local = trace.row_slice(i).expect("row exists");
         let next = trace.row_slice(i_next).expect("row exists");
 
-        let main = RowWindow::from_two_rows(&*local, &*next);
+        let main = RowWindow::from_two_rows(&local, &next);
 
         // Bind preprocessed row slices at this scope level so they live long enough.
         let (prep_local_slice, prep_next_slice);
@@ -126,7 +126,7 @@ where
             prep_next_slice = prep_trace
                 .row_slice(i_next)
                 .expect("preprocessed row exists");
-            RowWindow::from_two_rows(&*prep_local_slice, &*prep_next_slice)
+            RowWindow::from_two_rows(&prep_local_slice, &prep_next_slice)
         } else {
             RowWindow::from_two_rows(&[], &[])
         };
@@ -185,7 +185,7 @@ where
         let local = trace.row_slice(i).expect("row exists");
         let next = trace.row_slice(i_next).expect("row exists");
 
-        let main = RowWindow::from_two_rows(&*local, &*next);
+        let main = RowWindow::from_two_rows(&local, &next);
 
         let (prep_local_slice, prep_next_slice);
         let prep = if let Some(prep_trace) = preprocessed {
@@ -193,7 +193,7 @@ where
             prep_next_slice = prep_trace
                 .row_slice(i_next)
                 .expect("preprocessed row exists");
-            RowWindow::from_two_rows(&*prep_local_slice, &*prep_next_slice)
+            RowWindow::from_two_rows(&prep_local_slice, &prep_next_slice)
         } else {
             RowWindow::from_two_rows(&[], &[])
         };

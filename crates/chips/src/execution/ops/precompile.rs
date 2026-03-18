@@ -32,31 +32,27 @@ pub(crate) fn constrain_precompile<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let gate: AB::Expr = is_real * local.op_precompile.clone().into();
+    let gate: AB::Expr = is_real * local.op_precompile.into();
 
     // Domain tag check
     builder.assert_zero(
         gate.clone()
-            * (local.hash_perm_input[0].clone().into()
-                - expr_from_u32::<AB>(PRECOMPILE_DOMAIN_TAG)),
+            * (local.hash_perm_input[0].into() - expr_from_u32::<AB>(PRECOMPILE_DOMAIN_TAG)),
     );
 
     // Precompile ID consistency
-    builder.assert_zero(
-        gate.clone()
-            * (local.hash_perm_input[1].clone().into() - local.precompile_id.clone().into()),
-    );
+    builder
+        .assert_zero(gate.clone() * (local.hash_perm_input[1].into() - local.precompile_id.into()));
 
     // Result binding: hash_perm_output[0..W] -> written slot, not null
     for s in 0..MAX_SLOTS {
-        let slot_gate: AB::Expr = gate.clone() * local.slot_written[s].clone().into();
+        let slot_gate: AB::Expr = gate.clone() * local.slot_written[s].into();
         for i in 0..W {
             builder.assert_zero(
-                slot_gate.clone()
-                    * (local.slots[s][i].clone().into() - local.hash_perm_output[i].clone().into()),
+                slot_gate.clone() * (local.slots[s][i].into() - local.hash_perm_output[i].into()),
             );
         }
         // Written slot must not be null
-        builder.assert_zero(slot_gate * local.slot_is_null[s].clone().into());
+        builder.assert_zero(slot_gate * local.slot_is_null[s].into());
     }
 }

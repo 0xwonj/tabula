@@ -155,6 +155,10 @@ pub struct ExecutionCols<T, const W: usize> {
     // ── PropertyRead opcode ──
     /// Query type discriminant (PropertyQueryKind ordinal, 0–5).
     pub property_query_type: T,
+    /// First canonical query operand (encoded as `Value::U64`).
+    pub property_query_arg0: [T; W],
+    /// Second canonical query operand (encoded as `Value::U64`).
+    pub property_query_arg1: [T; W],
     /// Result value field elements.
     pub property_result_val: [T; W],
     /// Result key as u64 limbs (W field elements).

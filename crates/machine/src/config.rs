@@ -21,7 +21,7 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_poseidon2::Poseidon2;
 use p3_uni_stark::StarkConfig;
 
-use crate::blake3_pcs::{Blake3FieldCompressor, Blake3FieldHasher};
+use crate::backend::pcs::{Blake3FieldCompressor, Blake3FieldHasher};
 
 /// Quartic extension of KoalaBear for ~124-bit security.
 ///

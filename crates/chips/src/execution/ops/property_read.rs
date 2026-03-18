@@ -31,14 +31,14 @@ pub(crate) fn constrain_property_read<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let gate: AB::Expr = is_real.clone() * local.op_property_read.clone().into();
+    let gate: AB::Expr = is_real.clone() * local.op_property_read.into();
 
     // property_result_is_null must be boolean
     builder.assert_zero(
         is_real.clone()
-            * local.op_property_read.clone().into()
-            * local.property_result_is_null.clone().into()
-            * (AB::Expr::ONE - local.property_result_is_null.clone().into()),
+            * local.op_property_read.into()
+            * local.property_result_is_null.into()
+            * (AB::Expr::ONE - local.property_result_is_null.into()),
     );
 
     // property_val_sel: boolean per element, one-hot sum = op_property_read
@@ -46,31 +46,29 @@ pub(crate) fn constrain_property_read<AB: AirBuilder, const W: usize>(
     for s in 0..MAX_SLOTS {
         builder.assert_zero(
             is_real.clone()
-                * local.property_val_sel[s].clone().into()
-                * (AB::Expr::ONE - local.property_val_sel[s].clone().into()),
+                * local.property_val_sel[s].into()
+                * (AB::Expr::ONE - local.property_val_sel[s].into()),
         );
-        val_sel_sum += local.property_val_sel[s].clone().into();
+        val_sel_sum += local.property_val_sel[s].into();
     }
-    builder.assert_zero(is_real.clone() * (val_sel_sum - local.op_property_read.clone().into()));
+    builder.assert_zero(is_real.clone() * (val_sel_sum - local.op_property_read.into()));
 
     // property_key_sel: boolean per element, one-hot sum = op_property_read
     let mut key_sel_sum = AB::Expr::ZERO;
     for s in 0..MAX_SLOTS {
         builder.assert_zero(
             is_real.clone()
-                * local.property_key_sel[s].clone().into()
-                * (AB::Expr::ONE - local.property_key_sel[s].clone().into()),
+                * local.property_key_sel[s].into()
+                * (AB::Expr::ONE - local.property_key_sel[s].into()),
         );
-        key_sel_sum += local.property_key_sel[s].clone().into();
+        key_sel_sum += local.property_key_sel[s].into();
     }
-    builder.assert_zero(is_real.clone() * (key_sel_sum - local.op_property_read.clone().into()));
+    builder.assert_zero(is_real.clone() * (key_sel_sum - local.op_property_read.into()));
 
     // Non-overlap: val_sel[s] * key_sel[s] = 0 for all s
     for s in 0..MAX_SLOTS {
         builder.assert_zero(
-            gate.clone()
-                * local.property_val_sel[s].clone().into()
-                * local.property_key_sel[s].clone().into(),
+            gate.clone() * local.property_val_sel[s].into() * local.property_key_sel[s].into(),
         );
     }
 
@@ -79,60 +77,55 @@ pub(crate) fn constrain_property_read<AB: AirBuilder, const W: usize>(
         // val_sel[s] → slot_written[s]
         builder.assert_zero(
             gate.clone()
-                * local.property_val_sel[s].clone().into()
-                * (AB::Expr::ONE - local.slot_written[s].clone().into()),
+                * local.property_val_sel[s].into()
+                * (AB::Expr::ONE - local.slot_written[s].into()),
         );
         // key_sel[s] → slot_written[s]
         builder.assert_zero(
             gate.clone()
-                * local.property_key_sel[s].clone().into()
-                * (AB::Expr::ONE - local.slot_written[s].clone().into()),
+                * local.property_key_sel[s].into()
+                * (AB::Expr::ONE - local.slot_written[s].into()),
         );
     }
 
     // Val slot binding: slots[s] = property_result_val, not null
     for s in 0..MAX_SLOTS {
-        let val_gate: AB::Expr = gate.clone() * local.property_val_sel[s].clone().into();
+        let val_gate: AB::Expr = gate.clone() * local.property_val_sel[s].into();
         for i in 0..W {
             builder.assert_zero(
-                val_gate.clone()
-                    * (local.slots[s][i].clone().into()
-                        - local.property_result_val[i].clone().into()),
+                val_gate.clone() * (local.slots[s][i].into() - local.property_result_val[i].into()),
             );
         }
-        builder.assert_zero(val_gate * local.slot_is_null[s].clone().into());
+        builder.assert_zero(val_gate * local.slot_is_null[s].into());
     }
 
     // Key slot binding: slots[s] = property_result_key, not null
     for s in 0..MAX_SLOTS {
-        let key_gate: AB::Expr = gate.clone() * local.property_key_sel[s].clone().into();
+        let key_gate: AB::Expr = gate.clone() * local.property_key_sel[s].into();
         for i in 0..W {
             builder.assert_zero(
-                key_gate.clone()
-                    * (local.slots[s][i].clone().into()
-                        - local.property_result_key[i].clone().into()),
+                key_gate.clone() * (local.slots[s][i].into() - local.property_result_key[i].into()),
             );
         }
-        builder.assert_zero(key_gate * local.slot_is_null[s].clone().into());
+        builder.assert_zero(key_gate * local.slot_is_null[s].into());
     }
 
     // Null slot binding: the written slot that is neither val nor key.
     // Its value must be [is_null, 0, 0, ...], not null.
     for s in 0..MAX_SLOTS {
         let null_gate: AB::Expr = gate.clone()
-            * local.slot_written[s].clone().into()
-            * (AB::Expr::ONE - local.property_val_sel[s].clone().into())
-            * (AB::Expr::ONE - local.property_key_sel[s].clone().into());
+            * local.slot_written[s].into()
+            * (AB::Expr::ONE - local.property_val_sel[s].into())
+            * (AB::Expr::ONE - local.property_key_sel[s].into());
         // slots[s][0] = property_result_is_null
         builder.assert_zero(
-            null_gate.clone()
-                * (local.slots[s][0].clone().into() - local.property_result_is_null.clone().into()),
+            null_gate.clone() * (local.slots[s][0].into() - local.property_result_is_null.into()),
         );
         // slots[s][1..] = 0
         for i in 1..W {
-            builder.assert_zero(null_gate.clone() * local.slots[s][i].clone().into());
+            builder.assert_zero(null_gate.clone() * local.slots[s][i].into());
         }
-        builder.assert_zero(null_gate * local.slot_is_null[s].clone().into());
+        builder.assert_zero(null_gate * local.slot_is_null[s].into());
     }
 
     // No access clock increment: is_access = 0 is already enforced by

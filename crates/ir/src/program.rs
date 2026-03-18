@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use tabula_core::error::TabulaError;
 use tabula_core::{TableId, TableSchema, TxTypeId};
 
-use crate::instruction::PrecompileId;
+use crate::instruction::{PrecompileId, PropertyQueryKind, PropertyRequirement};
 use crate::pass::{BodyTypeInfo, canonicalize, typecheck, validate};
 use crate::{Instruction, TxTypeDef};
 
@@ -102,6 +102,39 @@ impl Program {
             }
         }
         ids
+    }
+
+    /// Collect all structural property query kinds referenced by `PropertyRead`.
+    pub fn referenced_property_query_kinds(&self) -> BTreeSet<PropertyQueryKind> {
+        let mut kinds = BTreeSet::new();
+        for def in self.types.values() {
+            for instr in &def.body {
+                if let Instruction::PropertyRead { query, .. } = instr {
+                    kinds.insert(query.kind());
+                }
+            }
+        }
+        kinds
+    }
+
+    /// Collect exact structural property requirements referenced by `PropertyRead`.
+    pub fn referenced_property_requirements(&self) -> BTreeSet<PropertyRequirement> {
+        let mut requirements = BTreeSet::new();
+        for def in self.types.values() {
+            for instr in &def.body {
+                if let Instruction::PropertyRead {
+                    table, col, query, ..
+                } = instr
+                {
+                    requirements.insert(PropertyRequirement {
+                        table_id: *table,
+                        col_id: *col,
+                        query_kind: query.kind(),
+                    });
+                }
+            }
+        }
+        requirements
     }
 }
 

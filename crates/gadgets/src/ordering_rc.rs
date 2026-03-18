@@ -56,21 +56,9 @@ pub fn constrain_ordering_halves<AB: AirBuilder>(
     builder: &mut AB,
     ordering: &OrderingRangeChecked<AB::Var>,
 ) {
-    constrain_limb_halves(
-        builder,
-        ordering.ineq.diff0.clone().into(),
-        &ordering.diff0_halves,
-    );
-    constrain_limb_halves(
-        builder,
-        ordering.ineq.diff1.clone().into(),
-        &ordering.diff1_halves,
-    );
-    constrain_limb2_bits(
-        builder,
-        ordering.ineq.diff2.clone().into(),
-        &ordering.diff2_bits,
-    );
+    constrain_limb_halves(builder, ordering.ineq.diff0.into(), &ordering.diff0_halves);
+    constrain_limb_halves(builder, ordering.ineq.diff1.into(), &ordering.diff1_halves);
+    constrain_limb2_bits(builder, ordering.ineq.diff2.into(), &ordering.diff2_bits);
 }
 
 /// Emit all constraints and bus interactions for an OrderingRangeChecked gadget.
@@ -104,10 +92,10 @@ pub fn send_ordering_range_checks<AB: InteractionAirBuilder>(
             bus: core_buses::RANGE_CHECK,
         });
     };
-    send_rc(ordering.diff0_halves.lo.clone().into());
-    send_rc(ordering.diff0_halves.hi.clone().into());
-    send_rc(ordering.diff1_halves.lo.clone().into());
-    send_rc(ordering.diff1_halves.hi.clone().into());
+    send_rc(ordering.diff0_halves.lo.into());
+    send_rc(ordering.diff0_halves.hi.into());
+    send_rc(ordering.diff1_halves.lo.into());
+    send_rc(ordering.diff1_halves.hi.into());
 }
 
 #[cfg(test)]

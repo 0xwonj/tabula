@@ -80,9 +80,10 @@ impl<'a> RapProverFolder<'a> {
         challenges: [EF4; 2],
         main_width: usize,
     ) -> Self {
-        let preprocessed_window = preprocessed
-            .map(|v| RowWindow::from_view(&v))
-            .unwrap_or_else(|| RowWindow::from_two_rows(&[], &[]));
+        let preprocessed_window = preprocessed.map_or_else(
+            || RowWindow::from_two_rows(&[], &[]),
+            |v| RowWindow::from_view(&v),
+        );
         Self {
             main_truncated,
             full_trace,

@@ -253,7 +253,7 @@ Deliberately excluded from the component list:
 | GPU acceleration | Implementation detail of trace builder, not architectural |
 | `tabula-compiler` | Execution orchestration CLI — infrastructure layer, not proof architecture |
 | `tabula-daemon` | HTTP control-plane server — infrastructure layer |
-| `tabula-artifact` | Canonical artifact models (ProgramArtifact, BatchFile, etc.) — serialization layer |
+| `tabula-artifact` | Canonical artifact models (ProgramArtifact, TransactionBatch, etc.) — serialization layer |
 | `tabula-web` | Leptos CSR frontend — presentation layer |
 | `Emit` instruction | Out-of-protocol: produces no AIR rows, no bus messages, not proven. Emitted events are debug/UX convenience only — the verifier cannot verify them |
 

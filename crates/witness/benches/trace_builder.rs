@@ -9,9 +9,10 @@ use tabula_core::traits::ValueCodec;
 use tabula_core::{Batch, CellKey, ColId, RowKey, TableId, Transaction, TxTypeId, Value};
 use tabula_core::{InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce};
 use tabula_executor::batch::{BatchEnv, execute_batch};
+use tabula_executor::property::PropertyQueryRegistry;
 use tabula_ir::Program;
 use tabula_lang::compile;
-use tabula_witness::TraceBuilder;
+use tabula_witness::BuiltinTraceBuilder;
 use tabula_witness::WitnessGenerator;
 
 type EncodedColumnEntries =
@@ -50,6 +51,7 @@ fn setup(
     };
     let hasher = PoseidonHasher::new();
     let static_tables = InMemoryStaticTables::new();
+    let property_queries = PropertyQueryRegistry::new();
     let env = BatchEnv {
         hasher: &hasher,
         sig_verifier: &NoopSigVerifier,
@@ -57,7 +59,7 @@ fn setup(
         static_tables: &static_tables,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
     let result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
         .expect("batch execution");
@@ -137,7 +139,7 @@ tx touch(id: u64) {
 
     c.bench_function("trace_read_write", |b| {
         b.iter(|| {
-            let builder = TraceBuilder::<PoseidonHasher, 3>::new(&s.witness);
+            let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(&s.witness);
             let store = builder
                 .prepare_witness_store(
                     &s.program,
@@ -147,7 +149,8 @@ tx touch(id: u64) {
                     &InMemoryStaticTables::new(),
                     PoseidonHasher::new(),
                 )
-                .unwrap();
+                .unwrap()
+                .store;
             let chips = tabula_chips::core_dyn_chips();
             let consumers = tabula_chips::core_bus_consumers();
             tabula_witness::trace::build_all_traces(&chips, &consumers, store).unwrap();
@@ -171,7 +174,7 @@ tx op(id: u64) {
 
     c.bench_function("trace_arith", |b| {
         b.iter(|| {
-            let builder = TraceBuilder::<PoseidonHasher, 3>::new(&s.witness);
+            let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(&s.witness);
             let store = builder
                 .prepare_witness_store(
                     &s.program,
@@ -181,7 +184,8 @@ tx op(id: u64) {
                     &InMemoryStaticTables::new(),
                     PoseidonHasher::new(),
                 )
-                .unwrap();
+                .unwrap()
+                .store;
             let chips = tabula_chips::core_dyn_chips();
             let consumers = tabula_chips::core_bus_consumers();
             tabula_witness::trace::build_all_traces(&chips, &consumers, store).unwrap();

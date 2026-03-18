@@ -32,6 +32,7 @@ pub(super) fn compile_execute_witness(
     let batch = Batch { transactions };
     let hasher = PoseidonHasher::new();
     let static_tables = InMemoryStaticTables::new();
+    let property_queries = tabula_executor::property::PropertyQueryRegistry::new();
     let env = BatchEnv {
         hasher: &hasher,
         sig_verifier: &NoopSigVerifier,
@@ -39,7 +40,7 @@ pub(super) fn compile_execute_witness(
         static_tables: &static_tables,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
     let result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
         .expect("batch execution");
@@ -108,7 +109,7 @@ pub(super) fn lower_build_validate(
 ) {
     let static_tables = InMemoryStaticTables::new();
 
-    let builder = TraceBuilder::<PoseidonHasher, 3>::new(witness);
+    let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(witness);
     let store = builder
         .prepare_witness_store(
             program,
@@ -118,7 +119,8 @@ pub(super) fn lower_build_validate(
             &static_tables,
             PoseidonHasher::new(),
         )
-        .expect("witness store preparation");
+        .expect("witness store preparation")
+        .store;
 
     let chips = tabula_chips::core_dyn_chips();
     let consumers = tabula_chips::core_bus_consumers();
@@ -194,7 +196,7 @@ tx touch(id: u64) {
     );
     assert!(matches!(result.txs[0], TxResult::Success { .. }));
 
-    let builder = TraceBuilder::<PoseidonHasher, 3>::new(&witness);
+    let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(&witness);
     let store = builder
         .prepare_witness_store(
             &program,
@@ -204,7 +206,8 @@ tx touch(id: u64) {
             &InMemoryStaticTables::new(),
             PoseidonHasher::new(),
         )
-        .expect("unified pipeline");
+        .expect("unified pipeline")
+        .store;
 
     let chips = tabula_chips::core_dyn_chips();
     let consumers = tabula_chips::core_bus_consumers();

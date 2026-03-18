@@ -8,10 +8,10 @@ mod resolve;
 mod stmt;
 use std::collections::HashMap;
 
-use tabula_core::{ColId, TableId, TableSchema, TxTypeId, Value, ValueType};
+use tabula_core::{ColId, SchemeId, TableId, TableSchema, TxTypeId, Value, ValueType};
 use tabula_ir::{Instruction, ParamDef, Slot, TxTypeDef, ValueExpr};
 
-use crate::ast::{self, TypeName};
+use crate::ast::{self, ColumnSchemeDecl, TypeName};
 use crate::error::{CompileError, ErrorKind};
 use crate::span::Span;
 
@@ -22,6 +22,8 @@ pub struct LoweredProgram {
     pub schemas: Vec<TableSchema>,
     /// Transaction type definitions (ordered by declaration order).
     pub tx_types: Vec<TxTypeDef>,
+    /// Non-default column commitment scheme selections from source.
+    pub column_schemes: Vec<ColumnSchemeSelection>,
 }
 
 /// Backward-compatible alias for older call sites.
@@ -39,6 +41,7 @@ pub fn lower(program: &ast::Program) -> Result<LoweredProgram, Vec<CompileError>
         Ok(LoweredProgram {
             schemas: ctx.schemas,
             tx_types: ctx.tx_types,
+            column_schemes: ctx.column_schemes,
         })
     } else {
         Err(ctx.errors)
@@ -72,6 +75,8 @@ struct LowerCtx {
     schemas: Vec<TableSchema>,
     /// Compiled tx type defs (output).
     tx_types: Vec<TxTypeDef>,
+    /// Non-default column scheme selections (output).
+    column_schemes: Vec<ColumnSchemeSelection>,
     errors: Vec<CompileError>,
 }
 
@@ -81,6 +86,7 @@ impl LowerCtx {
             tables: HashMap::new(),
             schemas: Vec::new(),
             tx_types: Vec::new(),
+            column_schemes: Vec::new(),
             errors: Vec::new(),
         }
     }
@@ -125,6 +131,16 @@ impl LowerCtx {
                     name: col.name.clone(),
                     value_type: vt,
                 });
+                if let Some(scheme) = col.scheme {
+                    let scheme_id = ast_scheme_to_scheme_id(scheme);
+                    if scheme_id != SchemeId::SSMC {
+                        self.column_schemes.push(ColumnSchemeSelection {
+                            table_id,
+                            col_id,
+                            scheme_id,
+                        });
+                    }
+                }
             }
 
             self.tables.insert(
@@ -166,6 +182,25 @@ impl LowerCtx {
                 Err(errs) => self.errors.extend(errs),
             }
         }
+    }
+}
+
+/// Source-selected non-default commitment scheme for one column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ColumnSchemeSelection {
+    /// Table identifier.
+    pub table_id: TableId,
+    /// Column identifier.
+    pub col_id: ColId,
+    /// Portable scheme identifier.
+    pub scheme_id: SchemeId,
+}
+
+fn ast_scheme_to_scheme_id(scheme: ColumnSchemeDecl) -> SchemeId {
+    match scheme {
+        ColumnSchemeDecl::Ssmc => SchemeId::SSMC,
+        ColumnSchemeDecl::Smt => SchemeId::SMT,
+        ColumnSchemeDecl::Numeric(id) => SchemeId(id),
     }
 }
 

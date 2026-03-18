@@ -9,9 +9,9 @@ use super::columns::StateShardCols;
 pub(super) fn derive_in_old<AB: AirBuilder, const W: usize>(
     local: &StateShardCols<AB::Var, W>,
 ) -> AB::Expr {
-    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.clone().into();
-    let s0: AB::Expr = local.s0.clone().into();
-    let s1: AB::Expr = local.s1.clone().into();
+    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.into();
+    let s0: AB::Expr = local.s0.into();
+    let s1: AB::Expr = local.s1.into();
     not_gap * (AB::Expr::ONE - s0.clone() + s1 * s0)
 }
 
@@ -19,8 +19,8 @@ pub(super) fn derive_in_old<AB: AirBuilder, const W: usize>(
 pub(super) fn derive_in_new<AB: AirBuilder, const W: usize>(
     local: &StateShardCols<AB::Var, W>,
 ) -> AB::Expr {
-    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.clone().into();
-    let s1_s0: AB::Expr = local.s1.clone().into() * local.s0.clone().into();
+    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.into();
+    let s1_s0: AB::Expr = local.s1.into() * local.s0.into();
     not_gap * (AB::Expr::ONE - s1_s0)
 }
 
@@ -28,17 +28,17 @@ pub(super) fn derive_in_new<AB: AirBuilder, const W: usize>(
 pub(super) fn derive_is_write_only<AB: AirBuilder, const W: usize>(
     local: &StateShardCols<AB::Var, W>,
 ) -> AB::Expr {
-    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.clone().into();
-    let not_s1: AB::Expr = AB::Expr::ONE - local.s1.clone().into();
-    not_gap * not_s1 * local.s0.clone().into()
+    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.into();
+    let not_s1: AB::Expr = AB::Expr::ONE - local.s1.into();
+    not_gap * not_s1 * local.s0.into()
 }
 
 /// `in_write = !is_gap * (s0 + s1 - s0*s1)` — write_only, both, delete.
 pub(super) fn derive_in_write<AB: AirBuilder, const W: usize>(
     local: &StateShardCols<AB::Var, W>,
 ) -> AB::Expr {
-    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.clone().into();
-    let s0: AB::Expr = local.s0.clone().into();
-    let s1: AB::Expr = local.s1.clone().into();
+    let not_gap: AB::Expr = AB::Expr::ONE - local.is_gap.into();
+    let s0: AB::Expr = local.s0.into();
+    let s1: AB::Expr = local.s1.into();
     not_gap * (s0.clone() + s1.clone() - s0 * s1)
 }

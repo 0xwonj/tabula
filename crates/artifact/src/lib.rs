@@ -1,42 +1,28 @@
 //! Canonical artifact models and helpers shared by adapters and orchestration.
 
 mod batch;
-mod commands;
+mod canonical;
 mod error;
 #[cfg(not(target_arch = "wasm32"))]
 mod io;
 mod program;
 mod receipt;
-mod records;
 mod state;
 
 // Error
 pub use error::ArtifactError;
 
 // Program
-pub use program::{CompiledProgram, ProgramArtifact};
+pub use program::{ColumnProofPlan, ProgramArtifact};
 
 // State
-pub use state::{StateCell, StateFile, merge_output_state_cells, normalize_state};
+pub use state::{StateEntry, StateSnapshot, merge_output_state_entries, normalize_state};
 
 // Batch
-pub use batch::{BatchFile, TxInput, parse_hex_32};
+pub use batch::{TransactionBatch, TransactionInput, parse_hex_32};
 
-// Receipt
-pub use receipt::{ChipSummary, ExecutionReceipt, StarkProofSummary};
-
-// Records
-pub use records::{
-    ExecutionSummary, InstanceId, InstanceRecord, InstanceStatus, ProgramId, ProgramRecord, RunId,
-    RunRecord, RunStatus, VerifyOutcome,
-};
-
-// Commands
-pub use commands::{
-    BatchInputRef, CreateInstanceCommand, GetInstanceCommand, GetProgramCommand, GetRunCommand,
-    InputRef, ListInstancesCommand, ListProgramsCommand, ListRunsCommand, ProgramInline,
-    ProgramInputRef, RegisterProgramCommand, StateInputRef, SubmitRunCommand, VerifyRunCommand,
-};
+// Statement
+pub use receipt::ExecutionStatement;
 
 // IO (non-wasm only)
 #[cfg(not(target_arch = "wasm32"))]

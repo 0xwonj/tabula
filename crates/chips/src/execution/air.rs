@@ -50,12 +50,12 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         let local: &ExecutionCols<AB::Var, W> = borrow_cols(local_row);
         let next: &ExecutionCols<AB::Var, W> = borrow_cols(next_row);
 
-        let is_real: AB::Expr = local.is_real.clone().into();
-        let both_real: AB::Expr = is_real.clone() * next.is_real.clone().into();
+        let is_real: AB::Expr = local.is_real.into();
+        let both_real: AB::Expr = is_real.clone() * next.is_real.into();
 
         // ── Structural constraints ──
         constrain_booleans(builder, local);
-        constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
+        constrain_is_real_prefix(builder, local.is_real, next.is_real);
         constrain_opcode_one_hot(builder, local, is_real.clone());
         constrain_is_access(builder, local, is_real.clone());
         constrain_clock(builder, local, next, both_real.clone());
@@ -111,48 +111,48 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
 ) {
     // Opcode selectors
-    builder.assert_bool(local.op_read.clone());
-    builder.assert_bool(local.op_write.clone());
-    builder.assert_bool(local.op_arith.clone());
-    builder.assert_bool(local.op_divmod.clone());
-    builder.assert_bool(local.op_cmp.clone());
-    builder.assert_bool(local.op_not.clone());
-    builder.assert_bool(local.op_and.clone());
-    builder.assert_bool(local.op_or.clone());
-    builder.assert_bool(local.op_assert.clone());
-    builder.assert_bool(local.op_select.clone());
-    builder.assert_bool(local.op_hash.clone());
-    builder.assert_bool(local.op_lookup.clone());
-    builder.assert_bool(local.op_precompile.clone());
-    builder.assert_bool(local.op_property_read.clone());
+    builder.assert_bool(local.op_read);
+    builder.assert_bool(local.op_write);
+    builder.assert_bool(local.op_arith);
+    builder.assert_bool(local.op_divmod);
+    builder.assert_bool(local.op_cmp);
+    builder.assert_bool(local.op_not);
+    builder.assert_bool(local.op_and);
+    builder.assert_bool(local.op_or);
+    builder.assert_bool(local.op_assert);
+    builder.assert_bool(local.op_select);
+    builder.assert_bool(local.op_hash);
+    builder.assert_bool(local.op_lookup);
+    builder.assert_bool(local.op_precompile);
+    builder.assert_bool(local.op_property_read);
 
     // Arith sub-selectors
-    builder.assert_bool(local.arith_is_sub.clone());
-    builder.assert_bool(local.arith_is_mul.clone());
+    builder.assert_bool(local.arith_is_sub);
+    builder.assert_bool(local.arith_is_mul);
 
     // Flags
-    builder.assert_bool(local.is_access.clone());
-    builder.assert_bool(local.is_empty_col.clone());
-    builder.assert_bool(local.access_is_write.clone());
-    builder.assert_bool(local.access_is_null.clone());
-    builder.assert_bool(local.cond_val.clone());
-    builder.assert_bool(local.carry0.clone());
-    builder.assert_bool(local.carry1.clone());
+    builder.assert_bool(local.is_access);
+    builder.assert_bool(local.is_empty_col);
+    builder.assert_bool(local.access_is_write);
+    builder.assert_bool(local.access_is_null);
+    builder.assert_bool(local.cond_val);
+    builder.assert_bool(local.carry0);
+    builder.assert_bool(local.carry1);
 
     // Cmp sub-selectors and witnesses
-    builder.assert_bool(local.cmp.is_eq.clone());
-    builder.assert_bool(local.cmp.is_ne.clone());
-    builder.assert_bool(local.cmp.is_lt.clone());
-    builder.assert_bool(local.cmp.is_lte.clone());
-    builder.assert_bool(local.cmp.is_gt.clone());
-    builder.assert_bool(local.cmp.is_gte.clone());
-    builder.assert_bool(local.cmp.lt_witness.clone());
-    builder.assert_bool(local.cmp.eq_witness.clone());
+    builder.assert_bool(local.cmp.is_eq);
+    builder.assert_bool(local.cmp.is_ne);
+    builder.assert_bool(local.cmp.is_lt);
+    builder.assert_bool(local.cmp.is_lte);
+    builder.assert_bool(local.cmp.is_gt);
+    builder.assert_bool(local.cmp.is_gte);
+    builder.assert_bool(local.cmp.lt_witness);
+    builder.assert_bool(local.cmp.eq_witness);
 
     // Per-slot flags
     for s in 0..MAX_SLOTS {
-        builder.assert_bool(local.slot_is_null[s].clone());
-        builder.assert_bool(local.slot_written[s].clone());
+        builder.assert_bool(local.slot_is_null[s]);
+        builder.assert_bool(local.slot_written[s]);
     }
 }
 
@@ -162,20 +162,20 @@ fn constrain_opcode_one_hot<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let opcode_sum: AB::Expr = local.op_read.clone().into()
-        + local.op_write.clone().into()
-        + local.op_arith.clone().into()
-        + local.op_divmod.clone().into()
-        + local.op_cmp.clone().into()
-        + local.op_not.clone().into()
-        + local.op_and.clone().into()
-        + local.op_or.clone().into()
-        + local.op_assert.clone().into()
-        + local.op_select.clone().into()
-        + local.op_hash.clone().into()
-        + local.op_lookup.clone().into()
-        + local.op_precompile.clone().into()
-        + local.op_property_read.clone().into();
+    let opcode_sum: AB::Expr = local.op_read.into()
+        + local.op_write.into()
+        + local.op_arith.into()
+        + local.op_divmod.into()
+        + local.op_cmp.into()
+        + local.op_not.into()
+        + local.op_and.into()
+        + local.op_or.into()
+        + local.op_assert.into()
+        + local.op_select.into()
+        + local.op_hash.into()
+        + local.op_lookup.into()
+        + local.op_precompile.into()
+        + local.op_property_read.into();
 
     builder.assert_zero(is_real * (opcode_sum - AB::Expr::ONE));
 }
@@ -186,8 +186,8 @@ fn constrain_is_access<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let derived: AB::Expr = local.op_read.clone().into() + local.op_write.clone().into();
-    builder.assert_zero(is_real * (local.is_access.clone().into() - derived));
+    let derived: AB::Expr = local.op_read.into() + local.op_write.into();
+    builder.assert_zero(is_real * (local.is_access.into() - derived));
 }
 
 /// 5. Clock recurrence: next.clk = local.clk + local.is_access.
@@ -197,8 +197,7 @@ fn constrain_clock<AB: AirBuilder, const W: usize>(
     next: &ExecutionCols<AB::Var, W>,
     both_real: AB::Expr,
 ) {
-    let clk_diff: AB::Expr =
-        next.clk.clone().into() - local.clk.clone().into() - local.is_access.clone().into();
+    let clk_diff: AB::Expr = next.clk.into() - local.clk.into() - local.is_access.into();
     builder.when_transition().assert_zero(both_real * clk_diff);
 }
 
@@ -211,11 +210,11 @@ fn constrain_empty_col<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let gate: AB::Expr = is_real.clone() * local.is_empty_col.clone().into();
+    let gate: AB::Expr = is_real.clone() * local.is_empty_col.into();
     // is_empty_col → op_read
-    builder.assert_zero(gate.clone() * (AB::Expr::ONE - local.op_read.clone().into()));
+    builder.assert_zero(gate.clone() * (AB::Expr::ONE - local.op_read.into()));
     // is_empty_col → access_is_null
-    builder.assert_zero(gate * (AB::Expr::ONE - local.access_is_null.clone().into()));
+    builder.assert_zero(gate * (AB::Expr::ONE - local.access_is_null.into()));
 }
 
 /// 7. Access log: access_is_write = op_write when is_access.
@@ -224,9 +223,8 @@ fn constrain_access_log<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let gate: AB::Expr = is_real * local.is_access.clone().into();
-    builder
-        .assert_zero(gate * (local.access_is_write.clone().into() - local.op_write.clone().into()));
+    let gate: AB::Expr = is_real * local.is_access.into();
+    builder.assert_zero(gate * (local.access_is_write.into() - local.op_write.into()));
 }
 
 /// 8. SSA slot carry: slots not written by the NEXT instruction carry forward.
@@ -238,16 +236,15 @@ fn constrain_slot_carry<AB: AirBuilder, const W: usize>(
     both_real: AB::Expr,
 ) {
     for s in 0..MAX_SLOTS {
-        let not_written_next: AB::Expr = AB::Expr::ONE - next.slot_written[s].clone().into();
+        let not_written_next: AB::Expr = AB::Expr::ONE - next.slot_written[s].into();
         let gate: AB::Expr = both_real.clone() * not_written_next;
 
         for i in 0..W {
-            let diff: AB::Expr = next.slots[s][i].clone().into() - local.slots[s][i].clone().into();
+            let diff: AB::Expr = next.slots[s][i].into() - local.slots[s][i].into();
             builder.when_transition().assert_zero(gate.clone() * diff);
         }
 
-        let null_diff: AB::Expr =
-            next.slot_is_null[s].clone().into() - local.slot_is_null[s].clone().into();
+        let null_diff: AB::Expr = next.slot_is_null[s].into() - local.slot_is_null[s].into();
         builder.when_transition().assert_zero(gate * null_diff);
     }
 }
@@ -258,19 +255,16 @@ fn constrain_arith_sub_selectors<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let op_arith: AB::Expr = local.op_arith.clone().into();
+    let op_arith: AB::Expr = local.op_arith.into();
 
     builder.assert_zero(
-        is_real.clone()
-            * op_arith.clone()
-            * local.arith_is_sub.clone().into()
-            * local.arith_is_mul.clone().into(),
+        is_real.clone() * op_arith.clone() * local.arith_is_sub.into() * local.arith_is_mul.into(),
     );
 
     builder.assert_zero(
-        is_real.clone() * (AB::Expr::ONE - op_arith.clone()) * local.arith_is_sub.clone().into(),
+        is_real.clone() * (AB::Expr::ONE - op_arith.clone()) * local.arith_is_sub.into(),
     );
-    builder.assert_zero(is_real * (AB::Expr::ONE - op_arith) * local.arith_is_mul.clone().into());
+    builder.assert_zero(is_real * (AB::Expr::ONE - op_arith) * local.arith_is_mul.into());
 }
 
 /// 10a. First-row initialization: clk starts at zero, non-written slots start zeroed.
@@ -280,21 +274,21 @@ fn constrain_first_row_init<AB: AirBuilder, const W: usize>(
 ) {
     builder
         .when_first_row()
-        .when(local.is_real.clone())
-        .assert_zero(local.clk.clone());
+        .when(local.is_real)
+        .assert_zero(local.clk);
 
     for s in 0..MAX_SLOTS {
-        let not_written: AB::Expr = AB::Expr::ONE - local.slot_written[s].clone().into();
+        let not_written: AB::Expr = AB::Expr::ONE - local.slot_written[s].into();
         for i in 0..W {
             builder
                 .when_first_row()
-                .when(local.is_real.clone())
-                .assert_zero(not_written.clone() * local.slots[s][i].clone().into());
+                .when(local.is_real)
+                .assert_zero(not_written.clone() * local.slots[s][i].into());
         }
         builder
             .when_first_row()
-            .when(local.is_real.clone())
-            .assert_zero(not_written * local.slot_is_null[s].clone().into());
+            .when(local.is_real)
+            .assert_zero(not_written * local.slot_is_null[s].into());
     }
 }
 
@@ -304,14 +298,11 @@ fn constrain_slot_written_count<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let written_sum: AB::Expr = (0..MAX_SLOTS)
-        .map(|s| local.slot_written[s].clone().into())
-        .sum();
+    let written_sum: AB::Expr = (0..MAX_SLOTS).map(|s| local.slot_written[s].into()).sum();
 
-    let expected: AB::Expr =
-        AB::Expr::ONE - local.op_write.clone().into() - local.op_assert.clone().into()
-            + local.op_divmod.clone().into()
-            + local.op_property_read.clone().into() * AB::Expr::TWO;
+    let expected: AB::Expr = AB::Expr::ONE - local.op_write.into() - local.op_assert.into()
+        + local.op_divmod.into()
+        + local.op_property_read.into() * AB::Expr::TWO;
 
     builder.assert_zero(is_real * (written_sum - expected));
 }
@@ -323,13 +314,13 @@ fn constrain_arith_result_not_null<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let op_arith: AB::Expr = local.op_arith.clone().into();
+    let op_arith: AB::Expr = local.op_arith.into();
     for s in 0..MAX_SLOTS {
         builder.assert_zero(
             is_real.clone()
                 * op_arith.clone()
-                * local.slot_written[s].clone().into()
-                * local.slot_is_null[s].clone().into(),
+                * local.slot_written[s].into()
+                * local.slot_is_null[s].into(),
         );
     }
 }
@@ -341,7 +332,7 @@ fn constrain_tx_index_monotonicity<AB: AirBuilder, const W: usize>(
     next: &ExecutionCols<AB::Var, W>,
     both_real: AB::Expr,
 ) {
-    let diff: AB::Expr = next.tx_index.clone().into() - local.tx_index.clone().into();
+    let diff: AB::Expr = next.tx_index.into() - local.tx_index.into();
     builder
         .when_transition()
         .assert_zero(both_real * diff.clone() * (diff - AB::Expr::ONE));
@@ -353,16 +344,15 @@ fn constrain_lookup<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let gate: AB::Expr = is_real * local.op_lookup.clone().into();
+    let gate: AB::Expr = is_real * local.op_lookup.into();
 
     for s in 0..MAX_SLOTS {
-        let slot_gate: AB::Expr = gate.clone() * local.slot_written[s].clone().into();
+        let slot_gate: AB::Expr = gate.clone() * local.slot_written[s].into();
         for i in 0..W {
             builder.assert_zero(
-                slot_gate.clone()
-                    * (local.slots[s][i].clone().into() - local.access_val[i].clone().into()),
+                slot_gate.clone() * (local.slots[s][i].into() - local.access_val[i].into()),
             );
         }
-        builder.assert_zero(slot_gate * local.slot_is_null[s].clone().into());
+        builder.assert_zero(slot_gate * local.slot_is_null[s].into());
     }
 }

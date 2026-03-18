@@ -92,7 +92,7 @@ Tier 3: Root Proof (1, lightweight)
   Pluggable via RootProof trait
 ```
 
-**Key flow**: `partition_by_tier()` → per-tier `TierSetup::build_traces()` → `ProofInstance` per tier → shared Fiat-Shamir → independent proofs
+**Key flow**: `partition_by_tier()` → runtime-owned per-tier `build_all_traces()` → `ProofInstance` per tier → shared Fiat-Shamir → independent proofs
 
 ### 2.2 Current Extension Points (Implemented)
 
@@ -350,10 +350,10 @@ Instruction::PropertyRead {
 
 ```
 Tier 1 (Execution): ExecutionChip SENDS on PROPERTY_READ bus
-    → (table_id, col_id, query_type, result_key, result_val[W], is_null)
+    → (table_id, col_id, query_type, query_arg0, query_arg1, result_key, result_val[W], is_null)
 
-Tier 2 (Column): PropertyVerifierChip RECEIVES from PROPERTY_READ bus
-    → Verifies result against column commitment (com_old)
+Tier 2 (Column): scheme-owned property chip (for SSMC: SsmcPropertyChip) RECEIVES from PROPERTY_READ bus
+    → Verifies result against the column's old committed state anchors
 
 Tier 3 (Root): Verifies PROPERTY_READ bus balance across tiers
     → Handled automatically by existing unbalanced_buses() mechanism
@@ -363,7 +363,7 @@ Tier 3 (Root): Verifies PROPERTY_READ bus balance across tiers
 
 **Scheme compatibility**: SSMC columns support O(1) min/max/successor/predecessor queries (sorted hash chain). SMT columns are unordered by key hash — structural queries require full scan or an indexed variant (future).
 
-**Multiple queries**: Multiple PropertyRead calls on the same column in one batch are supported. The PropertyVerifier receives all bus messages and verifies each against the same com_old state.
+**Multiple queries**: Multiple PropertyRead calls on the same column in one batch are supported. The scheme-owned property chip receives all bus messages and verifies each against the same `com_old` state.
 
 **Status**: Trait implemented in `machine/src/property.rs`. Cross-tier integration: Goal 7 Phase 5.
 

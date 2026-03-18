@@ -6,8 +6,9 @@
 //!
 //! # Architecture
 //!
-//! The runtime sits between the executor (zero-crypto deterministic VM) and
-//! the machine (STARK prover). It assembles the execution pipeline:
+//! The runtime is the default public proving surface.
+//! It sits between the executor (zero-crypto deterministic VM) and
+//! the machine (advanced STARK backend). It assembles the execution pipeline:
 //! normalize state -> build snapshot -> execute -> consistency check -> merge.
 //!
 //! ```text
@@ -17,20 +18,29 @@
 //! # Feature gating
 //!
 //! - **No features** (default): only [`run_batch()`] — zero crypto deps.
+//! - **`verify`**: adds [`ProgramVerifier`] and [`ProgramVerifierBuilder`] for
+//!   proof verification against sealed program artifacts.
 //! - **`prove`**: adds [`TabulaRuntime`], [`RuntimeBuilder`], and the full
-//!   witness → trace → prove pipeline.
+//!   witness → trace → prove pipeline. Implies `verify`.
 
-mod error;
-mod execute;
-
+#[cfg(any(feature = "prove", feature = "verify"))]
+mod assembly;
 #[cfg(feature = "prove")]
 mod builder;
 #[cfg(feature = "prove")]
-mod committed_state;
+mod capabilities;
+#[cfg(any(feature = "prove", feature = "verify"))]
+mod columns;
+mod error;
+mod execute;
+#[cfg(any(feature = "prove", feature = "verify"))]
+mod program;
 #[cfg(feature = "prove")]
-pub mod prove;
+mod proving;
 #[cfg(feature = "prove")]
 mod runtime;
+#[cfg(feature = "verify")]
+mod verifier;
 
 pub use error::{RuntimeError, RuntimeResult};
 pub use execute::{BatchInput, CompiledBatchInput, ExecutedBatch, run_batch, run_compiled_batch};
@@ -38,9 +48,21 @@ pub use execute::{BatchInput, CompiledBatchInput, ExecutedBatch, run_batch, run_
 #[cfg(feature = "prove")]
 pub use builder::RuntimeBuilder;
 #[cfg(feature = "prove")]
-pub use prove::{ProofSummary, ProveInput, ProveResult, VerifiedResult, digest_to_hex};
+pub use capabilities::PrecompileRegistration;
+#[cfg(any(feature = "prove", feature = "verify"))]
+pub use columns::{ColumnPlan, ColumnSchemeFactory, ColumnViews, RuntimeColumn};
 #[cfg(feature = "prove")]
-/// Prepared runtime built once per [`tabula_artifact::CompiledProgram`].
-pub use runtime::TabulaRuntime as PreparedRuntime;
+pub use columns::ProofInputBuilder;
+#[cfg(any(feature = "prove", feature = "verify"))]
+pub use columns::{SmtScheme, SsmcScheme};
+#[cfg(any(feature = "prove", feature = "verify"))]
+pub use program::ProgramBinding;
 #[cfg(feature = "prove")]
+pub use program::RuntimeProgram;
+#[cfg(feature = "prove")]
+pub use proving::{ProofSummary, ProveInput, ProveResult, VerifiedResult, digest_to_hex};
+#[cfg(feature = "prove")]
+/// Runtime built once per [`tabula_compiler::CompiledProgram`].
 pub use runtime::TabulaRuntime;
+#[cfg(feature = "verify")]
+pub use verifier::{ProgramVerifier, ProgramVerifierBuilder};

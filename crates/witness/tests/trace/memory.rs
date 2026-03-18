@@ -87,7 +87,7 @@ fn trace_builder_builds_valid_memory_traces() {
     };
 
     // Build memory traces via the full trace builder, then check the memory chips.
-    let builder = TraceBuilder::<MockFieldHasher, 3>::new(&witness);
+    let builder = BuiltinTraceBuilder::<MockFieldHasher, 3>::new(&witness);
     let store = builder
         .populate_store(AllTraceInputs {
             execution_records: &[],
@@ -95,7 +95,8 @@ fn trace_builder_builds_valid_memory_traces() {
             smt_col_paths: &[],
             smt_table_paths: &[],
         })
-        .expect("witness store");
+        .expect("witness store")
+        .store;
     let chips = tabula_chips::core_dyn_chips();
     let consumers = tabula_chips::core_bus_consumers();
     let trace_map =
@@ -243,6 +244,8 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
             is_empty_col: false,
             precompile_id: None,
             property_query_type: None,
+            property_query_arg0: vec![],
+            property_query_arg1: vec![],
             property_result_val: vec![],
             property_result_key: vec![],
             property_result_is_null: false,
@@ -269,6 +272,8 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
             is_empty_col: false,
             precompile_id: None,
             property_query_type: None,
+            property_query_arg0: vec![],
+            property_query_arg1: vec![],
             property_result_val: vec![],
             property_result_key: vec![],
             property_result_is_null: false,
@@ -297,7 +302,7 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
         root_mult: 1,
     }];
 
-    let builder = TraceBuilder::<MockFieldHasher, 3>::new(&witness);
+    let builder = BuiltinTraceBuilder::<MockFieldHasher, 3>::new(&witness);
     let store = builder
         .populate_store(AllTraceInputs {
             execution_records: &execution_records,
@@ -305,7 +310,8 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
             smt_col_paths: &smt_col_paths,
             smt_table_paths: &smt_table_paths,
         })
-        .expect("witness store");
+        .expect("witness store")
+        .store;
     let chips = tabula_chips::core_dyn_chips();
     let consumers = tabula_chips::core_bus_consumers();
     let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)
@@ -362,6 +368,7 @@ tx touch(id: u64) {
 
     let hasher = PoseidonHasher::new();
     let static_tables = InMemoryStaticTables::new();
+    let property_queries = tabula_executor::property::PropertyQueryRegistry::new();
     let env = BatchEnv {
         hasher: &hasher,
         sig_verifier: &NoopSigVerifier,
@@ -369,7 +376,7 @@ tx touch(id: u64) {
         static_tables: &static_tables,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
     let execution_result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
         .expect("batch execution should succeed");
@@ -429,7 +436,7 @@ tx touch(id: u64) {
     let execution_records = lower_execution_records::<3>(&execution_result, &schemas_by_id)
         .expect("execution record lowering");
 
-    let builder = TraceBuilder::<PoseidonHasher, 3>::new(&witness);
+    let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(&witness);
     let store = builder
         .populate_store(AllTraceInputs {
             execution_records: &execution_records,
@@ -437,7 +444,8 @@ tx touch(id: u64) {
             smt_col_paths: &smt_col_paths,
             smt_table_paths: &smt_table_paths,
         })
-        .expect("witness store");
+        .expect("witness store")
+        .store;
     let chips = tabula_chips::core_dyn_chips();
     let consumers = tabula_chips::core_bus_consumers();
     let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)

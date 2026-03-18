@@ -52,9 +52,11 @@ fn key_types_are_send_sync() {
 
 #[test]
 fn setup_types_are_send_sync() {
-    use tabula_machine::{ColumnSetupConfig, ProofSetups, ProofTraces, TierSetup};
+    use std::sync::Arc;
 
-    assert_send_sync::<ColumnSetupConfig>();
+    use tabula_machine::{ProofColumn, ProofSetups, ProofTraces, TierSetup};
+
+    assert_send_sync::<Arc<dyn ProofColumn>>();
     assert_send_sync::<ProofTraces>();
     // TierSetup and ProofSetups contain `Box<dyn DynChip>` / `Box<dyn BusConsumer>`;
     // they must be Send + Sync for parallel proof construction.

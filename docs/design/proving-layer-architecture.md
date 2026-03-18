@@ -1,11 +1,15 @@
 # Proving Layer Architecture
 
 > Defines the boundary between STARK protocol logic (`tabula-stark`) and proof orchestration (`tabula-machine`), and the abstractions needed for multi-proof architectures.
+> Normative boundary contract: [proof-backend-contract.md](proof-backend-contract.md)
 > Related: [full-sharding-research.md](full-sharding-research.md), [sharded-protocol-design.md](sharded-protocol-design.md)
 
 ---
 
 ## Layer Boundaries
+
+This document explains the proving-layer split historically and mechanically.
+For current crate-boundary rules, dependency policy, and public-surface ownership, follow [proof-backend-contract.md](proof-backend-contract.md).
 
 The crate structure separates two concerns:
 
@@ -19,9 +23,9 @@ The crate structure separates two concerns:
 ```
 tabula-stark (Layer 1: STARK Protocol)
 ├── air/              — constraint framework, bus types, keygen
+│   └── primitives.rs — protocol-facing limb primitives used by AIR macros
 ├── chips.rs          — ChipId, ChipSpec, ChipIdAllocator
 ├── debug/            — constraint checker, LogUp balance
-├── gadgets.rs        — U64Limbs
 ├── trace/            — TraceContributor, TraceMap, DynChip, WitnessStore
 ├── permutation/      — LogUp permutation trace infrastructure
 │   ├── challenges.rs — Fiat-Shamir challenge derivation (test-only)
@@ -36,9 +40,9 @@ tabula-stark (Layer 1: STARK Protocol)
 tabula-witness (Layer 3: Witness Pipeline)
 ├── witness/          — WitnessGenerator, BatchWitness
 └── trace/
-    ├── builder.rs    — TraceBuilder, prepare_witness_store()
-    ├── orchestration.rs — build_all_traces(), build_traces_for()
-    └── partition.rs  — WitnessPartition, single_partition()
+    ├── builtin/      — BuiltinTraceBuilder, lowering, SMT/memory helpers
+    ├── orchestration.rs — build_all_traces()
+    └── partition.rs  — PartitionedStores, partition_by_tier()
 
 tabula-machine (Layer 4: Proof Orchestration)
 ├── config.rs         — TabulaStarkConfig (re-exports EF4 from stark)
@@ -46,7 +50,7 @@ tabula-machine (Layer 4: Proof Orchestration)
 ├── composition.rs    — CommitmentScheme, MemoryModel, RootProof
 ├── machine.rs        — TabulaMachine, MachineBuilder
 ├── proof_instance.rs — ProofInstance (phased prover), MainCommitment, SubProof
-├── prove/            — prove_with_key() (thin orchestrator over ProofInstance)
+├── prove/            — prove over prepared `ProofTraces`
 │   └── quotient.rs   — compute_quotient_standard(), compute_quotient_rap()
 └── verify/           — verify_with_key()
 ```

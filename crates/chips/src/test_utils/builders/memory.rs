@@ -164,6 +164,8 @@ pub fn ss_old_only(key: u64, val: [u32; 3]) -> StateShardRow {
         new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
+        prev_old_key: 0,
+        next_old_key: 0,
     }
 }
 
@@ -180,6 +182,8 @@ pub fn ss_write_only(key: u64, val: [u32; 3]) -> StateShardRow {
         new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
+        prev_old_key: 0,
+        next_old_key: 0,
     }
 }
 
@@ -196,6 +200,8 @@ pub fn ss_both(key: u64, old: [u32; 3], new: [u32; 3]) -> StateShardRow {
         new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
+        prev_old_key: 0,
+        next_old_key: 0,
     }
 }
 
@@ -212,6 +218,8 @@ pub fn ss_delete(key: u64, old: [u32; 3]) -> StateShardRow {
         new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
+        prev_old_key: 0,
+        next_old_key: 0,
     }
 }
 
@@ -228,6 +236,8 @@ pub fn ss_gap(key: u64) -> StateShardRow {
         new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
+        prev_old_key: 0,
+        next_old_key: 0,
     }
 }
 

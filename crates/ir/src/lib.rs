@@ -7,7 +7,7 @@ pub mod tx;
 
 pub use instruction::{
     AggregateKind, ArithOp, CmpOp, Instruction, PrecompileId, PropertyQuery, PropertyQueryKind,
-    RowExpr, Slot, ValueExpr,
+    PropertyRequirement, RowExpr, Slot, ValueExpr,
 };
 pub use pass::BodyTypeInfo;
 pub use program::Program;

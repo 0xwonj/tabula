@@ -32,15 +32,15 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for StaticTableChip<W> {
         let next: &StaticTableCols<AB::Var, W> = borrow_cols(next_row);
 
         // ── 1. is_real prefix ──
-        constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
+        constrain_is_real_prefix(builder, local.is_real, next.is_real);
 
         // ── 2. C9 StaticTableLookup receive ──
         builder.receive_static_table_lookup(
-            local.table_id.clone().into(),
-            local.col_id.clone().into(),
+            local.table_id.into(),
+            local.col_id.into(),
             &local.row_key,
             &local.value,
-            local.is_real.clone().into() * local.lookup_mult_witness.clone().into(),
+            local.is_real.into() * local.lookup_mult_witness.into(),
         );
     }
 }

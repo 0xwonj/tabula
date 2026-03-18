@@ -39,6 +39,38 @@ pub struct TableId(pub u32);
 )]
 pub struct ColId(pub u16);
 
+/// Identifies a column commitment scheme in portable artifacts.
+///
+/// This is the protocol-facing identifier that links compiler-selected
+/// column proof plans to runtime-installed scheme implementations.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub struct SchemeId(pub u16);
+
+impl SchemeId {
+    /// Built-in sorted-state Merkle commitment scheme.
+    pub const SSMC: Self = Self(0);
+    /// Built-in sparse Merkle tree scheme.
+    pub const SMT: Self = Self(1);
+
+    /// Return the raw protocol identifier.
+    pub const fn raw(self) -> u16 {
+        self.0
+    }
+}
+
 /// Row key. Dense integer keys for kernel v1.0.
 #[derive(
     Debug,
@@ -131,6 +163,12 @@ impl std::fmt::Display for ColId {
     }
 }
 
+impl std::fmt::Display for SchemeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "scheme:{}", self.0)
+    }
+}
+
 impl std::fmt::Display for RowKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "row:{}", self.0)
@@ -171,6 +209,18 @@ impl From<u16> for ColId {
 
 impl From<ColId> for u16 {
     fn from(id: ColId) -> Self {
+        id.0
+    }
+}
+
+impl From<u16> for SchemeId {
+    fn from(v: u16) -> Self {
+        Self(v)
+    }
+}
+
+impl From<SchemeId> for u16 {
+    fn from(id: SchemeId) -> Self {
         id.0
     }
 }

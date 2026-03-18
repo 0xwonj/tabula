@@ -1,53 +1,33 @@
-//! Fluent builder for [`TabulaRuntime`] construction.
+//! Fluent builder for [`TabulaRuntime`](crate::TabulaRuntime) construction.
 //!
-//! Unifies executor-side and machine-side registration into a single API.
-//! Precompiles are registered once and wired to both the executor's
-//! [`PrecompileRegistry`] and the machine's [`MachineBuilder`].
-//!
-//! ```ignore
-//! let runtime = TabulaRuntime::builder(compiled_program)
-//!     .with_precompile(id, handler, verifier_ext)
-//!     .build()?;
-//! ```
+//! The runtime owns scheme registry resolution. Built-in and custom schemes
+//! are both installed as [`ColumnSchemeFactory`](crate::ColumnSchemeFactory)
+//! values, then materialized into runtime/proof column views during `build()`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use tabula_artifact::CompiledProgram;
-use tabula_commitment::scheme_tags;
-use tabula_core::{TableId, TableSchema};
-use tabula_executor::precompile::{PrecompileHandler, PrecompileRegistry};
-use tabula_executor::property::{PropertyOpeningRegistry, PropertyOpeningResolver};
+use tabula_compiler::CompiledProgram;
+use tabula_core::TableId;
 use tabula_ir::PrecompileId;
-use tabula_machine::{
-    ChipExtension, ColumnScheme, ColumnSetupConfig, MachineBuilder, PropertyOpening, RootProof,
-    TabulaStarkConfig,
-};
+use tabula_machine::{ChipExtension, RootProof, TabulaStarkConfig};
 
+use crate::assembly::build_base::BuildBase;
+use crate::assembly::materialize::resolve_column_views_with_factories;
+use crate::assembly::registries::{build_precompile_registry, build_property_query_registry};
+use crate::assembly::validation::{
+    validate_compiler_owned_proof_plan, validate_precompile_requirements,
+};
+use crate::capabilities::PrecompileRegistration;
+use crate::columns::ColumnSchemeFactory;
 use crate::error::RuntimeError;
+use crate::program::RuntimeProgram;
 use crate::runtime::TabulaRuntime;
 
-/// Fluent builder for [`TabulaRuntime`].
-///
-/// Collects program, schemas, and extension registrations, then builds
-/// a `TabulaRuntime` that owns a `TabulaMachine` (built once, reused).
-///
-/// # Required inputs
-///
-/// - `compiled_program` — compiler-produced semantic artifact
-///
-/// # Optional registrations
-///
-/// - `with_precompile()` — registers both executor handler and machine verifier
-/// - `with_property_read()` — registers both executor resolver and machine opening
-/// - `with_extension()` — machine-only chip extension
-/// - `with_column_scheme()` — custom commitment scheme
-/// - `with_root_proof()` — custom root proof scheme
-/// - `with_config()` — custom STARK configuration
+/// Fluent builder for [`TabulaRuntime`](crate::TabulaRuntime).
 pub struct RuntimeBuilder {
     compiled_program: CompiledProgram,
-    machine_builder: MachineBuilder,
-    precompile_handlers: Vec<Box<dyn PrecompileHandler>>,
-    property_resolver: Option<Box<dyn PropertyOpeningResolver>>,
+    base: BuildBase,
+    precompile_registrations: Vec<PrecompileRegistration>,
 }
 
 impl RuntimeBuilder {
@@ -55,131 +35,108 @@ impl RuntimeBuilder {
     pub(crate) fn new(compiled_program: CompiledProgram) -> Self {
         Self {
             compiled_program,
-            machine_builder: MachineBuilder::new(),
-            precompile_handlers: Vec::new(),
-            property_resolver: None,
+            base: BuildBase::new(),
+            precompile_registrations: Vec::new(),
         }
     }
 
-    /// Register a precompile with unified dual-registration.
-    ///
-    /// Registers the executor-side `handler` (for execution) and the
-    /// machine-side `verifier` (for proving) under the same `id`.
-    /// This ensures both sides stay in sync.
+    /// Register a precompile capability as one logical unit.
     pub fn with_precompile(
         mut self,
-        id: PrecompileId,
-        handler: impl PrecompileHandler + 'static,
-        verifier: impl ChipExtension + 'static,
-    ) -> Self {
-        self.precompile_handlers.push(Box::new(handler));
-        self.machine_builder = self.machine_builder.with_precompile(id, verifier);
-        self
+        registration: PrecompileRegistration,
+    ) -> Result<Self, RuntimeError> {
+        if self
+            .precompile_registrations
+            .iter()
+            .any(|existing| existing.id() == registration.id())
+        {
+            return Err(RuntimeError::ValidationFailed {
+                detail: format!(
+                    "duplicate precompile registration for id 0x{:04x}",
+                    registration.id().0
+                ),
+            });
+        }
+        self.precompile_registrations.push(registration);
+        Ok(self)
     }
 
     /// Register a machine-only chip extension.
-    ///
-    /// For extensions that don't need an executor-side handler
-    /// (e.g., custom gadgets that only add AIR constraints).
     pub fn with_extension(mut self, ext: impl ChipExtension + 'static) -> Self {
-        self.machine_builder = self.machine_builder.with_extension(ext);
+        self.base = self.base.with_extension(ext);
         self
     }
 
-    /// Register a custom column commitment scheme.
-    ///
-    /// Maps a `scheme_tag` to a [`ColumnScheme`] implementation.
-    /// The default SSMC scheme (tag 0) is always pre-registered.
-    pub fn with_column_scheme(
+    /// Register a custom or replacement scheme factory.
+    pub fn with_scheme(
         mut self,
-        scheme_tag: u16,
-        scheme: impl ColumnScheme + 'static,
-    ) -> Self {
-        self.machine_builder = self.machine_builder.with_column_scheme(scheme_tag, scheme);
-        self
+        factory: impl ColumnSchemeFactory + 'static,
+    ) -> Result<Self, RuntimeError> {
+        self.base = self.base.with_scheme(factory)?;
+        Ok(self)
     }
 
-    /// Register a property read with unified dual-registration.
-    ///
-    /// Registers the executor-side `resolver` (for execution, zero crypto) and
-    /// the machine-side `opening` (for proof generation) together. This ensures
-    /// both sides stay in sync — the resolver produces concrete values, and
-    /// the opening produces ZK witnesses for the same queries.
-    ///
-    /// Only one resolver can be registered (it handles all property queries).
-    /// Multiple openings can be registered for different scheme tags.
-    pub fn with_property_read(
-        mut self,
-        resolver: impl PropertyOpeningResolver + 'static,
-        opening: impl PropertyOpening + 'static,
-    ) -> Self {
-        self.property_resolver = Some(Box::new(resolver));
-        self.machine_builder = self.machine_builder.with_property_opening(opening);
-        self
-    }
-
-    /// Register a machine-only property opening (no executor-side resolver).
-    ///
-    /// Use this when the executor doesn't need to resolve property queries
-    /// (e.g., the opening is only used for verification in the machine).
-    /// For full support, prefer [`with_property_read()`](Self::with_property_read).
-    pub fn with_property_opening(mut self, opening: impl PropertyOpening + 'static) -> Self {
-        self.machine_builder = self.machine_builder.with_property_opening(opening);
-        self
-    }
-
-    /// Override the root proof scheme (default: two-level SMT).
+    /// Override the root proof scheme.
     pub fn with_root_proof(mut self, root: impl RootProof + 'static) -> Self {
-        self.machine_builder = self.machine_builder.with_root_proof(root);
+        self.base = self.base.with_root_proof(root);
         self
     }
 
     /// Override the STARK configuration.
     pub fn with_config(mut self, config: TabulaStarkConfig) -> Self {
-        self.machine_builder = self.machine_builder.with_config(config);
+        self.base = self.base.with_config(config);
         self
     }
 
-    /// Build the runtime, creating the machine and precompile registry.
-    ///
-    /// Validates program-schema compatibility and precompile registration
-    /// before building the machine. Derives column configs from schemas
-    /// (all columns use SSMC by default).
+    /// Build the runtime, materializing per-column schemes before machine setup.
     pub fn build(self) -> Result<TabulaRuntime, RuntimeError> {
         self.validate()?;
 
-        let col_configs = derive_column_configs(&self.compiled_program.table_schemas);
-        let machine = self
-            .machine_builder
-            .with_columns(col_configs)
+        let resolved_columns = resolve_column_views_with_factories(
+            &self.compiled_program,
+            self.base.scheme_factories(),
+        )?;
+        let proof_columns = resolved_columns.proof_columns.clone();
+        let runtime_program =
+            RuntimeProgram::from_compiled_program(&self.compiled_program, resolved_columns)?;
+
+        let (machine_builder, _scheme_factories) = self.base.into_parts();
+        let mut machine_builder = machine_builder.with_columns(proof_columns);
+
+        let mut precompile_handlers = Vec::with_capacity(self.precompile_registrations.len());
+        for registration in self.precompile_registrations {
+            let (_id, handler, verifier) = registration.into_parts();
+            precompile_handlers.push(handler);
+            machine_builder = machine_builder.with_extension_boxed(verifier);
+        }
+
+        let machine = machine_builder
             .build()
             .map_err(RuntimeError::MachineSetup)?;
-
-        let precompiles = build_precompile_registry(self.precompile_handlers);
-        let property_openings = self.property_resolver.map(PropertyOpeningRegistry::new);
-        let schemas_by_id = index_schemas(&self.compiled_program.table_schemas);
+        let precompiles = build_precompile_registry(precompile_handlers)?;
+        let property_queries = build_property_query_registry(
+            runtime_program.runtime_columns(),
+            runtime_program.column_plans(),
+        )?;
 
         Ok(TabulaRuntime::from_parts(
-            self.compiled_program,
-            schemas_by_id,
+            runtime_program,
             machine,
             precompiles,
-            property_openings,
+            property_queries,
         ))
     }
 
-    // ── Validation ───────────────────────────────────────────────────────
-
     fn validate(&self) -> Result<(), RuntimeError> {
         self.validate_schemas()?;
+        self.validate_compiler_owned_proof_plan()?;
         self.validate_table_references()?;
         self.validate_precompile_references()?;
         Ok(())
     }
 
-    /// Verify that no schema has an empty column set.
     fn validate_schemas(&self) -> Result<(), RuntimeError> {
-        for schema in &self.compiled_program.table_schemas {
+        for schema in self.compiled_program.table_schemas() {
             if schema.columns.is_empty() {
                 return Err(RuntimeError::ValidationFailed {
                     detail: format!(
@@ -192,16 +149,14 @@ impl RuntimeBuilder {
         Ok(())
     }
 
-    /// Verify that every table ID referenced by Read/Write/PropertyRead
-    /// instructions exists in the provided schemas.
     fn validate_table_references(&self) -> Result<(), RuntimeError> {
         let schema_ids: BTreeSet<TableId> = self
             .compiled_program
-            .table_schemas
+            .table_schemas()
             .iter()
             .map(|s| s.id)
             .collect();
-        for id in self.compiled_program.program.referenced_table_ids() {
+        for id in self.compiled_program.program().referenced_table_ids() {
             if !schema_ids.contains(&id) {
                 return Err(RuntimeError::ValidationFailed {
                     detail: format!("program references table {} not found in schemas", id.0,),
@@ -211,51 +166,434 @@ impl RuntimeBuilder {
         Ok(())
     }
 
-    /// Verify that every precompile ID referenced by Precompile instructions
-    /// has a registered handler.
+    fn validate_compiler_owned_proof_plan(&self) -> Result<(), RuntimeError> {
+        validate_compiler_owned_proof_plan(&self.compiled_program)
+    }
+
     fn validate_precompile_references(&self) -> Result<(), RuntimeError> {
-        let registered: BTreeSet<PrecompileId> =
-            self.precompile_handlers.iter().map(|h| h.id()).collect();
-        for id in self.compiled_program.program.referenced_precompile_ids() {
-            if !registered.contains(&id) {
-                return Err(RuntimeError::ValidationFailed {
-                    detail: format!(
-                        "program references precompile 0x{:04x} but no handler is registered",
-                        id.0,
-                    ),
-                });
+        let registered = self.registered_precompile_ids();
+        validate_precompile_requirements(&self.compiled_program, &registered, "handler")
+    }
+
+    fn registered_precompile_ids(&self) -> BTreeSet<PrecompileId> {
+        self.precompile_registrations
+            .iter()
+            .map(PrecompileRegistration::id)
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use tabula_compiler::register_program;
+    use tabula_core::error::TabulaError;
+    use tabula_core::{ColId, SchemeId, TableId, TableSchema, TxTypeId, ValueType};
+    use tabula_executor::precompile::PrecompileHandler;
+    use tabula_ir::{AggregateKind, Instruction, PrecompileId, PropertyQuery, TxTypeDef};
+    use tabula_machine::prelude::{ChipIdAllocator, DynChip};
+    use tabula_machine::{ChipExtension, ColumnChipSet, ProofColumn, SetupError};
+
+    use super::RuntimeBuilder;
+    use crate::error::RuntimeError;
+    use crate::{ColumnPlan, ColumnSchemeFactory, ColumnViews, ProofInputBuilder, RuntimeColumn};
+
+    fn compiled_program_with_property_query() -> tabula_compiler::CompiledProgram {
+        let schema = TableSchema {
+            id: TableId(1),
+            name: "accounts".to_string(),
+            columns: vec![tabula_core::ColumnDef {
+                id: ColId(0),
+                name: "balance".to_string(),
+                value_type: ValueType::U64,
+            }],
+        };
+        let tx = TxTypeDef {
+            id: TxTypeId(1),
+            name: "scan".to_string(),
+            param_schema: vec![],
+            body: vec![Instruction::PropertyRead {
+                dst_val: 0,
+                dst_key: 1,
+                dst_is_null: 2,
+                table: TableId(1),
+                col: ColId(0),
+                query: PropertyQuery::Successor {
+                    key: tabula_core::RowKey(0),
+                },
+            }],
+        };
+
+        register_program(&[schema], &[tx]).expect("register program")
+    }
+
+    fn compiled_program_with_unsupported_property_query() -> tabula_compiler::CompiledProgram {
+        let schema = TableSchema {
+            id: TableId(1),
+            name: "accounts".to_string(),
+            columns: vec![tabula_core::ColumnDef {
+                id: ColId(0),
+                name: "balance".to_string(),
+                value_type: ValueType::U64,
+            }],
+        };
+        let tx = TxTypeDef {
+            id: TxTypeId(1),
+            name: "scan".to_string(),
+            param_schema: vec![],
+            body: vec![Instruction::PropertyRead {
+                dst_val: 0,
+                dst_key: 1,
+                dst_is_null: 2,
+                table: TableId(1),
+                col: ColId(0),
+                query: PropertyQuery::Aggregate {
+                    kind: AggregateKind::Count,
+                },
+            }],
+        };
+
+        register_program(&[schema], &[tx]).expect("register program")
+    }
+
+    struct EmptyRuntimeColumn;
+
+    impl RuntimeColumn for EmptyRuntimeColumn {
+        fn name(&self) -> &str {
+            "empty"
+        }
+    }
+
+    struct EmptyProofColumn {
+        plan: ColumnPlan,
+    }
+
+    impl ProofColumn for EmptyProofColumn {
+        fn name(&self) -> &str {
+            "empty"
+        }
+
+        fn table_id(&self) -> TableId {
+            self.plan.table_id
+        }
+
+        fn col_id(&self) -> ColId {
+            self.plan.col_id
+        }
+
+        fn scheme_id(&self) -> SchemeId {
+            self.plan.scheme_id
+        }
+
+        fn create_chips(&self, _alloc: &mut ChipIdAllocator) -> Result<ColumnChipSet, SetupError> {
+            Ok(ColumnChipSet {
+                airs: vec![],
+                dyn_chips: vec![],
+            })
+        }
+    }
+
+    struct EmptyProofInputBuilder {
+        plan: ColumnPlan,
+    }
+
+    impl ProofInputBuilder for EmptyProofInputBuilder {
+        fn name(&self) -> &str {
+            "empty"
+        }
+
+        fn table_id(&self) -> TableId {
+            self.plan.table_id
+        }
+
+        fn col_id(&self) -> ColId {
+            self.plan.col_id
+        }
+
+        fn scheme_id(&self) -> SchemeId {
+            self.plan.scheme_id
+        }
+    }
+
+    struct EmptySchemeFactory;
+
+    impl ColumnSchemeFactory for EmptySchemeFactory {
+        fn scheme_id(&self) -> SchemeId {
+            SchemeId(0x1000)
+        }
+
+        fn name(&self) -> &str {
+            "empty"
+        }
+
+        fn build_column(&self, plan: ColumnPlan) -> Result<ColumnViews, SetupError> {
+            Ok(ColumnViews::new(
+                Arc::new(EmptyRuntimeColumn),
+                Arc::new(EmptyProofColumn { plan: plan.clone() }),
+                Arc::new(EmptyProofInputBuilder { plan }),
+            ))
+        }
+    }
+
+    #[derive(Clone)]
+    struct UnsupportedPropertyRuntimeColumn;
+
+    impl RuntimeColumn for UnsupportedPropertyRuntimeColumn {
+        fn name(&self) -> &str {
+            "unsupported"
+        }
+    }
+
+    struct UnsupportedPropertyProofColumn {
+        plan: ColumnPlan,
+    }
+
+    impl ProofColumn for UnsupportedPropertyProofColumn {
+        fn name(&self) -> &str {
+            "unsupported"
+        }
+
+        fn table_id(&self) -> TableId {
+            self.plan.table_id
+        }
+
+        fn col_id(&self) -> ColId {
+            self.plan.col_id
+        }
+
+        fn scheme_id(&self) -> SchemeId {
+            self.plan.scheme_id
+        }
+
+        fn create_chips(&self, _alloc: &mut ChipIdAllocator) -> Result<ColumnChipSet, SetupError> {
+            Ok(ColumnChipSet {
+                airs: vec![],
+                dyn_chips: vec![],
+            })
+        }
+    }
+
+    struct UnsupportedPropertyProofInputBuilder {
+        plan: ColumnPlan,
+    }
+
+    impl ProofInputBuilder for UnsupportedPropertyProofInputBuilder {
+        fn name(&self) -> &str {
+            "unsupported"
+        }
+
+        fn table_id(&self) -> TableId {
+            self.plan.table_id
+        }
+
+        fn col_id(&self) -> ColId {
+            self.plan.col_id
+        }
+
+        fn scheme_id(&self) -> SchemeId {
+            self.plan.scheme_id
+        }
+    }
+
+    struct UnsupportedPropertySchemeFactory;
+
+    impl ColumnSchemeFactory for UnsupportedPropertySchemeFactory {
+        fn scheme_id(&self) -> SchemeId {
+            SchemeId(0x1001)
+        }
+
+        fn name(&self) -> &str {
+            "unsupported"
+        }
+
+        fn build_column(&self, plan: ColumnPlan) -> Result<ColumnViews, SetupError> {
+            if !plan.required_property_query_kinds.is_empty() {
+                return Err(SetupError::SetupFailed(
+                    "unsupported property query".to_string(),
+                ));
+            }
+            Ok(ColumnViews::new(
+                Arc::new(UnsupportedPropertyRuntimeColumn),
+                Arc::new(UnsupportedPropertyProofColumn { plan: plan.clone() }),
+                Arc::new(UnsupportedPropertyProofInputBuilder { plan }),
+            ))
+        }
+    }
+
+    struct DummyVerifierExtension;
+
+    impl ChipExtension for DummyVerifierExtension {
+        fn name(&self) -> &str {
+            "dummy_verifier"
+        }
+
+        fn airs(&self) -> Vec<Box<dyn tabula_machine::AnyRap>> {
+            vec![]
+        }
+
+        fn dyn_chips(&self) -> Vec<Box<dyn DynChip>> {
+            vec![]
+        }
+    }
+
+    #[test]
+    fn custom_scheme_factory_can_prepare_runtime() {
+        let schema = TableSchema {
+            id: TableId(1),
+            name: "accounts".to_string(),
+            columns: vec![tabula_core::ColumnDef {
+                id: ColId(0),
+                name: "balance".to_string(),
+                value_type: ValueType::U64,
+            }],
+        };
+        let tx = TxTypeDef {
+            id: TxTypeId(1),
+            name: "noop".to_string(),
+            param_schema: vec![],
+            body: vec![],
+        };
+        let compiled = register_program(&[schema], &[tx]).expect("register program");
+        compiled.as_program_artifact();
+        let plan = compiled.column_proof_plan()[0];
+        let mut artifact = compiled.into_program_artifact();
+        artifact.column_proof_plan[0].scheme_id = SchemeId(0x1000);
+        let compiled = tabula_compiler::register_program_artifact(&artifact).expect("compiled");
+
+        let runtime = RuntimeBuilder::new(compiled)
+            .with_scheme(EmptySchemeFactory)
+            .expect("register custom scheme")
+            .build()
+            .expect("runtime");
+
+        assert_eq!(runtime.runtime_program().runtime_columns().len(), 1);
+        let plan = runtime
+            .runtime_program()
+            .column_plans()
+            .get(&(plan.table_id, plan.col_id))
+            .expect("column plan");
+        assert_eq!(plan.scheme_id, SchemeId(0x1000));
+    }
+
+    #[test]
+    fn runtime_rejects_missing_registered_scheme_factory() {
+        let schema = TableSchema {
+            id: TableId(1),
+            name: "accounts".to_string(),
+            columns: vec![tabula_core::ColumnDef {
+                id: ColId(0),
+                name: "balance".to_string(),
+                value_type: ValueType::U64,
+            }],
+        };
+        let tx = TxTypeDef {
+            id: TxTypeId(1),
+            name: "noop".to_string(),
+            param_schema: vec![],
+            body: vec![],
+        };
+        let compiled = register_program(&[schema], &[tx]).expect("register program");
+        let mut artifact = compiled.into_program_artifact();
+        artifact.column_proof_plan[0].scheme_id = SchemeId(0x1000);
+        let compiled = tabula_compiler::register_program_artifact(&artifact).expect("compiled");
+
+        let err = RuntimeBuilder::new(compiled)
+            .build()
+            .expect_err("missing scheme");
+        match err {
+            RuntimeError::ValidationFailed { detail } => {
+                assert!(detail.contains("scheme factory"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn runtime_rejects_unsupported_property_requirement_via_factory() {
+        let compiled = compiled_program_with_unsupported_property_query();
+        let mut artifact = compiled.into_program_artifact();
+        artifact.column_proof_plan[0].scheme_id = SchemeId(0x1001);
+        let compiled = tabula_compiler::register_program_artifact(&artifact).expect("compiled");
+
+        let err = RuntimeBuilder::new(compiled)
+            .with_scheme(UnsupportedPropertySchemeFactory)
+            .expect("register custom scheme")
+            .build()
+            .expect_err("unsupported property requirement should fail");
+
+        match err {
+            RuntimeError::MachineSetup(SetupError::SetupFailed(detail)) => {
+                assert!(detail.contains("unsupported property"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn runtime_rejects_duplicate_scheme_factory_ids() {
+        let compiled = compiled_program_with_property_query();
+        let result = RuntimeBuilder::new(compiled)
+            .with_scheme(EmptySchemeFactory)
+            .expect("first")
+            .with_scheme(EmptySchemeFactory);
+
+        match result {
+            Err(err) => match err {
+                RuntimeError::ValidationFailed { detail } => {
+                    assert!(detail.contains("duplicate scheme factory"));
+                }
+                other => panic!("unexpected error: {other}"),
+            },
+            Ok(_) => panic!("duplicate scheme id should fail"),
+        }
+    }
+
+    #[test]
+    fn runtime_materializes_matching_proof_input_builders() {
+        let compiled = compiled_program_with_property_query();
+        let runtime = RuntimeBuilder::new(compiled).build().expect("runtime");
+
+        assert_eq!(
+            runtime.runtime_program().runtime_columns().len(),
+            runtime.runtime_program().proof_input_builders().len()
+        );
+
+        for (&(table_id, col_id), builder) in runtime.runtime_program().proof_input_builders() {
+            assert_eq!(builder.table_id(), table_id);
+            assert_eq!(builder.col_id(), col_id);
+        }
+    }
+
+    #[test]
+    fn precompile_registration_rejects_handler_id_mismatch() {
+        struct WrongIdHandler;
+
+        impl PrecompileHandler for WrongIdHandler {
+            fn id(&self) -> PrecompileId {
+                PrecompileId(0x0002)
+            }
+
+            fn execute(
+                &self,
+                _inputs: &[tabula_core::Value],
+            ) -> Result<Vec<tabula_core::Value>, TabulaError> {
+                Ok(vec![])
             }
         }
-        Ok(())
+
+        let err = crate::PrecompileRegistration::new(
+            PrecompileId(0x0001),
+            WrongIdHandler,
+            DummyVerifierExtension,
+        )
+        .expect_err("id mismatch should fail");
+
+        match err {
+            RuntimeError::ValidationFailed { detail } => {
+                assert!(detail.contains("handler reports"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
-}
-
-/// Derive `ColumnSetupConfig` from schemas.
-///
-/// All columns default to SSMC scheme with commitment reception enabled.
-/// Custom schemes override this via `with_column_scheme()` on the machine builder.
-fn derive_column_configs(schemas: &[TableSchema]) -> Vec<ColumnSetupConfig> {
-    schemas
-        .iter()
-        .flat_map(|schema| {
-            schema.columns.iter().map(move |col_def| ColumnSetupConfig {
-                table_id: schema.id,
-                col_id: col_def.id,
-                scheme_tag: scheme_tags::SSMC,
-                receives_commitment: true,
-            })
-        })
-        .collect()
-}
-
-fn build_precompile_registry(handlers: Vec<Box<dyn PrecompileHandler>>) -> PrecompileRegistry {
-    let mut registry = PrecompileRegistry::new();
-    for handler in handlers {
-        registry.register_boxed(handler);
-    }
-    registry
-}
-
-fn index_schemas(schemas: &[TableSchema]) -> BTreeMap<TableId, TableSchema> {
-    schemas.iter().cloned().map(|s| (s.id, s)).collect()
 }

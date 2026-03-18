@@ -5,11 +5,13 @@ mod common;
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, ColumnDef, RowKey, TableId, TableSchema, Value, ValueType};
+use tabula_core::{
+    ColId, ColumnDef, PropertyQueryResult, RowKey, TableId, TableSchema, Value, ValueType,
+};
 use tabula_executor::interpreter::{ExecContext, execute};
 use tabula_executor::overlay::Overlay;
 use tabula_executor::property::{
-    CommittedStateProvider, PropertyOpeningRegistry, PropertyOpeningResolver, PropertyResult,
+    CommittedStateProvider, PropertyQueryHandler, PropertyQueryRegistry,
 };
 use tabula_ir::{Instruction, PropertyQuery, ValueExpr};
 
@@ -41,22 +43,19 @@ impl CommittedStateProvider for MockCommittedState {
 /// the smallest key.
 struct MinimumResolver;
 
-impl PropertyOpeningResolver for MinimumResolver {
+impl PropertyQueryHandler for MinimumResolver {
     fn resolve(
         &self,
-        table: TableId,
-        col: ColId,
         query: &PropertyQuery,
         provider: &dyn CommittedStateProvider,
-        _col_type: ValueType,
-    ) -> Result<PropertyResult, TabulaError> {
-        let entries = provider.get_column(table, col)?;
+    ) -> Result<PropertyQueryResult, TabulaError> {
+        let entries = provider.get_column(TableId(1), ColId(0))?;
 
         match query {
             PropertyQuery::Minimum => {
                 let non_null: Vec<_> = entries.iter().filter(|(_, _, null)| !null).collect();
                 if non_null.is_empty() {
-                    Ok(PropertyResult {
+                    Ok(PropertyQueryResult {
                         value: Value::U64(0),
                         key: None,
                         is_null: true,
@@ -64,7 +63,7 @@ impl PropertyOpeningResolver for MinimumResolver {
                 } else {
                     // Minimum key among non-null entries.
                     let min_entry = non_null.iter().min_by_key(|(k, _, _)| k.0).unwrap();
-                    Ok(PropertyResult {
+                    Ok(PropertyQueryResult {
                         value: min_entry.1,
                         key: Some(min_entry.0),
                         is_null: false,
@@ -74,14 +73,14 @@ impl PropertyOpeningResolver for MinimumResolver {
             PropertyQuery::Maximum => {
                 let non_null: Vec<_> = entries.iter().filter(|(_, _, null)| !null).collect();
                 if non_null.is_empty() {
-                    Ok(PropertyResult {
+                    Ok(PropertyQueryResult {
                         value: Value::U64(0),
                         key: None,
                         is_null: true,
                     })
                 } else {
                     let max_entry = non_null.iter().max_by_key(|(k, _, _)| k.0).unwrap();
-                    Ok(PropertyResult {
+                    Ok(PropertyQueryResult {
                         value: max_entry.1,
                         key: Some(max_entry.0),
                         is_null: false,
@@ -118,7 +117,7 @@ fn schemas_with_table() -> BTreeMap<TableId, TableSchema> {
 fn execute_and_get_slots(
     instrs: &[Instruction],
     committed: &MockCommittedState,
-    registry: &PropertyOpeningRegistry,
+    registry: &PropertyQueryRegistry,
     num_slots: usize,
 ) -> Vec<Value> {
     let snap = TestSnapshot(BTreeMap::new());
@@ -130,7 +129,7 @@ fn execute_and_get_slots(
         schemas: &schemas,
         precompiles: None,
         committed_state: Some(committed),
-        property_openings: Some(registry),
+        property_queries: registry,
     };
     // Build extended instructions: original + writes for each slot to different rows.
     let mut full = instrs.to_vec();
@@ -178,7 +177,10 @@ fn property_read_minimum() {
         ],
     );
     let committed = MockCommittedState { columns };
-    let registry = PropertyOpeningRegistry::new(Box::new(MinimumResolver));
+    let mut registry = PropertyQueryRegistry::new();
+    registry
+        .register(TableId(1), ColId(0), Box::new(MinimumResolver))
+        .expect("register property handler");
 
     let instrs = vec![Instruction::PropertyRead {
         dst_val: 0,
@@ -200,7 +202,10 @@ fn property_read_minimum_empty_column() {
     let mut columns = BTreeMap::new();
     columns.insert((TableId(1), ColId(0)), vec![]);
     let committed = MockCommittedState { columns };
-    let registry = PropertyOpeningRegistry::new(Box::new(MinimumResolver));
+    let mut registry = PropertyQueryRegistry::new();
+    registry
+        .register(TableId(1), ColId(0), Box::new(MinimumResolver))
+        .expect("register property handler");
 
     let instrs = vec![Instruction::PropertyRead {
         dst_val: 0,
@@ -227,7 +232,10 @@ fn property_read_maximum() {
         ],
     );
     let committed = MockCommittedState { columns };
-    let registry = PropertyOpeningRegistry::new(Box::new(MinimumResolver));
+    let mut registry = PropertyQueryRegistry::new();
+    registry
+        .register(TableId(1), ColId(0), Box::new(MinimumResolver))
+        .expect("register property handler");
 
     let instrs = vec![Instruction::PropertyRead {
         dst_val: 0,
@@ -249,13 +257,14 @@ fn property_read_no_provider_error() {
     let snap = TestSnapshot(BTreeMap::new());
     let mut ov = Overlay::new(&snap);
     let schemas = schemas_with_table();
+    let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
         precompiles: None,
         committed_state: None, // no provider
-        property_openings: None,
+        property_queries: &property_queries,
     };
     let instrs = vec![Instruction::PropertyRead {
         dst_val: 0,
@@ -277,7 +286,10 @@ fn property_read_result_usable_in_assert() {
         vec![(RowKey(42), Value::U64(999), false)],
     );
     let committed = MockCommittedState { columns };
-    let registry = PropertyOpeningRegistry::new(Box::new(MinimumResolver));
+    let mut registry = PropertyQueryRegistry::new();
+    registry
+        .register(TableId(1), ColId(0), Box::new(MinimumResolver))
+        .expect("register property handler");
 
     let snap = TestSnapshot(BTreeMap::new());
     let mut ov = Overlay::new(&snap);
@@ -288,7 +300,7 @@ fn property_read_result_usable_in_assert() {
         schemas: &schemas,
         precompiles: None,
         committed_state: Some(&committed),
-        property_openings: Some(&registry),
+        property_queries: &registry,
     };
 
     let instrs = vec![

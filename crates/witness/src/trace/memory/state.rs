@@ -39,6 +39,10 @@ pub(crate) struct StateColumnRow {
     pub read_mult: bool,
     /// Multiplicity for WriteAccess bus (C4 receive).
     pub write_mult: bool,
+    /// Previous old-state entry key, or zero when absent.
+    pub prev_old_key: u64,
+    /// Next old-state entry key, or zero when absent.
+    pub next_old_key: u64,
 }
 
 impl From<StateColumnRow> for StateShardRow {
@@ -54,6 +58,8 @@ impl From<StateColumnRow> for StateShardRow {
             new_hash_acc: r.new_hash_acc,
             read_mult: r.read_mult,
             write_mult: r.write_mult,
+            prev_old_key: r.prev_old_key,
+            next_old_key: r.next_old_key,
         }
     }
 }
@@ -119,14 +125,56 @@ where
             new_hash_acc: [KoalaBear::ZERO; 8],
             read_mult: true,
             write_mult: in_write,
+            prev_old_key: 0,
+            next_old_key: 0,
         });
     }
+
+    populate_old_neighbors(&mut rows);
 
     Ok(rows)
 }
 
 pub(super) fn sort_state_rows(rows: &mut [StateColumnRow]) {
     rows.sort_by_key(|r| (r.table_id, r.col_id, r.key));
+}
+
+fn populate_old_neighbors(rows: &mut [StateColumnRow]) {
+    let old_indices: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, row)| row.source.in_old().then_some(idx))
+        .collect();
+
+    for (pos, &idx) in old_indices.iter().enumerate() {
+        let prev = pos
+            .checked_sub(1)
+            .and_then(|prev_pos| old_indices.get(prev_pos))
+            .map_or(0, |prev_idx| rows[*prev_idx].key);
+        let next = old_indices
+            .get(pos + 1)
+            .map_or(0, |next_idx| rows[*next_idx].key);
+        rows[idx].prev_old_key = prev;
+        rows[idx].next_old_key = next;
+    }
+
+    let mut last_prev = 0;
+    for row in rows.iter_mut() {
+        if row.source.in_old() {
+            last_prev = row.key;
+        } else {
+            row.prev_old_key = row.prev_old_key.max(last_prev);
+        }
+    }
+
+    let mut next_old = 0;
+    for row in rows.iter_mut().rev() {
+        if row.source.in_old() {
+            next_old = row.key;
+        } else {
+            row.next_old_key = row.next_old_key.max(next_old);
+        }
+    }
 }
 
 fn ssmc_entries<H>(state: &ColumnState<H>) -> Result<BTreeMap<RowKey, Vec<KoalaBear>>, TabulaError>

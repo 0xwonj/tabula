@@ -12,21 +12,6 @@ use tabula_chips::execution::trace::Opcode;
 
 use super::context::LoweringContext;
 
-/// Map a `PropertyQuery` variant to its ordinal for the AIR witness.
-///
-/// Ordinals: Minimum=0, Maximum=1, Successor=2, Predecessor=3,
-/// NonExistenceRange=4, Aggregate=5.
-fn query_kind_ordinal(query: &PropertyQuery) -> u8 {
-    match query {
-        PropertyQuery::Minimum => 0,
-        PropertyQuery::Maximum => 1,
-        PropertyQuery::Successor { .. } => 2,
-        PropertyQuery::Predecessor { .. } => 3,
-        PropertyQuery::NonExistenceRange { .. } => 4,
-        PropertyQuery::Aggregate { .. } => 5,
-    }
-}
-
 pub(super) fn lower_property_read<const W: usize>(
     ctx: &mut LoweringContext<'_, W>,
     dst_val: u16,
@@ -66,7 +51,12 @@ pub(super) fn lower_property_read<const W: usize>(
     let null_val = Value::Bool(is_null);
     let null_enc = ctx.encode_padded(&null_val)?;
 
-    // 5. Update the three destination slots.
+    // 5. Canonical query operand encoding for the proof claim.
+    let (query_arg0, query_arg1) = query.encoded_args();
+    let query_arg0_enc = ctx.encode_padded(&Value::U64(query_arg0))?;
+    let query_arg1_enc = ctx.encode_padded(&Value::U64(query_arg1))?;
+
+    // 6. Update the three destination slots.
     let dst_val_idx = dst_val as usize;
     let dst_key_idx = dst_key as usize;
     let dst_is_null_idx = dst_is_null as usize;
@@ -75,12 +65,14 @@ pub(super) fn lower_property_read<const W: usize>(
     ctx.update_slot(dst_key_idx, key_val, key_enc.clone(), false)?;
     ctx.update_slot(dst_is_null_idx, null_val, null_enc.clone(), false)?;
 
-    // 6. Build instruction record.
+    // 7. Build instruction record.
     let mut rec = ctx.empty_record(Opcode::PropertyRead);
     rec.written_slots = vec![dst_val_idx, dst_key_idx, dst_is_null_idx];
     rec.access_t = Some(table.0);
     rec.access_c = Some(col.0);
-    rec.property_query_type = Some(query_kind_ordinal(query));
+    rec.property_query_type = Some(query.kind_ordinal());
+    rec.property_query_arg0 = query_arg0_enc;
+    rec.property_query_arg1 = query_arg1_enc;
     rec.property_result_val = val_enc.clone();
     rec.property_result_key = key_enc.clone();
     rec.property_result_is_null = is_null;

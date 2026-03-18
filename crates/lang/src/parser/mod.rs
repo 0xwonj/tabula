@@ -5,7 +5,7 @@
 mod expr;
 mod stmt;
 
-use crate::ast::{ColumnDecl, ParamDecl, Program, TableDecl, TxDecl, TypeName};
+use crate::ast::{ColumnDecl, ColumnSchemeDecl, ParamDecl, Program, TableDecl, TxDecl, TypeName};
 use crate::error::{CompileError, ErrorKind};
 use crate::span::Span;
 use crate::token::Token;
@@ -181,11 +181,77 @@ impl Parser {
         let (name, start) = self.expect_ident().ok()?;
         self.expect(&Token::Colon).ok()?;
         let (ty, ty_span) = self.parse_type_name()?;
+        let scheme = self.parse_column_scheme_annotation();
+        let end = scheme.map_or(ty_span, |(_, span)| span);
         Some(ColumnDecl {
             name,
             ty,
-            span: start.merge(ty_span),
+            scheme: scheme.map(|(scheme, _)| scheme),
+            span: start.merge(end),
         })
+    }
+
+    fn parse_column_scheme_annotation(&mut self) -> Option<(ColumnSchemeDecl, Span)> {
+        if !matches!(self.peek(), Token::At) {
+            return None;
+        }
+        let start = self.peek_span();
+        self.advance(); // consume '@'
+
+        let Ok((name, name_span)) = self.expect_ident() else {
+            return None;
+        };
+
+        match name.as_str() {
+            "ssmc" => Some((ColumnSchemeDecl::Ssmc, start.merge(name_span))),
+            "smt" => Some((ColumnSchemeDecl::Smt, start.merge(name_span))),
+            "scheme" => self.parse_numeric_scheme_annotation(start),
+            _ => {
+                self.errors.push(CompileError::new(
+                    ErrorKind::UnexpectedToken,
+                    start,
+                    format!(
+                        "expected column scheme annotation '@ssmc', '@smt', or '@scheme(<u16>)', found '@{name}'"
+                    ),
+                ));
+                None
+            }
+        }
+    }
+
+    fn parse_numeric_scheme_annotation(&mut self, start: Span) -> Option<(ColumnSchemeDecl, Span)> {
+        self.expect(&Token::LParen).ok()?;
+        let value_span = self.peek_span();
+        let scheme_id = match self.peek() {
+            Token::IntLit(value) => {
+                let value = *value;
+                self.advance();
+                match u16::try_from(value) {
+                    Ok(ok) => ok,
+                    Err(_) => {
+                        self.errors.push(CompileError::new(
+                            ErrorKind::UnexpectedToken,
+                            value_span,
+                            format!("scheme id {value} does not fit into u16"),
+                        ));
+                        return None;
+                    }
+                }
+            }
+            _ => {
+                self.errors.push(CompileError::new(
+                    ErrorKind::ExpectedToken,
+                    value_span,
+                    format!(
+                        "expected numeric scheme id inside '@scheme(...)', found {:?}",
+                        self.peek()
+                    ),
+                ));
+                return None;
+            }
+        };
+        let end = self.expect(&Token::RParen).ok()?;
+        Some((ColumnSchemeDecl::Numeric(scheme_id), start.merge(end)))
     }
 
     fn parse_type_name(&mut self) -> Option<(TypeName, Span)> {

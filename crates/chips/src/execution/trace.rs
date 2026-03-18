@@ -125,6 +125,10 @@ pub struct InstructionRecord {
     pub precompile_id: Option<u16>,
     /// For PropertyRead: query type discriminant (PropertyQueryKind ordinal).
     pub property_query_type: Option<u8>,
+    /// For PropertyRead: first canonical query operand (encoded `U64` limbs).
+    pub property_query_arg0: Vec<KoalaBear>,
+    /// For PropertyRead: second canonical query operand (encoded `U64` limbs).
+    pub property_query_arg1: Vec<KoalaBear>,
     /// For PropertyRead: result value (W field elements).
     pub property_result_val: Vec<KoalaBear>,
     /// For PropertyRead: result key as u64 limbs (W field elements).
@@ -157,6 +161,8 @@ impl Default for InstructionRecord {
             is_empty_col: false,
             precompile_id: None,
             property_query_type: None,
+            property_query_arg0: vec![],
+            property_query_arg1: vec![],
             property_result_val: vec![],
             property_result_key: vec![],
             property_result_is_null: false,
@@ -308,6 +314,12 @@ pub fn generate_execution_trace<const W: usize>(
         if rec.opcode == Opcode::PropertyRead {
             if let Some(qt) = rec.property_query_type {
                 cols.property_query_type = KoalaBear::new(qt as u32);
+            }
+            for (j, v) in rec.property_query_arg0.iter().enumerate().take(W) {
+                cols.property_query_arg0[j] = *v;
+            }
+            for (j, v) in rec.property_query_arg1.iter().enumerate().take(W) {
+                cols.property_query_arg1[j] = *v;
             }
             for (j, v) in rec.property_result_val.iter().enumerate().take(W) {
                 cols.property_result_val[j] = *v;

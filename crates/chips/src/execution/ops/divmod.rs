@@ -66,7 +66,7 @@ pub(crate) fn constrain_divmod<AB: AirBuilder, const W: usize>(
         );
     };
 
-    let gate: AB::Expr = is_real.clone() * local.op_divmod.clone().into();
+    let gate: AB::Expr = is_real.clone() * local.op_divmod.into();
     let shift_30: AB::Expr = expr_from_u32::<AB>(SHIFT_30_U32);
     let shift_16: AB::Expr = expr_from_u32::<AB>(1 << 16);
     let shift_60: AB::Expr = shift_30.clone() * shift_30.clone();
@@ -74,19 +74,17 @@ pub(crate) fn constrain_divmod<AB: AirBuilder, const W: usize>(
     // ── q_sel constraints ──
     // Boolean
     for s in 0..MAX_SLOTS {
-        builder.assert_bool(local.divmod.q_sel[s].clone());
+        builder.assert_bool(local.divmod.q_sel[s]);
     }
     // Exactly-one when op_divmod
-    let q_sel_sum: AB::Expr = (0..MAX_SLOTS)
-        .map(|s| local.divmod.q_sel[s].clone().into())
-        .sum();
+    let q_sel_sum: AB::Expr = (0..MAX_SLOTS).map(|s| local.divmod.q_sel[s].into()).sum();
     builder.assert_zero(gate.clone() * (q_sel_sum - AB::Expr::ONE));
     // Subset: q_sel[s] only where slot_written[s]=1
     for s in 0..MAX_SLOTS {
         builder.assert_zero(
             gate.clone()
-                * local.divmod.q_sel[s].clone().into()
-                * (AB::Expr::ONE - local.slot_written[s].clone().into()),
+                * local.divmod.q_sel[s].into()
+                * (AB::Expr::ONE - local.slot_written[s].into()),
         );
     }
 
@@ -95,13 +93,12 @@ pub(crate) fn constrain_divmod<AB: AirBuilder, const W: usize>(
     let mut rem_vals = Vec::with_capacity(W);
     for i in 0..W {
         let q_i: AB::Expr = (0..MAX_SLOTS)
-            .map(|s| local.divmod.q_sel[s].clone().into() * local.slots[s][i].clone().into())
+            .map(|s| local.divmod.q_sel[s].into() * local.slots[s][i].into())
             .sum();
         let rem_i: AB::Expr = (0..MAX_SLOTS)
             .map(|s| {
-                let r_sel_s: AB::Expr =
-                    local.slot_written[s].clone().into() - local.divmod.q_sel[s].clone().into();
-                r_sel_s * local.slots[s][i].clone().into()
+                let r_sel_s: AB::Expr = local.slot_written[s].into() - local.divmod.q_sel[s].into();
+                r_sel_s * local.slots[s][i].into()
             })
             .sum();
         q_vals.push(q_i);
@@ -110,28 +107,26 @@ pub(crate) fn constrain_divmod<AB: AirBuilder, const W: usize>(
 
     // Extract null flags
     let q_null: AB::Expr = (0..MAX_SLOTS)
-        .map(|s| local.divmod.q_sel[s].clone().into() * local.slot_is_null[s].clone().into())
+        .map(|s| local.divmod.q_sel[s].into() * local.slot_is_null[s].into())
         .sum();
     let rem_null: AB::Expr = (0..MAX_SLOTS)
         .map(|s| {
-            let r_sel_s: AB::Expr =
-                local.slot_written[s].clone().into() - local.divmod.q_sel[s].clone().into();
-            r_sel_s * local.slot_is_null[s].clone().into()
+            let r_sel_s: AB::Expr = local.slot_written[s].into() - local.divmod.q_sel[s].into();
+            r_sel_s * local.slot_is_null[s].into()
         })
         .sum();
 
     // ── Division identity ──
-    let l0: AB::Expr = local.src1_val[0].clone().into();
-    let l1: AB::Expr = local.src1_val[1].clone().into();
-    let l2: AB::Expr = local.src1_val[2].clone().into();
+    let l0: AB::Expr = local.src1_val[0].into();
+    let l1: AB::Expr = local.src1_val[1].into();
+    let l2: AB::Expr = local.src1_val[2].into();
 
-    let d0: AB::Expr = local.src2_val[0].clone().into();
-    let d1: AB::Expr = local.src2_val[1].clone().into();
-    let d2: AB::Expr = local.src2_val[2].clone().into();
+    let d0: AB::Expr = local.src2_val[0].into();
+    let d1: AB::Expr = local.src2_val[1].into();
+    let d2: AB::Expr = local.src2_val[2].into();
 
-    let c0: AB::Expr = local.divmod.c0.clone().into();
-    let c1: AB::Expr =
-        local.divmod.c1_lo.clone().into() + local.divmod.c1_hi.clone().into() * shift_16;
+    let c0: AB::Expr = local.divmod.c0.into();
+    let c1: AB::Expr = local.divmod.c1_lo.into() + local.divmod.c1_hi.into() * shift_16;
 
     // (1) q0*d0 + rem0 = l0 + c0 * 2^30
     builder.assert_zero(
@@ -173,56 +168,53 @@ pub(crate) fn constrain_divmod<AB: AirBuilder, const W: usize>(
     // Borrow booleans
     builder.assert_zero(
         gate.clone()
-            * local.divmod.rem_ineq.borrow0.clone().into()
-            * (AB::Expr::ONE - local.divmod.rem_ineq.borrow0.clone().into()),
+            * local.divmod.rem_ineq.borrow0.into()
+            * (AB::Expr::ONE - local.divmod.rem_ineq.borrow0.into()),
     );
     builder.assert_zero(
         gate.clone()
-            * local.divmod.rem_ineq.borrow1.clone().into()
-            * (AB::Expr::ONE - local.divmod.rem_ineq.borrow1.clone().into()),
+            * local.divmod.rem_ineq.borrow1.into()
+            * (AB::Expr::ONE - local.divmod.rem_ineq.borrow1.into()),
     );
 
     // diff0 = rhs[0] - rem[0] - 1 + borrow0 * 2^30
     builder.assert_zero(
         gate.clone()
-            * (local.divmod.rem_ineq.diff0.clone().into()
+            * (local.divmod.rem_ineq.diff0.into()
                 - (d0 - rem_vals[0].clone() - AB::Expr::ONE
-                    + local.divmod.rem_ineq.borrow0.clone().into() * shift_30.clone())),
+                    + local.divmod.rem_ineq.borrow0.into() * shift_30.clone())),
     );
     // diff1 = rhs[1] - rem[1] - borrow0 + borrow1 * 2^30
     builder.assert_zero(
         gate.clone()
-            * (local.divmod.rem_ineq.diff1.clone().into()
-                - (d1 - rem_vals[1].clone() - local.divmod.rem_ineq.borrow0.clone().into()
-                    + local.divmod.rem_ineq.borrow1.clone().into() * shift_30.clone())),
+            * (local.divmod.rem_ineq.diff1.into()
+                - (d1 - rem_vals[1].clone() - local.divmod.rem_ineq.borrow0.into()
+                    + local.divmod.rem_ineq.borrow1.into() * shift_30.clone())),
     );
     // diff2 = rhs[2] - rem[2] - borrow1
     builder.assert_zero(
         gate.clone()
-            * (local.divmod.rem_ineq.diff2.clone().into()
-                - (d2.clone()
-                    - rem_vals[2].clone()
-                    - local.divmod.rem_ineq.borrow1.clone().into())),
+            * (local.divmod.rem_ineq.diff2.into()
+                - (d2.clone() - rem_vals[2].clone() - local.divmod.rem_ineq.borrow1.into())),
     );
 
-    let rhs_combined: AB::Expr = local.src2_val[0].clone().into()
-        + local.src2_val[1].clone().into() * shift_30.clone()
-        + local.src2_val[2].clone().into() * shift_60.clone();
+    let rhs_combined: AB::Expr = local.src2_val[0].into()
+        + local.src2_val[1].into() * shift_30.clone()
+        + local.src2_val[2].into() * shift_60.clone();
 
     // ── Results not null ──
     builder.assert_zero(gate.clone() * q_null);
     builder.assert_zero(gate.clone() * rem_null);
 
     // ── Non-zero divisor: gated IsZero on combined rhs ──
-    builder.assert_bool(local.divmod.rhs_iz.is_zero.clone());
-    builder.assert_zero(gate.clone() * rhs_combined * local.divmod.rhs_iz.is_zero.clone().into());
-    let not_zero: AB::Expr = AB::Expr::ONE - local.divmod.rhs_iz.is_zero.clone().into();
-    let rhs_combined_for_inv: AB::Expr = local.src2_val[0].clone().into()
-        + local.src2_val[1].clone().into() * shift_30
-        + local.src2_val[2].clone().into() * shift_60;
-    let has_inv: AB::Expr =
-        AB::Expr::ONE - rhs_combined_for_inv * local.divmod.rhs_iz.inv.clone().into();
+    builder.assert_bool(local.divmod.rhs_iz.is_zero);
+    builder.assert_zero(gate.clone() * rhs_combined * local.divmod.rhs_iz.is_zero.into());
+    let not_zero: AB::Expr = AB::Expr::ONE - local.divmod.rhs_iz.is_zero.into();
+    let rhs_combined_for_inv: AB::Expr = local.src2_val[0].into()
+        + local.src2_val[1].into() * shift_30
+        + local.src2_val[2].into() * shift_60;
+    let has_inv: AB::Expr = AB::Expr::ONE - rhs_combined_for_inv * local.divmod.rhs_iz.inv.into();
     builder.assert_zero(gate.clone() * not_zero * has_inv);
     // rhs must not be zero: is_zero flag must be 0
-    builder.assert_zero(gate * local.divmod.rhs_iz.is_zero.clone().into());
+    builder.assert_zero(gate * local.divmod.rhs_iz.is_zero.into());
 }

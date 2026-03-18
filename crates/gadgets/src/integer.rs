@@ -10,8 +10,8 @@ use p3_field::integers::QuotientMap;
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
 
-// Re-export U64Limbs and constants from tabula-stark.
-pub use tabula_stark::gadgets::{MASK_30, SHIFT_30_U32, U64Limbs};
+// Re-export protocol-facing primitive types from tabula-stark.
+pub use tabula_stark::air::primitives::{MASK_30, SHIFT_30_U32, U64Limbs};
 
 /// Create an `AB::Expr` from a u32 constant in generic AIR context.
 /// Create an `AB::Expr` from a u32 constant in generic AIR context.
@@ -36,9 +36,8 @@ pub fn constrain_u64_decomposition<AB: AirBuilder>(
     let shift_30: AB::Expr = expr_from_u32::<AB>(SHIFT_30_U32);
     let shift_60: AB::Expr = shift_30.clone() * shift_30.clone();
 
-    let reconstructed: AB::Expr = limbs.limb0.clone().into()
-        + limbs.limb1.clone().into() * shift_30
-        + limbs.limb2.clone().into() * shift_60;
+    let reconstructed: AB::Expr =
+        limbs.limb0.into() + limbs.limb1.into() * shift_30 + limbs.limb2.into() * shift_60;
 
     builder.assert_eq(expected, reconstructed);
 }
@@ -84,7 +83,7 @@ pub fn constrain_limb_halves<AB: AirBuilder>(
     halves: &LimbHalves<AB::Var>,
 ) {
     let shift_15: AB::Expr = expr_from_u32::<AB>(SHIFT_15_U32);
-    let reconstructed: AB::Expr = halves.lo.clone().into() + halves.hi.clone().into() * shift_15;
+    let reconstructed: AB::Expr = halves.lo.into() + halves.hi.into() * shift_15;
     builder.assert_eq(limb, reconstructed);
 }
 
@@ -128,12 +127,12 @@ impl IsZero<KoalaBear> {
 /// 2. `val * is_zero = 0`
 /// 3. `(1 - is_zero) * (1 - val * inv) = 0`
 pub fn constrain_is_zero<AB: AirBuilder>(builder: &mut AB, val: AB::Expr, iz: &IsZero<AB::Var>) {
-    builder.assert_bool(iz.is_zero.clone());
+    builder.assert_bool(iz.is_zero);
     // val * is_zero = 0
-    builder.assert_zero(val.clone() * iz.is_zero.clone().into());
+    builder.assert_zero(val.clone() * iz.is_zero.into());
     // (1 - is_zero) * (1 - val * inv) = 0
-    let not_zero: AB::Expr = AB::Expr::ONE - iz.is_zero.clone().into();
-    let has_inv: AB::Expr = AB::Expr::ONE - val * iz.inv.clone().into();
+    let not_zero: AB::Expr = AB::Expr::ONE - iz.is_zero.into();
+    let has_inv: AB::Expr = AB::Expr::ONE - val * iz.inv.into();
     builder.assert_zero(not_zero * has_inv);
 }
 
@@ -178,14 +177,14 @@ pub fn constrain_limb2_bits<AB: AirBuilder>(
     val: AB::Expr,
     bits: &Limb2Bits<AB::Var>,
 ) {
-    builder.assert_bool(bits.b0.clone());
-    builder.assert_bool(bits.b1.clone());
-    builder.assert_bool(bits.b2.clone());
-    builder.assert_bool(bits.b3.clone());
-    let reconstructed: AB::Expr = bits.b0.clone().into()
-        + bits.b1.clone().into() * AB::Expr::TWO
-        + bits.b2.clone().into() * AB::Expr::from_u8(4)
-        + bits.b3.clone().into() * AB::Expr::from_u8(8);
+    builder.assert_bool(bits.b0);
+    builder.assert_bool(bits.b1);
+    builder.assert_bool(bits.b2);
+    builder.assert_bool(bits.b3);
+    let reconstructed: AB::Expr = bits.b0.into()
+        + bits.b1.into() * AB::Expr::TWO
+        + bits.b2.into() * AB::Expr::from_u8(4)
+        + bits.b3.into() * AB::Expr::from_u8(8);
     builder.assert_eq(val, reconstructed);
 }
 
@@ -269,22 +268,20 @@ pub fn constrain_strict_ineq<AB: AirBuilder>(
 ) {
     let shift_30: AB::Expr = expr_from_u32::<AB>(SHIFT_30_U32);
 
-    builder.assert_bool(ineq.borrow0.clone());
-    builder.assert_bool(ineq.borrow1.clone());
+    builder.assert_bool(ineq.borrow0);
+    builder.assert_bool(ineq.borrow1);
 
     // Limb 0: diff0 = b.limb0 - a.limb0 - 1 + borrow0 * 2^30
-    let expected0: AB::Expr = b.limb0.clone().into() - a.limb0.clone().into() - AB::Expr::ONE
-        + ineq.borrow0.clone().into() * shift_30.clone();
-    builder.assert_eq(ineq.diff0.clone().into(), expected0);
+    let expected0: AB::Expr =
+        b.limb0.into() - a.limb0.into() - AB::Expr::ONE + ineq.borrow0.into() * shift_30.clone();
+    builder.assert_eq(ineq.diff0.into(), expected0);
 
     // Limb 1: diff1 = b.limb1 - a.limb1 - borrow0 + borrow1 * 2^30
     let expected1: AB::Expr =
-        b.limb1.clone().into() - a.limb1.clone().into() - ineq.borrow0.clone().into()
-            + ineq.borrow1.clone().into() * shift_30;
-    builder.assert_eq(ineq.diff1.clone().into(), expected1);
+        b.limb1.into() - a.limb1.into() - ineq.borrow0.into() + ineq.borrow1.into() * shift_30;
+    builder.assert_eq(ineq.diff1.into(), expected1);
 
     // Limb 2: diff2 = b.limb2 - a.limb2 - borrow1
-    let expected2: AB::Expr =
-        b.limb2.clone().into() - a.limb2.clone().into() - ineq.borrow1.clone().into();
-    builder.assert_eq(ineq.diff2.clone().into(), expected2);
+    let expected2: AB::Expr = b.limb2.into() - a.limb2.into() - ineq.borrow1.into();
+    builder.assert_eq(ineq.diff2.into(), expected2);
 }

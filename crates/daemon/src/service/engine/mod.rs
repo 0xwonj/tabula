@@ -8,20 +8,21 @@ use std::collections::BTreeMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
 
-use tabula_artifact::{
-    InputRef, InstanceId, InstanceRecord, InstanceStatus, ListInstancesCommand, ListRunsCommand,
-    ProgramArtifact, ProgramId, ProgramInline, ProgramInputRef, ProgramRecord,
-    RegisterProgramCommand, RunId, RunRecord, StateFile, normalize_state,
-};
+use tabula_artifact::{ProgramArtifact, StateSnapshot, normalize_state};
 
 use crate::protocol::error::ErrorCode;
 use crate::service::capabilities::{Capabilities, CapabilityClientKind, CapabilityInputMode};
 use crate::service::catalog::{CatalogEntry, ProgramCatalog, SINGLE_PROGRAM_ID};
 use crate::service::error::{ServiceError, ServiceResult};
 use crate::service::io::FileAccessPolicy;
-use crate::service::receipt::{bytes_to_hex, hash_json, now_ms};
+use crate::service::receipt::{bytes_to_hex, now_ms};
+use crate::service::{
+    CreateInstanceCommand, InputRef, InstanceId, InstanceRecord, InstanceStatus,
+    ListInstancesCommand, ListRunsCommand, ProgramId, ProgramInline, ProgramRecord,
+    RegisterProgramCommand, RunId, RunRecord,
+};
 
-use helpers::{next_id, read_guard, register_resolved_program, write_guard};
+use helpers::{next_id, read_guard, write_guard};
 
 /// Local engine implementation backed by in-process crates.
 #[derive(Debug, Clone)]
@@ -70,13 +71,12 @@ impl LocalEngine {
 
     /// Register and persist a program artifact.
     pub fn register_program(&self, req: RegisterProgramCommand) -> ServiceResult<ProgramRecord> {
-        let resolved = self.resolve_program_input(&req.program)?;
-        let compiled_program = register_resolved_program(&resolved)?;
+        let compiled_program = self.compile_program_input(&req.program)?;
         let program: ProgramArtifact = compiled_program.as_program_artifact();
 
         #[cfg(feature = "stark")]
         let prepared_runtime = Arc::new(
-            tabula_runtime::PreparedRuntime::builder(compiled_program.clone())
+            tabula_runtime::TabulaRuntime::builder(compiled_program.clone())
                 .build()
                 .map_err(|e| map_runtime_registration_error(&e))?,
         );
@@ -88,9 +88,22 @@ impl LocalEngine {
             created_at_ms: now_ms(),
             table_count: program.table_schemas.len(),
             tx_type_count: program.tx_types.len(),
-            profile_hash: bytes_to_hex(&compiled_program.metadata_envelope.profile_hash),
-            metadata_hash: bytes_to_hex(&compiled_program.metadata_envelope.canonical_hash()),
-            program_hash: hash_json("program", &program)?,
+            profile_hash: bytes_to_hex(&compiled_program.metadata_envelope().profile_hash),
+            metadata_hash: bytes_to_hex(&compiled_program.metadata_envelope().canonical_hash()),
+            program_hash: program.canonical_digest().map_err(|e| {
+                ServiceError::internal(
+                    ErrorCode::InternalError,
+                    format!("failed to hash program artifact: {e}"),
+                )
+            })?,
+            contract_schema_version: compiled_program.metadata_envelope().contract_schema_version,
+            binding_version: compiled_program.metadata_envelope().binding_version,
+            statement_schema_version: compiled_program
+                .metadata_envelope()
+                .statement_schema_version,
+            verifier_profile_version: compiled_program
+                .metadata_envelope()
+                .verifier_profile_version,
             program,
         };
 
@@ -116,14 +129,11 @@ impl LocalEngine {
     }
 
     /// Create a stateful instance from a program and initial state.
-    pub fn create_instance(
-        &self,
-        req: tabula_artifact::CreateInstanceCommand,
-    ) -> ServiceResult<InstanceRecord> {
+    pub fn create_instance(&self, req: CreateInstanceCommand) -> ServiceResult<InstanceRecord> {
         let program = self.get_program_store(req.program_id.as_str())?;
         let initial_state = self
             .files
-            .load_json_input::<StateFile>(&req.state, "state")?;
+            .load_json_input::<StateSnapshot>(&req.state, "state")?;
         let normalized_state = normalize_state(&initial_state)
             .map_err(|e| ServiceError::bad_request(ErrorCode::InvalidStateCell, e.to_string()))?;
         let ts = now_ms();
@@ -135,7 +145,12 @@ impl LocalEngine {
             updated_at_ms: ts,
             version: 0,
             status: InstanceStatus::Active,
-            state_hash: hash_json("state", &normalized_state)?,
+            state_hash: normalized_state.canonical_digest().map_err(|e| {
+                ServiceError::internal(
+                    ErrorCode::InternalError,
+                    format!("failed to hash state artifact: {e}"),
+                )
+            })?,
             state: normalized_state,
         };
 
@@ -238,27 +253,20 @@ mod tests {
     use std::env;
 
     use crate::service::ErrorKind;
-    use tabula_artifact::{RunStatus, SubmitRunCommand, merge_output_state_cells};
+    use crate::service::{CreateInstanceCommand, RunStatus, SubmitRunCommand};
+    use tabula_artifact::{ExecutionStatement, StateEntry, merge_output_state_entries};
     use tabula_compiler::transfer_example_bundle;
     use tabula_core::Value;
 
     #[test]
-    fn inline_program_requires_contract_metadata() {
+    fn inline_source_program_compiles() {
         let cwd = env::current_dir().expect("cwd");
         let engine = LocalEngine::new(FileAccessPolicy::new(vec![cwd]).expect("policy"));
 
-        let resolved = engine
-            .resolve_program_input(&InputRef::inline(ProgramInline::program(ProgramArtifact {
-                table_schemas: vec![],
-                tx_types: vec![],
-                contract_metadata: None,
-            })))
-            .expect("program input should resolve");
-
-        let result = register_resolved_program(&resolved);
-        assert!(result.is_err(), "missing metadata must fail closed");
-        let err = result.expect_err("error");
-        assert!(format!("{err}").contains("missing contract_metadata"));
+        let result = engine.compile_program_input(&InputRef::inline(ProgramInline::source(
+            "table a { v: u64 }\n tx t() {}",
+        )));
+        assert!(result.is_ok(), "inline source should compile");
     }
 
     #[test]
@@ -274,19 +282,21 @@ mod tests {
 
     #[test]
     fn statement_hash_is_stable() {
-        let c1 = crate::service::receipt::StatementComponents {
+        let c1 = ExecutionStatement {
             program_hash: "a".to_string(),
             state_hash: "b".to_string(),
             batch_hash: "c".to_string(),
             state_after_hash: "d".to_string(),
             metadata_hash: "e".to_string(),
+            old_state_root: vec!["01".to_string()],
+            new_state_root: vec!["02".to_string()],
         };
         let c2 = c1.clone();
         let h1 = c1.statement_hash();
         let h2 = c2.statement_hash();
         assert_eq!(h1, h2);
 
-        let c3 = crate::service::receipt::StatementComponents {
+        let c3 = ExecutionStatement {
             metadata_hash: "x".to_string(),
             ..c2
         };
@@ -294,17 +304,15 @@ mod tests {
     }
 
     #[test]
-    fn merge_output_state_cells_deduplicates_initial_cells() {
-        use tabula_artifact::StateCell;
-
+    fn merge_output_state_entries_deduplicates_initial_entries() {
         let initial = vec![
-            StateCell {
+            StateEntry {
                 table: 0,
                 row: 1,
                 col: 2,
                 value: Some(Value::U64(10)),
             },
-            StateCell {
+            StateEntry {
                 table: 0,
                 row: 1,
                 col: 2,
@@ -312,7 +320,7 @@ mod tests {
             },
         ];
 
-        let merged = merge_output_state_cells(&initial, &[]);
+        let merged = merge_output_state_entries(&initial, &[]);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].value, Some(Value::U64(20)));
     }
@@ -331,7 +339,7 @@ mod tests {
             .expect("register program");
 
         let created = engine
-            .create_instance(tabula_artifact::CreateInstanceCommand {
+            .create_instance(CreateInstanceCommand {
                 program_id: registered.program_id.clone(),
                 state: InputRef::inline(bundle.state.clone()),
                 label: Some("demo".to_string()),
@@ -397,7 +405,7 @@ mod tests {
             })
             .expect("register program");
         let created = engine
-            .create_instance(tabula_artifact::CreateInstanceCommand {
+            .create_instance(CreateInstanceCommand {
                 program_id: registered.program_id,
                 state: InputRef::inline(bundle.state),
                 label: None,
@@ -432,7 +440,7 @@ mod tests {
             })
             .expect("register program");
         let created = engine
-            .create_instance(tabula_artifact::CreateInstanceCommand {
+            .create_instance(CreateInstanceCommand {
                 program_id: registered.program_id,
                 state: InputRef::inline(bundle.state),
                 label: None,
@@ -458,7 +466,7 @@ mod tests {
         assert_eq!(verified.run.proof_verified, Some(true));
     }
 
-    fn value_at_row(state: &StateFile, row: u64) -> Option<Value> {
+    fn value_at_row(state: &StateSnapshot, row: u64) -> Option<Value> {
         state
             .cells
             .iter()

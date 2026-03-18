@@ -289,6 +289,8 @@ pub fn make_property_read(
     table: u32,
     col: u16,
     query_type: u8,
+    query_arg0: u64,
+    query_arg1: u64,
     result_val: Vec<KoalaBear>,
     result_key: Vec<KoalaBear>,
     is_null: bool,
@@ -296,7 +298,14 @@ pub fn make_property_read(
     InstructionBuilder::new(Opcode::PropertyRead)
         .written_slots(vec![val_slot, key_slot, null_slot])
         .access(table, col, 0)
-        .property_read(query_type, result_val.clone(), result_key.clone(), is_null)
+        .property_read(
+            query_type,
+            query_arg0,
+            query_arg1,
+            result_val.clone(),
+            result_key.clone(),
+            is_null,
+        )
         .write_fe(val_slot, result_val, false)
         .write_fe(key_slot, result_key, false)
         .write_fe(null_slot, bool_val(is_null), false)

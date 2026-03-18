@@ -5,8 +5,8 @@ use tabula_contract::{
     BINDING_VERSION_V1, BindingRegistry, BindingStatus, C10_READ_ACCESS_SCHEMA_VERSION_V2,
     C11_WRITE_ACCESS_SCHEMA_VERSION_V2, CONTRACT_RULES_V1, CONTRACT_SCHEMA_VERSION_V1,
     ContractCompatibilityPolicy, ContractMetadataEnvelope, ContractRuleCode,
-    ContractValidationError, PUBLIC_INPUT_FIELDS, PublicInputField, access_bus_field_names,
-    binding_registry_v1,
+    ContractValidationError, PUBLIC_INPUT_FIELDS, PublicInputField, STATEMENT_SCHEMA_VERSION_V1,
+    VERIFIER_PROFILE_VERSION_V1, access_bus_field_names, binding_registry_v1,
 };
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -24,6 +24,8 @@ fn metadata_envelope_canonical_snapshot() {
         profile_hash: [0x11; 32],
         contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
         binding_version: BINDING_VERSION_V1,
+        statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
+        verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
         semantic_hash_stub: Some([0x22; 32]),
     };
 
@@ -32,11 +34,11 @@ fn metadata_envelope_canonical_snapshot() {
 
     assert_eq!(
         to_hex(&canonical),
-        "54434d450111111111111111111111111111111111111111111111111111111111111111110000000100000001012222222222222222222222222222222222222222222222222222222222222222"
+        "54434d4502111111111111111111111111111111111111111111111111111111111111111100000001000000010000000100000001012222222222222222222222222222222222222222222222222222222222222222"
     );
     assert_eq!(
         to_hex(&canonical_hash),
-        "499d02e91beb8160b42407dbcb8415d8175c4542dafab903812eac614e9cbb11"
+        "da2d64ac8df9c3eb01aa45c0794c97b24123b7dec136a25ff444f569456d36a5"
     );
 }
 
@@ -46,12 +48,16 @@ fn metadata_validation_is_fail_closed_for_unknown_schema_version() {
         expected_profile_hash: [0x11; 32],
         expected_contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
         expected_binding_version: BINDING_VERSION_V1,
+        expected_statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
+        expected_verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
         expected_semantic_hash_stub: None,
     };
     let envelope = ContractMetadataEnvelope {
         profile_hash: [0x11; 32],
         contract_schema_version: CONTRACT_SCHEMA_VERSION_V1 + 1,
         binding_version: BINDING_VERSION_V1,
+        statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
+        verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
         semantic_hash_stub: None,
     };
 
@@ -68,17 +74,52 @@ fn metadata_validation_is_fail_closed_for_unknown_schema_version() {
 }
 
 #[test]
+fn metadata_validation_is_fail_closed_for_unknown_binding_version() {
+    let policy = ContractCompatibilityPolicy {
+        expected_profile_hash: [0x11; 32],
+        expected_contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
+        expected_binding_version: BINDING_VERSION_V1,
+        expected_statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
+        expected_verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
+        expected_semantic_hash_stub: None,
+    };
+    let envelope = ContractMetadataEnvelope {
+        profile_hash: [0x11; 32],
+        contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
+        binding_version: BINDING_VERSION_V1 + 1,
+        statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
+        verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
+        semantic_hash_stub: None,
+    };
+
+    let err = policy
+        .validate(&envelope)
+        .expect_err("unknown binding version must hard-fail");
+    assert_eq!(
+        err,
+        ContractValidationError::UnknownBindingVersion {
+            got: BINDING_VERSION_V1 + 1,
+        }
+    );
+    assert_eq!(err.code(), "unknown_binding_version");
+}
+
+#[test]
 fn metadata_validation_is_fail_closed_for_profile_mismatch() {
     let policy = ContractCompatibilityPolicy {
         expected_profile_hash: [0x11; 32],
         expected_contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
         expected_binding_version: BINDING_VERSION_V1,
+        expected_statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
+        expected_verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
         expected_semantic_hash_stub: Some([0x33; 32]),
     };
     let envelope = ContractMetadataEnvelope {
         profile_hash: [0x22; 32],
         contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
         binding_version: BINDING_VERSION_V1,
+        statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
+        verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
         semantic_hash_stub: Some([0x33; 32]),
     };
 
@@ -87,6 +128,68 @@ fn metadata_validation_is_fail_closed_for_profile_mismatch() {
         .expect_err("profile mismatch must hard-fail");
     assert_eq!(err, ContractValidationError::ProfileMismatch);
     assert_eq!(err.code(), "profile_mismatch");
+}
+
+#[test]
+fn metadata_validation_is_fail_closed_for_unknown_statement_schema_version() {
+    let policy = ContractCompatibilityPolicy {
+        expected_profile_hash: [0x11; 32],
+        expected_contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
+        expected_binding_version: BINDING_VERSION_V1,
+        expected_statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
+        expected_verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
+        expected_semantic_hash_stub: None,
+    };
+    let envelope = ContractMetadataEnvelope {
+        profile_hash: [0x11; 32],
+        contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
+        binding_version: BINDING_VERSION_V1,
+        statement_schema_version: STATEMENT_SCHEMA_VERSION_V1 + 1,
+        verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
+        semantic_hash_stub: None,
+    };
+
+    let err = policy
+        .validate(&envelope)
+        .expect_err("unknown statement schema version must hard-fail");
+    assert_eq!(
+        err,
+        ContractValidationError::UnknownStatementSchemaVersion {
+            got: STATEMENT_SCHEMA_VERSION_V1 + 1,
+        }
+    );
+    assert_eq!(err.code(), "unknown_statement_schema_version");
+}
+
+#[test]
+fn metadata_validation_is_fail_closed_for_unknown_verifier_profile_version() {
+    let policy = ContractCompatibilityPolicy {
+        expected_profile_hash: [0x11; 32],
+        expected_contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
+        expected_binding_version: BINDING_VERSION_V1,
+        expected_statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
+        expected_verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
+        expected_semantic_hash_stub: None,
+    };
+    let envelope = ContractMetadataEnvelope {
+        profile_hash: [0x11; 32],
+        contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
+        binding_version: BINDING_VERSION_V1,
+        statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
+        verifier_profile_version: VERIFIER_PROFILE_VERSION_V1 + 1,
+        semantic_hash_stub: None,
+    };
+
+    let err = policy
+        .validate(&envelope)
+        .expect_err("unknown verifier profile version must hard-fail");
+    assert_eq!(
+        err,
+        ContractValidationError::UnknownVerifierProfileVersion {
+            got: VERIFIER_PROFILE_VERSION_V1 + 1,
+        }
+    );
+    assert_eq!(err.code(), "unknown_verifier_profile_version");
 }
 
 #[test]

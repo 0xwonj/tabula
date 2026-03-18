@@ -254,6 +254,8 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
             is_empty_col: false,
             precompile_id: None,
             property_query_type: None,
+            property_query_arg0: vec![],
+            property_query_arg1: vec![],
             property_result_val: vec![],
             property_result_key: vec![],
             property_result_is_null: false,

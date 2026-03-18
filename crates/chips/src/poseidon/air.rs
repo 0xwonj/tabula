@@ -23,6 +23,8 @@ use tabula_stark::air::interaction::{AirInteraction, core_buses};
 use super::columns::{PoseidonCols, PoseidonPreprocessedCols, poseidon_width};
 use super::constants::WIDTH;
 
+type RoundConstantPrepData<T> = ([T; WIDTH], T, T, T);
+
 /// The Poseidon2 AIR chip.
 #[derive(Debug, Clone, Copy)]
 pub struct PoseidonChip;
@@ -41,15 +43,15 @@ impl<AB: InteractionAirBuilder> Air<AB> for PoseidonChip {
         let local: &PoseidonCols<AB::Var> = borrow_cols(local_row);
         let next: &PoseidonCols<AB::Var> = borrow_cols(next_row);
 
-        let is_real: AB::Expr = local.is_real.clone().into();
-        let is_full: AB::Expr = local.is_full_round.clone().into();
+        let is_real: AB::Expr = local.is_real.into();
+        let is_full: AB::Expr = local.is_full_round.into();
         let not_full: AB::Expr = AB::Expr::ONE - is_full.clone();
-        let both_real: AB::Expr = is_real.clone() * next.is_real.clone().into();
+        let both_real: AB::Expr = is_real.clone() * next.is_real.into();
 
-        let not_last: AB::Expr = AB::Expr::ONE - local.is_last_round.clone().into();
+        let not_last: AB::Expr = AB::Expr::ONE - local.is_last_round.into();
 
         constrain_booleans(builder, local);
-        constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
+        constrain_is_real_prefix(builder, local.is_real, next.is_real);
         constrain_sbox_element0(builder, local, is_real.clone());
         constrain_sbox_full_round(builder, local, is_real.clone(), is_full.clone());
         // Linear layer transitions: NOT applied to last round (row 27 → next permutation or padding).
@@ -70,9 +72,9 @@ impl<AB: InteractionAirBuilder> Air<AB> for PoseidonChip {
 
 /// 1. Boolean constraints.
 fn constrain_booleans<AB: AirBuilder>(builder: &mut AB, local: &PoseidonCols<AB::Var>) {
-    builder.assert_bool(local.is_full_round.clone());
-    builder.assert_bool(local.is_first_round.clone());
-    builder.assert_bool(local.is_last_round.clone());
+    builder.assert_bool(local.is_full_round);
+    builder.assert_bool(local.is_first_round);
+    builder.assert_bool(local.is_last_round);
 }
 
 /// 3a. S-box decomposition for element 0 (always active when is_real).
@@ -85,9 +87,9 @@ fn constrain_sbox_element0<AB: AirBuilder>(
     local: &PoseidonCols<AB::Var>,
     is_real: AB::Expr,
 ) {
-    let y: AB::Expr = local.state[0].clone().into() + local.rc[0].clone().into();
-    let y2: AB::Expr = local.sbox_y2[0].clone().into();
-    let y3: AB::Expr = local.sbox_y3[0].clone().into();
+    let y: AB::Expr = local.state[0].into() + local.rc[0].into();
+    let y2: AB::Expr = local.sbox_y2[0].into();
+    let y3: AB::Expr = local.sbox_y3[0].into();
 
     // sbox_y2[0] = y^2
     builder
@@ -108,9 +110,9 @@ fn constrain_sbox_full_round<AB: AirBuilder>(
     let gate: AB::Expr = is_real * is_full;
 
     for i in 1..WIDTH {
-        let y: AB::Expr = local.state[i].clone().into() + local.rc[i].clone().into();
-        let y2: AB::Expr = local.sbox_y2[i].clone().into();
-        let y3: AB::Expr = local.sbox_y3[i].clone().into();
+        let y: AB::Expr = local.state[i].into() + local.rc[i].into();
+        let y2: AB::Expr = local.sbox_y2[i].into();
+        let y3: AB::Expr = local.sbox_y3[i].into();
 
         // sbox_y2[i] = y^2
         builder
@@ -136,7 +138,7 @@ fn constrain_linear_layer_full<AB: AirBuilder>(
     gate: AB::Expr,
 ) {
     // sbox_out[i] = sbox_y3[i] = y^3 (degree-1 in witness columns)
-    let sbox_out: [AB::Expr; WIDTH] = core::array::from_fn(|i| local.sbox_y3[i].clone().into());
+    let sbox_out: [AB::Expr; WIDTH] = core::array::from_fn(|i| local.sbox_y3[i].into());
 
     // Apply external linear layer (MDS) to get expected next state
     let expected = external_linear_exprs::<AB>(sbox_out);
@@ -145,7 +147,7 @@ fn constrain_linear_layer_full<AB: AirBuilder>(
         builder
             .when_transition()
             .when(gate.clone())
-            .assert_zero(next.state[i].clone().into() - exp.clone());
+            .assert_zero(next.state[i].into() - exp.clone());
     }
 }
 
@@ -163,11 +165,11 @@ fn constrain_linear_layer_partial<AB: AirBuilder>(
     gate: AB::Expr,
 ) {
     // Element 0: full S-box (y^3)
-    let sbox_out_0: AB::Expr = local.sbox_y3[0].clone().into();
+    let sbox_out_0: AB::Expr = local.sbox_y3[0].into();
 
     // Elements 1..15: identity S-box (pass through state + rc)
     let mut sbox_out: [AB::Expr; WIDTH] =
-        core::array::from_fn(|i| local.state[i].clone().into() + local.rc[i].clone().into());
+        core::array::from_fn(|i| local.state[i].into() + local.rc[i].into());
     sbox_out[0] = sbox_out_0;
 
     // Apply internal linear layer
@@ -178,7 +180,7 @@ fn constrain_linear_layer_partial<AB: AirBuilder>(
         builder
             .when_transition()
             .when(gate.clone())
-            .assert_zero(next.state[i].clone().into() - exp.clone());
+            .assert_zero(next.state[i].into() - exp.clone());
     }
 }
 
@@ -189,28 +191,26 @@ fn constrain_round_control<AB: AirBuilder>(
     next: &PoseidonCols<AB::Var>,
     both_real: AB::Expr,
 ) {
-    let is_last: AB::Expr = local.is_last_round.clone().into();
+    let is_last: AB::Expr = local.is_last_round.into();
     let not_last: AB::Expr = AB::Expr::ONE - is_last.clone();
 
     // Counter increment: when both real and NOT last round, counter increments by 1
     builder.when_transition().assert_zero(
         both_real.clone()
             * not_last.clone()
-            * (next.round_ctr.clone().into() - local.round_ctr.clone().into() - AB::Expr::ONE),
+            * (next.round_ctr.into() - local.round_ctr.into() - AB::Expr::ONE),
     );
 
     // After last round: next must be first round (new permutation) or not real
     // is_last * next.is_real * (1 - next.is_first_round) = 0
-    builder.when_transition().assert_zero(
-        is_last
-            * next.is_real.clone().into()
-            * (AB::Expr::ONE - next.is_first_round.clone().into()),
-    );
+    builder
+        .when_transition()
+        .assert_zero(is_last * next.is_real.into() * (AB::Expr::ONE - next.is_first_round.into()));
 
     // After last round, if both real: next.round_ctr = 0
-    builder.when_transition().assert_zero(
-        both_real * local.is_last_round.clone().into() * next.round_ctr.clone().into(),
-    );
+    builder
+        .when_transition()
+        .assert_zero(both_real * local.is_last_round.into() * next.round_ctr.into());
 }
 
 // ── Linear layer expression helpers ─────────────────────────────────────────
@@ -328,41 +328,38 @@ fn constrain_perm_output<AB: AirBuilder>(
     is_real: AB::Expr,
     both_real: AB::Expr,
 ) {
-    let not_last: AB::Expr = AB::Expr::ONE - local.is_last_round.clone().into();
+    let not_last: AB::Expr = AB::Expr::ONE - local.is_last_round.into();
 
     // 1-3. Carry: perm_input and perm_output constant within a permutation.
     let carry_gate: AB::Expr = both_real * not_last;
     for i in 0..WIDTH {
-        let diff: AB::Expr = next.perm_input[i].clone().into() - local.perm_input[i].clone().into();
+        let diff: AB::Expr = next.perm_input[i].into() - local.perm_input[i].into();
         builder
             .when_transition()
             .assert_zero(carry_gate.clone() * diff);
     }
     for j in 0..8 {
-        let diff: AB::Expr =
-            next.perm_output[j].clone().into() - local.perm_output[j].clone().into();
+        let diff: AB::Expr = next.perm_output[j].into() - local.perm_output[j].into();
         builder
             .when_transition()
             .assert_zero(carry_gate.clone() * diff);
     }
 
     // 2. First-round verification: state = external_linear_layer(perm_input).
-    let first_gate: AB::Expr = is_real.clone() * local.is_first_round.clone().into();
-    let perm_input_exprs: [AB::Expr; WIDTH] =
-        core::array::from_fn(|i| local.perm_input[i].clone().into());
+    let first_gate: AB::Expr = is_real.clone() * local.is_first_round.into();
+    let perm_input_exprs: [AB::Expr; WIDTH] = core::array::from_fn(|i| local.perm_input[i].into());
     let expected_state = external_linear_exprs::<AB>(perm_input_exprs);
     for (i, exp) in expected_state.iter().enumerate() {
-        builder.assert_zero(first_gate.clone() * (local.state[i].clone().into() - exp.clone()));
+        builder.assert_zero(first_gate.clone() * (local.state[i].into() - exp.clone()));
     }
 
     // 4. Last-round verification: perm_output = external_linear_layer(sbox_out)[0..8].
-    let sbox_out: [AB::Expr; WIDTH] = core::array::from_fn(|i| local.sbox_y3[i].clone().into());
+    let sbox_out: [AB::Expr; WIDTH] = core::array::from_fn(|i| local.sbox_y3[i].into());
     let expected_output = external_linear_exprs::<AB>(sbox_out);
 
-    let verify_gate: AB::Expr = is_real * local.is_last_round.clone().into();
+    let verify_gate: AB::Expr = is_real * local.is_last_round.into();
     for (j, exp) in expected_output.iter().enumerate().take(8) {
-        builder
-            .assert_zero(verify_gate.clone() * (local.perm_output[j].clone().into() - exp.clone()));
+        builder.assert_zero(verify_gate.clone() * (local.perm_output[j].into() - exp.clone()));
     }
 }
 
@@ -386,7 +383,7 @@ fn constrain_round_constants<AB: InteractionAirBuilder>(
 ) {
     // Extract preprocessed values before mutable builder calls (borrow splitting).
     // Var: Copy, so we can copy out the fields we need.
-    let prep_data: Option<([AB::Var; WIDTH], AB::Var, AB::Var, AB::Var)> = {
+    let prep_data: Option<RoundConstantPrepData<AB::Var>> = {
         let prep = builder.preprocessed();
         let prep_row = prep.current_slice();
         if prep_row.is_empty() {
@@ -398,16 +395,12 @@ fn constrain_round_constants<AB: InteractionAirBuilder>(
     };
 
     if let Some((prep_rc, prep_is_full, prep_is_first, prep_is_last)) = prep_data {
-        for i in 0..WIDTH {
-            builder.assert_zero(is_real.clone() * (local.rc[i].clone().into() - prep_rc[i].into()));
+        for (i, prep_rc_value) in prep_rc.into_iter().enumerate() {
+            builder.assert_zero(is_real.clone() * (local.rc[i].into() - prep_rc_value.into()));
         }
-        builder.assert_zero(
-            is_real.clone() * (local.is_full_round.clone().into() - prep_is_full.into()),
-        );
-        builder.assert_zero(
-            is_real.clone() * (local.is_first_round.clone().into() - prep_is_first.into()),
-        );
-        builder.assert_zero(is_real * (local.is_last_round.clone().into() - prep_is_last.into()));
+        builder.assert_zero(is_real.clone() * (local.is_full_round.into() - prep_is_full.into()));
+        builder.assert_zero(is_real.clone() * (local.is_first_round.into() - prep_is_first.into()));
+        builder.assert_zero(is_real * (local.is_last_round.into() - prep_is_last.into()));
     }
 }
 
@@ -424,14 +417,14 @@ fn receive_poseidon_permutation<AB: InteractionAirBuilder>(
     builder: &mut AB,
     local: &PoseidonCols<AB::Var>,
 ) {
-    let multiplicity: AB::Expr = local.is_real.clone().into() * local.is_first_round.clone().into();
+    let multiplicity: AB::Expr = local.is_real.into() * local.is_first_round.into();
 
     let mut values: Vec<AB::Expr> = Vec::with_capacity(24);
     for i in 0..WIDTH {
-        values.push(local.perm_input[i].clone().into());
+        values.push(local.perm_input[i].into());
     }
     for j in 0..8 {
-        values.push(local.perm_output[j].clone().into());
+        values.push(local.perm_output[j].into());
     }
 
     builder.receive(AirInteraction {

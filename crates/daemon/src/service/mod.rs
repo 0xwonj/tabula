@@ -9,14 +9,14 @@ pub mod io;
 #[cfg(feature = "stark")]
 pub(crate) mod prove;
 mod receipt;
+mod types;
 
-// Artifact domain types (direct re-export for downstream use)
-pub use tabula_artifact::{
-    CreateInstanceCommand, ExecutionReceipt, ExecutionSummary, GetInstanceCommand,
-    GetProgramCommand, GetRunCommand, InputRef, InstanceId, InstanceRecord, InstanceStatus,
-    ListInstancesCommand, ListProgramsCommand, ListRunsCommand, ProgramId, ProgramInline,
-    ProgramRecord, RegisterProgramCommand, RunId, RunRecord, RunStatus, StarkProofSummary,
-    SubmitRunCommand, VerifyOutcome, VerifyRunCommand,
+pub use types::{
+    BatchInputRef, ChipSummary, CreateInstanceCommand, ExecutionReceipt, ExecutionSummary,
+    GetInstanceCommand, GetProgramCommand, GetRunCommand, InputRef, InstanceId, InstanceRecord,
+    InstanceStatus, ListInstancesCommand, ListProgramsCommand, ListRunsCommand, ProgramId,
+    ProgramInline, ProgramInputRef, ProgramRecord, RegisterProgramCommand, RunId, RunRecord,
+    RunStatus, StarkProofSummary, StateInputRef, SubmitRunCommand, VerifyOutcome, VerifyRunCommand,
 };
 
 // Daemon-local types

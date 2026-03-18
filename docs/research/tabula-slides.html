@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tabula Slides</title>
+    <link rel="stylesheet" href="./tabula-slides.css" />
+  </head>
+  <body>
+    <main class="deck">
+      <section class="slide-frame" id="slide-1">
+        <article class="slide">
+          <div class="slide__inner">
+            <div class="slide__meta">
+              <span class="slide__kicker">Background</span>
+              <span class="slide__index">01 / 01</span>
+            </div>
+
+            <header class="slide-header">
+              <h1 class="slide-header__title">Tabula - Background</h1>
+              <p class="slide-header__subtitle">
+                Tabula sits between hand-written circuits and generic zkVMs.
+                The motivation starts with the strengths and limits of both.
+              </p>
+            </header>
+
+            <section class="ppt-grid">
+              <article class="ppt-card">
+                <p class="ppt-card__eyebrow">Option 1</p>
+                <h2>Custom Circuits</h2>
+                <p class="ppt-card__summary">
+                  Custom circuits can be extremely efficient because the proof
+                  system is shaped exactly around the application logic.
+                </p>
+                <ul class="ppt-list">
+                  <li>Strong specialization and tight control over proof cost</li>
+                  <li>Application semantics remain explicit inside the circuit</li>
+                  <li>But every feature change becomes a proving engineering task</li>
+                  <li>Reuse across applications is limited</li>
+                </ul>
+              </article>
+
+              <article class="ppt-card ppt-card--accent">
+                <p class="ppt-card__eyebrow">Option 2</p>
+                <h2>zkVMs</h2>
+                <p class="ppt-card__summary">
+                  zkVMs provide a much better software stack, but they prove
+                  machine execution before application meaning.
+                </p>
+                <ul class="ppt-list">
+                  <li>Reusable toolchains and familiar software workflows</li>
+                  <li>No need to build a new circuit for every application</li>
+                  <li>Application structure is lowered into ISA-level execution</li>
+                  <li>Proof cost pays for machine behavior that many stateful apps do not actually need</li>
+                </ul>
+              </article>
+            </section>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

@@ -32,16 +32,24 @@ pub struct AllTraceInputs<'a> {
     pub smt_table_paths: &'a [SmtTablePathWitness],
 }
 
-/// High-level trace-builder facade for one witness context.
+/// Builtin trace-builder facade for one witness context.
 #[derive(Clone, Copy)]
-pub struct TraceBuilder<'a, H, const W: usize>
+pub struct BuiltinTraceBuilder<'a, H, const W: usize>
 where
     H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     witness: &'a BatchWitness<H>,
 }
 
-impl<'a, H, const W: usize> TraceBuilder<'a, H, W>
+/// Builtin witness-store output plus per-column property-read records.
+pub struct BuiltinWitnessInputs {
+    /// Shared execution/root witness store.
+    pub store: WitnessStore,
+    /// Property reads grouped per `(table, col)` for runtime-owned proof-input assembly.
+    pub property_reads: BTreeMap<(TableId, ColId), Vec<PropertyReadRecord>>,
+}
+
+impl<'a, H, const W: usize> BuiltinTraceBuilder<'a, H, W>
 where
     H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
@@ -58,7 +66,7 @@ where
     #[allow(clippy::too_many_arguments)]
     /// 3. Builds SMT paths from witness metadata.
     /// 4. Validates SMT path shapes.
-    /// 5. Populates a [`WitnessStore`] with all chip inputs.
+    /// 5. Populates builtin witness artifacts for runtime trace assembly.
     pub fn prepare_witness_store(
         &self,
         program: &Program,
@@ -67,7 +75,7 @@ where
         schemas: &BTreeMap<TableId, TableSchema>,
         static_tables: &dyn StaticTableProvider,
         hasher: H,
-    ) -> Result<WitnessStore, TabulaError>
+    ) -> Result<BuiltinWitnessInputs, TabulaError>
     where
         H: Clone,
     {
@@ -96,7 +104,10 @@ where
     /// Lower-level entry point for callers that already have instruction records,
     /// static table rows, and SMT paths (e.g. chip-level tests).
     /// For the full IR-based pipeline, use [`prepare_witness_store`](Self::prepare_witness_store).
-    pub fn populate_store(&self, inputs: AllTraceInputs<'_>) -> Result<WitnessStore, TabulaError> {
+    pub fn populate_store(
+        &self,
+        inputs: AllTraceInputs<'_>,
+    ) -> Result<BuiltinWitnessInputs, TabulaError> {
         let statement = super::smt::smt_table_public_statement(self.witness);
         let smt_table_pvs = statement.to_field_elements();
 
@@ -118,17 +129,20 @@ where
         );
         store.put(witness_labels::SMT_TABLE_PVS, smt_table_pvs);
 
-        // PropertyRead records grouped by (table, col) for column-tier verifiers.
+        // PropertyRead records stay outside the shared store so runtime-owned
+        // proof-input builders do not depend on a magic cross-crate label.
         let property_records = extract_property_read_records(inputs.execution_records);
-        store.put(PROPERTY_READ_ALL_LABEL, property_records);
 
-        // Phase 1 (Memory) inputs are handled per-column via shard witness
-        // preparation (prepare_shard_witness). No global memory chip inputs.
+        // Phase 1 (Memory) inputs are handled per-column by prepared column
+        // schemes. No global memory chip inputs live in the shared store.
         //
         // Phase 2 (Dependent) inputs are collected by the orchestrator
         // via BusConsumer dispatch between Phase 1 and Phase 2.
 
-        Ok(store)
+        Ok(BuiltinWitnessInputs {
+            store,
+            property_reads: property_records,
+        })
     }
 
     /// Shared input preparation for IR-based pipelines.
@@ -188,12 +202,6 @@ struct PreparedInputs {
     smt_table_paths: Vec<SmtTablePathWitness>,
 }
 
-/// WitnessStore label for the global PropertyRead records map.
-///
-/// Contains `BTreeMap<(TableId, ColId), Vec<PropertyReadRecord>>` that gets
-/// split per-column during partitioning.
-pub(crate) const PROPERTY_READ_ALL_LABEL: &str = "property_read_all";
-
 /// Extract PropertyRead records from instruction records, grouped by (table, col).
 fn extract_property_read_records(
     records: &[InstructionRecord],
@@ -210,6 +218,8 @@ fn extract_property_read_records(
             .or_default()
             .push(PropertyReadRecord {
                 query_type: rec.property_query_type.unwrap_or(0),
+                query_arg0: rec.property_query_arg0.clone(),
+                query_arg1: rec.property_query_arg1.clone(),
                 result_val: rec.property_result_val.clone(),
                 result_key: rec.property_result_key.clone(),
                 is_null: rec.property_result_is_null,

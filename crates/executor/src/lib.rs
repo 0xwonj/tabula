@@ -28,4 +28,4 @@ pub use consistency::check_consistency_status;
 pub use interpreter::execute;
 pub use overlay::{Overlay, OverlayResult};
 pub use precompile::{PrecompileHandler, PrecompileRegistry};
-pub use property::{CommittedStateProvider, PropertyOpeningRegistry, PropertyOpeningResolver};
+pub use property::{CommittedStateProvider, PropertyQueryHandler, PropertyQueryRegistry};

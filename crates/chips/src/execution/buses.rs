@@ -19,26 +19,25 @@ pub(super) fn send_read_access<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
 ) {
-    let mult: AB::Expr = local.is_real.clone().into()
-        * local.op_read.clone().into()
-        * (AB::Expr::ONE - local.is_empty_col.clone().into());
+    let mult: AB::Expr =
+        local.is_real.into() * local.op_read.into() * (AB::Expr::ONE - local.is_empty_col.into());
 
     let value = local
         .access_val
         .iter()
-        .cloned()
+        .copied()
         .map(Into::into)
         .collect::<Vec<AB::Expr>>();
     builder.send_read_access(
         AccessTupleExpr {
-            table_id: local.access_t.clone().into(),
-            col_id: local.access_c.clone().into(),
-            key_limb0: local.access_r.limbs.limb0.clone().into(),
-            key_limb1: local.access_r.limbs.limb1.clone().into(),
-            key_limb2: local.access_r.limbs.limb2.clone().into(),
-            tx_index: local.tx_index.clone().into(),
+            table_id: local.access_t.into(),
+            col_id: local.access_c.into(),
+            key_limb0: local.access_r.limbs.limb0.into(),
+            key_limb1: local.access_r.limbs.limb1.into(),
+            key_limb2: local.access_r.limbs.limb2.into(),
+            tx_index: local.tx_index.into(),
             value,
-            is_null: local.access_is_null.clone().into(),
+            is_null: local.access_is_null.into(),
         },
         mult,
     );
@@ -52,24 +51,24 @@ pub(super) fn send_write_access<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
 ) {
-    let mult: AB::Expr = local.is_real.clone().into() * local.op_write.clone().into();
+    let mult: AB::Expr = local.is_real.into() * local.op_write.into();
 
     let value = local
         .access_val
         .iter()
-        .cloned()
+        .copied()
         .map(Into::into)
         .collect::<Vec<AB::Expr>>();
     builder.send_write_access(
         AccessTupleExpr {
-            table_id: local.access_t.clone().into(),
-            col_id: local.access_c.clone().into(),
-            key_limb0: local.access_r.limbs.limb0.clone().into(),
-            key_limb1: local.access_r.limbs.limb1.clone().into(),
-            key_limb2: local.access_r.limbs.limb2.clone().into(),
-            tx_index: local.tx_index.clone().into(),
+            table_id: local.access_t.into(),
+            col_id: local.access_c.into(),
+            key_limb0: local.access_r.limbs.limb0.into(),
+            key_limb1: local.access_r.limbs.limb1.into(),
+            key_limb2: local.access_r.limbs.limb2.into(),
+            tx_index: local.tx_index.into(),
             value,
-            is_null: local.access_is_null.clone().into(),
+            is_null: local.access_is_null.into(),
         },
         mult,
     );
@@ -83,10 +82,10 @@ pub(super) fn send_empty_col_read<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
 ) {
-    let mult: AB::Expr = local.is_real.clone().into() * local.is_empty_col.clone().into();
+    let mult: AB::Expr = local.is_real.into() * local.is_empty_col.into();
 
     builder.send(AirInteraction {
-        values: vec![local.access_t.clone().into(), local.access_c.clone().into()],
+        values: vec![local.access_t.into(), local.access_c.into()],
         multiplicity: mult,
         bus: core_buses::EMPTY_COL_READ,
     });
@@ -97,7 +96,7 @@ pub(super) fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
 ) {
-    let mult: AB::Expr = local.is_real.clone().into() * local.is_access.clone().into();
+    let mult: AB::Expr = local.is_real.into() * local.is_access.into();
 
     let mut send_rc = |val: AB::Expr| {
         builder.send(AirInteraction {
@@ -108,15 +107,14 @@ pub(super) fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
     };
 
     // access_r limbs (limb2 proven by Limb2Bits, no RC send needed)
-    send_rc(local.access_r.l0_halves.lo.clone().into());
-    send_rc(local.access_r.l0_halves.hi.clone().into());
-    send_rc(local.access_r.l1_halves.lo.clone().into());
-    send_rc(local.access_r.l1_halves.hi.clone().into());
+    send_rc(local.access_r.l0_halves.lo.into());
+    send_rc(local.access_r.l0_halves.hi.into());
+    send_rc(local.access_r.l1_halves.lo.into());
+    send_rc(local.access_r.l1_halves.hi.into());
 
     // Cmp inequality diff limbs
-    let cmp_mult: AB::Expr = local.is_real.clone().into()
-        * local.op_cmp.clone().into()
-        * (AB::Expr::ONE - local.cmp.eq_witness.clone().into());
+    let cmp_mult: AB::Expr =
+        local.is_real.into() * local.op_cmp.into() * (AB::Expr::ONE - local.cmp.eq_witness.into());
     let mut send_cmp_rc = |val: AB::Expr| {
         builder.send(AirInteraction {
             values: vec![val],
@@ -124,16 +122,15 @@ pub(super) fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
             bus: core_buses::RANGE_CHECK,
         });
     };
-    send_cmp_rc(local.cmp.ineq_diff0_halves.lo.clone().into());
-    send_cmp_rc(local.cmp.ineq_diff0_halves.hi.clone().into());
-    send_cmp_rc(local.cmp.ineq_diff1_halves.lo.clone().into());
-    send_cmp_rc(local.cmp.ineq_diff1_halves.hi.clone().into());
+    send_cmp_rc(local.cmp.ineq_diff0_halves.lo.into());
+    send_cmp_rc(local.cmp.ineq_diff0_halves.hi.into());
+    send_cmp_rc(local.cmp.ineq_diff1_halves.lo.into());
+    send_cmp_rc(local.cmp.ineq_diff1_halves.hi.into());
     // diff2 proven by Limb2Bits, no RC send needed
 
     // Mul carry range checks
-    let mul_mult: AB::Expr = local.is_real.clone().into()
-        * local.op_arith.clone().into()
-        * local.arith_is_mul.clone().into();
+    let mul_mult: AB::Expr =
+        local.is_real.into() * local.op_arith.into() * local.arith_is_mul.into();
     let mut send_mul_rc = |val: AB::Expr| {
         builder.send(AirInteraction {
             values: vec![val],
@@ -141,13 +138,13 @@ pub(super) fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
             bus: core_buses::RANGE_CHECK,
         });
     };
-    send_mul_rc(local.mul.c0_halves.lo.clone().into());
-    send_mul_rc(local.mul.c0_halves.hi.clone().into());
-    send_mul_rc(local.mul.c1_lo.clone().into());
-    send_mul_rc(local.mul.c1_hi.clone().into());
+    send_mul_rc(local.mul.c0_halves.lo.into());
+    send_mul_rc(local.mul.c0_halves.hi.into());
+    send_mul_rc(local.mul.c1_lo.into());
+    send_mul_rc(local.mul.c1_hi.into());
 
     // DivMod range checks
-    let divmod_mult: AB::Expr = local.is_real.clone().into() * local.op_divmod.clone().into();
+    let divmod_mult: AB::Expr = local.is_real.into() * local.op_divmod.into();
     let mut send_divmod_rc = |val: AB::Expr| {
         builder.send(AirInteraction {
             values: vec![val],
@@ -155,14 +152,14 @@ pub(super) fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
             bus: core_buses::RANGE_CHECK,
         });
     };
-    send_divmod_rc(local.divmod.c0_halves.lo.clone().into());
-    send_divmod_rc(local.divmod.c0_halves.hi.clone().into());
-    send_divmod_rc(local.divmod.c1_lo.clone().into());
-    send_divmod_rc(local.divmod.c1_hi.clone().into());
-    send_divmod_rc(local.divmod.rem_diff0_halves.lo.clone().into());
-    send_divmod_rc(local.divmod.rem_diff0_halves.hi.clone().into());
-    send_divmod_rc(local.divmod.rem_diff1_halves.lo.clone().into());
-    send_divmod_rc(local.divmod.rem_diff1_halves.hi.clone().into());
+    send_divmod_rc(local.divmod.c0_halves.lo.into());
+    send_divmod_rc(local.divmod.c0_halves.hi.into());
+    send_divmod_rc(local.divmod.c1_lo.into());
+    send_divmod_rc(local.divmod.c1_hi.into());
+    send_divmod_rc(local.divmod.rem_diff0_halves.lo.into());
+    send_divmod_rc(local.divmod.rem_diff0_halves.hi.into());
+    send_divmod_rc(local.divmod.rem_diff1_halves.lo.into());
+    send_divmod_rc(local.divmod.rem_diff1_halves.hi.into());
     // diff2 proven by Limb2Bits, no RC send needed
 }
 
@@ -180,15 +177,15 @@ pub(super) fn send_hash_permutation<AB: InteractionAirBuilder, const W: usize>(
     let _ = HASH_INSTRUCTION_DOMAIN_TAG;
     let _ = HASH_INSTRUCTION_INPUT_COUNT;
 
-    let multiplicity: AB::Expr = local.is_real.clone().into()
-        * (local.op_hash.clone().into() + local.op_precompile.clone().into());
+    let multiplicity: AB::Expr =
+        local.is_real.into() * (local.op_hash.into() + local.op_precompile.into());
 
     let mut values: Vec<AB::Expr> = Vec::with_capacity(24);
     for i in 0..16 {
-        values.push(local.hash_perm_input[i].clone().into());
+        values.push(local.hash_perm_input[i].into());
     }
     for i in 0..8 {
-        values.push(local.hash_perm_output[i].clone().into());
+        values.push(local.hash_perm_output[i].into());
     }
 
     builder.send(AirInteraction {
@@ -203,17 +200,17 @@ pub(super) fn send_static_table_lookup<AB: InteractionAirBuilder, const W: usize
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
 ) {
-    let multiplicity: AB::Expr = local.is_real.clone().into() * local.op_lookup.clone().into();
+    let multiplicity: AB::Expr = local.is_real.into() * local.op_lookup.into();
 
     let mut values: Vec<AB::Expr> = vec![
-        local.access_t.clone().into(),
-        local.access_c.clone().into(),
-        local.access_r.limbs.limb0.clone().into(),
-        local.access_r.limbs.limb1.clone().into(),
-        local.access_r.limbs.limb2.clone().into(),
+        local.access_t.into(),
+        local.access_c.into(),
+        local.access_r.limbs.limb0.into(),
+        local.access_r.limbs.limb1.into(),
+        local.access_r.limbs.limb2.into(),
     ];
     for i in 0..W {
-        values.push(local.access_val[i].clone().into());
+        values.push(local.access_val[i].into());
     }
 
     builder.send(AirInteraction {
@@ -225,22 +222,24 @@ pub(super) fn send_static_table_lookup<AB: InteractionAirBuilder, const W: usize
 
 /// C18 PropertyRead bus send: structural query results.
 ///
-/// Tuple: `(t, c, query_type, result_val[W], result_key[W], is_null)`.
+/// Tuple:
+/// `(t, c, query_type, query_arg0[W], query_arg1[W], result_val[W], result_key[W], is_null)`.
 /// Multiplicity: `is_real * op_property_read`.
 pub(super) fn send_property_read<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
 ) {
-    let multiplicity: AB::Expr =
-        local.is_real.clone().into() * local.op_property_read.clone().into();
+    let multiplicity: AB::Expr = local.is_real.into() * local.op_property_read.into();
 
     builder.send_property_read(
-        local.access_t.clone().into(),
-        local.access_c.clone().into(),
-        local.property_query_type.clone().into(),
+        local.access_t.into(),
+        local.access_c.into(),
+        local.property_query_type.into(),
+        &local.property_query_arg0,
+        &local.property_query_arg1,
         &local.property_result_val,
         &local.property_result_key,
-        local.property_result_is_null.clone().into(),
+        local.property_result_is_null.into(),
         multiplicity,
     );
 }
@@ -253,13 +252,13 @@ pub(super) fn send_precompile<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
 ) {
-    let multiplicity: AB::Expr = local.is_real.clone().into() * local.op_precompile.clone().into();
+    let multiplicity: AB::Expr = local.is_real.into() * local.op_precompile.into();
 
     // 9 FE: (precompile_id, hash_perm_output[0..8])
     let mut values: Vec<AB::Expr> = Vec::with_capacity(9);
-    values.push(local.precompile_id.clone().into());
+    values.push(local.precompile_id.into());
     for i in 0..8 {
-        values.push(local.hash_perm_output[i].clone().into());
+        values.push(local.hash_perm_output[i].into());
     }
 
     builder.send(AirInteraction {

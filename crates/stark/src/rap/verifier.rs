@@ -78,9 +78,10 @@ impl<'a> RapVerifierFolder<'a> {
         challenges: [EF4; 2],
         main_width: usize,
     ) -> Self {
-        let preprocessed_window = preprocessed
-            .map(|vp| RowWindow::from_two_rows(vp.top.values, vp.bottom.values))
-            .unwrap_or_else(|| RowWindow::from_two_rows(&[], &[]));
+        let preprocessed_window = preprocessed.map_or_else(
+            || RowWindow::from_two_rows(&[], &[]),
+            |vp| RowWindow::from_two_rows(vp.top.values, vp.bottom.values),
+        );
         Self {
             main_truncated,
             full_trace,

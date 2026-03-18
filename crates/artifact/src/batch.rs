@@ -1,23 +1,24 @@
-//! Batch file models and hex parsing utilities.
+//! Transaction batch models and hex parsing utilities.
 
 use serde::{Deserialize, Serialize};
 
 use tabula_core::{Transaction, TxTypeId, Value};
 
 use crate::ArtifactError;
+use crate::canonical::{bytes_to_hex, canonical_json_bytes, canonical_json_digest};
 
-/// JSON representation of a transaction batch file.
+/// Canonical transaction batch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct BatchFile {
+pub struct TransactionBatch {
     /// Transactions in execution order.
-    pub transactions: Vec<TxInput>,
+    pub transactions: Vec<TransactionInput>,
 }
 
 /// One transaction input row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct TxInput {
+pub struct TransactionInput {
     /// Transaction type id.
     pub tx_type: u32,
     /// Typed transaction params.
@@ -28,7 +29,24 @@ pub struct TxInput {
     pub nonce: u64,
 }
 
-impl TxInput {
+impl TransactionBatch {
+    /// Serialize this batch into canonical bytes.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ArtifactError> {
+        canonical_json_bytes(self)
+    }
+
+    /// Compute the canonical digest bytes for this batch.
+    pub fn canonical_digest_bytes(&self) -> Result<[u8; 32], ArtifactError> {
+        canonical_json_digest("batch", self)
+    }
+
+    /// Compute the canonical digest hex string for this batch.
+    pub fn canonical_digest(&self) -> Result<String, ArtifactError> {
+        Ok(bytes_to_hex(&self.canonical_digest_bytes()?))
+    }
+}
+
+impl TransactionInput {
     /// Convert to core transaction form.
     pub fn to_transaction(&self) -> Result<Transaction, ArtifactError> {
         let sender = parse_hex_32(&self.sender)?;
@@ -77,8 +95,8 @@ mod tests {
 
     #[test]
     fn batch_file_serde_roundtrip() {
-        let batch = BatchFile {
-            transactions: vec![TxInput {
+        let batch = TransactionBatch {
+            transactions: vec![TransactionInput {
                 tx_type: 0,
                 params: vec![Value::U64(100)],
                 sender: "01".repeat(32),
@@ -87,14 +105,14 @@ mod tests {
         };
 
         let json = serde_json::to_string(&batch).expect("serialize");
-        let back: BatchFile = serde_json::from_str(&json).expect("deserialize");
+        let back: TransactionBatch = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.transactions.len(), 1);
         assert_eq!(back.transactions[0].params[0], Value::U64(100));
     }
 
     #[test]
     fn tx_input_to_transaction_roundtrip() {
-        let tx = TxInput {
+        let tx = TransactionInput {
             tx_type: 1,
             params: vec![Value::U64(42), Value::Bool(true)],
             sender: "ab".repeat(32),
@@ -135,5 +153,22 @@ mod tests {
     fn parse_hex_32_empty() {
         let out = parse_hex_32("").expect("empty hex");
         assert_eq!(out, [0u8; 32]);
+    }
+
+    #[test]
+    fn canonical_digest_is_deterministic() {
+        let batch = TransactionBatch {
+            transactions: vec![TransactionInput {
+                tx_type: 0,
+                params: vec![Value::U64(1)],
+                sender: "01".repeat(32),
+                nonce: 7,
+            }],
+        };
+
+        assert_eq!(
+            batch.canonical_digest().expect("first"),
+            batch.canonical_digest().expect("second")
+        );
     }
 }

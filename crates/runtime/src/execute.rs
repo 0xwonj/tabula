@@ -7,8 +7,9 @@
 use std::collections::BTreeMap;
 
 use tabula_artifact::{
-    BatchFile, CompiledProgram, StateFile, merge_output_state_cells, normalize_state,
+    StateSnapshot, TransactionBatch, merge_output_state_entries, normalize_state,
 };
+use tabula_compiler::CompiledProgram;
 use tabula_core::traits::Hasher;
 use tabula_core::{
     Batch, CellKey, ExecutionConsistencyStatus, InMemoryState, InMemoryStaticTables,
@@ -16,6 +17,8 @@ use tabula_core::{
 };
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency_status;
+use tabula_executor::precompile::PrecompileRegistry;
+use tabula_executor::property::{CommittedStateProvider, PropertyQueryRegistry};
 use tabula_ir::Program;
 
 use crate::error::RuntimeError;
@@ -25,9 +28,9 @@ pub struct BatchInput<'a> {
     /// The IR program to execute.
     pub program: &'a Program,
     /// Pre-execution state.
-    pub state: &'a StateFile,
+    pub state: &'a StateSnapshot,
     /// Transaction batch.
-    pub batch: &'a BatchFile,
+    pub batch: &'a TransactionBatch,
     /// Hasher implementation (Blake3Hasher for CLI, PoseidonHasher for STARK).
     pub hasher: &'a dyn Hasher,
 }
@@ -37,20 +40,28 @@ pub struct CompiledBatchInput<'a> {
     /// Semantic artifact produced by the compiler/registration phase.
     pub compiled_program: &'a CompiledProgram,
     /// Pre-execution state.
-    pub state: &'a StateFile,
+    pub state: &'a StateSnapshot,
     /// Transaction batch.
-    pub batch: &'a BatchFile,
+    pub batch: &'a TransactionBatch,
     /// Hasher implementation (Blake3Hasher for CLI, PoseidonHasher for STARK).
     pub hasher: &'a dyn Hasher,
+}
+
+/// Optional runtime-owned resources used during execution.
+#[derive(Clone, Copy)]
+pub(crate) struct ExecutionResources<'a> {
+    pub precompiles: Option<&'a PrecompileRegistry>,
+    pub committed_state: Option<&'a dyn CommittedStateProvider>,
+    pub property_queries: &'a PropertyQueryRegistry,
 }
 
 /// Result of executing a batch through the canonical pipeline.
 #[derive(Debug, Clone)]
 pub struct ExecutedBatch {
     /// Normalized pre-state.
-    pub state_before: StateFile,
+    pub state_before: StateSnapshot,
     /// Post-execution state.
-    pub state_after: StateFile,
+    pub state_after: StateSnapshot,
     /// Per-transaction results (each carries its own access trace and emitted events).
     pub txs: Vec<TxResult>,
     /// Read set from base state.
@@ -71,8 +82,29 @@ pub struct ExecutedBatch {
 /// 5. Check consistency
 /// 6. Merge output state
 pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, RuntimeError> {
+    let property_queries = PropertyQueryRegistry::new();
+    execute_pipeline(
+        input.program,
+        input.state,
+        input.batch,
+        input.hasher,
+        ExecutionResources {
+            precompiles: None,
+            committed_state: None,
+            property_queries: &property_queries,
+        },
+    )
+}
+
+pub(crate) fn execute_pipeline(
+    program: &Program,
+    state: &StateSnapshot,
+    batch: &TransactionBatch,
+    hasher: &dyn Hasher,
+    resources: ExecutionResources<'_>,
+) -> Result<ExecutedBatch, RuntimeError> {
     // 1. Normalize state.
-    let normalized = normalize_state(input.state).map_err(RuntimeError::InvalidState)?;
+    let normalized = normalize_state(state).map_err(RuntimeError::InvalidState)?;
 
     // 2. Build in-memory state snapshot.
     let mut state_store = InMemoryState::new();
@@ -82,27 +114,26 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, RuntimeError> 
     }
 
     // 3. Convert transactions.
-    let transactions: Vec<_> = input
-        .batch
+    let transactions: Vec<_> = batch
         .transactions
         .iter()
         .map(|t| t.to_transaction().map_err(RuntimeError::InvalidBatch))
         .collect::<Result<_, _>>()?;
-    let batch = Batch { transactions };
+    let batch_core = Batch { transactions };
 
     // 4. Execute.
     let st = InMemoryStaticTables::new();
     let env = BatchEnv {
-        hasher: input.hasher,
+        hasher,
         sig_verifier: &NoopSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &st,
-        precompiles: None,
-        committed_state: None,
-        property_openings: None,
+        precompiles: resources.precompiles,
+        committed_state: resources.committed_state,
+        property_queries: resources.property_queries,
     };
 
-    let result = execute_batch(&batch, input.program, &state_store, &env, &BTreeMap::new())
+    let result = execute_batch(&batch_core, program, &state_store, &env, &BTreeMap::new())
         .map_err(|e| RuntimeError::Execution {
             source: e,
             instruction_index: None,
@@ -114,8 +145,8 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, RuntimeError> 
     let consistency = check_consistency_status(&all_events, &result.read_set_old, &result.txs);
 
     // 6. Merge output state.
-    let state_after = StateFile {
-        cells: merge_output_state_cells(&normalized.cells, &result.write_set_final),
+    let state_after = StateSnapshot {
+        cells: merge_output_state_entries(&normalized.cells, &result.write_set_final),
     };
 
     Ok(ExecutedBatch {
@@ -130,26 +161,50 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, RuntimeError> 
 
 /// Execute a batch using a compiler-produced program artifact.
 pub fn run_compiled_batch(input: &CompiledBatchInput<'_>) -> Result<ExecutedBatch, RuntimeError> {
-    run_batch(&BatchInput {
-        program: &input.compiled_program.program,
-        state: input.state,
-        batch: input.batch,
-        hasher: input.hasher,
-    })
+    validate_free_execution_requirements(input.compiled_program)?;
+    let property_queries = PropertyQueryRegistry::new();
+    execute_pipeline(
+        input.compiled_program.program(),
+        input.state,
+        input.batch,
+        input.hasher,
+        ExecutionResources {
+            precompiles: None,
+            committed_state: None,
+            property_queries: &property_queries,
+        },
+    )
+}
+
+fn validate_free_execution_requirements(
+    compiled_program: &CompiledProgram,
+) -> Result<(), RuntimeError> {
+    if !compiled_program.required_precompile_ids().is_empty() {
+        return Err(RuntimeError::ValidationFailed {
+            detail:
+                "program requires precompiles; use TabulaRuntime::builder(...), register the required PrecompileRegistration values, and build before execution"
+                    .to_string(),
+        });
+    }
+    if !compiled_program.required_property_requirements().is_empty() {
+        return Err(RuntimeError::ValidationFailed {
+            detail:
+                "program requires scheme-backed property queries; use TabulaRuntime::builder(...), install any required custom scheme factories, and build before execution"
+                    .to_string(),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use tabula_artifact::{BatchFile, CompiledProgram, StateCell, TxInput};
-    use tabula_contract::{
-        BINDING_VERSION_V1, CONTRACT_SCHEMA_VERSION_V1, ContractMetadataEnvelope,
-    };
+    use tabula_artifact::{StateEntry, StateSnapshot, TransactionBatch, TransactionInput};
+    use tabula_compiler::{CompiledProgram, register_program};
     use tabula_core::mock::Blake3Hasher;
     use tabula_core::{TableId, TableSchema, TxTypeId, Value, ValueType};
-    use tabula_ir::{Instruction, Program, RowExpr, TxTypeDef, ValueExpr};
+    use tabula_ir::{Instruction, PrecompileId, PropertyQuery, RowExpr, TxTypeDef, ValueExpr};
 
     use super::{CompiledBatchInput, RuntimeError, run_compiled_batch};
-
     fn compiled_program() -> CompiledProgram {
         let schema = TableSchema {
             id: TableId(1),
@@ -173,26 +228,12 @@ mod tests {
             }],
         };
 
-        let mut program = Program::new();
-        program.add_schema(schema.clone());
-        program.register(tx_def.clone()).expect("register tx");
-
-        CompiledProgram {
-            program,
-            table_schemas: vec![schema],
-            tx_types: vec![tx_def],
-            metadata_envelope: ContractMetadataEnvelope {
-                profile_hash: [0; 32],
-                contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
-                binding_version: BINDING_VERSION_V1,
-                semantic_hash_stub: None,
-            },
-        }
+        register_program(&[schema], &[tx_def]).expect("register program")
     }
 
-    fn batch_file() -> BatchFile {
-        BatchFile {
-            transactions: vec![TxInput {
+    fn batch_file() -> TransactionBatch {
+        TransactionBatch {
+            transactions: vec![TransactionInput {
                 tx_type: 1,
                 params: vec![],
                 sender: String::new(),
@@ -201,11 +242,59 @@ mod tests {
         }
     }
 
+    fn compiled_program_with_precompile() -> CompiledProgram {
+        register_program(
+            &[],
+            &[TxTypeDef {
+                id: TxTypeId(1),
+                name: "call".to_string(),
+                param_schema: vec![],
+                body: vec![Instruction::Precompile {
+                    id: PrecompileId(7),
+                    dst_slots: vec![0],
+                    inputs: vec![ValueExpr::Literal(Value::U64(1))],
+                }],
+            }],
+        )
+        .expect("register precompile program")
+    }
+
+    fn compiled_program_with_property_query() -> CompiledProgram {
+        let schema = TableSchema {
+            id: TableId(1),
+            name: "accounts".to_string(),
+            columns: vec![tabula_core::ColumnDef {
+                id: tabula_core::ColId(0),
+                name: "balance".to_string(),
+                value_type: ValueType::U64,
+            }],
+        };
+        register_program(
+            &[schema],
+            &[TxTypeDef {
+                id: TxTypeId(1),
+                name: "scan".to_string(),
+                param_schema: vec![],
+                body: vec![Instruction::PropertyRead {
+                    dst_val: 0,
+                    dst_key: 1,
+                    dst_is_null: 2,
+                    table: TableId(1),
+                    col: tabula_core::ColId(0),
+                    query: PropertyQuery::Successor {
+                        key: tabula_core::RowKey(0),
+                    },
+                }],
+            }],
+        )
+        .expect("register property program")
+    }
+
     #[test]
     fn run_compiled_batch_applies_writes() {
         let compiled = compiled_program();
-        let state = tabula_artifact::StateFile {
-            cells: vec![StateCell {
+        let state = StateSnapshot {
+            cells: vec![StateEntry {
                 table: 1,
                 row: 0,
                 col: 0,
@@ -233,8 +322,8 @@ mod tests {
     #[test]
     fn run_compiled_batch_rejects_invalid_state() {
         let compiled = compiled_program();
-        let invalid_state = tabula_artifact::StateFile {
-            cells: vec![StateCell {
+        let invalid_state = StateSnapshot {
+            cells: vec![StateEntry {
                 table: 1,
                 row: 0,
                 col: 0,
@@ -256,15 +345,15 @@ mod tests {
     #[test]
     fn run_compiled_batch_handles_empty_batch() {
         let compiled = compiled_program();
-        let state = tabula_artifact::StateFile {
-            cells: vec![StateCell {
+        let state = StateSnapshot {
+            cells: vec![StateEntry {
                 table: 1,
                 row: 0,
                 col: 0,
                 value: Some(Value::U64(1)),
             }],
         };
-        let empty_batch = BatchFile {
+        let empty_batch = TransactionBatch {
             transactions: vec![],
         };
 
@@ -282,5 +371,43 @@ mod tests {
             executed.state_after.cells.len(),
             executed.state_before.cells.len()
         );
+    }
+
+    #[test]
+    fn run_compiled_batch_rejects_required_precompiles() {
+        let compiled = compiled_program_with_precompile();
+        let err = run_compiled_batch(&CompiledBatchInput {
+            compiled_program: &compiled,
+            state: &StateSnapshot { cells: vec![] },
+            batch: &batch_file(),
+            hasher: &Blake3Hasher,
+        })
+        .expect_err("free execute should reject required precompiles");
+
+        match err {
+            RuntimeError::ValidationFailed { detail } => {
+                assert!(detail.contains("requires precompiles"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn run_compiled_batch_rejects_required_property_requirements() {
+        let compiled = compiled_program_with_property_query();
+        let err = run_compiled_batch(&CompiledBatchInput {
+            compiled_program: &compiled,
+            state: &StateSnapshot { cells: vec![] },
+            batch: &batch_file(),
+            hasher: &Blake3Hasher,
+        })
+        .expect_err("free execute should reject required property requirements");
+
+        match err {
+            RuntimeError::ValidationFailed { detail } => {
+                assert!(detail.contains("requires scheme-backed property queries"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
 }

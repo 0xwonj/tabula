@@ -29,15 +29,19 @@ pub enum RuntimeError {
     },
 
     /// Construction-time validation failed.
-    #[cfg(feature = "prove")]
     #[error("validation: {detail}")]
     ValidationFailed {
         /// Description of the validation failure.
         detail: String,
     },
 
+    /// Program artifact failed compiler-side semantic validation.
+    #[cfg(feature = "verify")]
+    #[error("compiler validation: {0}")]
+    CompilerValidation(#[source] tabula_compiler::CompilerError),
+
     /// Machine setup failed (e.g., invalid column config).
-    #[cfg(feature = "prove")]
+    #[cfg(feature = "verify")]
     #[error("machine setup: {0}")]
     MachineSetup(#[source] tabula_machine::SetupError),
 
@@ -62,13 +66,21 @@ pub enum RuntimeError {
     #[error("trace build: {0}")]
     TraceBuild(#[source] tabula_core::error::TabulaError),
 
+    /// Canonical execution statement construction failed.
+    #[cfg(feature = "prove")]
+    #[error("statement build: {detail}")]
+    StatementBuild {
+        /// Description of the statement construction failure.
+        detail: String,
+    },
+
     /// STARK proving failed.
     #[cfg(feature = "prove")]
     #[error("proving: {0}")]
     Proving(#[source] tabula_machine::ProveError),
 
     /// STARK verification failed.
-    #[cfg(feature = "prove")]
+    #[cfg(feature = "verify")]
     #[error("verification: {0}")]
     Verification(#[source] tabula_machine::VerificationError),
 }

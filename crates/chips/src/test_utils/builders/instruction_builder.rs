@@ -138,11 +138,15 @@ impl InstructionBuilder {
     pub fn property_read(
         mut self,
         query_type: u8,
+        query_arg0: u64,
+        query_arg1: u64,
         result_val: Vec<KoalaBear>,
         result_key: Vec<KoalaBear>,
         is_null: bool,
     ) -> Self {
         self.inner.property_query_type = Some(query_type);
+        self.inner.property_query_arg0 = u64_to_limbs(query_arg0).to_vec();
+        self.inner.property_query_arg1 = u64_to_limbs(query_arg1).to_vec();
         self.inner.property_result_val = result_val;
         self.inner.property_result_key = result_key;
         self.inner.property_result_is_null = is_null;

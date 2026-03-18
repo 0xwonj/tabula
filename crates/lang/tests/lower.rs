@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-use tabula_core::{ColId, TableId, TxTypeId, Value, ValueType};
+use tabula_core::{ColId, SchemeId, TableId, TxTypeId, Value, ValueType};
 use tabula_ir::{ArithOp, CmpOp, Instruction, Program, RowExpr, ValueExpr};
 use tabula_lang::error::ErrorKind;
 use tabula_lang::lexer::lex;
@@ -30,6 +30,18 @@ fn test_lower_multiple_tables() {
     assert_eq!(prog.schemas.len(), 2);
     assert_eq!(prog.schemas[0].id, TableId(0));
     assert_eq!(prog.schemas[1].id, TableId(1));
+    assert!(prog.column_schemes.is_empty());
+}
+
+#[test]
+fn test_lower_non_default_column_schemes() {
+    let prog = compile("table t { a: u64 @ssmc, b: u64 @smt, c: u64 @scheme(42) }");
+    assert_eq!(prog.column_schemes.len(), 2);
+    assert_eq!(prog.column_schemes[0].table_id, TableId(0));
+    assert_eq!(prog.column_schemes[0].col_id, ColId(1));
+    assert_eq!(prog.column_schemes[0].scheme_id, SchemeId::SMT);
+    assert_eq!(prog.column_schemes[1].col_id, ColId(2));
+    assert_eq!(prog.column_schemes[1].scheme_id, SchemeId(42));
 }
 
 #[test]

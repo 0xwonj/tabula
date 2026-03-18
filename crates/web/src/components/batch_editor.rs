@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use serde_json::json;
 use tabula_core::Value as CoreValue;
 
-use crate::models::{BatchFile, ProgramArtifact};
+use crate::models::{ProgramArtifact, TransactionBatch};
 use crate::utils::{
     format_value, parse_batch, parse_value_input, pretty_json_inline, pretty_json_value,
 };
@@ -37,7 +37,7 @@ pub(crate) fn render_batch_editor(
 
 fn render_schema_batch(
     artifact: &ProgramArtifact,
-    batch: &BatchFile,
+    batch: &TransactionBatch,
     batch_json: ReadSignal<String>,
     set_batch_json: WriteSignal<String>,
     persist: impl Fn() + Clone + 'static,
@@ -217,7 +217,7 @@ fn render_schema_batch(
 }
 
 fn render_flat_batch(
-    batch: &BatchFile,
+    batch: &TransactionBatch,
     batch_json: ReadSignal<String>,
     set_batch_json: WriteSignal<String>,
     persist: impl Fn() + Clone + 'static,

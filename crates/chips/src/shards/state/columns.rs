@@ -8,7 +8,7 @@
 //! - Removed `SameKeyDetection` (5 cols): no segment boundaries
 //! - Removed `LexOrderingDirection` (3 cols): no cross-segment ordering
 //!
-//! Column budget: 93 (W=3).
+//! Column budget: 93 (W=3) before property-anchor multiplicity.
 
 use tabula_gadgets::{HashChainInput, KeyRangeChecked, OrderingRangeChecked};
 use tabula_stark::air::columns::num_cols;
@@ -68,8 +68,12 @@ pub struct StateShardCols<T, const W: usize> {
     // ── Chain tracking flags (6) ──
     /// 1 if any prior row had `in_old=1`.
     pub has_prev_old_entry: T,
+    /// Previous `in_old=1` key, or zero when none exists yet.
+    pub prev_old_key: KeyRangeChecked<T>,
     /// 1 if this is the last `in_old=1` row.
     pub is_last_old_entry: T,
+    /// Next `in_old=1` key, or zero when this row has no later old entry.
+    pub next_old_key: KeyRangeChecked<T>,
     /// Running flag: 1 after the last old entry (no more in_old rows allowed).
     pub past_last_old_entry: T,
     /// 1 if any prior row had `in_new=1`.
@@ -88,6 +92,8 @@ pub struct StateShardCols<T, const W: usize> {
     pub read_mult_witness: T,
     /// Multiplicity witness for CoalescedWrite bus receive.
     pub write_mult_witness: T,
+    /// Multiplicity for `SSMC_OLD_ENTRY` sends consumed by scheme-owned property chips.
+    pub property_anchor_mult: T,
 }
 
 /// Compute the width of `StateShardCols` for a given value width.
@@ -104,6 +110,6 @@ mod tests {
 
     #[test]
     fn standard_width_is_93() {
-        assert_eq!(STATE_SHARD_STANDARD_WIDTH, 93);
+        assert_eq!(STATE_SHARD_STANDARD_WIDTH, 116);
     }
 }

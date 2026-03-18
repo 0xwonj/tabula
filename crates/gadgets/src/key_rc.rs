@@ -49,9 +49,9 @@ impl KeyRangeChecked<KoalaBear> {
 
 /// Constrain limb decompositions: halves for limb0/1, bits for limb2.
 pub fn constrain_key_halves<AB: AirBuilder>(builder: &mut AB, key: &KeyRangeChecked<AB::Var>) {
-    constrain_limb_halves(builder, key.limbs.limb0.clone().into(), &key.l0_halves);
-    constrain_limb_halves(builder, key.limbs.limb1.clone().into(), &key.l1_halves);
-    constrain_limb2_bits(builder, key.limbs.limb2.clone().into(), &key.limb2_bits);
+    constrain_limb_halves(builder, key.limbs.limb0.into(), &key.l0_halves);
+    constrain_limb_halves(builder, key.limbs.limb1.into(), &key.l1_halves);
+    constrain_limb2_bits(builder, key.limbs.limb2.into(), &key.limb2_bits);
 }
 
 /// Emit all constraints and bus interactions for a KeyRangeChecked gadget.
@@ -85,10 +85,10 @@ pub fn send_key_range_checks<AB: InteractionAirBuilder>(
             bus: core_buses::RANGE_CHECK,
         });
     };
-    send_rc(key.l0_halves.lo.clone().into());
-    send_rc(key.l0_halves.hi.clone().into());
-    send_rc(key.l1_halves.lo.clone().into());
-    send_rc(key.l1_halves.hi.clone().into());
+    send_rc(key.l0_halves.lo.into());
+    send_rc(key.l0_halves.hi.into());
+    send_rc(key.l1_halves.lo.into());
+    send_rc(key.l1_halves.hi.into());
 }
 
 #[cfg(test)]

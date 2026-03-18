@@ -117,7 +117,7 @@ pub struct PrecompileId(pub u16);
 
 /// Kind of structural property query on committed column state.
 ///
-/// Closed enum — apps define semantics via custom `PropertyOpening` impls,
+/// Closed enum — apps extend support via custom column schemes,
 /// not custom query variants.
 #[derive(
     Debug,
@@ -125,6 +125,8 @@ pub struct PrecompileId(pub u16);
     Copy,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Hash,
     Serialize,
     Deserialize,
@@ -175,6 +177,16 @@ impl std::fmt::Display for AggregateKind {
     }
 }
 
+impl AggregateKind {
+    /// Canonical ordinal used in proof-time query encoding.
+    pub const fn ordinal(self) -> u64 {
+        match self {
+            Self::Sum => 0,
+            Self::Count => 1,
+        }
+    }
+}
+
 /// A concrete structural property query with parameters.
 ///
 /// Produced by the compiler when processing a `property_read` statement.
@@ -221,6 +233,69 @@ impl PropertyQuery {
             Self::Aggregate { .. } => PropertyQueryKind::Aggregate,
         }
     }
+
+    /// Canonical proof-time ordinal for this query kind.
+    pub const fn kind_ordinal(&self) -> u8 {
+        match self {
+            Self::Minimum => PropertyQueryKind::Minimum.ordinal(),
+            Self::Maximum => PropertyQueryKind::Maximum.ordinal(),
+            Self::Successor { .. } => PropertyQueryKind::Successor.ordinal(),
+            Self::Predecessor { .. } => PropertyQueryKind::Predecessor.ordinal(),
+            Self::NonExistenceRange { .. } => PropertyQueryKind::NonExistenceRange.ordinal(),
+            Self::Aggregate { .. } => PropertyQueryKind::Aggregate.ordinal(),
+        }
+    }
+
+    /// Canonical proof-time operands for this query.
+    ///
+    /// `arg0` and `arg1` are encoded as `U64` values in the execution trace.
+    /// Query kinds that do not need operands use zero.
+    pub const fn encoded_args(&self) -> (u64, u64) {
+        match self {
+            Self::Minimum | Self::Maximum => (0, 0),
+            Self::Successor { key } | Self::Predecessor { key } => (key.0, 0),
+            Self::NonExistenceRange { lower, upper } => (lower.0, upper.0),
+            Self::Aggregate { kind } => (kind.ordinal(), 0),
+        }
+    }
+}
+
+impl PropertyQueryKind {
+    /// Canonical proof-time ordinal used in execution/property traces.
+    pub const fn ordinal(self) -> u8 {
+        match self {
+            Self::Minimum => 0,
+            Self::Maximum => 1,
+            Self::Successor => 2,
+            Self::Predecessor => 3,
+            Self::NonExistenceRange => 4,
+            Self::Aggregate => 5,
+        }
+    }
+}
+
+/// Compiler-derived structural property capability for one specific column.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub struct PropertyRequirement {
+    /// Table that owns the queried column.
+    pub table_id: TableId,
+    /// Column that is queried.
+    pub col_id: ColId,
+    /// Structural query kind required by the program.
+    pub query_kind: PropertyQueryKind,
 }
 
 impl CmpOp {

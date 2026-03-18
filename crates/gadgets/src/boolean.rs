@@ -17,7 +17,7 @@ pub fn constrain_is_real_prefix<AB: AirBuilder>(
     next_is_real: AB::Var,
 ) {
     // is_real must be boolean.
-    builder.assert_bool(is_real.clone());
+    builder.assert_bool(is_real);
     // Prefix: if is_real=0 then next_is_real=0.
     // Equivalently: next_is_real * (1 - is_real) = 0.
     builder

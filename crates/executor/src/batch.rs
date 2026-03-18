@@ -12,7 +12,7 @@ use tabula_ir::{ParamDef, Program};
 use crate::interpreter;
 use crate::overlay::Overlay;
 use crate::precompile::PrecompileRegistry;
-use crate::property::{CommittedStateProvider, PropertyOpeningRegistry};
+use crate::property::{CommittedStateProvider, PropertyQueryRegistry};
 
 /// Validate transaction parameters against the schema definition.
 fn validate_params(params: &[Value], schema: &[ParamDef]) -> Result<(), TabulaError> {
@@ -49,8 +49,8 @@ pub struct BatchEnv<'a> {
     pub precompiles: Option<&'a PrecompileRegistry>,
     /// Optional committed state for PropertyRead instructions.
     pub committed_state: Option<&'a dyn CommittedStateProvider>,
-    /// Optional property opening registry for PropertyRead resolution.
-    pub property_openings: Option<&'a PropertyOpeningRegistry>,
+    /// Property query registry for PropertyRead resolution.
+    pub property_queries: &'a PropertyQueryRegistry,
 }
 
 /// Execute a batch of transactions against a state snapshot.
@@ -74,7 +74,7 @@ pub fn execute_batch<S: StateSnapshot>(
         schemas: program.schemas(),
         precompiles: env.precompiles,
         committed_state: env.committed_state,
-        property_openings: env.property_openings,
+        property_queries: env.property_queries,
     };
 
     for (tx_idx, tx) in batch.transactions.iter().enumerate() {

@@ -36,8 +36,21 @@ pub struct ColumnDecl {
     pub name: String,
     /// Column type.
     pub ty: TypeName,
+    /// Optional column commitment scheme annotation.
+    pub scheme: Option<ColumnSchemeDecl>,
     /// Source span.
     pub span: Span,
+}
+
+/// A column commitment scheme as written in source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnSchemeDecl {
+    /// Built-in sorted-state Merkle commitment.
+    Ssmc,
+    /// Built-in sparse Merkle tree commitment.
+    Smt,
+    /// Explicit numeric scheme identifier.
+    Numeric(u16),
 }
 
 /// A type name as written in source.

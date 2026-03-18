@@ -18,7 +18,7 @@ pub fn constrain_null_canon<AB: AirBuilder>(
     val: &[AB::Var],
 ) {
     for v in val {
-        builder.assert_zero(val_is_null.clone() * v.clone().into());
+        builder.assert_zero(val_is_null.clone() * (*v).into());
     }
 }
 
@@ -42,7 +42,7 @@ pub fn constrain_mem_read<AB: AirBuilder>(
         "constrain_mem_read: val/mem width mismatch"
     );
     for (v, m) in val.iter().zip(mem.iter()) {
-        builder.assert_eq(v.clone(), m.clone());
+        builder.assert_eq(*v, *m);
     }
     builder.assert_eq(val_is_null, mem_is_null);
 }
@@ -67,7 +67,7 @@ pub fn constrain_mem_write<AB: AirBuilder>(
         "constrain_mem_write: val/next_mem width mismatch"
     );
     for (v, nm) in val.iter().zip(next_mem.iter()) {
-        builder.assert_eq(v.clone(), nm.clone());
+        builder.assert_eq(*v, *nm);
     }
     builder.assert_eq(val_is_null, next_mem_is_null);
 }

@@ -2,66 +2,65 @@
 
 use std::path::Path;
 
-use tabula_artifact::CompiledProgram;
+use tabula_artifact::ProgramArtifact;
 
-use crate::ProgramSourceFile;
 use crate::compile::compile_program_source;
 use crate::error::{CompilerError, CompilerResult};
-use crate::register::{MetadataPolicy, register_program_sources};
+use crate::program::CompiledProgram;
+use crate::register::{register_program_artifact, register_program_definition};
+use crate::sources::ProgramDefinition;
 
-/// Program source format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProgramSourceFormat {
-    /// `.tab` source program.
-    TabSource,
-    /// JSON artifact program.
-    JsonArtifact,
+/// Load program definitions from a `.tab` file.
+pub fn load_program_definition(path: &Path) -> anyhow::Result<ProgramDefinition> {
+    load_program_definition_strict(path).map_err(anyhow::Error::new)
 }
 
-/// Load program sources from `.tab` or `.json`.
-pub fn load_program_sources(path: &Path) -> anyhow::Result<ProgramSourceFile> {
-    load_program_sources_strict(path).map_err(anyhow::Error::new)
-}
-
-/// Strict variant of [`load_program_sources`] that returns typed compiler errors.
-pub fn load_program_sources_strict(path: &Path) -> CompilerResult<ProgramSourceFile> {
+/// Strict variant of [`load_program_definition`] that returns typed compiler errors.
+pub fn load_program_definition_strict(path: &Path) -> CompilerResult<ProgramDefinition> {
     let source = std::fs::read_to_string(path).map_err(|source| CompilerError::ReadFile {
         path: path.display().to_string(),
         source,
     })?;
-
-    let format = if path.extension().and_then(|e| e.to_str()) == Some("tab") {
-        ProgramSourceFormat::TabSource
-    } else {
-        ProgramSourceFormat::JsonArtifact
-    };
-    parse_program_sources(&source, format, &path.display().to_string())
+    compile_program_source(&source)
 }
 
-/// Parse/compile program sources from in-memory text using the given source format.
-pub fn parse_program_sources(
+/// Parse program definitions from in-memory `.tab` text.
+pub fn parse_program_definition(content: &str) -> CompilerResult<ProgramDefinition> {
+    compile_program_source(content)
+}
+
+/// Load a sealed program artifact from JSON.
+pub fn load_program_artifact(path: &Path) -> anyhow::Result<ProgramArtifact> {
+    load_program_artifact_strict(path).map_err(anyhow::Error::new)
+}
+
+/// Strict variant of [`load_program_artifact`] that returns typed compiler errors.
+pub fn load_program_artifact_strict(path: &Path) -> CompilerResult<ProgramArtifact> {
+    let source = std::fs::read_to_string(path).map_err(|source| CompilerError::ReadFile {
+        path: path.display().to_string(),
+        source,
+    })?;
+    parse_program_artifact(&source, &path.display().to_string())
+}
+
+/// Parse a sealed program artifact from JSON text.
+pub fn parse_program_artifact(
     content: &str,
-    format: ProgramSourceFormat,
     source_label: &str,
-) -> CompilerResult<ProgramSourceFile> {
-    match format {
-        ProgramSourceFormat::TabSource => compile_program_source(content),
-        ProgramSourceFormat::JsonArtifact => {
-            serde_json::from_str(content).map_err(|source| CompilerError::ParseJson {
-                path: source_label.to_string(),
-                source,
-            })
-        }
-    }
+) -> CompilerResult<ProgramArtifact> {
+    serde_json::from_str(content).map_err(|source| CompilerError::ParseJson {
+        path: source_label.to_string(),
+        source,
+    })
 }
 
 /// Convenience helper: load sources from a path and register in one step.
 pub fn load_and_register_program(path: &Path) -> anyhow::Result<CompiledProgram> {
-    let sources = load_program_sources_strict(path).map_err(anyhow::Error::new)?;
-    let metadata_policy = if path.extension().and_then(|e| e.to_str()) == Some("tab") {
-        MetadataPolicy::Optional
+    if path.extension().and_then(|e| e.to_str()) == Some("tab") {
+        let definition = load_program_definition_strict(path).map_err(anyhow::Error::new)?;
+        register_program_definition(&definition).map_err(anyhow::Error::new)
     } else {
-        MetadataPolicy::Required
-    };
-    register_program_sources(&sources, metadata_policy).map_err(anyhow::Error::new)
+        let artifact = load_program_artifact_strict(path).map_err(anyhow::Error::new)?;
+        register_program_artifact(&artifact).map_err(anyhow::Error::new)
+    }
 }

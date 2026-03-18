@@ -1,9 +1,11 @@
 //! Batch execution pipeline — delegates to the runtime's canonical pipeline.
 
-use tabula_artifact::{BatchFile, CompiledProgram, ExecutionSummary, StateCell, StateFile};
+use tabula_artifact::{StateEntry, StateSnapshot, TransactionBatch};
+use tabula_compiler::CompiledProgram;
 use tabula_core::traits::Hasher;
 use tabula_runtime::{CompiledBatchInput, RuntimeError, run_compiled_batch};
 
+use super::ExecutionSummary;
 use super::error::{ServiceError, ServiceResult};
 use crate::protocol::error::ErrorCode;
 
@@ -11,7 +13,7 @@ use crate::protocol::error::ErrorCode;
 #[derive(Debug, Clone)]
 pub struct ExecutedBatch {
     pub compiled_program: CompiledProgram,
-    pub batch_file: BatchFile,
+    pub transaction_batch: TransactionBatch,
     pub inner: tabula_runtime::ExecutedBatch,
 }
 
@@ -21,7 +23,7 @@ impl ExecutedBatch {
             .inner
             .txs
             .iter()
-            .flat_map(|tx| tx.access_trace())
+            .flat_map(tabula_core::TxResult::access_trace)
             .cloned()
             .collect();
         let trace = if include_trace {
@@ -48,13 +50,13 @@ impl ExecutedBatch {
                 .inner
                 .read_set
                 .iter()
-                .map(|(k, v)| StateCell::from_cell_pair(k, v))
+                .map(|(k, v)| StateEntry::from_cell_pair(k, v))
                 .collect(),
             write_set: self
                 .inner
                 .write_set
                 .iter()
-                .map(|(k, v)| StateCell::from_cell_pair(k, v))
+                .map(|(k, v)| StateEntry::from_cell_pair(k, v))
                 .collect(),
             emitted,
             consistency: self.inner.consistency,
@@ -67,21 +69,21 @@ impl ExecutedBatch {
 /// Execute a batch against a compiled program and state.
 pub fn execute_compiled_batch(
     compiled_program: CompiledProgram,
-    state_file: &StateFile,
-    batch_file: BatchFile,
+    state_snapshot: &StateSnapshot,
+    transaction_batch: TransactionBatch,
     hasher: &dyn Hasher,
 ) -> ServiceResult<ExecutedBatch> {
     let inner = run_compiled_batch(&CompiledBatchInput {
         compiled_program: &compiled_program,
-        state: state_file,
-        batch: &batch_file,
+        state: state_snapshot,
+        batch: &transaction_batch,
         hasher,
     })
     .map_err(|e| map_runtime_execution_error(&e))?;
 
     Ok(ExecutedBatch {
         compiled_program,
-        batch_file,
+        transaction_batch,
         inner,
     })
 }
@@ -89,17 +91,17 @@ pub fn execute_compiled_batch(
 #[cfg(feature = "stark")]
 pub fn execute_prepared_batch(
     compiled_program: CompiledProgram,
-    runtime: &tabula_runtime::PreparedRuntime,
-    state_file: &StateFile,
-    batch_file: BatchFile,
+    runtime: &tabula_runtime::TabulaRuntime,
+    state_snapshot: &StateSnapshot,
+    transaction_batch: TransactionBatch,
 ) -> ServiceResult<ExecutedBatch> {
     let inner = runtime
-        .execute(state_file, &batch_file)
+        .execute(state_snapshot, &transaction_batch)
         .map_err(|e| map_runtime_execution_error(&e))?;
 
     Ok(ExecutedBatch {
         compiled_program,
-        batch_file,
+        transaction_batch,
         inner,
     })
 }
@@ -116,6 +118,7 @@ fn map_runtime_execution_error(err: &RuntimeError) -> ServiceError {
         RuntimeError::Execution { source, .. } => {
             ServiceError::unprocessable(ErrorCode::ExecutionError, source.to_string())
         }
+        _ => ServiceError::internal(ErrorCode::InternalError, err.to_string()),
     }
 }
 

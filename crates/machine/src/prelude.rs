@@ -32,7 +32,6 @@ pub use tabula_stark::trace::contributor::{TraceContributor, TracePhase, Witness
 pub use tabula_stark::trace::trace_map::TraceMap;
 
 // Machine-level types.
-pub use crate::column_scheme::{ColumnChipSet, ColumnScheme};
-pub use crate::extension::{ChipExtension, ExtensionContext};
-pub use crate::property::{PropertyOpening, PropertyQuery, PropertyQueryKind, PropertyWitness};
+pub use crate::backend::extension::{ChipExtension, ExtensionContext};
+pub use crate::columns::{ColumnChipSet, ProofColumn};
 pub use crate::{AnyRap, ChipRegistry};

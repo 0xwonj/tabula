@@ -43,27 +43,26 @@ pub(crate) fn constrain_arith_mul<AB: AirBuilder, const W: usize>(
         );
     };
 
-    let op_mul: AB::Expr = local.op_arith.clone().into() * local.arith_is_mul.clone().into();
+    let op_mul: AB::Expr = local.op_arith.into() * local.arith_is_mul.into();
     let shift_30: AB::Expr = expr_from_u32::<AB>(SHIFT_30_U32);
     let shift_16: AB::Expr = expr_from_u32::<AB>(1 << 16);
 
-    let a0: AB::Expr = local.src1_val[0].clone().into();
-    let a1: AB::Expr = local.src1_val[1].clone().into();
-    let a2: AB::Expr = local.src1_val[2].clone().into();
-    let b0: AB::Expr = local.src2_val[0].clone().into();
-    let b1: AB::Expr = local.src2_val[1].clone().into();
-    let b2: AB::Expr = local.src2_val[2].clone().into();
+    let a0: AB::Expr = local.src1_val[0].into();
+    let a1: AB::Expr = local.src1_val[1].into();
+    let a2: AB::Expr = local.src1_val[2].into();
+    let b0: AB::Expr = local.src2_val[0].into();
+    let b1: AB::Expr = local.src2_val[1].into();
+    let b2: AB::Expr = local.src2_val[2].into();
 
-    let c0: AB::Expr = local.mul.c0.clone().into();
-    let c1: AB::Expr = local.mul.c1_lo.clone().into() + local.mul.c1_hi.clone().into() * shift_16;
+    let c0: AB::Expr = local.mul.c0.into();
+    let c1: AB::Expr = local.mul.c1_lo.into() + local.mul.c1_hi.into() * shift_16;
 
     for s in 0..MAX_SLOTS {
-        let gate: AB::Expr =
-            is_real.clone() * op_mul.clone() * local.slot_written[s].clone().into();
+        let gate: AB::Expr = is_real.clone() * op_mul.clone() * local.slot_written[s].into();
 
-        let r0: AB::Expr = local.slots[s][0].clone().into();
-        let r1: AB::Expr = local.slots[s][1].clone().into();
-        let r2: AB::Expr = local.slots[s][2].clone().into();
+        let r0: AB::Expr = local.slots[s][0].into();
+        let r1: AB::Expr = local.slots[s][1].into();
+        let r2: AB::Expr = local.slots[s][2].into();
 
         // (1) a0*b0 = r0 + c0 * 2^30
         builder.assert_zero(

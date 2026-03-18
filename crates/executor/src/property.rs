@@ -1,24 +1,14 @@
-//! PropertyRead support: committed state provider and opening registry.
+//! PropertyRead support: committed state provider and scheme-backed query registry.
 //!
-//! These traits enable the executor to resolve `PropertyRead` instructions
-//! against pre-batch committed column state without introducing crypto
-//! dependencies.
+//! The executor resolves `PropertyRead` instructions against pre-batch committed
+//! column state. Runtime preparation supplies a per-column registry whose
+//! handlers are typically backed by the column's registered commitment scheme.
+
+use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, RowKey, TableId, Value, ValueType};
+use tabula_core::{ColId, PropertyQueryResult, RowKey, TableId, Value};
 use tabula_ir::PropertyQuery;
-
-/// Result of resolving a `PropertyRead` query.
-#[derive(Debug, Clone)]
-pub struct PropertyResult {
-    /// The result value (e.g., the value at the minimum key).
-    pub value: Value,
-    /// The key satisfying the property (e.g., the minimum key).
-    /// `None` for aggregate queries (Sum, Count).
-    pub key: Option<RowKey>,
-    /// Whether the result is null (no matching key found).
-    pub is_null: bool,
-}
 
 /// Provides access to pre-batch committed column state.
 ///
@@ -36,46 +26,81 @@ pub trait CommittedStateProvider: Send + Sync {
     ) -> Result<Vec<(RowKey, Value, bool)>, TabulaError>;
 }
 
-/// Resolves `PropertyRead` queries by delegating to registered handlers.
-///
-/// Each handler knows how to answer structural queries (min, max,
-/// successor, etc.) for a specific table/column configuration.
-pub trait PropertyOpeningResolver: Send + Sync {
+/// Resolves structural property queries for one committed column.
+pub trait PropertyQueryHandler: Send + Sync {
     /// Resolve a property query against committed state.
     fn resolve(
         &self,
-        table: TableId,
-        col: ColId,
         query: &PropertyQuery,
         provider: &dyn CommittedStateProvider,
-        col_type: ValueType,
-    ) -> Result<PropertyResult, TabulaError>;
+    ) -> Result<PropertyQueryResult, TabulaError>;
 }
 
-/// Registry of property opening resolvers.
+/// Registry of per-column property query handlers.
 ///
-/// Wraps a `PropertyOpeningResolver` impl for use in `ExecContext`.
-/// If no resolvers are registered, the registry is `None` in ExecContext
-/// and any `PropertyRead` instruction will error.
-pub struct PropertyOpeningRegistry {
-    resolver: Box<dyn PropertyOpeningResolver>,
+/// Runtime preparation populates this registry using the compiler-owned
+/// `(table, col) -> scheme_id` proof plan. Each routed handler is expected
+/// to stay aligned with the column's selected commitment scheme.
+pub struct PropertyQueryRegistry {
+    handlers: BTreeMap<(TableId, ColId), Box<dyn PropertyQueryHandler>>,
 }
 
-impl PropertyOpeningRegistry {
-    /// Create a new registry wrapping a resolver.
-    pub fn new(resolver: Box<dyn PropertyOpeningResolver>) -> Self {
-        Self { resolver }
+impl PropertyQueryRegistry {
+    /// Create an empty property query registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            handlers: BTreeMap::new(),
+        }
     }
 
-    /// Resolve a property query.
+    /// Register one handler for a specific committed column.
+    pub fn register(
+        &mut self,
+        table: TableId,
+        col: ColId,
+        handler: Box<dyn PropertyQueryHandler>,
+    ) -> Result<(), TabulaError> {
+        let key = (table, col);
+        if self.handlers.insert(key, handler).is_some() {
+            return Err(TabulaError::InvalidIr(format!(
+                "duplicate PropertyRead handler registered for table {} col {}",
+                table.0, col.0
+            )));
+        }
+        Ok(())
+    }
+
+    /// Whether a handler was registered for the given committed column.
+    pub fn contains(&self, table: TableId, col: ColId) -> bool {
+        self.handlers.contains_key(&(table, col))
+    }
+
+    /// Whether no property handlers are installed.
+    pub fn is_empty(&self) -> bool {
+        self.handlers.is_empty()
+    }
+
+    /// Resolve a property query against one committed column.
     pub fn resolve(
         &self,
         table: TableId,
         col: ColId,
         query: &PropertyQuery,
         provider: &dyn CommittedStateProvider,
-        col_type: ValueType,
-    ) -> Result<PropertyResult, TabulaError> {
-        self.resolver.resolve(table, col, query, provider, col_type)
+    ) -> Result<PropertyQueryResult, TabulaError> {
+        let handler = self.handlers.get(&(table, col)).ok_or_else(|| {
+            TabulaError::InvalidIr(format!(
+                "PropertyRead encountered for table {} col {} but no handler is registered",
+                table.0, col.0
+            ))
+        })?;
+        handler.resolve(query, provider)
+    }
+}
+
+impl Default for PropertyQueryRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }

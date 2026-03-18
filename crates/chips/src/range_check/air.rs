@@ -32,8 +32,8 @@ impl<AB: InteractionAirBuilder> Air<AB> for RangeCheckChip {
         // C8 RangeCheck bus receive: one receive per row.
         // value is fixed (0..2^16), multiplicity is prover-filled.
         builder.receive(AirInteraction {
-            values: vec![local.value.clone().into()],
-            multiplicity: local.multiplicity.clone().into(),
+            values: vec![local.value.into()],
+            multiplicity: local.multiplicity.into(),
             bus: core_buses::RANGE_CHECK,
         });
     }

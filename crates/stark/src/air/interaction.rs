@@ -76,9 +76,13 @@ pub mod core_buses {
     pub const PRECOMPILE: BusId = BusId(17);
     /// Execution → PropertyVerifier (cross-tier property query results).
     pub const PROPERTY_READ: BusId = BusId(18);
+    /// MetaShard → scheme-owned property chips (old column is empty).
+    pub const EMPTY_OLD_COLUMN: BusId = BusId(19);
+    /// StateShard → scheme-owned SSMC property chips (old-entry anchor + adjacency).
+    pub const SSMC_OLD_ENTRY: BusId = BusId(20);
 
     /// All core bus IDs, for iteration and validation.
-    pub const ALL: [BusId; 13] = [
+    pub const ALL: [BusId; 15] = [
         POSEIDON_PERM,
         COMMITMENT_VERIF,
         RANGE_CHECK,
@@ -92,6 +96,8 @@ pub mod core_buses {
         SMT_TABLE_ROOT,
         PRECOMPILE,
         PROPERTY_READ,
+        EMPTY_OLD_COLUMN,
+        SSMC_OLD_ENTRY,
     ];
 
     /// Human-readable name for a core bus ID, or `None` for app-defined buses.
@@ -110,6 +116,8 @@ pub mod core_buses {
             16 => Some("SmtTableRoot"),
             17 => Some("Precompile"),
             18 => Some("PropertyRead"),
+            19 => Some("EmptyOldColumn"),
+            20 => Some("SsmcOldEntry"),
             _ => None,
         }
     }

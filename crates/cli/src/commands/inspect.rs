@@ -1,11 +1,11 @@
 //! Handler for the `inspect` subcommand.
 
-use crate::io::{StateFile, load_json};
+use crate::io::{StateSnapshot, load_json};
 
 pub fn cmd_inspect(state_path: &std::path::Path, table_filter: Option<u32>) -> anyhow::Result<()> {
-    let state_file: StateFile = load_json(state_path)?;
+    let state_snapshot: StateSnapshot = load_json(state_path)?;
 
-    let cells: Vec<_> = state_file
+    let cells: Vec<_> = state_snapshot
         .cells
         .iter()
         .filter(|c| table_filter.is_none_or(|t| c.table == t))

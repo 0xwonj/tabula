@@ -13,6 +13,7 @@ use tabula_ir::{Instruction, RowExpr, ValueExpr};
 
 use tabula_executor::interpreter::{ExecContext, InterpreterError, TxExecutionOutput};
 use tabula_executor::overlay::{Overlay, OverlayResult};
+use tabula_executor::property::PropertyQueryRegistry;
 
 // ── StateSnapshot impls ─────────────────────────────────────────────────
 
@@ -176,6 +177,7 @@ pub fn make_tx(tx_type: u32, params: Vec<Value>, sender: [u8; 32], nonce: u64) -
 
 /// Build a `BatchEnv` using the standard test doubles.
 pub fn test_env() -> tabula_executor::batch::BatchEnv<'static> {
+    let property_queries = Box::leak(Box::new(PropertyQueryRegistry::new()));
     tabula_executor::batch::BatchEnv {
         hasher: &XorHasher,
         sig_verifier: &AlwaysValidSig,
@@ -183,7 +185,7 @@ pub fn test_env() -> tabula_executor::batch::BatchEnv<'static> {
         static_tables: &TestStaticTables,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries,
     }
 }
 
@@ -226,13 +228,14 @@ pub fn run_with(
     let snap = make_snapshot(entries);
     let mut ov = Overlay::new(&snap);
     let schemas = test_schemas();
+    let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
     let out = tabula_executor::interpreter::execute(&instrs, params, &mut ov, &ctx).unwrap();
     (out, ov.into_result())
@@ -253,13 +256,14 @@ pub fn run_err_with(
     let snap = make_snapshot(entries);
     let mut ov = Overlay::new(&snap);
     let schemas = test_schemas();
+    let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
     tabula_executor::interpreter::execute(&instrs, params, &mut ov, &ctx).unwrap_err()
 }

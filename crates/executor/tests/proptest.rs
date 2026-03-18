@@ -14,6 +14,7 @@ use tabula_ir::{ArithOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
 
 use tabula_executor::consistency::check_consistency;
 use tabula_executor::overlay::Overlay;
+use tabula_executor::property::PropertyQueryRegistry;
 
 use common::*;
 
@@ -215,6 +216,7 @@ proptest! {
             .collect();
         let batch = Batch { transactions: txs };
 
+        let property_queries = PropertyQueryRegistry::new();
         let env = tabula_executor::batch::BatchEnv {
             hasher: &XorHasher,
             sig_verifier: &AlwaysValidSig,
@@ -222,7 +224,7 @@ proptest! {
             static_tables: &EmptyStaticTables,
             precompiles: None,
             committed_state: None,
-            property_openings: None,
+            property_queries: &property_queries,
         };
         let result = tabula_executor::batch::execute_batch(
             &batch, &prog, &snap, &env, &BTreeMap::new(),

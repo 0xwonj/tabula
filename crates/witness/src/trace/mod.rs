@@ -1,11 +1,12 @@
-//! Trace builder orchestrator (M12 entry).
+//! Trace assembly infrastructure for Tabula witness pipelines.
 //!
-//! Converts `BatchWitness` into canonical chip traces via one entrypoint,
-//! enforcing a shared E-Trace/contract boundary.
+//! Generic orchestration APIs live at the root.
+//! Builtin lowering helpers live under [`builtin`].
 
 mod builder;
+pub mod builtin;
 mod lowering;
-pub mod memory;
+mod memory;
 pub mod orchestration;
 pub mod partition;
 mod smt;
@@ -17,10 +18,6 @@ pub use tabula_stark::trace::{
     witness_labels,
 };
 
-pub use builder::{AllTraceInputs, TraceBuilder};
-pub use lowering::{LoweringOutput, lower_execution_records, lower_program_batch};
-pub use memory::prepare_shard_witness;
 pub use orchestration::build_all_traces;
 pub use partition::{PartitionedStores, partition_by_tier};
-pub use smt::build_smt_paths;
 pub use validation::debug_validate_trace_map;

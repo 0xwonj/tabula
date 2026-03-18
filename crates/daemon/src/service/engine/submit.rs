@@ -5,10 +5,9 @@ use std::sync::RwLock;
 
 use serde_json::json;
 
-use tabula_artifact::{
-    BatchFile, InstanceId, InstanceRecord, InstanceStatus, RunRecord, RunStatus, StateFile,
-    SubmitRunCommand,
-};
+#[cfg(not(feature = "stark"))]
+use crate::service::StarkProofSummary;
+use tabula_artifact::{StateSnapshot, TransactionBatch};
 use tabula_core::mock::Blake3Hasher;
 
 use crate::protocol::error::ErrorCode;
@@ -16,7 +15,10 @@ use crate::service::error::{ServiceError, ServiceResult};
 use crate::service::execute::execute_compiled_batch;
 #[cfg(feature = "stark")]
 use crate::service::execute::execute_prepared_batch;
-use crate::service::receipt::{build_receipt, now_ms, statement_components, verify_receipt};
+use crate::service::receipt::{build_execution_statement, build_receipt, now_ms, verify_receipt};
+use crate::service::{
+    InstanceId, InstanceRecord, InstanceStatus, RunRecord, RunStatus, SubmitRunCommand,
+};
 
 use super::helpers::write_guard;
 
@@ -29,11 +31,11 @@ impl super::LocalEngine {
         let program = self.get_program_store(snapshot.program_id.as_str())?;
         let batch_file = self
             .files
-            .load_json_input::<BatchFile>(&req.batch, "batch")?;
+            .load_json_input::<TransactionBatch>(&req.batch, "batch")?;
         let state_before = snapshot.state.clone();
 
         #[cfg(feature = "stark")]
-        let stark_proof_summary;
+        let stark_result;
 
         let executed = {
             #[cfg(feature = "stark")]
@@ -50,14 +52,22 @@ impl super::LocalEngine {
                         &state_before,
                         batch_file,
                     )?;
-                    stark_proof_summary = match super::super::prove::prove_batch(
+                    stark_result = match super::super::prove::prove_batch(
                         &exec,
                         program.prepared_runtime.as_ref(),
                     ) {
-                        Ok(summary) => Some(summary),
+                        Ok((summary, statement)) => Some((summary, statement)),
                         Err(e) => {
                             tracing::warn!("STARK proof generation failed, returning mock: {e}");
-                            Some(super::super::prove::mock_stark_summary())
+                            Some((
+                                super::super::prove::mock_stark_summary(),
+                                build_execution_statement(
+                                    &exec.compiled_program,
+                                    &exec.inner.state_before,
+                                    &exec.transaction_batch,
+                                    &exec.inner.state_after,
+                                )?,
+                            ))
                         }
                     };
                     exec
@@ -67,7 +77,7 @@ impl super::LocalEngine {
             } else {
                 #[cfg(feature = "stark")]
                 {
-                    stark_proof_summary = None;
+                    stark_result = None;
                 }
                 execute_compiled_batch(
                     program.compiled_program,
@@ -80,24 +90,30 @@ impl super::LocalEngine {
 
         let execution = executed.clone().into_execution_summary(req.include_trace);
 
-        let components = statement_components(
+        #[cfg(feature = "stark")]
+        let (stark_proof_summary, statement) = match stark_result {
+            Some((summary, statement)) => (Some(summary), statement),
+            None => (
+                None,
+                build_execution_statement(
+                    &executed.compiled_program,
+                    &executed.inner.state_before,
+                    &executed.transaction_batch,
+                    &executed.inner.state_after,
+                )?,
+            ),
+        };
+        #[cfg(not(feature = "stark"))]
+        let statement = build_execution_statement(
             &executed.compiled_program,
             &executed.inner.state_before,
-            &executed.batch_file,
+            &executed.transaction_batch,
             &executed.inner.state_after,
         )?;
-        let stmt_hash = components.statement_hash();
+        let stmt_hash = statement.statement_hash();
 
-        // Fill in statement hashes on STARK proof summary (computed after execution).
         #[cfg(not(feature = "stark"))]
-        let stark_proof_summary: Option<tabula_artifact::StarkProofSummary> = None;
-        #[cfg(feature = "stark")]
-        let stark_proof_summary = stark_proof_summary.map(|mut s| {
-            s.statement_hash = stmt_hash.clone();
-            s.program_hash = components.program_hash.clone();
-            s.batch_hash = components.batch_hash.clone();
-            s
-        });
+        let stark_proof_summary: Option<StarkProofSummary> = None;
 
         // Build legacy receipt for non-STARK path.
         let has_stark_proof = stark_proof_summary.is_some();
@@ -113,7 +129,7 @@ impl super::LocalEngine {
             .sum::<usize>();
         let proof = if proof_requested && !has_stark_proof {
             Some(build_receipt(
-                &components,
+                &statement,
                 executed.inner.txs.len(),
                 emitted_count,
                 &executed.inner.consistency,
@@ -139,7 +155,7 @@ impl super::LocalEngine {
                         "proof must exist when verify=true",
                     )
                 })?;
-                let verification = verify_receipt(proof_ref, &components, &stmt_hash);
+                let verification = verify_receipt(proof_ref, &statement, &stmt_hash);
                 if !verification.verified {
                     return Err(ServiceError::unprocessable(
                         ErrorCode::ExecutionError,
@@ -158,11 +174,11 @@ impl super::LocalEngine {
                 &snapshot.instance_id,
                 snapshot.version,
                 execution.state_after.clone(),
-                components.state_after_hash.clone(),
+                statement.state_after_hash.clone(),
                 now_ms(),
             )?
         } else {
-            (snapshot.version, components.state_after_hash.clone())
+            (snapshot.version, statement.state_after_hash.clone())
         };
 
         let prove = req.prove || req.verify;
@@ -179,11 +195,11 @@ impl super::LocalEngine {
             verify: req.verify,
             instance_version_before: snapshot.version,
             instance_version_after: version_after,
-            state_hash_before: components.state_hash,
+            state_hash_before: statement.state_hash,
             state_hash_after,
-            program_hash: components.program_hash,
-            batch_hash: components.batch_hash,
-            metadata_hash: components.metadata_hash,
+            program_hash: statement.program_hash,
+            batch_hash: statement.batch_hash,
+            metadata_hash: statement.metadata_hash,
             statement_hash: stmt_hash,
             execution,
             proof,
@@ -237,7 +253,7 @@ fn commit_instance(
     instances: &RwLock<BTreeMap<InstanceId, InstanceRecord>>,
     instance_id: &InstanceId,
     version_before: u64,
-    state_after: StateFile,
+    state_after: StateSnapshot,
     state_hash_after: String,
     updated_at_ms: u64,
 ) -> ServiceResult<(u64, String)> {

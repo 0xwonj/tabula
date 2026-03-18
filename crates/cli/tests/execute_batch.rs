@@ -8,6 +8,7 @@ use tabula_core::{
 use tabula_core::{InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce};
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency;
+use tabula_executor::property::PropertyQueryRegistry;
 use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, Program, RowExpr, TxTypeDef, ValueExpr};
 
 /// NF-compliant transfer: reads `from_row` and `to_row` of (table 1, col 0),
@@ -139,6 +140,7 @@ fn test_multi_tx_mixed_outcomes() {
     };
 
     let st = InMemoryStaticTables::new();
+    let property_queries = PropertyQueryRegistry::new();
     let env = BatchEnv {
         hasher: &Blake3Hasher,
         sig_verifier: &NoopSigVerifier,
@@ -146,7 +148,7 @@ fn test_multi_tx_mixed_outcomes() {
         static_tables: &st,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
     let result = execute_batch(
         &batch,
@@ -210,6 +212,7 @@ fn test_deterministic_execution() {
     };
 
     let st = InMemoryStaticTables::new();
+    let property_queries = PropertyQueryRegistry::new();
     let env = BatchEnv {
         hasher: &Blake3Hasher,
         sig_verifier: &NoopSigVerifier,
@@ -217,7 +220,7 @@ fn test_deterministic_execution() {
         static_tables: &st,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
     let r1 = execute_batch(
         &batch,
@@ -264,6 +267,7 @@ fn test_consistency_passes_for_valid_batch() {
     };
 
     let st = InMemoryStaticTables::new();
+    let property_queries = PropertyQueryRegistry::new();
     let env = BatchEnv {
         hasher: &Blake3Hasher,
         sig_verifier: &NoopSigVerifier,
@@ -271,7 +275,7 @@ fn test_consistency_passes_for_valid_batch() {
         static_tables: &st,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
     let result = execute_batch(
         &batch,
@@ -282,7 +286,7 @@ fn test_consistency_passes_for_valid_batch() {
     )
     .unwrap();
 
-    assert!(result.txs.iter().all(|tx| tx.is_success()));
+    assert!(result.txs.iter().all(tabula_core::TxResult::is_success));
     let all_events: Vec<_> = result.successful_events().cloned().collect();
     assert!(check_consistency(&all_events, &result.read_set_old, &result.txs).is_ok());
 }

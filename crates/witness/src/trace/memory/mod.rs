@@ -1,6 +1,6 @@
 //! Memory-layer chip input preparation from [`BatchWitness`].
 //!
-//! Provides per-column shard witness preparation via [`prepare_shard_witness`].
+//! Provides built-in SSMC shard witness preparation helpers.
 //! Produces per-column data for MemoryShard + StateShard + MetaShard chips.
 
 use std::collections::BTreeMap;
@@ -11,7 +11,7 @@ use tabula_commitment::{FieldHasher, NativeDigest};
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId};
 
-use crate::witness::BatchWitness;
+use crate::witness::{BatchWitness, ColumnWitness};
 
 pub(crate) mod chain;
 pub(crate) mod inter_tx;
@@ -49,14 +49,66 @@ use tabula_chips::shards::meta::trace::MetaShardRow;
 use tabula_chips::shards::ssmc::{SsmcColumnWitness, SsmcWitness};
 use tabula_chips::shards::state::trace::StateShardRow;
 
-/// Prepare per-column shard witness data from a [`BatchWitness`].
+fn empty_read_count_for_column<H>(column: &ColumnWitness<H>) -> u32
+where
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
+{
+    if !column.meta.is_empty_old {
+        return 0;
+    }
+
+    column
+        .access_rows
+        .iter()
+        .filter(|r| !r.is_write && r.val_is_null)
+        .count() as u32
+}
+
+/// Prepare SSMC shard witness rows for one touched column.
+pub fn prepare_ssmc_column_witness<H, const W: usize>(
+    column: &ColumnWitness<H>,
+) -> Result<SsmcColumnWitness, TabulaError>
+where
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
+{
+    let empty_count = empty_read_count_for_column(column);
+
+    // Build InterTxOrder rows, then convert to MemoryShardRows.
+    let itx_rows = build_inter_tx_rows::<H, W>(column)?;
+    let memory_rows: Vec<MemoryShardRow> = itx_rows.into_iter().map(MemoryShardRow::from).collect();
+
+    // Build StateColumn rows, sort, populate hash chain accumulators,
+    // then convert to StateShardRows.
+    let mut sc_rows = build_state_rows::<H, W>(column)?;
+    sort_state_rows(&mut sc_rows);
+    populate_state_chain_accumulators::<W>(&mut sc_rows);
+
+    let state_rows: Vec<StateShardRow> = sc_rows.into_iter().map(StateShardRow::from).collect();
+
+    let meta_row = MetaShardRow {
+        com_old: column.meta.com_old,
+        com_new: column.meta.com_new,
+        is_empty_old: column.meta.is_empty_old,
+        is_empty_new: column.meta.is_empty_new,
+        is_touched: column.meta.is_touched,
+        empty_read_count: empty_count,
+    };
+
+    Ok(SsmcColumnWitness {
+        memory_rows,
+        state_rows,
+        meta_row: Some(meta_row),
+    })
+}
+
+/// Prepare per-column SSMC shard witness data from a [`BatchWitness`].
 ///
 /// Builds [`SsmcWitness`] containing per-column `MemoryShardRow`,
 /// `StateShardRow`, and `MetaShardRow` data suitable for shard chip
 /// trace generation. Each column's data is self-contained.
 ///
 /// Used by the sharded prover to produce per-column proof instances.
-pub fn prepare_shard_witness<H, const W: usize>(
+pub fn prepare_ssmc_shard_witness<H, const W: usize>(
     witness: &BatchWitness<H>,
 ) -> Result<SsmcWitness, TabulaError>
 where
@@ -73,42 +125,15 @@ where
             continue;
         }
 
-        // Build InterTxOrder rows, then convert to MemoryShardRows.
-        let itx_rows = build_inter_tx_rows::<H, W>(column)?;
-        let memory_rows: Vec<MemoryShardRow> =
-            itx_rows.into_iter().map(MemoryShardRow::from).collect();
+        let mut col_witness = prepare_ssmc_column_witness::<H, W>(column)?;
+        if let Some(meta_row) = col_witness.meta_row.as_mut() {
+            meta_row.empty_read_count = empty_read_mults
+                .get(&(column.table, column.col))
+                .copied()
+                .unwrap_or(0);
+        }
 
-        // Build StateColumn rows, sort, populate hash chain accumulators,
-        // then convert to StateShardRows.
-        let mut sc_rows = build_state_rows::<H, W>(column)?;
-        sort_state_rows(&mut sc_rows);
-        populate_state_chain_accumulators::<W>(&mut sc_rows);
-
-        let state_rows: Vec<StateShardRow> = sc_rows.into_iter().map(StateShardRow::from).collect();
-
-        // Create MetaShardRow from ColumnMeta.
-        let empty_count = empty_read_mults
-            .get(&(column.table, column.col))
-            .copied()
-            .unwrap_or(0);
-        let meta_row = MetaShardRow {
-            com_old: column.meta.com_old,
-            com_new: column.meta.com_new,
-            is_empty_old: column.meta.is_empty_old,
-            is_empty_new: column.meta.is_empty_new,
-            is_touched: column.meta.is_touched,
-            empty_read_count: empty_count,
-        };
-
-        ssmc_witness.insert(
-            column.table,
-            column.col,
-            SsmcColumnWitness {
-                memory_rows,
-                state_rows,
-                meta_row: Some(meta_row),
-            },
-        );
+        ssmc_witness.insert(column.table, column.col, col_witness);
     }
 
     Ok(ssmc_witness)

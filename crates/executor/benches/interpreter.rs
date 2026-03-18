@@ -11,6 +11,7 @@ use tabula_ir::{ArithOp, CmpOp, Instruction, RowExpr, ValueExpr};
 
 use tabula_executor::interpreter::{ExecContext, execute};
 use tabula_executor::overlay::Overlay;
+use tabula_executor::property::PropertyQueryRegistry;
 
 // ── Test doubles ─────────────────────────────────────────────────────
 
@@ -108,13 +109,14 @@ fn bench_arith_chain(c: &mut Criterion) {
 
     let snap = BenchSnapshot(BTreeMap::new());
     let schemas = test_schemas();
+    let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
 
     c.bench_function("arith_chain_100", |b| {
@@ -154,13 +156,14 @@ fn bench_read_write_mix(c: &mut Criterion) {
 
     let snap = BenchSnapshot(data);
     let schemas = test_schemas();
+    let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
 
     c.bench_function("read_write_50_50", |b| {
@@ -188,13 +191,14 @@ fn bench_cmp_assert(c: &mut Criterion) {
 
     let snap = BenchSnapshot(BTreeMap::new());
     let schemas = test_schemas();
+    let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
         precompiles: None,
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
 
     c.bench_function("cmp_assert_100", |b| {

@@ -15,7 +15,7 @@ use tabula_ir::{Instruction, Slot};
 
 use crate::overlay::Overlay;
 use crate::precompile::PrecompileRegistry;
-use crate::property::{CommittedStateProvider, PropertyOpeningRegistry};
+use crate::property::{CommittedStateProvider, PropertyQueryRegistry};
 use crate::resolve::{resolve_row_expr, resolve_value_expr};
 
 /// Output of executing a single transaction's instruction body.
@@ -54,8 +54,8 @@ pub struct ExecContext<'a> {
     pub precompiles: Option<&'a PrecompileRegistry>,
     /// Optional committed state for PropertyRead instructions.
     pub committed_state: Option<&'a dyn CommittedStateProvider>,
-    /// Optional property opening registry for PropertyRead resolution.
-    pub property_openings: Option<&'a PropertyOpeningRegistry>,
+    /// Property query registry for PropertyRead resolution.
+    pub property_queries: &'a PropertyQueryRegistry,
 }
 
 /// Execute a transaction body against an overlay.
@@ -335,13 +335,9 @@ pub fn execute<S: StateSnapshot>(
                             "PropertyRead encountered but no CommittedStateProvider".into(),
                         )
                     })?;
-                    let registry = ctx.property_openings.ok_or_else(|| {
-                        TabulaError::InvalidIr(
-                            "PropertyRead encountered but no PropertyOpeningRegistry".into(),
-                        )
-                    })?;
-                    let col_type = lookup_col_type(ctx.schemas, *table, *col)?;
-                    let result = registry.resolve(*table, *col, query, provider, col_type)?;
+                    let result = ctx
+                        .property_queries
+                        .resolve(*table, *col, query, provider)?;
                     property_reads.push(PropertyReadResult {
                         instruction_index: idx,
                         value: result.value,

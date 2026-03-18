@@ -1,71 +1,75 @@
-//! Execution receipt and proof summary models.
+//! Canonical execution statement model.
 
 use serde::{Deserialize, Serialize};
 
-use tabula_core::ExecutionConsistencyStatus;
+use sha2::{Digest, Sha256};
+const STATEMENT_HASH_DOMAIN: &[u8] = b"tabula.execution.statement.v2";
 
-/// Execution receipt model (non-STARK placeholder backend).
+/// Canonical public statement for one execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExecutionReceipt {
-    /// Receipt version.
-    pub version: u32,
-    /// Scheme identifier.
-    pub scheme: String,
-    /// Statement hash.
-    pub statement_hash: String,
-    /// Program hash.
+pub struct ExecutionStatement {
+    /// Program artifact hash.
     pub program_hash: String,
-    /// State hash.
+    /// Input state hash.
     pub state_hash: String,
     /// Batch hash.
     pub batch_hash: String,
     /// Output state hash.
     pub state_after_hash: String,
-    /// Metadata hash.
+    /// Contract metadata hash.
     pub metadata_hash: String,
-    /// Generation timestamp.
-    pub generated_at_ms: u64,
-    /// Number of transactions.
-    pub tx_count: usize,
-    /// Number of emitted events.
-    pub emitted_count: usize,
-    /// Consistency status.
-    pub consistency: ExecutionConsistencyStatus,
-}
-
-/// Summary of one chip in a STARK proof.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChipSummary {
-    /// Chip name.
-    pub name: String,
-    /// Trace height (number of rows).
-    pub trace_height: usize,
-}
-
-/// Serializable summary of a STARK proof (the actual proof is not serializable).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StarkProofSummary {
-    /// Scheme identifier.
-    pub scheme: String,
-    /// Whether the proof was verified.
-    pub verified: bool,
-    /// Number of chips.
-    pub chip_count: usize,
-    /// Per-chip summaries.
-    pub chips: Vec<ChipSummary>,
-    /// Old state root (8 KoalaBear field elements as hex strings).
+    /// AIR public old state root, encoded as 8 hex limbs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub old_state_root: Vec<String>,
-    /// New state root (8 KoalaBear field elements as hex strings).
+    /// AIR public new state root, encoded as 8 hex limbs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub new_state_root: Vec<String>,
-    /// Proving time in milliseconds.
-    pub prove_time_ms: u64,
-    /// Verification time in milliseconds.
-    pub verify_time_ms: u64,
-    /// Statement hash (hex).
-    pub statement_hash: String,
-    /// Program hash (hex).
-    pub program_hash: String,
-    /// Batch hash (hex).
-    pub batch_hash: String,
+}
+
+impl ExecutionStatement {
+    /// Compute the canonical statement digest bytes.
+    pub fn statement_hash_bytes(&self) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(STATEMENT_HASH_DOMAIN);
+        hash_part(&mut hasher, b"program_hash", &self.program_hash);
+        hash_part(&mut hasher, b"state_hash", &self.state_hash);
+        hash_part(&mut hasher, b"batch_hash", &self.batch_hash);
+        hash_part(&mut hasher, b"state_after_hash", &self.state_after_hash);
+        hash_part(&mut hasher, b"metadata_hash", &self.metadata_hash);
+        hash_list_part(&mut hasher, b"old_state_root", &self.old_state_root);
+        hash_list_part(&mut hasher, b"new_state_root", &self.new_state_root);
+        hasher.finalize().into()
+    }
+
+    /// Compute the canonical statement digest.
+    pub fn statement_hash(&self) -> String {
+        bytes_to_hex(&self.statement_hash_bytes())
+    }
+}
+
+fn hash_part(hasher: &mut Sha256, label: &[u8], value: &str) {
+    hasher.update(label);
+    hasher.update([0u8]);
+    hasher.update(value.as_bytes());
+    hasher.update([0xffu8]);
+}
+
+fn hash_list_part(hasher: &mut Sha256, label: &[u8], values: &[String]) {
+    hasher.update(label);
+    hasher.update([0u8]);
+    for value in values {
+        hasher.update(value.as_bytes());
+        hasher.update([0xffu8]);
+    }
+    hasher.update([0xfeu8]);
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{b:02x}");
+    }
+    out
 }

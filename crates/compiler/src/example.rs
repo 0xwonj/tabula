@@ -1,11 +1,12 @@
 //! Built-in transfer example program and bundle.
 
-use tabula_artifact::{BatchFile, StateCell, StateFile, TxInput};
+use tabula_artifact::{
+    ProgramArtifact, StateEntry, StateSnapshot, TransactionBatch, TransactionInput,
+};
 use tabula_core::Value;
 
-use crate::ProgramSourceFile;
 use crate::compile::compile_program_source;
-use crate::register::{MetadataPolicy, register_program_sources};
+use crate::register::register_program_definition;
 
 /// Built-in transfer example source used by adapter commands.
 pub const TRANSFER_EXAMPLE_TAB_SOURCE: &str = "\
@@ -28,37 +29,37 @@ tx transfer(from: u64, to: u64, amount: u64) {
 pub struct ExampleBundle {
     /// `.tab` source text.
     pub program_tab_source: String,
-    /// Program artifact JSON payload.
-    pub program: ProgramSourceFile,
+    /// Sealed program artifact JSON payload.
+    pub program: ProgramArtifact,
     /// Initial state payload.
-    pub state: StateFile,
+    pub state: StateSnapshot,
     /// Batch payload.
-    pub batch: BatchFile,
+    pub batch: TransactionBatch,
 }
 
 /// Build the canonical transfer example bundle.
 pub fn transfer_example_bundle() -> anyhow::Result<ExampleBundle> {
-    let mut program =
+    let program_sources =
         compile_program_source(TRANSFER_EXAMPLE_TAB_SOURCE).map_err(anyhow::Error::new)?;
-    let artifact =
-        register_program_sources(&program, MetadataPolicy::Optional).map_err(anyhow::Error::new)?;
-    program.contract_metadata = Some(artifact.metadata_envelope);
+    let program = register_program_definition(&program_sources)
+        .map_err(anyhow::Error::new)?
+        .into_program_artifact();
 
-    let state = StateFile {
+    let state = StateSnapshot {
         cells: vec![
-            StateCell {
+            StateEntry {
                 table: 0,
                 row: 0,
                 col: 0,
                 value: Some(Value::U64(1000)),
             },
-            StateCell {
+            StateEntry {
                 table: 0,
                 row: 1,
                 col: 0,
                 value: Some(Value::U64(500)),
             },
-            StateCell {
+            StateEntry {
                 table: 0,
                 row: 2,
                 col: 0,
@@ -67,21 +68,21 @@ pub fn transfer_example_bundle() -> anyhow::Result<ExampleBundle> {
         ],
     };
 
-    let batch = BatchFile {
+    let batch = TransactionBatch {
         transactions: vec![
-            TxInput {
+            TransactionInput {
                 tx_type: 0,
                 params: vec![Value::U64(0), Value::U64(1), Value::U64(300)],
                 sender: "01".repeat(32),
                 nonce: 0,
             },
-            TxInput {
+            TransactionInput {
                 tx_type: 0,
                 params: vec![Value::U64(1), Value::U64(2), Value::U64(200)],
                 sender: "01".repeat(32),
                 nonce: 1,
             },
-            TxInput {
+            TransactionInput {
                 tx_type: 0,
                 params: vec![Value::U64(2), Value::U64(0), Value::U64(50)],
                 sender: "01".repeat(32),

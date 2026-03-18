@@ -218,9 +218,22 @@ define_bus! {
         new_root: var_arr<8>,
     }
 
+    /// Extension trait for send/receive on the EmptyOldColumn bus (C19).
+    ///
+    /// Tuple (2 elements): `(t, c)`.
+    pub EmptyOldColumnAirBuilder(
+        core_buses::EMPTY_OLD_COLUMN,
+        send_empty_old_column,
+        receive_empty_old_column
+    ) {
+        t: expr,
+        c: expr,
+    }
+
     /// Extension trait for send/receive on the PropertyRead bus (C18).
     ///
-    /// Tuple (2W+4 elements): `(t, c, query_type, result_val[W], result_key[W], is_null)`.
+    /// Tuple (4W+4 elements):
+    /// `(t, c, query_type, query_arg0[W], query_arg1[W], result_val[W], result_key[W], is_null)`.
     #[allow(clippy::too_many_arguments)]
     pub PropertyReadAirBuilder(
         core_buses::PROPERTY_READ,
@@ -230,8 +243,29 @@ define_bus! {
         t: expr,
         c: expr,
         query_type: expr,
+        query_arg0: var_slice,
+        query_arg1: var_slice,
         result_val: var_slice,
         result_key: var_slice,
         is_null: expr,
+    }
+
+    /// Extension trait for send/receive on the SSMC old-entry anchor bus (C20).
+    ///
+    /// Tuple `(t, c, key[3], val[W], has_prev, prev_key[3], is_last_old, next_key[3])`.
+    #[allow(clippy::too_many_arguments)]
+    pub SsmcOldEntryAirBuilder(
+        core_buses::SSMC_OLD_ENTRY,
+        send_ssmc_old_entry,
+        receive_ssmc_old_entry
+    ) {
+        t: expr,
+        c: expr,
+        key: u64limbs,
+        val: var_slice,
+        has_prev: expr,
+        prev_key: u64limbs,
+        is_last_old: expr,
+        next_key: u64limbs,
     }
 }

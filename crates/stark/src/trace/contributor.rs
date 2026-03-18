@@ -146,10 +146,9 @@ impl Default for WitnessStore {
 ///
 /// Extension chips may define additional labels in their own crates.
 /// Pre-populate the [`WitnessStore`] with custom data before passing it
-/// to [`TabulaMachine::build_traces()`].
+/// to the runtime-owned trace assembly pipeline.
 ///
 /// [`build_all_traces()`]: tabula_witness::trace::build_all_traces
-/// [`TabulaMachine::build_traces()`]: tabula_machine::TabulaMachine::build_traces
 pub mod witness_labels {
     /// `Vec<InstructionRecord>` — execution instruction trace input.
     pub const EXECUTION_RECORDS: &str = "execution_records";

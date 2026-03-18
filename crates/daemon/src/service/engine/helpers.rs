@@ -5,20 +5,14 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use serde_json::json;
 
-use tabula_artifact::CompiledProgram;
 use tabula_compiler::{
-    CompilerError, MetadataPolicy, ProgramSourceFormat, parse_program_sources,
-    register_program_sources,
+    CompiledProgram, CompilerError, compile_program_source, parse_program_artifact,
+    register_program_artifact, register_program_definition,
 };
 
 use crate::protocol::error::ErrorCode;
+use crate::service::ProgramInputRef;
 use crate::service::error::{ServiceError, ServiceResult};
-
-#[derive(Debug, Clone)]
-pub(crate) struct ResolvedProgramInput {
-    pub(crate) sources: tabula_compiler::ProgramSourceFile,
-    pub(crate) metadata_policy: MetadataPolicy,
-}
 
 pub(super) fn read_guard<'a, T>(
     lock: &'a RwLock<T>,
@@ -49,13 +43,6 @@ pub(super) fn next_id(counter: &AtomicU64, prefix: &str) -> String {
     format!("{prefix}_{value:016x}")
 }
 
-pub(super) fn register_resolved_program(
-    input: &ResolvedProgramInput,
-) -> ServiceResult<CompiledProgram> {
-    register_program_sources(&input.sources, input.metadata_policy)
-        .map_err(|e| map_compiler_error(&e))
-}
-
 pub(super) fn map_compiler_error(err: &CompilerError) -> ServiceError {
     match err {
         CompilerError::ReadFile { .. } => {
@@ -71,8 +58,8 @@ pub(super) fn map_compiler_error(err: &CompilerError) -> ServiceError {
         CompilerError::InvalidProgram(source) => {
             ServiceError::unprocessable(ErrorCode::ProgramValidationError, source.to_string())
         }
-        CompilerError::MissingContractMetadata => {
-            ServiceError::unprocessable(ErrorCode::ProgramSchemaError, err.to_string())
+        CompilerError::ArtifactMismatch { detail } => {
+            ServiceError::unprocessable(ErrorCode::ProgramSchemaError, detail.clone())
         }
         CompilerError::ContractMetadataMismatch(source) => {
             ServiceError::unprocessable(ErrorCode::ProgramSchemaError, source.to_string())
@@ -81,26 +68,20 @@ pub(super) fn map_compiler_error(err: &CompilerError) -> ServiceError {
 }
 
 impl super::LocalEngine {
-    pub(super) fn resolve_program_input(
+    pub(super) fn compile_program_input(
         &self,
-        input: &super::ProgramInputRef,
-    ) -> ServiceResult<ResolvedProgramInput> {
+        input: &ProgramInputRef,
+    ) -> ServiceResult<CompiledProgram> {
         use super::{InputRef, ProgramInline};
 
         match input {
             InputRef::Inline { inline } => match inline {
-                ProgramInline::Source { source } => {
-                    parse_program_sources(source, ProgramSourceFormat::TabSource, "<inline:source>")
-                        .map(|sources| ResolvedProgramInput {
-                            sources,
-                            metadata_policy: MetadataPolicy::Optional,
-                        })
-                        .map_err(|e| map_compiler_error(&e))
+                ProgramInline::Source { source } => compile_program_source(source)
+                    .and_then(|definition| register_program_definition(&definition))
+                    .map_err(|e| map_compiler_error(&e)),
+                ProgramInline::Program(program) => {
+                    register_program_artifact(program).map_err(|e| map_compiler_error(&e))
                 }
-                ProgramInline::Program(program) => Ok(ResolvedProgramInput {
-                    sources: program.clone(),
-                    metadata_policy: MetadataPolicy::Required,
-                }),
             },
             InputRef::File { file_path } => self.load_program_from_file(file_path),
             InputRef::Artifact { artifact_id } => Err(ServiceError::not_implemented(
@@ -110,24 +91,17 @@ impl super::LocalEngine {
         }
     }
 
-    fn load_program_from_file(
-        &self,
-        path: &std::path::Path,
-    ) -> ServiceResult<ResolvedProgramInput> {
+    fn load_program_from_file(&self, path: &std::path::Path) -> ServiceResult<CompiledProgram> {
         let source = self.files.read_utf8_file(path, "program")?;
-        let (format, metadata_policy) = if path.extension().and_then(|e| e.to_str()) == Some("tab")
-        {
-            (ProgramSourceFormat::TabSource, MetadataPolicy::Optional)
+        if path.extension().and_then(|e| e.to_str()) == Some("tab") {
+            compile_program_source(&source)
+                .and_then(|definition| register_program_definition(&definition))
+                .map_err(|e| map_compiler_error(&e))
         } else {
-            (ProgramSourceFormat::JsonArtifact, MetadataPolicy::Required)
-        };
-
-        parse_program_sources(&source, format, &path.display().to_string())
-            .map(|sources| ResolvedProgramInput {
-                sources,
-                metadata_policy,
-            })
-            .map_err(|e| map_compiler_error(&e))
+            parse_program_artifact(&source, &path.display().to_string())
+                .and_then(|artifact| register_program_artifact(&artifact))
+                .map_err(|e| map_compiler_error(&e))
+        }
     }
 }
 

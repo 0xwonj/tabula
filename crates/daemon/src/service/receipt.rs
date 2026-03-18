@@ -2,43 +2,16 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
-use sha2::{Digest, Sha256};
-
-use tabula_artifact::{CompiledProgram, ExecutionReceipt, ProgramArtifact, StateFile};
+use tabula_artifact::{ExecutionStatement, StateSnapshot, TransactionBatch};
+use tabula_compiler::CompiledProgram;
 use tabula_core::ExecutionConsistencyStatus;
 
 use super::error::{ServiceError, ServiceResult};
+use super::types::ExecutionReceipt;
 use crate::protocol::error::ErrorCode;
 
-const RECEIPT_VERSION: u32 = 1;
-const RECEIPT_SCHEME: &str = "execution_receipt_v1";
-const JSON_HASH_DOMAIN: &[u8] = b"tabula.orchestrator.json_hash.v1";
-const STATEMENT_HASH_DOMAIN: &[u8] = b"tabula.orchestrator.statement_hash.v1";
-
-/// Pre-computed hashes for a statement.
-#[derive(Debug, Clone)]
-pub struct StatementComponents {
-    pub program_hash: String,
-    pub state_hash: String,
-    pub batch_hash: String,
-    pub state_after_hash: String,
-    pub metadata_hash: String,
-}
-
-impl StatementComponents {
-    /// Compute statement hash from components.
-    pub fn statement_hash(&self) -> String {
-        statement_hash(
-            &self.program_hash,
-            &self.state_hash,
-            &self.batch_hash,
-            &self.state_after_hash,
-            &self.metadata_hash,
-        )
-    }
-}
-
+const RECEIPT_VERSION: u32 = 2;
+const RECEIPT_SCHEME: &str = "execution_receipt_v2";
 /// Verification result from receipt comparison.
 #[derive(Debug, Clone)]
 pub struct ReceiptVerification {
@@ -46,27 +19,49 @@ pub struct ReceiptVerification {
     pub message: String,
 }
 
-/// Build statement components from execution artifacts.
-pub fn statement_components(
+/// Build a canonical execution statement from execution artifacts.
+pub fn build_execution_statement(
     artifact: &CompiledProgram,
-    state: &StateFile,
-    batch: &tabula_artifact::BatchFile,
-    state_after: &StateFile,
-) -> ServiceResult<StatementComponents> {
-    let program_file: ProgramArtifact = artifact.as_program_artifact();
+    state: &StateSnapshot,
+    batch: &TransactionBatch,
+    state_after: &StateSnapshot,
+) -> ServiceResult<ExecutionStatement> {
+    let program_artifact = artifact.as_program_artifact();
 
-    Ok(StatementComponents {
-        program_hash: hash_json("program", &program_file)?,
-        state_hash: hash_json("state", state)?,
-        batch_hash: hash_json("batch", batch)?,
-        state_after_hash: hash_json("state_after", state_after)?,
-        metadata_hash: bytes_to_hex(&artifact.metadata_envelope.canonical_hash()),
+    Ok(ExecutionStatement {
+        program_hash: program_artifact.canonical_digest().map_err(|e| {
+            ServiceError::internal(
+                ErrorCode::InternalError,
+                format!("failed to hash program artifact: {e}"),
+            )
+        })?,
+        state_hash: state.canonical_digest().map_err(|e| {
+            ServiceError::internal(
+                ErrorCode::InternalError,
+                format!("failed to hash state artifact: {e}"),
+            )
+        })?,
+        batch_hash: batch.canonical_digest().map_err(|e| {
+            ServiceError::internal(
+                ErrorCode::InternalError,
+                format!("failed to hash batch artifact: {e}"),
+            )
+        })?,
+        state_after_hash: state_after.canonical_digest().map_err(|e| {
+            ServiceError::internal(
+                ErrorCode::InternalError,
+                format!("failed to hash post-state artifact: {e}"),
+            )
+        })?,
+        metadata_hash: bytes_to_hex(&artifact.metadata_envelope().canonical_hash()),
+        old_state_root: vec![],
+        new_state_root: vec![],
     })
 }
 
-/// Build an execution receipt from statement components and execution metadata.
+/// Build an execution receipt from a canonical execution statement.
 pub fn build_receipt(
-    components: &StatementComponents,
+    statement: &ExecutionStatement,
     tx_count: usize,
     emitted_count: usize,
     consistency: &ExecutionConsistencyStatus,
@@ -74,12 +69,12 @@ pub fn build_receipt(
     ExecutionReceipt {
         version: RECEIPT_VERSION,
         scheme: RECEIPT_SCHEME.to_string(),
-        statement_hash: components.statement_hash(),
-        program_hash: components.program_hash.clone(),
-        state_hash: components.state_hash.clone(),
-        batch_hash: components.batch_hash.clone(),
-        state_after_hash: components.state_after_hash.clone(),
-        metadata_hash: components.metadata_hash.clone(),
+        statement_hash: statement.statement_hash(),
+        program_hash: statement.program_hash.clone(),
+        state_hash: statement.state_hash.clone(),
+        batch_hash: statement.batch_hash.clone(),
+        state_after_hash: statement.state_after_hash.clone(),
+        metadata_hash: statement.metadata_hash.clone(),
         generated_at_ms: now_ms(),
         tx_count,
         emitted_count,
@@ -87,10 +82,10 @@ pub fn build_receipt(
     }
 }
 
-/// Verify a receipt against expected statement components.
+/// Verify a receipt against the expected execution statement.
 pub fn verify_receipt(
     proof: &ExecutionReceipt,
-    components: &StatementComponents,
+    statement: &ExecutionStatement,
     expected_statement_hash: &str,
 ) -> ReceiptVerification {
     if proof.version != RECEIPT_VERSION || proof.scheme != RECEIPT_SCHEME {
@@ -103,13 +98,16 @@ pub fn verify_receipt(
         };
     }
 
-    let recomputed = statement_hash(
-        &proof.program_hash,
-        &proof.state_hash,
-        &proof.batch_hash,
-        &proof.state_after_hash,
-        &proof.metadata_hash,
-    );
+    let recomputed = ExecutionStatement {
+        program_hash: proof.program_hash.clone(),
+        state_hash: proof.state_hash.clone(),
+        batch_hash: proof.batch_hash.clone(),
+        state_after_hash: proof.state_after_hash.clone(),
+        metadata_hash: proof.metadata_hash.clone(),
+        old_state_root: statement.old_state_root.clone(),
+        new_state_root: statement.new_state_root.clone(),
+    }
+    .statement_hash();
     if recomputed != proof.statement_hash {
         return ReceiptVerification {
             verified: false,
@@ -117,11 +115,11 @@ pub fn verify_receipt(
         };
     }
 
-    if proof.program_hash != components.program_hash
-        || proof.state_hash != components.state_hash
-        || proof.batch_hash != components.batch_hash
-        || proof.state_after_hash != components.state_after_hash
-        || proof.metadata_hash != components.metadata_hash
+    if proof.program_hash != statement.program_hash
+        || proof.state_hash != statement.state_hash
+        || proof.batch_hash != statement.batch_hash
+        || proof.state_after_hash != statement.state_after_hash
+        || proof.metadata_hash != statement.metadata_hash
     {
         return ReceiptVerification {
             verified: false,
@@ -142,22 +140,6 @@ pub fn verify_receipt(
     }
 }
 
-pub fn hash_json<T: Serialize>(label: &str, value: &T) -> ServiceResult<String> {
-    let bytes = serde_json::to_vec(value).map_err(|e| {
-        ServiceError::internal(
-            ErrorCode::InternalError,
-            format!("failed to serialize {label} for hashing: {e}"),
-        )
-    })?;
-
-    let mut hasher = Sha256::new();
-    hasher.update(JSON_HASH_DOMAIN);
-    hasher.update(label.as_bytes());
-    hasher.update([0u8]);
-    hasher.update(&bytes);
-    Ok(bytes_to_hex(&hasher.finalize()))
-}
-
 pub fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -172,28 +154,4 @@ pub fn bytes_to_hex(bytes: &[u8]) -> String {
         let _ = write!(out, "{b:02x}");
     }
     out
-}
-
-fn statement_hash(
-    program_hash: &str,
-    state_hash: &str,
-    batch_hash: &str,
-    state_after_hash: &str,
-    metadata_hash: &str,
-) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(STATEMENT_HASH_DOMAIN);
-    hash_part(&mut hasher, b"program_hash", program_hash);
-    hash_part(&mut hasher, b"state_hash", state_hash);
-    hash_part(&mut hasher, b"batch_hash", batch_hash);
-    hash_part(&mut hasher, b"state_after_hash", state_after_hash);
-    hash_part(&mut hasher, b"metadata_hash", metadata_hash);
-    bytes_to_hex(&hasher.finalize())
-}
-
-fn hash_part(hasher: &mut Sha256, label: &[u8], value: &str) {
-    hasher.update(label);
-    hasher.update([0u8]);
-    hasher.update(value.as_bytes());
-    hasher.update([0xffu8]);
 }

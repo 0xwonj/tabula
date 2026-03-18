@@ -12,8 +12,8 @@ mod tx;
 
 // ── State model ──
 pub use state::id::{
-    CellKey, ColId, ColumnCommitmentId, Digest, RowKey, StateRoot, TableCommitmentId, TableId,
-    TxTypeId,
+    CellKey, ColId, ColumnCommitmentId, Digest, RowKey, SchemeId, StateRoot, TableCommitmentId,
+    TableId, TxTypeId,
 };
 pub use state::schema::{ColumnDef, TableSchema};
 pub use state::value::{Value, ValueType, zero_value};
@@ -24,7 +24,7 @@ pub use tx::{Batch, ProgramBudgets, Transaction};
 // ── Execution output ──
 pub use event::{
     AccessEvent, BatchResult, ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, LogicalTime,
-    OpKind, PrecompileIo, PropertyReadResult, TxResult,
+    OpKind, PrecompileIo, PropertyQueryResult, PropertyReadResult, TxResult,
 };
 
 // ── Default implementations ──

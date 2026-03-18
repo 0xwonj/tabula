@@ -2,55 +2,28 @@
 
 use serde::{Deserialize, Serialize};
 
-use tabula_contract::{ContractCompatibilityPolicy, ContractMetadataEnvelope};
-use tabula_core::TableSchema;
-use tabula_ir::{Program, TxTypeDef};
+use tabula_contract::ContractMetadataEnvelope;
+use tabula_core::{ColId, SchemeId, TableId, TableSchema};
+use tabula_ir::{PrecompileId, PropertyRequirement, TxTypeDef};
 
-/// In-memory semantic artifact produced by the compiler/registration phase.
-///
-/// This is the canonical handoff type between the compiler-side pipeline
-/// and the runtime-side pipeline. It carries both the registered IR program
-/// and the canonical metadata used for compatibility checks.
-#[derive(Debug, Clone)]
-pub struct CompiledProgram {
-    /// Registered IR program.
-    pub program: Program,
-    /// Canonical table schemas consumed during registration.
-    pub table_schemas: Vec<TableSchema>,
-    /// Canonical transaction definitions consumed during registration.
-    pub tx_types: Vec<TxTypeDef>,
-    /// Canonical metadata envelope for proof compatibility checks.
-    pub metadata_envelope: ContractMetadataEnvelope,
+use crate::ArtifactError;
+use crate::canonical::{bytes_to_hex, canonical_json_bytes, canonical_json_digest};
+
+/// Canonical proof-planning metadata for one committed column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ColumnProofPlan {
+    /// Table identifier.
+    pub table_id: TableId,
+    /// Column identifier.
+    pub col_id: ColId,
+    /// Commitment scheme tag chosen by the compiler.
+    pub scheme_id: SchemeId,
+    /// Whether this column participates in the root commitment.
+    pub receives_commitment: bool,
 }
 
-impl CompiledProgram {
-    /// Build a strict compatibility policy pinned to this artifact's metadata.
-    pub fn compatibility_policy(&self) -> ContractCompatibilityPolicy {
-        ContractCompatibilityPolicy {
-            expected_profile_hash: self.metadata_envelope.profile_hash,
-            expected_contract_schema_version: self.metadata_envelope.contract_schema_version,
-            expected_binding_version: self.metadata_envelope.binding_version,
-            expected_semantic_hash_stub: self.metadata_envelope.semantic_hash_stub,
-        }
-    }
-
-    /// Clone into a portable JSON artifact.
-    pub fn as_program_artifact(&self) -> ProgramArtifact {
-        ProgramArtifact::from(self)
-    }
-
-    /// Convert into a portable JSON artifact.
-    pub fn into_program_artifact(self) -> ProgramArtifact {
-        ProgramArtifact::from(self)
-    }
-
-    /// Backward-compatible alias for older compile/CLI call sites.
-    pub fn into_program_file(self) -> ProgramArtifact {
-        self.into_program_artifact()
-    }
-}
-
-/// Program artifact used by compile/check/execute interfaces.
+/// Sealed program artifact used for storage, transport, and verification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProgramArtifact {
@@ -59,27 +32,83 @@ pub struct ProgramArtifact {
     pub table_schemas: Vec<TableSchema>,
     /// Transaction type definitions.
     pub tx_types: Vec<TxTypeDef>,
-    /// Optional metadata envelope (required for JSON artifact mode).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub contract_metadata: Option<ContractMetadataEnvelope>,
+    /// Capability manifest: precompiles required by this program.
+    pub required_precompile_ids: Vec<PrecompileId>,
+    /// Capability manifest: exact structural property requirements required by this program.
+    pub required_property_requirements: Vec<PropertyRequirement>,
+    /// Compiler-owned proof plan for all committed columns.
+    pub column_proof_plan: Vec<ColumnProofPlan>,
+    /// Canonical contract metadata envelope for compatibility checks.
+    pub contract_metadata: ContractMetadataEnvelope,
 }
 
-impl From<&CompiledProgram> for ProgramArtifact {
-    fn from(value: &CompiledProgram) -> Self {
-        Self {
-            table_schemas: value.table_schemas.clone(),
-            tx_types: value.tx_types.clone(),
-            contract_metadata: Some(value.metadata_envelope.clone()),
-        }
+impl ProgramArtifact {
+    /// Serialize this sealed artifact into its canonical byte representation.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ArtifactError> {
+        canonical_json_bytes(self)
+    }
+
+    /// Compute the canonical digest bytes for this artifact.
+    pub fn canonical_digest_bytes(&self) -> Result<[u8; 32], ArtifactError> {
+        canonical_json_digest("program", self)
+    }
+
+    /// Compute the canonical digest hex string for this artifact.
+    pub fn canonical_digest(&self) -> Result<String, ArtifactError> {
+        Ok(bytes_to_hex(&self.canonical_digest_bytes()?))
     }
 }
 
-impl From<CompiledProgram> for ProgramArtifact {
-    fn from(value: CompiledProgram) -> Self {
-        Self {
-            table_schemas: value.table_schemas,
-            tx_types: value.tx_types,
-            contract_metadata: Some(value.metadata_envelope),
-        }
+#[cfg(test)]
+mod tests {
+    use tabula_contract::{
+        BINDING_VERSION_V1, CONTRACT_SCHEMA_VERSION_V1, ContractMetadataEnvelope,
+        STATEMENT_SCHEMA_VERSION_V1, VERIFIER_PROFILE_VERSION_V1,
+    };
+    use tabula_core::{ColId, SchemeId, TableId, TableSchema, TxTypeId, ValueType};
+    use tabula_ir::TxTypeDef;
+
+    use super::{ColumnProofPlan, ProgramArtifact};
+
+    #[test]
+    fn program_artifact_canonical_digest_is_deterministic() {
+        let artifact = ProgramArtifact {
+            table_schemas: vec![TableSchema {
+                id: TableId(1),
+                name: "accounts".to_string(),
+                columns: vec![tabula_core::ColumnDef {
+                    id: ColId(0),
+                    name: "balance".to_string(),
+                    value_type: ValueType::U64,
+                }],
+            }],
+            tx_types: vec![TxTypeDef {
+                id: TxTypeId(1),
+                name: "touch".to_string(),
+                param_schema: vec![],
+                body: vec![],
+            }],
+            required_precompile_ids: vec![],
+            required_property_requirements: vec![],
+            column_proof_plan: vec![ColumnProofPlan {
+                table_id: TableId(1),
+                col_id: ColId(0),
+                scheme_id: SchemeId::SSMC,
+                receives_commitment: true,
+            }],
+            contract_metadata: ContractMetadataEnvelope {
+                profile_hash: [7; 32],
+                contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
+                binding_version: BINDING_VERSION_V1,
+                statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
+                verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
+                semantic_hash_stub: None,
+            },
+        };
+
+        assert_eq!(
+            artifact.canonical_digest().expect("first digest"),
+            artifact.canonical_digest().expect("second digest")
+        );
     }
 }

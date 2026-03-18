@@ -70,53 +70,53 @@ fn constrain_smt_path_core<AB: InteractionAirBuilder>(
     local: &SmtPathCols<AB::Var>,
     next: &SmtPathCols<AB::Var>,
 ) {
-    let is_real: AB::Expr = local.is_real.clone().into();
+    let is_real: AB::Expr = local.is_real.into();
 
     // ── 1. Booleans ──
-    builder.assert_bool(local.path_bit.clone());
-    builder.assert_bool(local.is_leaf.clone());
-    builder.assert_bool(local.is_root.clone());
+    builder.assert_bool(local.path_bit);
+    builder.assert_bool(local.is_leaf);
+    builder.assert_bool(local.is_root);
 
     // ── 2. is_real prefix ──
-    constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
+    constrain_is_real_prefix(builder, local.is_real, next.is_real);
 
     // First real row must start a path.
     builder
         .when_first_row()
-        .assert_zero(is_real.clone() * (AB::Expr::ONE - local.is_leaf.clone().into()));
+        .assert_zero(is_real.clone() * (AB::Expr::ONE - local.is_leaf.into()));
 
     // ── 3. Perm input mux ──
     // left[i]  = (1-bit)*node[i] + bit*sib[i]
     // right[i] = bit*node[i] + (1-bit)*sib[i]
     {
-        let bit: AB::Expr = local.path_bit.clone().into();
+        let bit: AB::Expr = local.path_bit.into();
         let not_bit: AB::Expr = AB::Expr::ONE - bit.clone();
 
         for i in 0..DIGEST_WIDTH {
             // Old tree left = perm_input[i]
-            let expected_left_old: AB::Expr = not_bit.clone() * local.old_node[i].clone().into()
-                + bit.clone() * local.old_sibling[i].clone().into();
+            let expected_left_old: AB::Expr = not_bit.clone() * local.old_node[i].into()
+                + bit.clone() * local.old_sibling[i].into();
             builder.assert_zero(
-                is_real.clone() * (local.old_perm_input[i].clone().into() - expected_left_old),
+                is_real.clone() * (local.old_perm_input[i].into() - expected_left_old),
             );
             // Old tree right = perm_input[8+i]
-            let expected_right_old: AB::Expr = bit.clone() * local.old_node[i].clone().into()
-                + not_bit.clone() * local.old_sibling[i].clone().into();
+            let expected_right_old: AB::Expr = bit.clone() * local.old_node[i].into()
+                + not_bit.clone() * local.old_sibling[i].into();
             builder.assert_zero(
-                is_real.clone() * (local.old_perm_input[8 + i].clone().into() - expected_right_old),
+                is_real.clone() * (local.old_perm_input[8 + i].into() - expected_right_old),
             );
 
             // New tree left = perm_input[i]
-            let expected_left_new: AB::Expr = not_bit.clone() * local.new_node[i].clone().into()
-                + bit.clone() * local.new_sibling[i].clone().into();
+            let expected_left_new: AB::Expr = not_bit.clone() * local.new_node[i].into()
+                + bit.clone() * local.new_sibling[i].into();
             builder.assert_zero(
-                is_real.clone() * (local.new_perm_input[i].clone().into() - expected_left_new),
+                is_real.clone() * (local.new_perm_input[i].into() - expected_left_new),
             );
             // New tree right = perm_input[8+i]
-            let expected_right_new: AB::Expr = bit.clone() * local.new_node[i].clone().into()
-                + not_bit.clone() * local.new_sibling[i].clone().into();
+            let expected_right_new: AB::Expr = bit.clone() * local.new_node[i].into()
+                + not_bit.clone() * local.new_sibling[i].into();
             builder.assert_zero(
-                is_real.clone() * (local.new_perm_input[8 + i].clone().into() - expected_right_new),
+                is_real.clone() * (local.new_perm_input[8 + i].into() - expected_right_new),
             );
         }
     }
@@ -131,26 +131,22 @@ fn constrain_smt_path_core<AB: InteractionAirBuilder>(
     // For simplicity: at an is_root row, the next row is a new path start.
     // next_is_new_path.is_zero = 1 means "next row is same path" (diff=0).
     // We define: diff = local.is_root (1 at boundary, 0 within path).
-    constrain_is_zero(
-        builder,
-        local.is_root.clone().into(),
-        &local.next_is_new_path,
-    );
+    constrain_is_zero(builder, local.is_root.into(), &local.next_is_new_path);
 
-    let within_path: AB::Expr = local.next_is_new_path.is_zero.clone().into();
+    let within_path: AB::Expr = local.next_is_new_path.is_zero.into();
     let at_boundary: AB::Expr = AB::Expr::ONE - within_path.clone();
-    let both_real: AB::Expr = is_real.clone() * next.is_real.clone().into();
+    let both_real: AB::Expr = is_real.clone() * next.is_real.into();
 
     // Within a path, only the first row may have is_leaf=1.
     builder
         .when_transition()
-        .assert_zero(both_real.clone() * within_path.clone() * next.is_leaf.clone().into());
+        .assert_zero(both_real.clone() * within_path.clone() * next.is_leaf.into());
 
     // Last real row before padding must end a path with is_root=1.
     builder.when_transition().assert_zero(
         is_real.clone()
-            * (AB::Expr::ONE - next.is_real.clone().into())
-            * (AB::Expr::ONE - local.is_root.clone().into()),
+            * (AB::Expr::ONE - next.is_real.into())
+            * (AB::Expr::ONE - local.is_root.into()),
     );
 
     // ── 5. Continuity within path: next.node = local.parent ──
@@ -158,26 +154,22 @@ fn constrain_smt_path_core<AB: InteractionAirBuilder>(
         builder.when_transition().assert_zero(
             both_real.clone()
                 * within_path.clone()
-                * (next.old_node[i].clone().into() - local.old_parent[i].clone().into()),
+                * (next.old_node[i].into() - local.old_parent[i].into()),
         );
         builder.when_transition().assert_zero(
             both_real.clone()
                 * within_path.clone()
-                * (next.new_node[i].clone().into() - local.new_parent[i].clone().into()),
+                * (next.new_node[i].into() - local.new_parent[i].into()),
         );
     }
 
     // ── 6. Key reconstruction ──
     // is_leaf → key_acc = path_bit, level_power = 1
     builder.assert_zero(
-        is_real.clone()
-            * local.is_leaf.clone().into()
-            * (local.key_acc.clone().into() - local.path_bit.clone().into()),
+        is_real.clone() * local.is_leaf.into() * (local.key_acc.into() - local.path_bit.into()),
     );
     builder.assert_zero(
-        is_real.clone()
-            * local.is_leaf.clone().into()
-            * (local.level_power.clone().into() - AB::Expr::ONE),
+        is_real.clone() * local.is_leaf.into() * (local.level_power.into() - AB::Expr::ONE),
     );
 
     // Within path: next.key_acc = key_acc + next.path_bit * next.level_power
@@ -185,40 +177,36 @@ fn constrain_smt_path_core<AB: InteractionAirBuilder>(
     builder.when_transition().assert_zero(
         both_real.clone()
             * within_path.clone()
-            * (next.key_acc.clone().into()
-                - local.key_acc.clone().into()
-                - next.path_bit.clone().into() * next.level_power.clone().into()),
+            * (next.key_acc.into()
+                - local.key_acc.into()
+                - next.path_bit.into() * next.level_power.into()),
     );
     builder.when_transition().assert_zero(
         both_real.clone()
             * within_path.clone()
-            * (next.level_power.clone().into() - local.level_power.clone().into() * AB::Expr::TWO),
+            * (next.level_power.into() - local.level_power.into() * AB::Expr::TWO),
     );
 
     // ── 7. Key binding: is_root → key_acc = bind_key ──
     builder.assert_zero(
-        is_real.clone()
-            * local.is_root.clone().into()
-            * (local.key_acc.clone().into() - local.bind_key.clone().into()),
+        is_real.clone() * local.is_root.into() * (local.key_acc.into() - local.bind_key.into()),
     );
 
     // ── 8. Identity constancy within path ──
     builder.when_transition().assert_zero(
         both_real.clone()
             * within_path.clone()
-            * (next.bind_table_id.clone().into() - local.bind_table_id.clone().into()),
+            * (next.bind_table_id.into() - local.bind_table_id.into()),
     );
     builder.when_transition().assert_zero(
-        both_real.clone()
-            * within_path.clone()
-            * (next.bind_key.clone().into() - local.bind_key.clone().into()),
+        both_real.clone() * within_path.clone() * (next.bind_key.into() - local.bind_key.into()),
     );
 
     // ── 9. Path structure ──
     // At boundary (transition to new path): next row must be is_leaf
-    builder.when_transition().assert_zero(
-        both_real.clone() * at_boundary * (AB::Expr::ONE - next.is_leaf.clone().into()),
-    );
+    builder
+        .when_transition()
+        .assert_zero(both_real.clone() * at_boundary * (AB::Expr::ONE - next.is_leaf.into()));
 
     // is_leaf row must NOT also be is_root (unless path depth = 1, which we disallow
     // for SMT depths ≥ 2). For robustness we allow it — the constraint is:
@@ -240,19 +228,19 @@ impl<AB: InteractionAirBuilder> Air<AB> for SmtColPathChip {
 
         // C15 SmtLeafDigest receive (at leaf)
         builder.receive_smt_leaf_digest(
-            local.bind_table_id.clone().into(),
-            local.bind_key.clone().into(),
+            local.bind_table_id.into(),
+            local.bind_key.into(),
             &local.old_node,
             &local.new_node,
-            local.is_real.clone().into() * local.is_leaf.clone().into(),
+            local.is_real.into() * local.is_leaf.into(),
         );
 
         // C16 SmtTableRoot send (at root)
         builder.send_smt_table_root(
-            local.bind_table_id.clone().into(),
+            local.bind_table_id.into(),
             &local.old_parent,
             &local.new_parent,
-            local.is_real.clone().into() * local.is_root.clone().into(),
+            local.is_real.into() * local.is_root.into(),
         );
     }
 }
@@ -275,12 +263,10 @@ where
 
         // C16 SmtTableRoot receive (at leaf, with multiplicity witness)
         builder.receive_smt_table_root(
-            local.base.bind_table_id.clone().into(),
+            local.base.bind_table_id.into(),
             &local.base.old_node,
             &local.base.new_node,
-            local.base.is_real.clone().into()
-                * local.base.is_leaf.clone().into()
-                * local.root_mult_witness.clone().into(),
+            local.base.is_real.into() * local.base.is_leaf.into() * local.root_mult_witness.into(),
         );
 
         // Root rows are bound to public values (old_root/new_root).
@@ -310,13 +296,11 @@ where
         )
     };
 
-    let root_gate: AB::Expr = local.is_real.clone().into() * local.is_root.clone().into();
+    let root_gate: AB::Expr = local.is_real.into() * local.is_root.into();
     for i in 0..DIGEST_WIDTH {
-        builder.assert_zero(
-            root_gate.clone() * (local.old_parent[i].clone().into() - old_root_pvs[i].into()),
-        );
-        builder.assert_zero(
-            root_gate.clone() * (local.new_parent[i].clone().into() - new_root_pvs[i].into()),
-        );
+        builder
+            .assert_zero(root_gate.clone() * (local.old_parent[i].into() - old_root_pvs[i].into()));
+        builder
+            .assert_zero(root_gate.clone() * (local.new_parent[i].into() - new_root_pvs[i].into()));
     }
 }

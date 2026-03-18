@@ -25,12 +25,9 @@ use super::TraceMap;
 ///
 /// # Usage
 ///
-/// External callers should prefer [`TabulaMachine::build_traces()`] which
-/// delegates to this function with the machine's own chip configuration.
-/// Direct usage is for advanced scenarios (e.g., custom orchestration or
-/// testing with a hand-picked chip subset).
-///
-/// [`TabulaMachine::build_traces()`]: tabula_machine::TabulaMachine::build_traces
+/// External callers typically reach this through runtime proving, but direct
+/// usage is still useful for custom orchestration or tests with a hand-picked
+/// chip subset.
 pub fn build_all_traces(
     chips: &[Box<dyn DynChip>],
     bus_consumers: &[Box<dyn BusConsumer>],

@@ -101,28 +101,28 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for MemoryShardChip<W> {
         let local: &MemoryShardCols<AB::Var, W> = borrow_cols(local_row);
         let next: &MemoryShardCols<AB::Var, W> = borrow_cols(next_row);
 
-        let is_real: AB::Expr = local.is_real.clone().into();
-        let both_real: AB::Expr = is_real.clone() * next.is_real.clone().into();
+        let is_real: AB::Expr = local.is_real.into();
+        let both_real: AB::Expr = is_real.clone() * next.is_real.into();
 
         // Derive same_key from key limb IsZero gadgets.
-        let limb0_same: AB::Expr = local.r_limb0_iz.is_zero.clone().into();
-        let limb1_same: AB::Expr = local.r_limb1_iz.is_zero.clone().into();
-        let limb2_same: AB::Expr = local.r_limb2_iz.is_zero.clone().into();
+        let limb0_same: AB::Expr = local.r_limb0_iz.is_zero.into();
+        let limb1_same: AB::Expr = local.r_limb1_iz.is_zero.into();
+        let limb2_same: AB::Expr = local.r_limb2_iz.is_zero.into();
         let same_key: AB::Expr = limb0_same * limb1_same * limb2_same;
 
         // 1. Boolean constraints
         constrain_booleans(builder, local);
 
         // 2. is_real prefix
-        constrain_is_real_prefix(builder, local.is_real.clone(), next.is_real.clone());
+        constrain_is_real_prefix(builder, local.is_real, next.is_real);
 
         // 3. Constant identity: table_id and col_id must not change between real rows
         constrain_constant_identity(
             builder,
-            local.table_id.clone(),
-            next.table_id.clone(),
-            local.col_id.clone(),
-            next.col_id.clone(),
+            local.table_id,
+            next.table_id,
+            local.col_id,
+            next.col_id,
             both_real.clone(),
         );
 
@@ -179,16 +179,13 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for MemoryShardChip<W> {
 
         // Key limb IsZero gadgets (unconditional — must have valid witnesses everywhere)
         {
-            let diff0: AB::Expr =
-                next.key.limbs.limb0.clone().into() - local.key.limbs.limb0.clone().into();
+            let diff0: AB::Expr = next.key.limbs.limb0.into() - local.key.limbs.limb0.into();
             constrain_is_zero(builder, diff0, &local.r_limb0_iz);
 
-            let diff1: AB::Expr =
-                next.key.limbs.limb1.clone().into() - local.key.limbs.limb1.clone().into();
+            let diff1: AB::Expr = next.key.limbs.limb1.into() - local.key.limbs.limb1.into();
             constrain_is_zero(builder, diff1, &local.r_limb1_iz);
 
-            let diff2: AB::Expr =
-                next.key.limbs.limb2.clone().into() - local.key.limbs.limb2.clone().into();
+            let diff2: AB::Expr = next.key.limbs.limb2.into() - local.key.limbs.limb2.into();
             constrain_is_zero(builder, diff2, &local.r_limb2_iz);
         }
 
@@ -200,10 +197,10 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for MemoryShardChip<W> {
         }
         // tx_diff range check (u16)
         {
-            let not_init_local: AB::Expr = AB::Expr::ONE - local.is_init.clone().into();
-            let not_init_next: AB::Expr = AB::Expr::ONE - next.is_init.clone().into();
+            let not_init_local: AB::Expr = AB::Expr::ONE - local.is_init.into();
+            let not_init_next: AB::Expr = AB::Expr::ONE - next.is_init.into();
             builder.send(tabula_stark::air::interaction::AirInteraction {
-                values: vec![local.tx_diff.clone().into()],
+                values: vec![local.tx_diff.into()],
                 multiplicity: both_real.clone() * same_key.clone() * not_init_local * not_init_next,
                 bus: tabula_stark::air::interaction::core_buses::RANGE_CHECK,
             });
@@ -221,13 +218,13 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &MemoryShardCols<AB::Var, W>,
 ) {
-    builder.assert_bool(local.is_init.clone());
-    builder.assert_bool(local.has_read.clone());
-    builder.assert_bool(local.has_write.clone());
-    builder.assert_bool(local.is_last_for_key.clone());
-    builder.assert_bool(local.has_ever_written.clone());
-    builder.assert_bool(local.input_is_null.clone());
-    builder.assert_bool(local.output_is_null.clone());
+    builder.assert_bool(local.is_init);
+    builder.assert_bool(local.has_read);
+    builder.assert_bool(local.has_write);
+    builder.assert_bool(local.is_last_for_key);
+    builder.assert_bool(local.has_ever_written);
+    builder.assert_bool(local.input_is_null);
+    builder.assert_bool(local.output_is_null);
 }
 
 /// 4. Init first: when key changes, next row must be init. First real row must be init.
@@ -241,10 +238,10 @@ fn constrain_init_first<AB: AirBuilder, const W: usize>(
     let diff_key: AB::Expr = AB::Expr::ONE - same_key;
     builder
         .when_transition()
-        .assert_zero(both_real * diff_key * (AB::Expr::ONE - next.is_init.clone().into()));
+        .assert_zero(both_real * diff_key * (AB::Expr::ONE - next.is_init.into()));
     builder
         .when_first_row()
-        .assert_zero(local.is_real.clone().into() * (AB::Expr::ONE - local.is_init.clone().into()));
+        .assert_zero(local.is_real.into() * (AB::Expr::ONE - local.is_init.into()));
 }
 
 /// 5. Init shape: init → has_read=0, has_write=0, output=input.
@@ -253,15 +250,14 @@ fn constrain_init_shape<AB: AirBuilder, const W: usize>(
     local: &MemoryShardCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let gate: AB::Expr = is_real * local.is_init.clone().into();
-    builder.assert_zero(gate.clone() * local.has_read.clone().into());
-    builder.assert_zero(gate.clone() * local.has_write.clone().into());
+    let gate: AB::Expr = is_real * local.is_init.into();
+    builder.assert_zero(gate.clone() * local.has_read.into());
+    builder.assert_zero(gate.clone() * local.has_write.into());
     for i in 0..W {
-        let diff: AB::Expr = local.output_val[i].clone().into() - local.input_val[i].clone().into();
+        let diff: AB::Expr = local.output_val[i].into() - local.input_val[i].into();
         builder.assert_zero(gate.clone() * diff);
     }
-    let null_diff: AB::Expr =
-        local.output_is_null.clone().into() - local.input_is_null.clone().into();
+    let null_diff: AB::Expr = local.output_is_null.into() - local.input_is_null.into();
     builder.assert_zero(gate * null_diff);
 }
 
@@ -271,9 +267,9 @@ fn constrain_access_minimum<AB: AirBuilder, const W: usize>(
     local: &MemoryShardCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let not_init: AB::Expr = AB::Expr::ONE - local.is_init.clone().into();
-    let no_read: AB::Expr = AB::Expr::ONE - local.has_read.clone().into();
-    let no_write: AB::Expr = AB::Expr::ONE - local.has_write.clone().into();
+    let not_init: AB::Expr = AB::Expr::ONE - local.is_init.into();
+    let no_read: AB::Expr = AB::Expr::ONE - local.has_read.into();
+    let no_write: AB::Expr = AB::Expr::ONE - local.has_write.into();
     builder.assert_zero(is_real * not_init * no_read * no_write);
 }
 
@@ -285,13 +281,12 @@ fn constrain_read_consistency<AB: AirBuilder, const W: usize>(
     both_real: AB::Expr,
     same_key: AB::Expr,
 ) {
-    let gate: AB::Expr = both_real * same_key * next.has_read.clone().into();
+    let gate: AB::Expr = both_real * same_key * next.has_read.into();
     for i in 0..W {
-        let diff: AB::Expr = next.input_val[i].clone().into() - local.output_val[i].clone().into();
+        let diff: AB::Expr = next.input_val[i].into() - local.output_val[i].into();
         builder.when_transition().assert_zero(gate.clone() * diff);
     }
-    let null_diff: AB::Expr =
-        next.input_is_null.clone().into() - local.output_is_null.clone().into();
+    let null_diff: AB::Expr = next.input_is_null.into() - local.output_is_null.into();
     builder.when_transition().assert_zero(gate * null_diff);
 }
 
@@ -301,15 +296,14 @@ fn constrain_output_derivation<AB: AirBuilder, const W: usize>(
     local: &MemoryShardCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let not_init: AB::Expr = AB::Expr::ONE - local.is_init.clone().into();
-    let no_write: AB::Expr = AB::Expr::ONE - local.has_write.clone().into();
+    let not_init: AB::Expr = AB::Expr::ONE - local.is_init.into();
+    let no_write: AB::Expr = AB::Expr::ONE - local.has_write.into();
     let gate: AB::Expr = is_real * not_init * no_write;
     for i in 0..W {
-        let diff: AB::Expr = local.output_val[i].clone().into() - local.input_val[i].clone().into();
+        let diff: AB::Expr = local.output_val[i].into() - local.input_val[i].into();
         builder.assert_zero(gate.clone() * diff);
     }
-    let null_diff: AB::Expr =
-        local.output_is_null.clone().into() - local.input_is_null.clone().into();
+    let null_diff: AB::Expr = local.output_is_null.into() - local.input_is_null.into();
     builder.assert_zero(gate * null_diff);
 }
 
@@ -342,14 +336,13 @@ fn constrain_tx_ordering<AB: AirBuilder, const W: usize>(
     both_real: AB::Expr,
     same_key: AB::Expr,
 ) {
-    let not_init_local: AB::Expr = AB::Expr::ONE - local.is_init.clone().into();
-    let not_init_next: AB::Expr = AB::Expr::ONE - next.is_init.clone().into();
+    let not_init_local: AB::Expr = AB::Expr::ONE - local.is_init.into();
+    let not_init_next: AB::Expr = AB::Expr::ONE - next.is_init.into();
     let gate: AB::Expr = both_real * same_key * not_init_local * not_init_next;
-    let expected: AB::Expr =
-        next.tx_index.clone().into() - local.tx_index.clone().into() - AB::Expr::ONE;
+    let expected: AB::Expr = next.tx_index.into() - local.tx_index.into() - AB::Expr::ONE;
     builder
         .when_transition()
-        .assert_zero(gate * (local.tx_diff.clone().into() - expected));
+        .assert_zero(gate * (local.tx_diff.into() - expected));
 }
 
 /// 11. is_last_for_key: true iff next row has different key (or is padding).
@@ -366,13 +359,13 @@ fn constrain_is_last_for_key<AB: AirBuilder, const W: usize>(
     // When both rows real: is_last_for_key = !same_key
     builder
         .when_transition()
-        .assert_zero(both_real * (local.is_last_for_key.clone().into() - not_same_key));
+        .assert_zero(both_real * (local.is_last_for_key.into() - not_same_key));
 
     // When real→padding: must be last for key
-    let real_to_padding: AB::Expr = is_real * (AB::Expr::ONE - next.is_real.clone().into());
+    let real_to_padding: AB::Expr = is_real * (AB::Expr::ONE - next.is_real.into());
     builder
         .when_transition()
-        .assert_zero(real_to_padding * (AB::Expr::ONE - local.is_last_for_key.clone().into()));
+        .assert_zero(real_to_padding * (AB::Expr::ONE - local.is_last_for_key.into()));
 }
 
 /// 12. has_ever_written: init→0, same-key transition OR propagation.
@@ -385,17 +378,15 @@ fn constrain_has_ever_written<AB: AirBuilder, const W: usize>(
     same_key: AB::Expr,
 ) {
     // Init → has_ever_written = 0
-    builder.assert_zero(
-        is_real * local.is_init.clone().into() * local.has_ever_written.clone().into(),
-    );
+    builder.assert_zero(is_real * local.is_init.into() * local.has_ever_written.into());
 
     // Same-key transition: next.hew = local.hew OR next.has_write
-    let local_hew: AB::Expr = local.has_ever_written.clone().into();
-    let next_hw: AB::Expr = next.has_write.clone().into();
+    let local_hew: AB::Expr = local.has_ever_written.into();
+    let next_hw: AB::Expr = next.has_write.into();
     let expected: AB::Expr = local_hew.clone() + next_hw.clone() - local_hew * next_hw;
     builder
         .when_transition()
-        .assert_zero(both_real * same_key * (next.has_ever_written.clone().into() - expected));
+        .assert_zero(both_real * same_key * (next.has_ever_written.into() - expected));
 }
 
 /// LogUp bus interactions (C10, C11, C13, C14).
@@ -407,64 +398,60 @@ fn send_receive_bus_interactions<AB: InteractionAirBuilder, const W: usize>(
     // C10 ReadAccess receive: non-init rows with has_read
     builder.receive_read_access(
         AccessTupleExpr {
-            table_id: local.table_id.clone().into(),
-            col_id: local.col_id.clone().into(),
-            key_limb0: local.key.limbs.limb0.clone().into(),
-            key_limb1: local.key.limbs.limb1.clone().into(),
-            key_limb2: local.key.limbs.limb2.clone().into(),
-            tx_index: local.tx_index.clone().into(),
+            table_id: local.table_id.into(),
+            col_id: local.col_id.into(),
+            key_limb0: local.key.limbs.limb0.into(),
+            key_limb1: local.key.limbs.limb1.into(),
+            key_limb2: local.key.limbs.limb2.into(),
+            tx_index: local.tx_index.into(),
             value: local
                 .input_val
                 .iter()
-                .cloned()
+                .copied()
                 .map(Into::into)
                 .collect::<Vec<AB::Expr>>(),
-            is_null: local.input_is_null.clone().into(),
+            is_null: local.input_is_null.into(),
         },
-        is_real.clone()
-            * local.has_read.clone().into()
-            * (AB::Expr::ONE - local.is_init.clone().into()),
+        is_real.clone() * local.has_read.into() * (AB::Expr::ONE - local.is_init.into()),
     );
 
     // C11 WriteAccess receive: non-init rows with has_write
     builder.receive_write_access(
         AccessTupleExpr {
-            table_id: local.table_id.clone().into(),
-            col_id: local.col_id.clone().into(),
-            key_limb0: local.key.limbs.limb0.clone().into(),
-            key_limb1: local.key.limbs.limb1.clone().into(),
-            key_limb2: local.key.limbs.limb2.clone().into(),
-            tx_index: local.tx_index.clone().into(),
+            table_id: local.table_id.into(),
+            col_id: local.col_id.into(),
+            key_limb0: local.key.limbs.limb0.into(),
+            key_limb1: local.key.limbs.limb1.into(),
+            key_limb2: local.key.limbs.limb2.into(),
+            tx_index: local.tx_index.into(),
             value: local
                 .output_val
                 .iter()
-                .cloned()
+                .copied()
                 .map(Into::into)
                 .collect::<Vec<AB::Expr>>(),
-            is_null: local.output_is_null.clone().into(),
+            is_null: local.output_is_null.into(),
         },
-        is_real.clone()
-            * local.has_write.clone().into()
-            * (AB::Expr::ONE - local.is_init.clone().into()),
+        is_real.clone() * local.has_write.into() * (AB::Expr::ONE - local.is_init.into()),
     );
 
     // C13 BaseStateEntry send: init rows
     builder.send_base_state_entry(
-        local.table_id.clone().into(),
-        local.col_id.clone().into(),
+        local.table_id.into(),
+        local.col_id.into(),
         &local.key.limbs,
         &local.input_val,
-        local.input_is_null.clone().into(),
-        is_real.clone() * local.is_init.clone().into(),
+        local.input_is_null.into(),
+        is_real.clone() * local.is_init.into(),
     );
 
     // C14 CoalescedWrite send: last-for-key rows that had a write
     builder.send_coalesced_write(
-        local.table_id.clone().into(),
-        local.col_id.clone().into(),
+        local.table_id.into(),
+        local.col_id.into(),
         &local.key.limbs,
         &local.output_val,
-        local.output_is_null.clone().into(),
-        is_real * local.is_last_for_key.clone().into() * local.has_ever_written.clone().into(),
+        local.output_is_null.into(),
+        is_real * local.is_last_for_key.into() * local.has_ever_written.into(),
     );
 }

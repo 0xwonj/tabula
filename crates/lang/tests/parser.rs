@@ -18,6 +18,7 @@ fn test_parse_table_decl() {
     assert_eq!(prog.tables[0].columns.len(), 1);
     assert_eq!(prog.tables[0].columns[0].name, "balance");
     assert_eq!(prog.tables[0].columns[0].ty, TypeName::U64);
+    assert_eq!(prog.tables[0].columns[0].scheme, None);
 }
 
 #[test]
@@ -33,6 +34,23 @@ fn test_parse_table_multi_columns() {
 fn test_parse_table_trailing_comma() {
     let prog = parse_source("table t { a: u64, b: i64, }");
     assert_eq!(prog.tables[0].columns.len(), 2);
+}
+
+#[test]
+fn test_parse_table_column_scheme_annotations() {
+    let prog = parse_source("table t { a: u64 @ssmc, b: u64 @smt, c: u64 @scheme(42) }");
+    assert_eq!(
+        prog.tables[0].columns[0].scheme,
+        Some(ColumnSchemeDecl::Ssmc)
+    );
+    assert_eq!(
+        prog.tables[0].columns[1].scheme,
+        Some(ColumnSchemeDecl::Smt)
+    );
+    assert_eq!(
+        prog.tables[0].columns[2].scheme,
+        Some(ColumnSchemeDecl::Numeric(42))
+    );
 }
 
 // --- Tx declarations ---

@@ -9,7 +9,6 @@ tabula-core = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-stark = { workspace = true }
-tabula-witness = { workspace = true }
 tabula-chips = { workspace = true }
 thiserror = { workspace = true }
 p3-air = { workspace = true }
@@ -38,10 +37,6 @@ tabula-lang = { workspace = true }
 p3-koala-bear = { workspace = true }
 p3-field = { workspace = true }
 criterion = { workspace = true }
-
-[[bench]]
-name = "prover"
-harness = false
 
 [lints]
 workspace = true

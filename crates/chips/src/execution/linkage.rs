@@ -19,48 +19,42 @@ pub(crate) fn constrain_operand_selectors<AB: AirBuilder, const W: usize>(
 ) {
     // Boolean constraints on all selector elements
     for s in 0..MAX_SLOTS {
-        builder.assert_bool(local.src1_sel[s].clone());
-        builder.assert_bool(local.src2_sel[s].clone());
-        builder.assert_bool(local.cond_sel[s].clone());
+        builder.assert_bool(local.src1_sel[s]);
+        builder.assert_bool(local.src2_sel[s]);
+        builder.assert_bool(local.cond_sel[s]);
     }
-    builder.assert_bool(local.src1_is_null.clone());
+    builder.assert_bool(local.src1_is_null);
 
     // Opcodes that need src1
-    let needs_src1: AB::Expr = local.op_arith.clone().into()
-        + local.op_divmod.clone().into()
-        + local.op_cmp.clone().into()
-        + local.op_not.clone().into()
-        + local.op_and.clone().into()
-        + local.op_or.clone().into()
-        + local.op_assert.clone().into()
-        + local.op_select.clone().into()
-        + local.op_write.clone().into()
-        + local.op_hash.clone().into()
-        + local.op_precompile.clone().into();
+    let needs_src1: AB::Expr = local.op_arith.into()
+        + local.op_divmod.into()
+        + local.op_cmp.into()
+        + local.op_not.into()
+        + local.op_and.into()
+        + local.op_or.into()
+        + local.op_assert.into()
+        + local.op_select.into()
+        + local.op_write.into()
+        + local.op_hash.into()
+        + local.op_precompile.into();
 
     // Opcodes that need src2
-    let needs_src2: AB::Expr = local.op_arith.clone().into()
-        + local.op_divmod.clone().into()
-        + local.op_cmp.clone().into()
-        + local.op_and.clone().into()
-        + local.op_or.clone().into()
-        + local.op_select.clone().into()
-        + local.op_hash.clone().into()
-        + local.op_precompile.clone().into();
+    let needs_src2: AB::Expr = local.op_arith.into()
+        + local.op_divmod.into()
+        + local.op_cmp.into()
+        + local.op_and.into()
+        + local.op_or.into()
+        + local.op_select.into()
+        + local.op_hash.into()
+        + local.op_precompile.into();
 
     // Opcodes that need cond
-    let needs_cond: AB::Expr = local.op_select.clone().into();
+    let needs_cond: AB::Expr = local.op_select.into();
 
     // Sum of selectors
-    let src1_sum: AB::Expr = (0..MAX_SLOTS)
-        .map(|s| local.src1_sel[s].clone().into())
-        .sum();
-    let src2_sum: AB::Expr = (0..MAX_SLOTS)
-        .map(|s| local.src2_sel[s].clone().into())
-        .sum();
-    let cond_sum: AB::Expr = (0..MAX_SLOTS)
-        .map(|s| local.cond_sel[s].clone().into())
-        .sum();
+    let src1_sum: AB::Expr = (0..MAX_SLOTS).map(|s| local.src1_sel[s].into()).sum();
+    let src2_sum: AB::Expr = (0..MAX_SLOTS).map(|s| local.src2_sel[s].into()).sum();
+    let cond_sum: AB::Expr = (0..MAX_SLOTS).map(|s| local.cond_sel[s].into()).sum();
 
     // Exactly-one when needed
     builder.assert_zero(is_real.clone() * needs_src1 * (src1_sum - AB::Expr::ONE));
@@ -80,31 +74,24 @@ pub(crate) fn constrain_operand_value_linkage<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
 ) {
     for s in 0..MAX_SLOTS {
-        let sel1: AB::Expr = local.src1_sel[s].clone().into();
-        let sel2: AB::Expr = local.src2_sel[s].clone().into();
-        let selc: AB::Expr = local.cond_sel[s].clone().into();
+        let sel1: AB::Expr = local.src1_sel[s].into();
+        let sel2: AB::Expr = local.src2_sel[s].into();
+        let selc: AB::Expr = local.cond_sel[s].into();
 
         for i in 0..W {
             // src1 linkage
-            builder.assert_zero(
-                sel1.clone()
-                    * (local.src1_val[i].clone().into() - local.slots[s][i].clone().into()),
-            );
+            builder
+                .assert_zero(sel1.clone() * (local.src1_val[i].into() - local.slots[s][i].into()));
             // src2 linkage
-            builder.assert_zero(
-                sel2.clone()
-                    * (local.src2_val[i].clone().into() - local.slots[s][i].clone().into()),
-            );
+            builder
+                .assert_zero(sel2.clone() * (local.src2_val[i].into() - local.slots[s][i].into()));
         }
 
         // src1 null flag linkage
-        builder.assert_zero(
-            sel1 * (local.src1_is_null.clone().into() - local.slot_is_null[s].clone().into()),
-        );
+        builder.assert_zero(sel1 * (local.src1_is_null.into() - local.slot_is_null[s].into()));
 
         // cond linkage (single boolean from limb 0)
-        builder
-            .assert_zero(selc * (local.cond_val.clone().into() - local.slots[s][0].clone().into()));
+        builder.assert_zero(selc * (local.cond_val.into() - local.slots[s][0].into()));
     }
 }
 
@@ -118,16 +105,12 @@ pub(crate) fn constrain_write_operand<AB: AirBuilder, const W: usize>(
     local: &ExecutionCols<AB::Var, W>,
     is_real: AB::Expr,
 ) {
-    let gate: AB::Expr = is_real.clone() * local.op_write.clone().into();
+    let gate: AB::Expr = is_real.clone() * local.op_write.into();
 
     for i in 0..W {
-        builder.assert_zero(
-            gate.clone() * (local.access_val[i].clone().into() - local.src1_val[i].clone().into()),
-        );
+        builder.assert_zero(gate.clone() * (local.access_val[i].into() - local.src1_val[i].into()));
     }
-    builder.assert_zero(
-        gate * (local.access_is_null.clone().into() - local.src1_is_null.clone().into()),
-    );
+    builder.assert_zero(gate * (local.access_is_null.into() - local.src1_is_null.into()));
 }
 
 /// Read destination constraint: read value flows to the written slot.
@@ -142,17 +125,13 @@ pub(crate) fn constrain_read_destination<AB: AirBuilder, const W: usize>(
     is_real: AB::Expr,
 ) {
     for s in 0..MAX_SLOTS {
-        let gate: AB::Expr =
-            is_real.clone() * local.op_read.clone().into() * local.slot_written[s].clone().into();
+        let gate: AB::Expr = is_real.clone() * local.op_read.into() * local.slot_written[s].into();
 
         for i in 0..W {
             builder.assert_zero(
-                gate.clone()
-                    * (local.slots[s][i].clone().into() - local.access_val[i].clone().into()),
+                gate.clone() * (local.slots[s][i].into() - local.access_val[i].into()),
             );
         }
-        builder.assert_zero(
-            gate * (local.slot_is_null[s].clone().into() - local.access_is_null.clone().into()),
-        );
+        builder.assert_zero(gate * (local.slot_is_null[s].into() - local.access_is_null.into()));
     }
 }

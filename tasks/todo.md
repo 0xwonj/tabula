@@ -68,6 +68,7 @@ See [docs/design/full-sharding-research.md](../docs/design/full-sharding-researc
 | 9 | Optimization (sharded) | 🔵 | [optimization.md](optimization.md) §Sharded | — |
 | 10 | Advanced research (incl. GKR-LogUp) | 🔬 | [research.md](research.md) | Various |
 | 11 | DSL improvements | ⬜ | [dsl-improvements.md](dsl-improvements.md) | 7 |
+| 12 | Proof backend boundary cleanup | ✅ | [proof-backend-cleanup.md](proof-backend-cleanup.md) | — |
 
 ---
 

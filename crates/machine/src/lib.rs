@@ -2,49 +2,45 @@
 //!
 //! Orchestrates a C+2 proof architecture (1 execution + C column + 1 root)
 //! with shared Fiat-Shamir synchronization for LogUp challenges.
+//! This is an advanced/backend API; most users should enter through `tabula-runtime`.
 //!
 //! ```ignore
-//! let machine = TabulaMachine::new(&col_configs)?;
-//! let traces = machine.build_traces(stores)?;
-//! let proof = machine.prove(traces, &column_identities, statement)?;
-//! machine.verify(&proof)?;
+//! let machine = TabulaMachine::new(&columns)?;
+//! let prover = machine.prover();
+//! let verifier = machine.verifier();
+//! let traces = prepared_traces();
+//! let proof = prover.prove(tabula_machine::MachineProofInput {
+//!     traces,
+//!     column_identities,
+//!     statement,
+//!     statement_digest: [0u8; 32],
+//! })?;
+//! verifier.verify(&proof)?;
 //! ```
 
-mod any_rap;
-mod blake3_pcs;
-mod builder;
-pub(crate) mod chip_ref;
-pub mod column_scheme;
-pub mod composition;
+mod backend;
+mod columns;
 pub mod config;
-pub mod extension;
-pub mod keys;
 mod machine;
 pub mod prelude;
 mod proof;
-mod proof_instance;
-pub mod property;
-mod prove;
-mod registry;
 mod setup;
-mod verify;
+#[cfg(test)]
+mod testing;
 
-pub use any_rap::AnyRap;
-pub use builder::MachineBuilder;
-pub use column_scheme::{ColumnChipSet, ColumnScheme, SmtScheme, SsmcScheme};
-pub use composition::{RootProof, SmtRootProof};
+pub use backend::extension::{ChipExtension, ExtensionContext};
+pub use backend::rap::AnyRap;
+pub use columns::{ColumnChipSet, ProofColumn};
 pub use config::{EF4, TabulaStarkConfig, default_config, make_config};
-pub use extension::{ChipExtension, ExtensionContext};
-pub use keys::{TabulaProvingKey, TabulaVerifyingKey, compute_external_buses};
 pub use machine::TabulaMachine;
-pub use proof::{
-    ChipOpening, ColumnIdentity, ColumnProofEntry, ProofTier, ProveError, SubProofEnvelope,
-    TabulaProof, VerificationError,
+pub use proof::types::{
+    ChipOpening, ColumnIdentity, ColumnProofEntry, MachineProofInput, ProofTier, ProveError,
+    SubProofEnvelope, TabulaProof, VerificationError,
 };
-pub use property::{
-    AggregateKind, PropertyError, PropertyOpening, PropertyQuery, PropertyQueryKind,
-    PropertyWitness,
-};
-pub use registry::{ChipRegistry, RegisteredChip, SetupError};
-pub use setup::{ColumnSetupConfig, ProofSetups, ProofTraces, TierSetup};
+pub use proof::{Prover, Verifier};
+pub use setup::builder::MachineBuilder;
+pub use setup::keys::{TabulaProvingKey, TabulaVerifyingKey, compute_external_buses};
+pub use setup::registry::{ChipRegistry, RegisteredChip, SetupError};
+pub use setup::root::{RootProof, SmtRootProof};
+pub use setup::{MachineSetup, ProofSetups, ProofTraces, TierSetup};
 pub use tabula_stark::air::statement::PublicStatement;

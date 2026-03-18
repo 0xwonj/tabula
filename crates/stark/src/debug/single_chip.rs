@@ -77,7 +77,7 @@ where
         let local = trace.row_slice(i).expect("row exists");
         let next = trace.row_slice(i_next).expect("row exists");
 
-        let main = RowWindow::from_two_rows(&*local, &*next);
+        let main = RowWindow::from_two_rows(&local, &next);
 
         // Bind preprocessed row slices at this scope level so they live long enough.
         let (prep_local_slice, prep_next_slice);
@@ -86,7 +86,7 @@ where
             prep_next_slice = prep_trace
                 .row_slice(i_next)
                 .expect("preprocessed row exists");
-            RowWindow::from_two_rows(&*prep_local_slice, &*prep_next_slice)
+            RowWindow::from_two_rows(&prep_local_slice, &prep_next_slice)
         } else {
             empty_preprocessed()
         };
@@ -135,7 +135,7 @@ where
         let local = trace.row_slice(i).expect("row exists");
         let next = trace.row_slice(i_next).expect("row exists");
 
-        let main = RowWindow::from_two_rows(&*local, &*next);
+        let main = RowWindow::from_two_rows(&local, &next);
 
         let mut builder = DebugConstraintBuilder {
             row_index: i,

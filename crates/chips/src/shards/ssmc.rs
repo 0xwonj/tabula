@@ -21,7 +21,10 @@ use tabula_stark::trace::trace_map::TraceEntry;
 
 use super::memory::trace::{MemoryShardRow, generate_memory_shard_trace};
 use super::meta::trace::{MetaShardRow, generate_meta_shard_trace};
-use super::state::trace::{StateShardRow, generate_state_shard_trace};
+use super::property::trace::{
+    PROPERTY_READ_WITNESS_LABEL, PropertyReadRecord, ssmc_property_anchor_multiplicities,
+};
+use super::state::trace::{StateShardRow, generate_state_shard_trace_with_anchor_mults};
 
 /// Per-column witness data for the SSMC commitment scheme.
 ///
@@ -145,9 +148,20 @@ impl<const W: usize> ColumnCommitment for SsmcCommitment<W> {
 
             let t = col.table.0;
             let c = col.col.0;
+            let property_claims = store
+                .get::<Vec<PropertyReadRecord>>(PROPERTY_READ_WITNESS_LABEL)
+                .cloned()
+                .unwrap_or_default();
+            let property_anchor_mults =
+                ssmc_property_anchor_multiplicities::<W>(&property_claims, col_data)?;
 
             let mem_trace = generate_memory_shard_trace::<W>(t, c, &col_data.memory_rows);
-            let state_trace = generate_state_shard_trace::<W>(t, c, &col_data.state_rows);
+            let state_trace = generate_state_shard_trace_with_anchor_mults::<W>(
+                t,
+                c,
+                &col_data.state_rows,
+                &property_anchor_mults,
+            );
             let meta_trace =
                 generate_meta_shard_trace(t, c, scheme_tags::SSMC, col_data.meta_row.as_ref());
 

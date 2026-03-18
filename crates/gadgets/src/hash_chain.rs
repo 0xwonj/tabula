@@ -97,56 +97,38 @@ pub fn constrain_hash_chain_input<AB: AirBuilder, const W: usize>(
     const { assert!(11 + W <= 16) }
     // ── First-entry composition ──
     // perm_input[0] = 0 (domain tag 0x00)
-    builder.assert_zero(first_gate.clone() * hash_chain.perm_input[0].clone().into());
+    builder.assert_zero(first_gate.clone() * hash_chain.perm_input[0].into());
     // perm_input[1] = table_id
-    builder.assert_zero(
-        first_gate.clone() * (hash_chain.perm_input[1].clone().into() - table_id.clone().into()),
-    );
+    builder.assert_zero(first_gate.clone() * (hash_chain.perm_input[1].into() - table_id.into()));
     // perm_input[2] = col_id
-    builder.assert_zero(
-        first_gate.clone() * (hash_chain.perm_input[2].clone().into() - col_id.clone().into()),
-    );
+    builder.assert_zero(first_gate.clone() * (hash_chain.perm_input[2].into() - col_id.into()));
     // perm_input[3..6] = key limbs
-    builder.assert_zero(
-        first_gate.clone() * (hash_chain.perm_input[3].clone().into() - key.limb0.clone().into()),
-    );
-    builder.assert_zero(
-        first_gate.clone() * (hash_chain.perm_input[4].clone().into() - key.limb1.clone().into()),
-    );
-    builder.assert_zero(
-        first_gate.clone() * (hash_chain.perm_input[5].clone().into() - key.limb2.clone().into()),
-    );
+    builder.assert_zero(first_gate.clone() * (hash_chain.perm_input[3].into() - key.limb0.into()));
+    builder.assert_zero(first_gate.clone() * (hash_chain.perm_input[4].into() - key.limb1.into()));
+    builder.assert_zero(first_gate.clone() * (hash_chain.perm_input[5].into() - key.limb2.into()));
     // perm_input[6..6+W] = value
     for (i, v) in value.iter().enumerate() {
-        builder.assert_zero(
-            first_gate.clone() * (hash_chain.perm_input[6 + i].clone().into() - v.clone().into()),
-        );
+        builder
+            .assert_zero(first_gate.clone() * (hash_chain.perm_input[6 + i].into() - (*v).into()));
     }
     // perm_input[6+W..16] = 0 (padding)
     for i in (6 + W)..16 {
-        builder.assert_zero(first_gate.clone() * hash_chain.perm_input[i].clone().into());
+        builder.assert_zero(first_gate.clone() * hash_chain.perm_input[i].into());
     }
 
     // ── Continuation composition (local part) ──
     // perm_input[8..11] = key limbs
-    builder.assert_zero(
-        cont_gate.clone() * (hash_chain.perm_input[8].clone().into() - key.limb0.clone().into()),
-    );
-    builder.assert_zero(
-        cont_gate.clone() * (hash_chain.perm_input[9].clone().into() - key.limb1.clone().into()),
-    );
-    builder.assert_zero(
-        cont_gate.clone() * (hash_chain.perm_input[10].clone().into() - key.limb2.clone().into()),
-    );
+    builder.assert_zero(cont_gate.clone() * (hash_chain.perm_input[8].into() - key.limb0.into()));
+    builder.assert_zero(cont_gate.clone() * (hash_chain.perm_input[9].into() - key.limb1.into()));
+    builder.assert_zero(cont_gate.clone() * (hash_chain.perm_input[10].into() - key.limb2.into()));
     // perm_input[11..11+W] = value
     for (i, v) in value.iter().enumerate() {
-        builder.assert_zero(
-            cont_gate.clone() * (hash_chain.perm_input[11 + i].clone().into() - v.clone().into()),
-        );
+        builder
+            .assert_zero(cont_gate.clone() * (hash_chain.perm_input[11 + i].into() - (*v).into()));
     }
     // perm_input[11+W..16] = 0 (padding)
     for i in (11 + W)..16 {
-        builder.assert_zero(cont_gate.clone() * hash_chain.perm_input[i].clone().into());
+        builder.assert_zero(cont_gate.clone() * hash_chain.perm_input[i].into());
     }
 }
 
@@ -167,8 +149,7 @@ pub fn constrain_hash_chain_transition<AB: AirBuilder>(
 ) {
     for j in 0..8 {
         builder.when_transition().assert_zero(
-            trans_gate.clone()
-                * (next_perm_input[j].clone().into() - local_hash_acc[j].clone().into()),
+            trans_gate.clone() * (next_perm_input[j].into() - local_hash_acc[j].into()),
         );
     }
 }

@@ -1,30 +1,23 @@
 //! Unified runtime: owns machine, schemas, and precompile registry.
 //!
-//! [`TabulaRuntime`] is the primary entry point for applications that need
+//! [`TabulaRuntime`](crate::TabulaRuntime) is the primary entry point for applications that need
 //! both execution and proving. The machine is built once at setup time
 //! and reused across batches.
 
-use std::collections::BTreeMap;
-
-use tabula_artifact::{
-    BatchFile, CompiledProgram, StateFile, merge_output_state_cells, normalize_state,
-};
+use tabula_artifact::{ExecutionStatement, StateSnapshot, TransactionBatch, normalize_state};
 use tabula_commitment::PoseidonHasher;
-use tabula_core::{
-    InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce, TableId, TableSchema,
-};
-use tabula_executor::batch::{BatchEnv, execute_batch};
-use tabula_executor::consistency::check_consistency_status;
 use tabula_executor::precompile::PrecompileRegistry;
-use tabula_executor::property::PropertyOpeningRegistry;
+use tabula_executor::property::PropertyQueryRegistry;
 use tabula_ir::Program;
-use tabula_machine::{TabulaMachine, TabulaProof};
+use tabula_machine::{MachineProofInput, TabulaMachine, TabulaProof};
 
 use crate::builder::RuntimeBuilder;
-use crate::committed_state::StateFileCommittedState;
 use crate::error::RuntimeError;
-use crate::execute::ExecutedBatch;
-use crate::prove::{self, ProofSummary, ProveInput, ProveResult, VerifiedResult};
+use crate::execute::{ExecutedBatch, ExecutionResources, execute_pipeline};
+use crate::program::RuntimeProgram;
+use crate::program::StateSnapshotCommittedState;
+use crate::proving::{self, ProofSummary, ProveInput, ProveResult, VerifiedResult};
+use crate::verifier::verify_with_binding;
 
 /// Unified runtime owning execution and proving infrastructure.
 ///
@@ -45,59 +38,46 @@ use crate::prove::{self, ProofSummary, ProveInput, ProveResult, VerifiedResult};
 ///
 /// # What it owns
 ///
-/// - **Program** and **schemas** — for witness generation
+/// - **RuntimeProgram** — runtime materialization of the compiler artifact
 /// - **TabulaMachine** — STARK prover/verifier (built once from schemas)
 /// - **PrecompileRegistry** — executor-side precompile handlers
-/// - **PropertyOpeningRegistry** — executor-side property query resolvers
+/// - **PropertyQueryRegistry** — executor-side property query handlers
 pub struct TabulaRuntime {
-    compiled_program: CompiledProgram,
-    schemas_by_id: BTreeMap<TableId, TableSchema>,
+    runtime_program: RuntimeProgram,
     machine: TabulaMachine,
     precompiles: PrecompileRegistry,
-    property_openings: Option<PropertyOpeningRegistry>,
+    property_queries: PropertyQueryRegistry,
 }
 
 impl TabulaRuntime {
     /// Create a builder for customized runtime construction.
-    pub fn builder(compiled_program: CompiledProgram) -> RuntimeBuilder {
+    pub fn builder(compiled_program: tabula_compiler::CompiledProgram) -> RuntimeBuilder {
         RuntimeBuilder::new(compiled_program)
     }
 
     /// Construct from pre-built parts (used by [`RuntimeBuilder`]).
     pub(crate) fn from_parts(
-        compiled_program: CompiledProgram,
-        schemas_by_id: BTreeMap<TableId, TableSchema>,
+        runtime_program: RuntimeProgram,
         machine: TabulaMachine,
         precompiles: PrecompileRegistry,
-        property_openings: Option<PropertyOpeningRegistry>,
+        property_queries: PropertyQueryRegistry,
     ) -> Self {
         Self {
-            compiled_program,
-            schemas_by_id,
+            runtime_program,
             machine,
             precompiles,
-            property_openings,
+            property_queries,
         }
     }
 
-    /// The compiled program artifact backing this runtime.
-    pub fn compiled_program(&self) -> &CompiledProgram {
-        &self.compiled_program
+    /// The runtime program backing this runtime.
+    pub fn runtime_program(&self) -> &RuntimeProgram {
+        &self.runtime_program
     }
 
-    /// The IR program.
+    /// The IR program executed by this runtime.
     pub fn program(&self) -> &Program {
-        &self.compiled_program.program
-    }
-
-    /// Table schemas.
-    pub fn schemas(&self) -> &[TableSchema] {
-        &self.compiled_program.table_schemas
-    }
-
-    /// The STARK machine (for advanced usage).
-    pub fn machine(&self) -> &TabulaMachine {
-        &self.machine
+        self.runtime_program.program()
     }
 
     /// The precompile registry (for executor integration).
@@ -105,74 +85,62 @@ impl TabulaRuntime {
         &self.precompiles
     }
 
-    /// The property opening registry (for executor PropertyRead resolution).
-    pub fn property_openings(&self) -> Option<&PropertyOpeningRegistry> {
-        self.property_openings.as_ref()
+    /// The property query registry (for executor PropertyRead resolution).
+    pub fn property_queries(&self) -> &PropertyQueryRegistry {
+        &self.property_queries
+    }
+
+    /// The STARK machine (for advanced usage).
+    pub fn machine(&self) -> &TabulaMachine {
+        &self.machine
     }
 
     /// Execute a batch using the runtime's owned resources.
     ///
     /// Unlike the free function [`run_batch()`](crate::run_batch), this method:
     /// - Uses `PoseidonHasher` (consistent with the proving path)
-    /// - Passes registered precompiles and property openings to the executor
+    /// - Passes registered precompiles and property query handlers to the executor
     ///
     /// Returns an [`ExecutedBatch`] ready for [`prove()`](Self::prove).
     #[tracing::instrument(skip_all, name = "execute")]
     pub fn execute(
         &self,
-        state: &StateFile,
-        batch: &BatchFile,
+        state: &StateSnapshot,
+        batch: &TransactionBatch,
     ) -> Result<ExecutedBatch, RuntimeError> {
-        let normalized = normalize_state(state).map_err(RuntimeError::InvalidState)?;
-
-        let mut state_store = InMemoryState::new();
-        for cell in &normalized.cells {
-            let (key, value) = cell.to_cell_pair().map_err(RuntimeError::InvalidState)?;
-            state_store.set(key, value);
-        }
-
-        let batch_core = prove::convert_batch(batch)?;
         let hasher = PoseidonHasher::new();
-        let st = InMemoryStaticTables::new();
-        let committed = StateFileCommittedState::from_cells(&normalized.cells);
-        let env = BatchEnv {
-            hasher: &hasher,
-            sig_verifier: &NoopSigVerifier,
-            nonce_policy: &SequentialNonce,
-            static_tables: &st,
-            precompiles: Some(&self.precompiles),
-            committed_state: Some(&committed),
-            property_openings: self.property_openings.as_ref(),
-        };
+        let normalized = normalize_state(state).map_err(RuntimeError::InvalidState)?;
+        let committed = StateSnapshotCommittedState::from_cells(&normalized.cells);
 
-        let result = execute_batch(
-            &batch_core,
-            &self.compiled_program.program,
-            &state_store,
-            &env,
-            &BTreeMap::new(),
+        execute_pipeline(
+            self.runtime_program.program(),
+            &normalized,
+            batch,
+            &hasher,
+            ExecutionResources {
+                precompiles: Some(&self.precompiles),
+                committed_state: Some(&committed),
+                property_queries: &self.property_queries,
+            },
         )
-        .map_err(|e| RuntimeError::Execution {
-            source: e,
-            instruction_index: None,
-            tx_index: None,
-        })?;
+    }
 
-        let all_events: Vec<_> = result.successful_events().cloned().collect();
-        let consistency = check_consistency_status(&all_events, &result.read_set_old, &result.txs);
+    /// Build the canonical execution statement for one executed batch.
+    #[tracing::instrument(skip_all, name = "build_execution_statement")]
+    pub fn build_execution_statement(
+        &self,
+        input: &ProveInput<'_>,
+    ) -> Result<ExecutionStatement, RuntimeError> {
+        let artifacts =
+            proving::prepare_witness_artifacts(&self.runtime_program, input.state, input.executed)?;
 
-        let state_after = StateFile {
-            cells: merge_output_state_cells(&normalized.cells, &result.write_set_final),
-        };
-
-        Ok(ExecutedBatch {
-            state_before: normalized,
-            state_after,
-            txs: result.txs,
-            read_set: result.read_set_old,
-            write_set: result.write_set_final,
-            consistency,
-        })
+        proving::build_execution_statement(
+            &self.runtime_program,
+            input.state,
+            input.batch,
+            &input.executed.state_after,
+            &artifacts.air_statement,
+        )
     }
 
     /// Generate a STARK proof from an executed batch.
@@ -180,63 +148,83 @@ impl TabulaRuntime {
     /// Pipeline: column states -> witness -> traces -> prove.
     #[tracing::instrument(skip_all, name = "prove")]
     pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, RuntimeError> {
-        let old_column_states = prove::build_old_column_states(&self.schemas_by_id, input.state)?;
-        let batch_result = prove::to_batch_result(input.executed);
-        let batch = prove::convert_batch(input.batch)?;
-
-        let witness =
-            prove::generate_witness(&batch_result, &self.schemas_by_id, &old_column_states)?;
-        let column_identities = prove::extract_column_identities(&witness);
-        let statement = prove::extract_statement(&witness);
-
-        let traces = prove::build_traces(
-            &self.machine,
-            &witness,
-            &self.compiled_program.program,
-            &batch,
-            &batch_result,
-            &self.schemas_by_id,
+        let artifacts =
+            proving::prepare_witness_artifacts(&self.runtime_program, input.state, input.executed)?;
+        let batch = proving::convert_batch(input.batch)?;
+        let statement = proving::build_execution_statement(
+            &self.runtime_program,
+            input.state,
+            input.batch,
+            &input.executed.state_after,
+            &artifacts.air_statement,
         )?;
+
+        let traces = proving::build_traces(
+            &self.machine,
+            &self.runtime_program,
+            &artifacts.witness,
+            &batch,
+            &artifacts.batch_result,
+        )?;
+        let column_identities = proving::extract_column_identities(&artifacts.witness, &traces)?;
 
         let proof = {
             let _span = tracing::info_span!("stark_prove").entered();
             self.machine
-                .prove(traces, &column_identities, statement)
+                .prover()
+                .prove(MachineProofInput {
+                    traces,
+                    column_identities,
+                    statement: artifacts.air_statement,
+                    statement_digest: statement.statement_hash_bytes(),
+                })
                 .map_err(RuntimeError::Proving)?
         };
 
         let summary = ProofSummary::from_proof(&proof);
         tracing::info!(chip_count = summary.chip_count, "proof generated");
 
-        Ok(ProveResult { proof, summary })
+        Ok(ProveResult {
+            proof,
+            statement,
+            summary,
+        })
     }
 
-    /// Verify a STARK proof against this runtime's prepared machine.
+    /// Verify a STARK proof against this runtime's machine and expected statement.
     #[tracing::instrument(skip_all, name = "verify")]
-    pub fn verify(&self, proof: &TabulaProof) -> Result<(), RuntimeError> {
-        self.machine
-            .verify(proof)
-            .map_err(RuntimeError::Verification)
+    pub fn verify(
+        &self,
+        proof: &TabulaProof,
+        statement: &ExecutionStatement,
+    ) -> Result<(), RuntimeError> {
+        verify_with_binding(
+            self.runtime_program.binding(),
+            &self.machine,
+            proof,
+            statement,
+        )
     }
 
     /// Generate and verify a STARK proof.
     ///
     /// Convenience method that calls [`prove()`](Self::prove) then
-    /// [`machine().verify()`](TabulaMachine::verify).
+    /// [`verify()`](Self::verify).
     #[tracing::instrument(skip_all, name = "prove_and_verify")]
     pub fn prove_and_verify(&self, input: &ProveInput<'_>) -> Result<VerifiedResult, RuntimeError> {
         let prove_result = self.prove(input)?;
 
-        let verified = {
+        {
             let _span = tracing::info_span!("stark_verify").entered();
-            self.verify(&prove_result.proof).is_ok()
-        };
+            self.verify(&prove_result.proof, &prove_result.statement)?;
+        }
 
-        tracing::info!(verified, "verification complete");
+        tracing::info!(verified = true, "verification complete");
 
         Ok(VerifiedResult {
             proof: prove_result.proof,
-            verified,
+            statement: prove_result.statement,
+            verified: true,
             summary: prove_result.summary,
         })
     }
@@ -248,8 +236,8 @@ impl TabulaRuntime {
     #[tracing::instrument(skip_all, name = "execute_and_prove")]
     pub fn execute_and_prove(
         &self,
-        state: &StateFile,
-        batch: &BatchFile,
+        state: &StateSnapshot,
+        batch: &TransactionBatch,
     ) -> Result<VerifiedResult, RuntimeError> {
         let executed = self.execute(state, batch)?;
         self.prove_and_verify(&ProveInput {
@@ -263,12 +251,12 @@ impl TabulaRuntime {
 impl std::fmt::Debug for TabulaRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TabulaRuntime")
-            .field("schemas", &self.compiled_program.table_schemas.len())
+            .field("runtime_program", &self.runtime_program)
             .field("machine", &self.machine)
             .field("precompiles_registered", &!self.precompiles.is_empty())
             .field(
-                "property_openings_registered",
-                &self.property_openings.is_some(),
+                "property_queries_registered",
+                &!self.property_queries.is_empty(),
             )
             .finish()
     }
@@ -283,3 +271,82 @@ const _: () = {
         assert_send_sync::<TabulaRuntime>();
     }
 };
+
+#[cfg(test)]
+mod tests {
+    use tabula_compiler::{register_program_artifact, transfer_example_bundle};
+    use tabula_machine::MachineProofInput;
+
+    use super::*;
+    use crate::proving;
+
+    #[test]
+    fn runtime_prove_and_verify_smoke() {
+        let bundle = transfer_example_bundle().expect("example bundle");
+        let compiled = register_program_artifact(&bundle.program).expect("compiled program");
+        let runtime = TabulaRuntime::builder(compiled).build().expect("runtime");
+        let executed = runtime
+            .execute(&bundle.state, &bundle.batch)
+            .expect("execution succeeds");
+
+        let verified = runtime
+            .prove_and_verify(&ProveInput {
+                state: &bundle.state,
+                batch: &bundle.batch,
+                executed: &executed,
+            })
+            .expect("prove and verify");
+
+        assert!(verified.verified);
+        assert!(!verified.proof.columns.is_empty());
+    }
+
+    #[test]
+    fn machine_backend_proves_from_prepared_traces() {
+        let bundle = transfer_example_bundle().expect("example bundle");
+        let compiled = register_program_artifact(&bundle.program).expect("compiled program");
+        let runtime = TabulaRuntime::builder(compiled).build().expect("runtime");
+        let executed = runtime
+            .execute(&bundle.state, &bundle.batch)
+            .expect("execution succeeds");
+        let artifacts =
+            proving::prepare_witness_artifacts(runtime.runtime_program(), &bundle.state, &executed)
+                .expect("witness artifacts");
+        let batch = proving::convert_batch(&bundle.batch).expect("batch conversion");
+        let statement = proving::build_execution_statement(
+            runtime.runtime_program(),
+            &bundle.state,
+            &bundle.batch,
+            &executed.state_after,
+            &artifacts.air_statement,
+        )
+        .expect("execution statement");
+        let traces = proving::build_traces(
+            runtime.machine(),
+            runtime.runtime_program(),
+            &artifacts.witness,
+            &batch,
+            &artifacts.batch_result,
+        )
+        .expect("proof traces");
+        let column_identities =
+            proving::extract_column_identities(&artifacts.witness, &traces).expect("identities");
+
+        let proof = runtime
+            .machine()
+            .prover()
+            .prove(MachineProofInput {
+                traces,
+                column_identities,
+                statement: artifacts.air_statement,
+                statement_digest: statement.statement_hash_bytes(),
+            })
+            .expect("machine prove");
+
+        runtime
+            .machine()
+            .verifier()
+            .verify(&proof)
+            .expect("machine verify");
+    }
+}

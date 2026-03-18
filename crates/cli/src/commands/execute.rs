@@ -1,10 +1,10 @@
 //! Handler for the `execute` subcommand.
 
-use tabula_artifact::{BatchFile, StateFile};
+use tabula_artifact::{StateSnapshot, TransactionBatch};
 use tabula_core::mock::Blake3Hasher;
 use tabula_runtime::{CompiledBatchInput, run_compiled_batch};
 
-use crate::io::{ExecutionOutput, StateCell, load_json, write_json};
+use crate::io::{ExecutionOutput, StateEntry, load_json, write_json};
 
 pub fn cmd_execute(
     program_path: &std::path::Path,
@@ -18,14 +18,14 @@ pub fn cmd_execute(
     let compiled = tabula_compiler::load_and_register_program(program_path)?;
 
     // 2. Load state + batch
-    let state_file: StateFile = load_json(state_path)?;
-    let batch_file: BatchFile = load_json(batch_path)?;
+    let state_snapshot: StateSnapshot = load_json(state_path)?;
+    let transaction_batch: TransactionBatch = load_json(batch_path)?;
 
     // 3. Execute via runtime pipeline
     let executed = run_compiled_batch(&CompiledBatchInput {
         compiled_program: &compiled,
-        state: &state_file,
-        batch: &batch_file,
+        state: &state_snapshot,
+        batch: &transaction_batch,
         hasher: &Blake3Hasher,
     })?;
 
@@ -33,20 +33,20 @@ pub fn cmd_execute(
         write_json(out_path, &executed.state_after)?;
     }
 
-    let read_set: Vec<StateCell> = executed
+    let read_set: Vec<StateEntry> = executed
         .read_set
         .iter()
-        .map(|(k, v)| StateCell::from_cell_pair(k, v))
+        .map(|(k, v)| StateEntry::from_cell_pair(k, v))
         .collect();
-    let write_set: Vec<StateCell> = executed
+    let write_set: Vec<StateEntry> = executed
         .write_set
         .iter()
-        .map(|(k, v)| StateCell::from_cell_pair(k, v))
+        .map(|(k, v)| StateEntry::from_cell_pair(k, v))
         .collect();
     let all_events: Vec<_> = executed
         .txs
         .iter()
-        .flat_map(|tx| tx.access_trace())
+        .flat_map(tabula_core::TxResult::access_trace)
         .cloned()
         .collect();
     let trace = if include_trace {

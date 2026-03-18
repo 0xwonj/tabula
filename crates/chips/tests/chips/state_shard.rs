@@ -23,8 +23,8 @@ fn trace(rows: &[StateShardRow]) -> RowMajorMatrix<KoalaBear> {
 // ── Column width ──
 
 #[test]
-fn standard_width_is_93() {
-    assert_eq!(STATE_SHARD_STANDARD_WIDTH, 93);
+fn standard_width_is_116() {
+    assert_eq!(STATE_SHARD_STANDARD_WIDTH, 116);
 }
 
 // ── A. Valid single-entry traces ──

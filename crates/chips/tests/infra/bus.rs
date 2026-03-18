@@ -46,15 +46,15 @@ fn c9_static_table_lookup_balance_multiple_lookups() {
     .expect("C9 StaticTableLookup should balance for duplicate lookups");
 }
 
-// ── C18 PropertyRead: Execution → PropertyVerifier ──
+// ── C18 PropertyRead: Execution → SSMC Property ──
 
-use tabula_chips::shards::property::air::PropertyVerifierChip;
-use tabula_chips::shards::property::trace::{PropertyReadRecord, generate_property_verifier_trace};
+use tabula_chips::shards::property::SsmcPropertyChip;
+use tabula_chips::test_utils::builders::{SsmcPropertyTestRow, generate_ssmc_property_test_trace};
 use tabula_stark::chips::ChipId;
 
 #[test]
 fn c18_property_read_bus_balance_single_query() {
-    // ExecutionChip sends one PropertyRead (MIN query, table=5, col=2).
+    // ExecutionChip sends one PropertyRead successor query on table=5, col=2.
     let result_val = vec![KoalaBear::new(42), KoalaBear::ZERO, KoalaBear::ZERO];
     let result_key = vec![KoalaBear::new(100), KoalaBear::ZERO, KoalaBear::ZERO];
 
@@ -64,6 +64,8 @@ fn c18_property_read_bus_balance_single_query() {
         2,
         5,
         2,
+        2,
+        50,
         0,
         result_val.clone(),
         result_key.clone(),
@@ -72,18 +74,20 @@ fn c18_property_read_bus_balance_single_query() {
     let exec_trace = generate_execution_trace::<3>(&[exec_rec]);
     let exec_record = evaluate_chip("Execution", &ExecutionChip::<3>, &exec_trace).unwrap();
 
-    // PropertyVerifier receives the same query.
-    let pv_records = vec![PropertyReadRecord {
-        query_type: 0,
-        result_val,
-        result_key,
-        is_null: false,
-    }];
-    let pv_chip = PropertyVerifierChip::<3>::new(ChipId(100), 5, 2);
-    let pv_trace = generate_property_verifier_trace::<3>(5, 2, &pv_records);
-    let pv_record = evaluate_chip("PropertyVerifier", &pv_chip, &pv_trace).unwrap();
+    let property_chip = SsmcPropertyChip::<3>::new(ChipId(100), 5, 2);
+    let property_trace = generate_ssmc_property_test_trace::<3>(
+        5,
+        2,
+        &[SsmcPropertyTestRow::Successor {
+            query_key: 50,
+            anchor_key: 100,
+            prev_key: None,
+            result_val,
+        }],
+    );
+    let property_record = evaluate_chip("SsmcProperty", &property_chip, &property_trace).unwrap();
 
-    check_bus_balance(&[exec_record, pv_record], core_buses::PROPERTY_READ)
+    check_bus_balance(&[exec_record, property_record], core_buses::PROPERTY_READ)
         .expect("C18 PropertyRead should balance for single query");
 }
 
@@ -95,33 +99,36 @@ fn c18_property_read_bus_balance_multiple_queries() {
     let val2 = vec![KoalaBear::new(99), KoalaBear::ZERO, KoalaBear::ZERO];
     let key2 = vec![KoalaBear::new(200), KoalaBear::ZERO, KoalaBear::ZERO];
 
-    let mut exec0 = make_property_read(0, 1, 2, 5, 2, 0, val1.clone(), key1.clone(), false);
+    let mut exec0 = make_property_read(0, 1, 2, 5, 2, 2, 50, 0, val1.clone(), key1.clone(), false);
     exec0.tx_index = 0;
-    let mut exec1 = make_property_read(3, 4, 5, 5, 2, 1, val2.clone(), key2.clone(), false);
+    let mut exec1 = make_property_read(3, 4, 5, 5, 2, 3, 250, 0, val2.clone(), key2.clone(), false);
     exec1.tx_index = 1;
 
     let exec_trace = generate_execution_trace::<3>(&[exec0, exec1]);
     let exec_record = evaluate_chip("Execution", &ExecutionChip::<3>, &exec_trace).unwrap();
 
-    let pv_records = vec![
-        PropertyReadRecord {
-            query_type: 0,
-            result_val: val1,
-            result_key: key1,
-            is_null: false,
-        },
-        PropertyReadRecord {
-            query_type: 1,
-            result_val: val2,
-            result_key: key2,
-            is_null: false,
-        },
-    ];
-    let pv_chip = PropertyVerifierChip::<3>::new(ChipId(100), 5, 2);
-    let pv_trace = generate_property_verifier_trace::<3>(5, 2, &pv_records);
-    let pv_record = evaluate_chip("PropertyVerifier", &pv_chip, &pv_trace).unwrap();
+    let property_chip = SsmcPropertyChip::<3>::new(ChipId(100), 5, 2);
+    let property_trace = generate_ssmc_property_test_trace::<3>(
+        5,
+        2,
+        &[
+            SsmcPropertyTestRow::Successor {
+                query_key: 50,
+                anchor_key: 100,
+                prev_key: None,
+                result_val: val1,
+            },
+            SsmcPropertyTestRow::Predecessor {
+                query_key: 250,
+                anchor_key: 200,
+                next_key: None,
+                result_val: val2,
+            },
+        ],
+    );
+    let property_record = evaluate_chip("SsmcProperty", &property_chip, &property_trace).unwrap();
 
-    check_bus_balance(&[exec_record, pv_record], core_buses::PROPERTY_READ)
+    check_bus_balance(&[exec_record, property_record], core_buses::PROPERTY_READ)
         .expect("C18 PropertyRead should balance for multiple queries");
 }
 
@@ -131,20 +138,18 @@ fn c18_property_read_bus_balance_null_result() {
     let val = vec![KoalaBear::ZERO, KoalaBear::ZERO, KoalaBear::ZERO];
     let key = vec![KoalaBear::ZERO, KoalaBear::ZERO, KoalaBear::ZERO];
 
-    let exec_rec = make_property_read(0, 1, 2, 3, 1, 2, val.clone(), key.clone(), true);
+    let exec_rec = make_property_read(0, 1, 2, 3, 1, 2, 999, 0, val.clone(), key.clone(), true);
     let exec_trace = generate_execution_trace::<3>(&[exec_rec]);
     let exec_record = evaluate_chip("Execution", &ExecutionChip::<3>, &exec_trace).unwrap();
 
-    let pv_records = vec![PropertyReadRecord {
-        query_type: 2,
-        result_val: val,
-        result_key: key,
-        is_null: true,
-    }];
-    let pv_chip = PropertyVerifierChip::<3>::new(ChipId(100), 3, 1);
-    let pv_trace = generate_property_verifier_trace::<3>(3, 1, &pv_records);
-    let pv_record = evaluate_chip("PropertyVerifier", &pv_chip, &pv_trace).unwrap();
+    let property_chip = SsmcPropertyChip::<3>::new(ChipId(100), 3, 1);
+    let property_trace = generate_ssmc_property_test_trace::<3>(
+        3,
+        1,
+        &[SsmcPropertyTestRow::EmptySuccessor { query_key: 999 }],
+    );
+    let property_record = evaluate_chip("SsmcProperty", &property_chip, &property_trace).unwrap();
 
-    check_bus_balance(&[exec_record, pv_record], core_buses::PROPERTY_READ)
+    check_bus_balance(&[exec_record, property_record], core_buses::PROPERTY_READ)
         .expect("C18 PropertyRead should balance for null result");
 }

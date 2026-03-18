@@ -3,6 +3,8 @@
 //! Converts per-column witness data (sorted by key) into a
 //! `RowMajorMatrix<KoalaBear>` trace with two parallel hash chains.
 
+use std::collections::BTreeMap;
+
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
@@ -79,6 +81,10 @@ pub struct StateShardRow {
     pub read_mult: bool,
     /// Multiplicity for CoalescedWrite bus receive.
     pub write_mult: bool,
+    /// Previous old-state entry key, or zero when absent.
+    pub prev_old_key: u64,
+    /// Next old-state entry key, or zero when absent.
+    pub next_old_key: u64,
 }
 
 /// Generate a StateShard trace from pre-sorted rows for a single column.
@@ -89,6 +95,20 @@ pub fn generate_state_shard_trace<const W: usize>(
     col_id: u16,
     rows: &[StateShardRow],
 ) -> RowMajorMatrix<KoalaBear> {
+    generate_state_shard_trace_with_anchor_mults::<W>(table_id, col_id, rows, &BTreeMap::new())
+}
+
+/// Generate a StateShard trace with explicit property-anchor multiplicities.
+///
+/// `anchor_mults` is keyed by old-entry row key and controls how many times a
+/// row sends on the internal `SSMC_OLD_ENTRY` bus for scheme-owned property
+/// verification. Rows absent from the map send zero multiplicity.
+pub fn generate_state_shard_trace_with_anchor_mults<const W: usize>(
+    table_id: u32,
+    col_id: u16,
+    rows: &[StateShardRow],
+    anchor_mults: &BTreeMap<u64, u32>,
+) -> RowMajorMatrix<KoalaBear> {
     debug_assert!(
         rows.windows(2).all(|w| w[0].key < w[1].key),
         "rows must be sorted by key"
@@ -98,9 +118,21 @@ pub fn generate_state_shard_trace<const W: usize>(
     let num_real = rows.len();
     let num_rows = (num_real + 1).next_power_of_two().max(2);
     let mut values = vec![KoalaBear::ZERO; num_rows * width];
+    let (prev_old_keys, next_old_keys) = derive_old_neighbor_keys(rows);
 
     // Pass 1: populate base columns, hash chains, chain tracking.
-    populate_base_and_chains::<W>(table_id, col_id, rows, width, &mut values);
+    populate_base_and_chains::<W>(
+        StateShardTraceLayout {
+            table_id,
+            col_id,
+            width,
+        },
+        rows,
+        &prev_old_keys,
+        &next_old_keys,
+        anchor_mults,
+        &mut values,
+    );
 
     // Pass 2: chain tracking flags (look-ahead).
     populate_chain_tracking_flags::<W>(rows, num_real, width, &mut values);
@@ -111,12 +143,42 @@ pub fn generate_state_shard_trace<const W: usize>(
     RowMajorMatrix::new(values, width)
 }
 
-/// Populate base columns, hash chain inputs, and forward-scan flags.
-fn populate_base_and_chains<const W: usize>(
+fn derive_old_neighbor_keys(rows: &[StateShardRow]) -> (Vec<u64>, Vec<u64>) {
+    let mut prev_old_keys = vec![0; rows.len()];
+    let mut next_old_keys = vec![0; rows.len()];
+    let mut last_old_key = 0;
+    for (idx, row) in rows.iter().enumerate() {
+        prev_old_keys[idx] = last_old_key;
+        if !row.is_gap && row.source.in_old() {
+            last_old_key = row.key;
+        }
+    }
+
+    let mut upcoming_old_key = 0;
+    for (idx, row) in rows.iter().enumerate().rev() {
+        next_old_keys[idx] = upcoming_old_key;
+        if !row.is_gap && row.source.in_old() {
+            upcoming_old_key = row.key;
+        }
+    }
+
+    (prev_old_keys, next_old_keys)
+}
+
+#[derive(Clone, Copy)]
+struct StateShardTraceLayout {
     table_id: u32,
     col_id: u16,
-    rows: &[StateShardRow],
     width: usize,
+}
+
+/// Populate base columns, hash chain inputs, and forward-scan flags.
+fn populate_base_and_chains<const W: usize>(
+    layout: StateShardTraceLayout,
+    rows: &[StateShardRow],
+    prev_old_keys: &[u64],
+    next_old_keys: &[u64],
+    anchor_mults: &BTreeMap<u64, u32>,
     values: &mut [KoalaBear],
 ) {
     let mut seen_old = false;
@@ -129,13 +191,13 @@ fn populate_base_and_chains<const W: usize>(
         assert_eq!(row.old_val.len(), W, "old_val length mismatch");
         assert_eq!(row.new_val.len(), W, "new_val length mismatch");
 
-        let offset = i * width;
+        let offset = i * layout.width;
         let cols: &mut StateShardCols<KoalaBear, W> =
-            borrow_cols_mut(&mut values[offset..offset + width]);
+            borrow_cols_mut(&mut values[offset..offset + layout.width]);
 
         cols.is_real = KoalaBear::ONE;
-        cols.table_id = KoalaBear::new(table_id);
-        cols.col_id = KoalaBear::new(col_id as u32);
+        cols.table_id = KoalaBear::new(layout.table_id);
+        cols.col_id = KoalaBear::new(layout.col_id as u32);
         cols.key.populate(row.key);
 
         cols.is_gap = bool_fe(row.is_gap);
@@ -156,6 +218,13 @@ fn populate_base_and_chains<const W: usize>(
         cols.new_hash_acc = row.new_hash_acc;
         cols.read_mult_witness = bool_fe(row.read_mult);
         cols.write_mult_witness = bool_fe(row.write_mult);
+        cols.property_anchor_mult = KoalaBear::new(if !row.is_gap && row.source.in_old() {
+            anchor_mults.get(&row.key).copied().unwrap_or(0)
+        } else {
+            0
+        });
+        cols.prev_old_key.populate(prev_old_keys[i]);
+        cols.next_old_key.populate(next_old_keys[i]);
 
         let in_old = !row.is_gap && row.source.in_old();
         let in_new = !row.is_gap && row.source.in_new();
@@ -167,8 +236,12 @@ fn populate_base_and_chains<const W: usize>(
         cols.has_prev_old_entry = bool_fe(seen_old);
         if in_old {
             if !seen_old {
-                cols.old_hash_chain
-                    .populate_first(table_id, col_id as u32, row.key, &row.old_val);
+                cols.old_hash_chain.populate_first(
+                    layout.table_id,
+                    layout.col_id as u32,
+                    row.key,
+                    &row.old_val,
+                );
             } else {
                 cols.old_hash_chain.populate_continuation(
                     prev_old_hash_acc
@@ -186,8 +259,12 @@ fn populate_base_and_chains<const W: usize>(
         cols.has_prev_new_entry = bool_fe(seen_new);
         if in_new {
             if !seen_new {
-                cols.new_hash_chain
-                    .populate_first(table_id, col_id as u32, row.key, &row.new_val);
+                cols.new_hash_chain.populate_first(
+                    layout.table_id,
+                    layout.col_id as u32,
+                    row.key,
+                    &row.new_val,
+                );
             } else {
                 cols.new_hash_chain.populate_continuation(
                     prev_new_hash_acc

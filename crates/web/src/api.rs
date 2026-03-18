@@ -3,8 +3,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::models::{
-    BatchFile, CapabilitiesResponse, CreateInstanceResponse, DaemonErrorEnvelope, HealthResponse,
-    RegisterProgramResponse, StateFile, SubmitRunResponse, VerifyRunResponse,
+    CapabilitiesResponse, CreateInstanceResponse, DaemonErrorEnvelope, HealthResponse,
+    RegisterProgramResponse, StateSnapshot, SubmitRunResponse, TransactionBatch, VerifyRunResponse,
 };
 
 #[derive(Debug, Clone)]
@@ -55,7 +55,7 @@ impl ApiClient {
     pub async fn create_instance(
         &self,
         program_id: &str,
-        state: StateFile,
+        state: StateSnapshot,
     ) -> Result<CreateInstanceResponse, ApiClientError> {
         let payload = json!({
             "program_id": program_id,
@@ -70,7 +70,7 @@ impl ApiClient {
     pub async fn submit_run(
         &self,
         instance_id: &str,
-        batch: BatchFile,
+        batch: TransactionBatch,
         include_trace: bool,
         prove: bool,
         verify: bool,
@@ -93,6 +93,7 @@ impl ApiClient {
         self.send_post("/v1/runs", payload).await
     }
 
+    #[allow(dead_code)]
     pub async fn verify_run(&self, run_id: &str) -> Result<VerifyRunResponse, ApiClientError> {
         self.send_post(&format!("/v1/runs/{run_id}"), json!({}))
             .await

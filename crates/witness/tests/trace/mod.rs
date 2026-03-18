@@ -18,9 +18,8 @@ use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_ir::Program;
 use tabula_lang::compile;
 use tabula_witness::WitnessGenerator;
-use tabula_witness::trace::{
-    AllTraceInputs, TraceBuilder, lower_execution_records, lower_program_batch,
-};
+use tabula_witness::trace::builtin::lowering::{lower_execution_records, lower_program_batch};
+use tabula_witness::{AllTraceInputs, BuiltinTraceBuilder};
 use tabula_witness::witness::{AccessRow, BatchWitness, ColumnWitness, InitRow, KeyRoute};
 
 pub(super) type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<KoalaBear>)>>;

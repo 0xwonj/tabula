@@ -53,11 +53,12 @@ pub enum CompilerError {
     /// Program failed semantic registration.
     #[error("invalid program: {0}")]
     InvalidProgram(#[source] anyhow::Error),
-    /// Compiled artifact is missing contract metadata.
-    #[error(
-        "compiled program JSON is missing contract_metadata; regenerate with the current compiler"
-    )]
-    MissingContractMetadata,
+    /// Sealed program artifact diverges from the compiler-derived canonical shape.
+    #[error("sealed artifact mismatch: {detail}")]
+    ArtifactMismatch {
+        /// Human-readable mismatch detail.
+        detail: String,
+    },
     /// Compiled artifact metadata mismatched current semantic policy.
     #[error("contract metadata mismatch: {0}")]
     ContractMetadataMismatch(#[source] tabula_contract::ContractValidationError),

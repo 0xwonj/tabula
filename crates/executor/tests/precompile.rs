@@ -9,6 +9,7 @@ use tabula_core::{ColId, RowKey, TableId, Value};
 use tabula_executor::interpreter::ExecContext;
 use tabula_executor::overlay::Overlay;
 use tabula_executor::precompile::{PrecompileHandler, PrecompileRegistry};
+use tabula_executor::property::PropertyQueryRegistry;
 use tabula_ir::{Instruction, PrecompileId, RowExpr, ValueExpr};
 
 use common::*;
@@ -70,13 +71,14 @@ fn run_with_precompiles(
     let snap = TestSnapshot(BTreeMap::new());
     let mut ov = Overlay::new(&snap);
     let schemas = test_schemas();
+    let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         schemas: &schemas,
         precompiles: Some(registry),
         committed_state: None,
-        property_openings: None,
+        property_queries: &property_queries,
     };
     tabula_executor::interpreter::execute(instrs, params, &mut ov, &ctx)?;
     Ok(ov.into_result())
@@ -87,7 +89,7 @@ fn run_with_precompiles(
 #[test]
 fn precompile_identity_round_trip() {
     let mut reg = PrecompileRegistry::new();
-    reg.register(IdentityHandler);
+    reg.register(IdentityHandler).expect("register handler");
 
     let result = run_with_precompiles(
         &[
@@ -118,7 +120,7 @@ fn precompile_identity_round_trip() {
 #[test]
 fn precompile_multi_input() {
     let mut reg = PrecompileRegistry::new();
-    reg.register(AddHandler);
+    reg.register(AddHandler).expect("register handler");
 
     let result = run_with_precompiles(
         &[
@@ -152,7 +154,7 @@ fn precompile_multi_input() {
 #[test]
 fn precompile_multi_output() {
     let mut reg = PrecompileRegistry::new();
-    reg.register(SplitHandler);
+    reg.register(SplitHandler).expect("register handler");
 
     let result = run_with_precompiles(
         &[
@@ -214,7 +216,7 @@ fn precompile_unknown_id_error() {
 #[test]
 fn precompile_wrong_result_count_error() {
     let mut reg = PrecompileRegistry::new();
-    reg.register(BadCountHandler); // returns 1 value
+    reg.register(BadCountHandler).expect("register handler"); // returns 1 value
 
     let err = run_with_precompiles(
         &[Instruction::Precompile {
@@ -249,7 +251,7 @@ fn precompile_no_registry_error() {
 #[test]
 fn precompile_with_param_input() {
     let mut reg = PrecompileRegistry::new();
-    reg.register(IdentityHandler);
+    reg.register(IdentityHandler).expect("register handler");
 
     let result = run_with_precompiles(
         &[
@@ -275,4 +277,17 @@ fn precompile_with_param_input() {
         result.write_set_final,
         vec![(cell(1, 0, 0), Some(Value::U64(999)))]
     );
+}
+
+#[test]
+fn duplicate_precompile_registration_is_rejected() {
+    let mut reg = PrecompileRegistry::new();
+    reg.register(IdentityHandler)
+        .expect("register first handler");
+
+    let err = reg
+        .register(IdentityHandler)
+        .expect_err("duplicate registration should fail");
+
+    assert!(err.to_string().contains("duplicate precompile ID"));
 }
