@@ -1,14 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use p3_koala_bear::KoalaBear;
 
-use tabula_commitment::{FieldHasher, NativeDigest};
+use crate::trace::lowering::LoweringOutput;
+use tabula_commitment::{ColumnMeta, FieldHasher, NativeDigest};
 use tabula_core::error::TabulaError;
-use tabula_core::traits::StaticTableProvider;
-use tabula_core::{Batch, BatchResult, ColId, TableId, TableSchema};
-use tabula_ir::Program;
+use tabula_core::{ColId, TableId};
 
-use crate::witness::BatchWitness;
 use tabula_chips::execution::trace::{InstructionRecord, Opcode};
 use tabula_chips::shards::property::trace::PropertyReadRecord;
 use tabula_chips::smt_path::trace::{SmtPathWitness, SmtTablePathWitness};
@@ -16,7 +14,6 @@ use tabula_chips::static_table::trace::StaticTableRow;
 
 use tabula_stark::trace::{WitnessStore, witness_labels};
 
-use super::lowering::lower_program_batch;
 use super::smt::validate_smt_path_shapes;
 
 /// Input bundle for all-chip trace construction.
@@ -38,7 +35,19 @@ pub struct BuiltinTraceBuilder<'a, H, const W: usize>
 where
     H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
-    witness: &'a BatchWitness<H>,
+    context: BuiltinTraceContext<'a>,
+    _marker: core::marker::PhantomData<H>,
+}
+
+/// Minimal shared proving context required by builtin execution/root traces.
+#[derive(Clone, Copy)]
+pub struct BuiltinTraceContext<'a> {
+    /// Column metadata for all planned columns.
+    pub column_metas: &'a [ColumnMeta],
+    /// State root before the batch.
+    pub old_state_root: &'a NativeDigest,
+    /// State root after the batch.
+    pub new_state_root: &'a NativeDigest,
 }
 
 /// Builtin witness-store output plus per-column property-read records.
@@ -54,45 +63,35 @@ where
     H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     /// Create a new trace builder for a witness.
-    pub fn new(witness: &'a BatchWitness<H>) -> Self {
-        Self { witness }
+    pub fn new(context: BuiltinTraceContext<'a>) -> Self {
+        Self {
+            context,
+            _marker: core::marker::PhantomData,
+        }
     }
 
-    /// Full pipeline: IR program + execution result → populated [`WitnessStore`].
-    ///
-    /// Runs the complete preparation pipeline:
-    /// 1. Derives empty columns from witness metadata.
-    /// 2. Lowers IR body → instruction records + static table rows.
-    #[allow(clippy::too_many_arguments)]
-    /// 3. Builds SMT paths from witness metadata.
-    /// 4. Validates SMT path shapes.
-    /// 5. Populates builtin witness artifacts for runtime trace assembly.
+    /// Build the shared execution/root witness store from already-lowered
+    /// execution inputs plus the current batch proof context.
     pub fn prepare_witness_store(
         &self,
-        program: &Program,
-        batch: &Batch,
-        execution_result: &BatchResult,
-        schemas: &BTreeMap<TableId, TableSchema>,
-        static_tables: &dyn StaticTableProvider,
+        lowering: &LoweringOutput,
         hasher: H,
     ) -> Result<BuiltinWitnessInputs, TabulaError>
     where
         H: Clone,
     {
-        let prepared = self.prepare_inputs(
-            program,
-            batch,
-            execution_result,
-            schemas,
-            static_tables,
+        let (smt_col_paths, smt_table_paths) = super::smt::build_smt_paths(
+            self.context.column_metas,
+            self.context.old_state_root,
+            self.context.new_state_root,
             hasher,
         )?;
 
         let inputs = AllTraceInputs {
-            execution_records: &prepared.instruction_records,
-            static_table_rows: &prepared.static_table_rows,
-            smt_col_paths: &prepared.smt_col_paths,
-            smt_table_paths: &prepared.smt_table_paths,
+            execution_records: &lowering.instruction_records,
+            static_table_rows: &lowering.static_table_rows,
+            smt_col_paths: &smt_col_paths,
+            smt_table_paths: &smt_table_paths,
         };
 
         validate_smt_path_shapes(inputs.smt_col_paths, inputs.smt_table_paths)?;
@@ -103,12 +102,15 @@ where
     ///
     /// Lower-level entry point for callers that already have instruction records,
     /// static table rows, and SMT paths (e.g. chip-level tests).
-    /// For the full IR-based pipeline, use [`prepare_witness_store`](Self::prepare_witness_store).
+    /// For the canonical builtin path, use [`prepare_witness_store`](Self::prepare_witness_store).
     pub fn populate_store(
         &self,
         inputs: AllTraceInputs<'_>,
     ) -> Result<BuiltinWitnessInputs, TabulaError> {
-        let statement = super::smt::smt_table_public_statement(self.witness);
+        let statement = super::smt::smt_table_public_statement(
+            self.context.old_state_root,
+            self.context.new_state_root,
+        );
         let smt_table_pvs = statement.to_field_elements();
 
         let mut store = WitnessStore::new();
@@ -144,65 +146,8 @@ where
             property_reads: property_records,
         })
     }
-
-    /// Shared input preparation for IR-based pipelines.
-    fn prepare_inputs(
-        &self,
-        program: &Program,
-        batch: &Batch,
-        execution_result: &BatchResult,
-        schemas: &BTreeMap<TableId, TableSchema>,
-        static_tables: &dyn StaticTableProvider,
-        hasher: H,
-    ) -> Result<PreparedInputs, TabulaError>
-    where
-        H: Clone,
-    {
-        // 1. Derive empty columns from witness metadata.
-        let empty_columns: BTreeSet<(TableId, ColId)> = self
-            .witness
-            .column_metas
-            .iter()
-            .filter(|m| m.is_empty_old)
-            .map(|m| (m.table, m.col))
-            .collect();
-
-        // 2. Lower IR body → instruction records + static table rows.
-        let lowering = lower_program_batch::<W>(
-            program,
-            batch,
-            execution_result,
-            schemas,
-            static_tables,
-            &empty_columns,
-        )?;
-
-        // 3. Build SMT paths from witness metadata.
-        let (smt_col_paths, smt_table_paths) = super::smt::build_smt_paths(
-            &self.witness.column_metas,
-            &self.witness.old_state_root,
-            &self.witness.new_state_root,
-            hasher,
-        )?;
-
-        Ok(PreparedInputs {
-            instruction_records: lowering.instruction_records,
-            static_table_rows: lowering.static_table_rows,
-            smt_col_paths,
-            smt_table_paths,
-        })
-    }
 }
 
-/// Internal bundle of prepared inputs for trace assembly.
-struct PreparedInputs {
-    instruction_records: Vec<InstructionRecord>,
-    static_table_rows: Vec<StaticTableRow>,
-    smt_col_paths: Vec<SmtPathWitness>,
-    smt_table_paths: Vec<SmtTablePathWitness>,
-}
-
-/// Extract PropertyRead records from instruction records, grouped by (table, col).
 fn extract_property_read_records(
     records: &[InstructionRecord],
 ) -> BTreeMap<(TableId, ColId), Vec<PropertyReadRecord>> {

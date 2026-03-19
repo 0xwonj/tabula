@@ -48,7 +48,7 @@ use super::columns::{DIGEST_WIDTH, META_SHARD_WIDTH, MetaShardCols};
 ///
 /// The `scheme_tag` is used for leaf digest domain separation (e.g., 0=SSMC, 1=SMT).
 /// The `receives_commitment` flag controls whether this chip receives on the
-/// C6 CommitmentVerification bus (true for SSMC, false for SMT).
+/// C6 CommitmentVerification bus gate for scheme-owned state proofs.
 #[derive(Debug, Clone)]
 pub struct MetaShardChip {
     chip_id: ChipId,
@@ -64,8 +64,7 @@ impl MetaShardChip {
     /// Create a new meta shard chip for a specific column.
     ///
     /// - `scheme_tag`: domain-separation value (e.g., `scheme_tags::SSMC` = 0)
-    /// - `receives_commitment`: true if this scheme sends commitments via C6
-    ///   (SSMC does; SMT does not — it uses C15 SmtLeafDigest instead)
+    /// - `receives_commitment`: true if this scheme's state chip sends commitments via C6
     pub fn new(
         chip_id: ChipId,
         table_id: u32,
@@ -199,7 +198,7 @@ impl<AB: InteractionAirBuilder> Air<AB> for MetaShardChip {
                     AB::Expr::ZERO, // comm_type = 0 (Com_old)
                     local.is_touched.into(),
                     &local.com_old,
-                    local.is_real.into() * not_empty_old,
+                    local.is_real.into() * local.has_commitment_proof.into() * not_empty_old,
                 );
             }
 
@@ -212,7 +211,10 @@ impl<AB: InteractionAirBuilder> Air<AB> for MetaShardChip {
                     AB::Expr::ONE, // comm_type = 1 (Com_new)
                     local.is_touched.into(),
                     &local.com_new,
-                    local.is_real.into() * local.is_touched.into() * non_empty_new,
+                    local.is_real.into()
+                        * local.has_commitment_proof.into()
+                        * local.is_touched.into()
+                        * non_empty_new,
                 );
             }
         }
@@ -228,14 +230,14 @@ impl<AB: InteractionAirBuilder> Air<AB> for MetaShardChip {
         builder.send_poseidon_perm(
             &local.leaf_perm_input_old,
             &local.leaf_digest_old,
-            local.is_real.into(),
+            local.is_real.into() * local.is_touched.into(),
         );
 
         // C5 PoseidonPermutation send: leaf digest new
         builder.send_poseidon_perm(
             &local.leaf_perm_input_new,
             &local.leaf_digest_new,
-            local.is_real.into(),
+            local.is_real.into() * local.is_touched.into(),
         );
 
         // C15 SmtLeafDigest send
@@ -244,7 +246,7 @@ impl<AB: InteractionAirBuilder> Air<AB> for MetaShardChip {
             local.col_id.into(),
             &local.leaf_digest_old,
             &local.leaf_digest_new,
-            local.is_real.into(),
+            local.is_real.into() * local.is_touched.into(),
         );
     }
 }
@@ -256,6 +258,7 @@ fn constrain_booleans<AB: AirBuilder>(builder: &mut AB, local: &MetaShardCols<AB
     builder.assert_bool(local.is_empty_old);
     builder.assert_bool(local.is_empty_new);
     builder.assert_bool(local.is_touched);
+    builder.assert_bool(local.has_commitment_proof);
 }
 
 /// 4. Untouched binding: `is_touched=0 ⟹ com_new = com_old`.

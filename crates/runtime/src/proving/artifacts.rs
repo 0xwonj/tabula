@@ -1,41 +1,35 @@
-use tabula_commitment::PoseidonHasher;
-use tabula_core::BatchResult;
 use tabula_machine::PublicStatement;
-use tabula_witness::BatchWitness;
+use tabula_witness::trace::builtin::lowering::LoweringOutput;
 
+use crate::columns::BatchProofInput;
 use crate::error::RuntimeError;
 use crate::execute::ExecutedBatch;
 use crate::program::RuntimeProgram;
 
-use super::witness::{
-    build_old_column_states, extract_statement, generate_witness, to_batch_result,
-};
+use super::prepare::{convert_batch, prepare_batch_proof_input, to_batch_result};
 
 /// Proof-preparation artifacts shared by statement-building and proving.
 pub(crate) struct WitnessArtifacts {
-    pub(crate) batch_result: BatchResult,
-    pub(crate) witness: BatchWitness<PoseidonHasher>,
+    pub(crate) proof_input: BatchProofInput,
     pub(crate) air_statement: PublicStatement,
+    pub(crate) lowering: LoweringOutput,
 }
 
-/// Prepare the witness-level artifacts derived from one executed batch.
+/// Prepare the batch proof input and lowering artifacts derived from one executed batch.
 pub(crate) fn prepare_witness_artifacts(
     runtime_program: &RuntimeProgram,
     state: &tabula_artifact::StateSnapshot,
+    batch_file: &tabula_artifact::TransactionBatch,
     executed: &ExecutedBatch,
 ) -> Result<WitnessArtifacts, RuntimeError> {
-    let old_column_states = build_old_column_states(runtime_program, state)?;
+    let batch = convert_batch(batch_file)?;
     let batch_result = to_batch_result(executed);
-    let witness = generate_witness(
-        &batch_result,
-        runtime_program.schemas_by_id(),
-        &old_column_states,
-    )?;
-    let air_statement = extract_statement(&witness);
+    let prepared = prepare_batch_proof_input(runtime_program, state, &batch, &batch_result)?;
+    let air_statement = prepared.proof_input.public_statement();
 
     Ok(WitnessArtifacts {
-        batch_result,
-        witness,
+        proof_input: prepared.proof_input,
         air_statement,
+        lowering: prepared.lowering,
     })
 }

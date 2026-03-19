@@ -12,8 +12,8 @@ mod tx;
 
 // ── State model ──
 pub use state::id::{
-    CellKey, ColId, ColumnCommitmentId, Digest, RowKey, SchemeId, StateRoot, TableCommitmentId,
-    TableId, TxTypeId,
+    CellKey, ColId, ColumnCommitmentId, ColumnLayoutKind, Digest, RootProfileId, RowKey, SchemeId,
+    StateRoot, TableCommitmentId, TableId, TxTypeId,
 };
 pub use state::schema::{ColumnDef, TableSchema};
 pub use state::value::{Value, ValueType, zero_value};

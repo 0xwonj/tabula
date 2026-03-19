@@ -33,6 +33,7 @@ impl ProofColumn for DummyProofColumn {
         Ok(ColumnChipSet {
             airs: vec![],
             dyn_chips: vec![],
+            bus_consumers: vec![],
         })
     }
 }

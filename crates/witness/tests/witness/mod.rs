@@ -8,14 +8,13 @@ use tabula_core::{
     AccessEvent, CellKey, ColId, ColumnDef, OpKind, RowKey, TableId, TableSchema, Value, ValueType,
 };
 
-use tabula_witness::WitnessGenerator;
+use tabula_witness::ExecutionInputPreparer;
 
 mod generator;
 mod program_info;
-mod route;
 
-pub(super) fn make_wg() -> WitnessGenerator<MockFieldHasher> {
-    WitnessGenerator::new(MockFieldHasher)
+pub(super) fn make_preparer() -> ExecutionInputPreparer<MockFieldHasher> {
+    ExecutionInputPreparer::new(MockFieldHasher)
 }
 
 pub(super) fn t(n: u32) -> TableId {

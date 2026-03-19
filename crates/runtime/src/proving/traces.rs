@@ -1,71 +1,44 @@
-use std::collections::BTreeMap;
-
 use rayon::prelude::*;
 use tabula_commitment::PoseidonHasher;
 use tabula_core::error::TabulaError;
-use tabula_core::{Batch, BatchResult, ColId, InMemoryStaticTables, TableId};
 use tabula_machine::{ProofSetups, ProofTraces, TabulaMachine, TierSetup};
 use tabula_stark::trace::{TraceMap, WitnessStore};
+use tabula_witness::trace::builtin::lowering::LoweringOutput;
+use tabula_witness::trace::builtin::{BuiltinTraceBuilder, BuiltinTraceContext};
 use tabula_witness::trace::{PartitionedStores, build_all_traces, partition_by_tier};
-use tabula_witness::trace::builtin::{BuiltinTraceBuilder, PropertyReadRecord};
-use tabula_witness::BatchWitness;
 
+use crate::columns::BatchProofInput;
 use crate::error::RuntimeError;
-use crate::program::RuntimeProgram;
 
-/// Build traces from witness through the full runtime-owned pipeline:
-/// witness store -> per-column proof inputs -> tier partition -> proof traces.
+/// Build traces from canonical batch proof input through the full runtime-owned
+/// pipeline: builtin lowering + per-column witness stores -> tier partition -> traces.
 #[tracing::instrument(skip_all)]
 pub fn build_traces(
     machine: &TabulaMachine,
-    runtime_program: &RuntimeProgram,
-    witness: &BatchWitness<PoseidonHasher>,
-    batch: &Batch,
-    batch_result: &BatchResult,
+    proof_input: BatchProofInput,
+    lowering: &LoweringOutput,
 ) -> Result<ProofTraces, RuntimeError> {
-    let prepared = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(witness)
-        .prepare_witness_store(
-            runtime_program.program(),
-            batch,
-            batch_result,
-            runtime_program.schemas_by_id(),
-            &InMemoryStaticTables::new(),
-            PoseidonHasher::new(),
-        )
-        .map_err(RuntimeError::TraceBuild)?;
+    let metas = proof_input.column_metas();
+    let prepared = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(BuiltinTraceContext {
+        column_metas: &metas,
+        old_state_root: &proof_input.old_state_root,
+        new_state_root: &proof_input.new_state_root,
+    })
+    .prepare_witness_store(lowering, PoseidonHasher::new())
+    .map_err(RuntimeError::TraceBuild)?;
 
-    let column_stores =
-        build_column_stores(runtime_program, witness, &prepared.property_reads)?;
+    let column_stores = build_column_stores(proof_input);
     let stores = partition_by_tier(prepared.store, column_stores);
     build_proof_traces(machine.setup().proof_setups(), stores).map_err(RuntimeError::TraceBuild)
 }
 
 fn build_column_stores(
-    runtime_program: &RuntimeProgram,
-    witness: &BatchWitness<PoseidonHasher>,
-    property_records: &BTreeMap<(TableId, ColId), Vec<PropertyReadRecord>>,
-) -> Result<Vec<((TableId, ColId), WitnessStore)>, RuntimeError> {
-    witness
+    proof_input: BatchProofInput,
+) -> Vec<((tabula_core::TableId, tabula_core::ColId), WitnessStore)> {
+    proof_input
         .columns
-        .par_iter()
-        .map(|column| {
-            let key = (column.table, column.col);
-            let Some(builder) = runtime_program.proof_input_builders().get(&key) else {
-                return Err(RuntimeError::ValidationFailed {
-                    detail: format!(
-                        "missing proof input builder for table {} col {}",
-                        column.table.0, column.col.0
-                    ),
-                });
-            };
-            let reads = property_records
-                .get(&key)
-                .map_or(&[] as &[PropertyReadRecord], Vec::as_slice);
-            let store = builder
-                .build_witness_store(column, reads)
-                .map_err(RuntimeError::TraceBuild)?;
-            Ok((key, store))
-        })
+        .into_iter()
+        .map(|column| ((column.table, column.col), column.witness_store))
         .collect()
 }
 
@@ -75,12 +48,13 @@ fn build_proof_traces(
 ) -> Result<ProofTraces, TabulaError> {
     let exec_traces = build_tier_traces(&setups.execution, stores.execution)?;
 
-    let setup_index: BTreeMap<(TableId, ColId), usize> = setups
-        .columns
-        .iter()
-        .enumerate()
-        .map(|(i, ((table_id, col_id), _))| ((*table_id, *col_id), i))
-        .collect();
+    let setup_index: std::collections::BTreeMap<(tabula_core::TableId, tabula_core::ColId), usize> =
+        setups
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(i, ((table_id, col_id), _))| ((*table_id, *col_id), i))
+            .collect();
 
     let col_traces: Vec<_> = stores
         .columns
@@ -123,57 +97,56 @@ mod tests {
     use tabula_compiler::{register_program_artifact, transfer_example_bundle};
 
     use super::*;
-    use crate::proving::{convert_batch, prepare_witness_artifacts};
     use crate::TabulaRuntime;
+    use crate::proving::prepare_witness_artifacts;
 
     #[test]
-    fn proof_input_builders_assemble_one_store_per_witness_column() {
+    fn canonical_column_proof_inputs_assemble_one_store_per_planned_column() {
         let bundle = transfer_example_bundle().expect("example bundle");
         let compiled = register_program_artifact(&bundle.program).expect("compiled program");
         let runtime = TabulaRuntime::builder(compiled).build().expect("runtime");
         let executed = runtime
             .execute(&bundle.state, &bundle.batch)
             .expect("execution succeeds");
-        let artifacts = prepare_witness_artifacts(runtime.runtime_program(), &bundle.state, &executed)
-            .expect("witness artifacts");
-        let batch = convert_batch(&bundle.batch).expect("batch conversion");
-        let prepared = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(&artifacts.witness)
-            .prepare_witness_store(
-                runtime.runtime_program().program(),
-                &batch,
-                &artifacts.batch_result,
-                runtime.runtime_program().schemas_by_id(),
-                &InMemoryStaticTables::new(),
-                PoseidonHasher::new(),
-            )
-            .expect("builtin witness preparation");
-
-        let stores = build_column_stores(
+        let artifacts = prepare_witness_artifacts(
             runtime.runtime_program(),
-            &artifacts.witness,
-            &prepared.property_reads,
+            &bundle.state,
+            &bundle.batch,
+            &executed,
         )
-        .expect("column stores");
+        .expect("witness artifacts");
 
-        assert_eq!(stores.len(), artifacts.witness.columns.len());
+        let column_count = artifacts.proof_input.columns.len();
+        let expected_keys: Vec<_> = artifacts
+            .proof_input
+            .columns
+            .iter()
+            .map(|column| (column.table, column.col))
+            .collect();
+        let stores = build_column_stores(artifacts.proof_input);
+
+        assert_eq!(stores.len(), column_count);
         for ((table_id, col_id), _) in &stores {
             assert!(
-                artifacts
-                    .witness
-                    .columns
+                expected_keys
                     .iter()
-                    .any(|column| column.table == *table_id && column.col == *col_id),
-                "missing witness column for ({}, {})",
+                    .any(|(table, col)| table == table_id && col == col_id),
+                "missing proof input column for ({}, {})",
                 table_id.0,
                 col_id.0
             );
         }
 
-        let traces = build_proof_traces(
-            runtime.machine().setup().proof_setups(),
-            partition_by_tier(prepared.store, stores),
+        let artifacts = prepare_witness_artifacts(
+            runtime.runtime_program(),
+            &bundle.state,
+            &bundle.batch,
+            &executed,
         )
-        .expect("proof traces");
+        .expect("witness artifacts");
+        let proof_input = artifacts.proof_input;
+        let traces = build_traces(runtime.machine(), proof_input, &artifacts.lowering)
+            .expect("proof traces");
 
         assert_eq!(
             traces.columns.len(),

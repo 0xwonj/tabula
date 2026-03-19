@@ -2,7 +2,7 @@
 
 use tabula_core::{ColId, SchemeId, TableId};
 use tabula_stark::chips::ChipIdAllocator;
-use tabula_stark::trace::DynChip;
+use tabula_stark::trace::{BusConsumer, DynChip};
 
 use crate::AnyRap;
 use crate::setup::registry::SetupError;
@@ -13,6 +13,8 @@ pub struct ColumnChipSet {
     pub airs: Vec<Box<dyn AnyRap>>,
     /// Dynamic chips for phase-ordered trace generation.
     pub dyn_chips: Vec<Box<dyn DynChip>>,
+    /// Optional scheme-owned dependent bus consumers.
+    pub bus_consumers: Vec<Box<dyn BusConsumer>>,
 }
 
 /// Proving-facing per-column view.

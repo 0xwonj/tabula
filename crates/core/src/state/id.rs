@@ -71,6 +71,69 @@ impl SchemeId {
     }
 }
 
+/// Identifies the verifier-relevant commitment layout/backend for a column.
+///
+/// Unlike [`SchemeId`], this is not the public SDK/profile identity. It seals
+/// the actual column-state representation expected by witness generation and
+/// proof chips.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub struct ColumnLayoutKind(pub u16);
+
+impl ColumnLayoutKind {
+    /// Built-in sorted-state Merkle commitment layout.
+    pub const SSMC_V1: Self = Self(0);
+    /// Built-in sparse Merkle tree layout.
+    pub const SMT_V1: Self = Self(1);
+
+    /// Return the raw layout identifier.
+    pub const fn raw(self) -> u16 {
+        self.0
+    }
+}
+
+/// Identifies a root-proof compatibility profile in portable artifacts.
+///
+/// Column commitment schemes bind to one root profile so runtime and verifier
+/// can fail closed when a program artifact and installed root proof disagree.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub struct RootProfileId(pub u16);
+
+impl RootProfileId {
+    /// Two-level SMT root proof profile used by Tabula v1.
+    pub const SMT_V1: Self = Self(0);
+
+    /// Return the raw protocol identifier.
+    pub const fn raw(self) -> u16 {
+        self.0
+    }
+}
+
 /// Row key. Dense integer keys for kernel v1.0.
 #[derive(
     Debug,
@@ -169,6 +232,18 @@ impl std::fmt::Display for SchemeId {
     }
 }
 
+impl std::fmt::Display for ColumnLayoutKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "column_layout:{}", self.0)
+    }
+}
+
+impl std::fmt::Display for RootProfileId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "root_profile:{}", self.0)
+    }
+}
+
 impl std::fmt::Display for RowKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "row:{}", self.0)
@@ -221,6 +296,18 @@ impl From<u16> for SchemeId {
 
 impl From<SchemeId> for u16 {
     fn from(id: SchemeId) -> Self {
+        id.0
+    }
+}
+
+impl From<u16> for RootProfileId {
+    fn from(v: u16) -> Self {
+        Self(v)
+    }
+}
+
+impl From<RootProfileId> for u16 {
+    fn from(id: RootProfileId) -> Self {
         id.0
     }
 }

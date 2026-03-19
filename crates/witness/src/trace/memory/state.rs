@@ -4,11 +4,10 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
 use tabula_chips::shards::state::trace::{EntrySource, StateShardRow};
-use tabula_commitment::{ColumnState, FieldHasher, NativeDigest};
-use tabula_core::RowKey;
 use tabula_core::error::TabulaError;
+use tabula_core::{ColId, RowKey, TableId};
 
-use crate::witness::ColumnWitness;
+use crate::witness::AccessRow;
 
 /// A single row for building state column data.
 ///
@@ -64,17 +63,16 @@ impl From<StateColumnRow> for StateShardRow {
     }
 }
 
-pub(super) fn build_state_rows<H, const W: usize>(
-    column: &ColumnWitness<H>,
-) -> Result<Vec<StateColumnRow>, TabulaError>
-where
-    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
-{
-    let old_entries = ssmc_entries::<H>(&column.old_state)?;
-    let new_entries = ssmc_entries::<H>(&column.new_state)?;
-
+pub(super) fn build_state_rows_for_parts<const W: usize>(
+    table: TableId,
+    col: ColId,
+    access_rows: &[AccessRow],
+    old_entries: &BTreeMap<RowKey, Vec<KoalaBear>>,
+    new_entries: &BTreeMap<RowKey, Vec<KoalaBear>>,
+    is_touched: bool,
+) -> Result<Vec<StateColumnRow>, TabulaError> {
     let mut write_keys: BTreeSet<RowKey> = BTreeSet::new();
-    for access in &column.access_rows {
+    for access in access_rows {
         if access.is_write {
             write_keys.insert(access.key.row);
         }
@@ -107,20 +105,20 @@ where
                 phase: "memory",
                 detail: format!(
                     "state row width mismatch for ({:?}, {:?}) key {}",
-                    column.table, column.col, key.0
+                    table, col, key.0
                 ),
             });
         }
 
         rows.push(StateColumnRow {
-            table_id: column.table.0,
-            col_id: column.col.0,
+            table_id: table.0,
+            col_id: col.0,
             key: key.0,
             is_gap: false,
             source,
             old_val,
             new_val,
-            segment_is_touched: column.meta.is_touched,
+            segment_is_touched: is_touched,
             old_hash_acc: [KoalaBear::ZERO; 8],
             new_hash_acc: [KoalaBear::ZERO; 8],
             read_mult: true,
@@ -134,7 +132,6 @@ where
 
     Ok(rows)
 }
-
 pub(super) fn sort_state_rows(rows: &mut [StateColumnRow]) {
     rows.sort_by_key(|r| (r.table_id, r.col_id, r.key));
 }
@@ -174,22 +171,5 @@ fn populate_old_neighbors(rows: &mut [StateColumnRow]) {
         } else {
             row.next_old_key = row.next_old_key.max(next_old);
         }
-    }
-}
-
-fn ssmc_entries<H>(state: &ColumnState<H>) -> Result<BTreeMap<RowKey, Vec<KoalaBear>>, TabulaError>
-where
-    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
-{
-    match state {
-        ColumnState::Ssmc(list) => Ok(list
-            .entries()
-            .iter()
-            .map(|entry| (entry.key, entry.value.clone()))
-            .collect()),
-        ColumnState::Smt(_) => Err(TabulaError::ProofError {
-            phase: "memory",
-            detail: "only SSMC-backed columns are currently supported".to_string(),
-        }),
     }
 }

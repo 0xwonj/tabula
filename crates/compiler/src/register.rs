@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::bail;
 
-use tabula_artifact::{ColumnProofPlan, ProgramArtifact};
+use tabula_artifact::{ColumnProofPlan, ProgramArtifact, SchemeDescriptor};
 use tabula_contract::{
     BINDING_VERSION_V1, CONTRACT_SCHEMA_VERSION_V1, ContractMetadataEnvelope,
     STATEMENT_SCHEMA_VERSION_V1, VERIFIER_PROFILE_VERSION_V1, binding_registry_v1,
@@ -19,13 +19,27 @@ use crate::sources::{ColumnSchemeSelection, ProgramDefinition};
 
 const DEFAULT_COLUMN_SCHEME_ID: SchemeId = SchemeId::SSMC;
 
+/// Source-registration catalog for custom scheme descriptors.
+pub type SchemeDescriptorCatalog = BTreeMap<SchemeId, SchemeDescriptor>;
+
 /// Register source-derived program definitions.
 pub fn register_program_definition(
     definition: &ProgramDefinition,
 ) -> CompilerResult<CompiledProgram> {
-    let column_proof_plan =
-        derive_column_proof_plan(&definition.table_schemas, &definition.column_schemes)
-            .map_err(|err| CompilerError::InvalidProgram(anyhow::Error::msg(err)))?;
+    register_program_definition_with_scheme_catalog(definition, &SchemeDescriptorCatalog::new())
+}
+
+/// Register source-derived program definitions with custom scheme descriptors.
+pub fn register_program_definition_with_scheme_catalog(
+    definition: &ProgramDefinition,
+    scheme_catalog: &SchemeDescriptorCatalog,
+) -> CompilerResult<CompiledProgram> {
+    let column_proof_plan = derive_column_proof_plan(
+        &definition.table_schemas,
+        &definition.column_schemes,
+        scheme_catalog,
+    )
+    .map_err(|err| CompilerError::InvalidProgram(anyhow::Error::msg(err)))?;
     register_program_with_plan(
         &definition.table_schemas,
         &definition.tx_types,
@@ -58,7 +72,8 @@ pub fn register_program(
     register_program_with_plan(
         schemas,
         tx_types,
-        derive_column_proof_plan(schemas, &[]).map_err(anyhow::Error::msg)?,
+        derive_column_proof_plan(schemas, &[], &SchemeDescriptorCatalog::new())
+            .map_err(anyhow::Error::msg)?,
     )
 }
 
@@ -204,15 +219,22 @@ fn derive_required_property_requirements(program: &Program) -> Vec<PropertyRequi
 fn derive_column_proof_plan(
     schemas: &[TableSchema],
     overrides: &[ColumnSchemeSelection],
+    scheme_catalog: &SchemeDescriptorCatalog,
 ) -> Result<Vec<ColumnProofPlan>, String> {
+    let default_descriptor =
+        resolve_descriptor_for_scheme(DEFAULT_COLUMN_SCHEME_ID, scheme_catalog)?;
     let mut columns: Vec<_> = schemas
         .iter()
         .flat_map(|schema| {
-            schema.columns.iter().map(move |column| ColumnProofPlan {
-                table_id: schema.id,
-                col_id: column.id,
-                scheme_id: DEFAULT_COLUMN_SCHEME_ID,
-                receives_commitment: true,
+            schema.columns.iter().map({
+                let default_descriptor = default_descriptor.clone();
+                move |column| ColumnProofPlan {
+                    table_id: schema.id,
+                    col_id: column.id,
+                    scheme_id: DEFAULT_COLUMN_SCHEME_ID,
+                    scheme_descriptor: default_descriptor.clone(),
+                    receives_commitment: true,
+                }
             })
         })
         .collect();
@@ -237,7 +259,34 @@ fn derive_column_proof_plan(
             ));
         };
         columns[idx].scheme_id = override_entry.scheme_id;
+        columns[idx].scheme_descriptor =
+            resolve_descriptor_for_scheme(override_entry.scheme_id, scheme_catalog)?;
     }
     columns.sort_by_key(|plan| (plan.table_id, plan.col_id));
     Ok(columns)
+}
+
+fn resolve_descriptor_for_scheme(
+    scheme_id: SchemeId,
+    scheme_catalog: &SchemeDescriptorCatalog,
+) -> Result<SchemeDescriptor, String> {
+    match scheme_id {
+        SchemeId::SSMC => Ok(SchemeDescriptor::builtin_ssmc()),
+        SchemeId::SMT => Ok(SchemeDescriptor::builtin_smt()),
+        other => {
+            let Some(descriptor) = scheme_catalog.get(&other) else {
+                return Err(format!(
+                    "source-derived proof planning does not know a descriptor for custom scheme id {}",
+                    other.0
+                ));
+            };
+            if descriptor.scheme_id != other {
+                return Err(format!(
+                    "custom scheme descriptor catalog mismatch: key {} maps to descriptor scheme id {}",
+                    other.0, descriptor.scheme_id.0
+                ));
+            }
+            Ok(descriptor.clone())
+        }
+    }
 }

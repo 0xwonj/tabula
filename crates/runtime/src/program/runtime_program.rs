@@ -6,9 +6,9 @@ use tabula_core::{ColId, TableId, TableSchema};
 use tabula_ir::Program;
 
 use crate::assembly::materialize::ResolvedColumnViews;
-use crate::columns::{ColumnPlan, RuntimeColumn};
 #[cfg(feature = "prove")]
-use crate::columns::ProofInputBuilder;
+use crate::columns::ColumnTransitionBackend;
+use crate::columns::{ColumnPlan, RuntimeColumn};
 use crate::error::RuntimeError;
 use crate::program::ProgramBinding;
 
@@ -29,7 +29,7 @@ pub struct RuntimeProgram {
     runtime_columns: BTreeMap<(TableId, ColId), Arc<dyn RuntimeColumn>>,
     column_plans: BTreeMap<(TableId, ColId), ColumnPlan>,
     #[cfg(feature = "prove")]
-    proof_input_builders: BTreeMap<(TableId, ColId), Arc<dyn ProofInputBuilder>>,
+    transition_backends: BTreeMap<(TableId, ColId), Arc<dyn ColumnTransitionBackend>>,
     binding: ProgramBinding,
 }
 
@@ -53,7 +53,7 @@ impl RuntimeProgram {
             runtime_columns: resolved_columns.runtime_columns,
             column_plans: resolved_columns.column_plans,
             #[cfg(feature = "prove")]
-            proof_input_builders: resolved_columns.proof_input_builders,
+            transition_backends: resolved_columns.transition_backends,
             binding,
         })
     }
@@ -78,12 +78,12 @@ impl RuntimeProgram {
         &self.column_plans
     }
 
-    /// Per-column proof-input builders keyed by `(table_id, col_id)`.
+    /// Per-column transition backends keyed by `(table_id, col_id)`.
     #[cfg(feature = "prove")]
-    pub fn proof_input_builders(
+    pub(crate) fn transition_backends(
         &self,
-    ) -> &BTreeMap<(TableId, ColId), Arc<dyn ProofInputBuilder>> {
-        &self.proof_input_builders
+    ) -> &BTreeMap<(TableId, ColId), Arc<dyn ColumnTransitionBackend>> {
+        &self.transition_backends
     }
 
     /// Precomputed canonical binding for execution statements and proofs.
@@ -98,19 +98,16 @@ impl std::fmt::Debug for RuntimeProgram {
             .field("schemas", &self.schemas_by_id.len())
             .field("runtime_columns", &self.runtime_columns.len())
             .field("column_plans", &self.column_plans.len())
-            .field(
-                "proof_input_builders",
-                &{
-                    #[cfg(feature = "prove")]
-                    {
-                        self.proof_input_builders.len()
-                    }
-                    #[cfg(not(feature = "prove"))]
-                    {
-                        0usize
-                    }
-                },
-            )
+            .field("transition_backends", &{
+                #[cfg(feature = "prove")]
+                {
+                    self.transition_backends.len()
+                }
+                #[cfg(not(feature = "prove"))]
+                {
+                    0usize
+                }
+            })
             .field("program_hash", &self.binding.program_hash())
             .field("metadata_hash", &self.binding.metadata_hash())
             .finish_non_exhaustive()

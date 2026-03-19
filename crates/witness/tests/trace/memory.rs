@@ -1,99 +1,59 @@
 use super::*;
 
-#[test]
-fn trace_builder_builds_valid_memory_traces() {
-    let hasher = MockFieldHasher;
+fn validate_intra_tier(trace_map: &tabula_stark::trace::TraceMap) {
+    let chips = tabula_chips::core_dyn_chips();
+    let intra_tier_buses = vec![
+        tabula_stark::air::interaction::core_buses::POSEIDON_PERM,
+        tabula_stark::air::interaction::core_buses::RANGE_CHECK,
+        tabula_stark::air::interaction::core_buses::STATIC_TABLE_LOOKUP,
+    ];
+    tabula_witness::trace::debug_validate_trace_map(&chips, &intra_tier_buses, trace_map)
+        .expect("trace map must satisfy intra-tier checks");
+}
+
+fn single_column_context() -> TraceProofContext {
+    let hasher = PoseidonHasher::new();
     let table = TableId(1);
     let col = ColId(0);
-
     let old_entries = vec![(RowKey(10), encode_u64(50))];
-    let (old_state, _runtime_com_old) =
+    let (old_state, _) =
         ColumnState::commit(&hasher, table, col, old_entries, scheme_tags::SSMC).unwrap();
-
-    let writes = vec![(RowKey(10), Some(encode_u64(50)))];
-    let (new_state, _runtime_com_new, merge_trace) =
-        old_state.apply_writes(&hasher, table, col, &writes);
-    let com_old = chain_commit_single(1, 0, 10, &encode_u64(50));
-    let com_new = chain_commit_single(1, 0, 10, &encode_u64(50));
-
-    let meta = ColumnMeta {
+    let meta = build_ssmc_meta(
+        &hasher,
         table,
         col,
-        tag: scheme_tags::SSMC,
-        com_old,
-        com_new,
-        is_empty_old: false,
-        is_empty_new: false,
-        is_touched: true,
-    };
-
-    let column_witness = ColumnWitness {
-        table,
-        col,
-        value_type: tabula_core::ValueType::U64,
-        init_rows: vec![InitRow {
-            key: CellKey {
-                table,
-                col,
-                row: RowKey(10),
-            },
-            value_fes: encode_u64(50),
-            val_is_null: false,
-        }],
-        access_rows: vec![
-            AccessRow {
-                key: CellKey {
-                    table,
-                    col,
-                    row: RowKey(10),
-                },
-                time: 0,
-                is_write: false,
-                value_fes: encode_u64(50),
-                val_is_null: false,
-                tx_index: 0,
-                effect_ordinal_in_tx: 0,
-            },
-            AccessRow {
-                key: CellKey {
-                    table,
-                    col,
-                    row: RowKey(10),
-                },
-                time: 1,
-                is_write: true,
-                value_fes: encode_u64(50),
-                val_is_null: false,
-                tx_index: 0,
-                effect_ordinal_in_tx: 1,
-            },
-        ],
-        old_state,
-        new_state,
-        merge_trace,
-        meta: meta.clone(),
-    };
-
-    let (old_state_root, new_state_root) =
-        single_column_roots(&hasher, table, col, com_old, com_new);
-
-    let witness = BatchWitness {
-        columns: vec![column_witness],
+        &old_state,
+        &[(RowKey(10), Some(encode_u64(50)))],
+        true,
+    );
+    let (old_state_root, new_state_root) = roots_from_metas(std::slice::from_ref(&meta));
+    TraceProofContext {
         column_metas: vec![meta],
         old_state_root,
         new_state_root,
-        tx_results: vec![TxResult::success(vec![], vec![])],
-        key_routes: BTreeMap::<CellKey, KeyRoute>::new(),
-    };
+    }
+}
 
-    // Build memory traces via the full trace builder, then check the memory chips.
-    let builder = BuiltinTraceBuilder::<MockFieldHasher, 3>::new(&witness);
+#[test]
+fn trace_builder_builds_valid_memory_traces() {
+    let context = single_column_context();
+    let (smt_col_paths, smt_table_paths) = build_smt_paths_from_metas(
+        &context.column_metas,
+        &context.old_state_root,
+        &context.new_state_root,
+    );
+
+    let builder = BuiltinTraceBuilder::<MockFieldHasher, 3>::new(BuiltinTraceContext {
+        column_metas: &context.column_metas,
+        old_state_root: &context.old_state_root,
+        new_state_root: &context.new_state_root,
+    });
     let store = builder
         .populate_store(AllTraceInputs {
             execution_records: &[],
             static_table_rows: &[],
-            smt_col_paths: &[],
-            smt_table_paths: &[],
+            smt_col_paths: &smt_col_paths,
+            smt_table_paths: &smt_table_paths,
         })
         .expect("witness store")
         .store;
@@ -102,124 +62,12 @@ fn trace_builder_builds_valid_memory_traces() {
     let trace_map =
         tabula_witness::trace::build_all_traces(&chips, &consumers, store).expect("trace bundle");
 
-    // Verify the trace map was built successfully (chip-specific checks removed
-    // after InterTxOrder/StateColumn/ColumnMeta global chips were replaced by shard chips).
-    assert!(
-        !trace_map.chip_ids().is_empty(),
-        "trace map should contain at least one chip trace"
-    );
+    assert!(!trace_map.chip_ids().is_empty());
 }
 
 #[test]
 fn trace_builder_builds_and_validates_all_chip_bundle() {
-    let hasher = MockFieldHasher;
-    let table = TableId(1);
-    let col = ColId(0);
-
-    let old_entries = vec![(RowKey(10), encode_u64(50))];
-    let (old_state, _runtime_com_old) =
-        ColumnState::commit(&hasher, table, col, old_entries, scheme_tags::SSMC).unwrap();
-
-    let writes = vec![(RowKey(10), Some(encode_u64(50)))];
-    let (new_state, _runtime_com_new, merge_trace) =
-        old_state.apply_writes(&hasher, table, col, &writes);
-    let com_old = chain_commit_single(1, 0, 10, &encode_u64(50));
-    let com_new = chain_commit_single(1, 0, 10, &encode_u64(50));
-
-    let meta = ColumnMeta {
-        table,
-        col,
-        tag: scheme_tags::SSMC,
-        com_old,
-        com_new,
-        is_empty_old: false,
-        is_empty_new: false,
-        is_touched: true,
-    };
-
-    let column_witness = ColumnWitness {
-        table,
-        col,
-        value_type: tabula_core::ValueType::U64,
-        init_rows: vec![InitRow {
-            key: CellKey {
-                table,
-                col,
-                row: RowKey(10),
-            },
-            value_fes: encode_u64(50),
-            val_is_null: false,
-        }],
-        access_rows: vec![
-            AccessRow {
-                key: CellKey {
-                    table,
-                    col,
-                    row: RowKey(10),
-                },
-                time: 0,
-                is_write: false,
-                value_fes: encode_u64(50),
-                val_is_null: false,
-                tx_index: 0,
-                effect_ordinal_in_tx: 0,
-            },
-            AccessRow {
-                key: CellKey {
-                    table,
-                    col,
-                    row: RowKey(10),
-                },
-                time: 1,
-                is_write: true,
-                value_fes: encode_u64(50),
-                val_is_null: false,
-                tx_index: 0,
-                effect_ordinal_in_tx: 1,
-            },
-        ],
-        old_state,
-        new_state,
-        merge_trace,
-        meta: meta.clone(),
-    };
-
-    let old_leaf = compute_leaf_digest(1, 0, 0, &com_old);
-    let new_leaf = compute_leaf_digest(1, 0, 0, &com_new);
-
-    fn chain_compress(leaf: &NativeDigest, depth: usize) -> NativeDigest {
-        let mut node = *leaf;
-        for _ in 0..depth {
-            node = poseidon_compress(&node, &NativeDigest::ZERO);
-        }
-        node
-    }
-
-    fn chain_compress_key1(leaf: &NativeDigest, depth: usize) -> NativeDigest {
-        let mut node = *leaf;
-        for level in 0..depth {
-            if level == 0 {
-                node = poseidon_compress(&NativeDigest::ZERO, &node);
-            } else {
-                node = poseidon_compress(&node, &NativeDigest::ZERO);
-            }
-        }
-        node
-    }
-
-    let old_table_root = chain_compress(&old_leaf, 3);
-    let new_table_root = chain_compress(&new_leaf, 3);
-    let old_state_root = chain_compress_key1(&old_table_root, 3);
-    let new_state_root = chain_compress_key1(&new_table_root, 3);
-
-    let witness = BatchWitness {
-        columns: vec![column_witness],
-        column_metas: vec![meta],
-        old_state_root,
-        new_state_root,
-        tx_results: vec![TxResult::success(vec![], vec![])],
-        key_routes: BTreeMap::<CellKey, KeyRoute>::new(),
-    };
+    let context = single_column_context();
 
     let execution_records = vec![
         InstructionRecord {
@@ -280,29 +128,17 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
         },
     ];
 
-    let smt_col_paths = vec![SmtPathWitness {
-        table_id: 1,
-        key: 0,
-        old_leaf,
-        new_leaf,
-        old_siblings: zero_siblings(3),
-        new_siblings: zero_siblings(3),
-        path_bits: vec![false, false, false],
-    }];
-    let smt_table_paths = vec![SmtTablePathWitness {
-        path: SmtPathWitness {
-            table_id: 1,
-            key: 1,
-            old_leaf: old_table_root,
-            new_leaf: new_table_root,
-            old_siblings: zero_siblings(3),
-            new_siblings: zero_siblings(3),
-            path_bits: vec![true, false, false],
-        },
-        root_mult: 1,
-    }];
+    let (smt_col_paths, smt_table_paths) = build_smt_paths_from_metas(
+        &context.column_metas,
+        &context.old_state_root,
+        &context.new_state_root,
+    );
 
-    let builder = BuiltinTraceBuilder::<MockFieldHasher, 3>::new(&witness);
+    let builder = BuiltinTraceBuilder::<MockFieldHasher, 3>::new(BuiltinTraceContext {
+        column_metas: &context.column_metas,
+        old_state_root: &context.old_state_root,
+        new_state_root: &context.new_state_root,
+    });
     let store = builder
         .populate_store(AllTraceInputs {
             execution_records: &execution_records,
@@ -316,19 +152,12 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
     let consumers = tabula_chips::core_bus_consumers();
     let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)
         .expect("all-chip trace map");
-    // Only validate intra-tier buses. Cross-tier buses balance across
-    // execution+column+root tiers in the sharded architecture.
-    let intra_tier_buses = vec![
-        tabula_stark::air::interaction::core_buses::POSEIDON_PERM,
-        tabula_stark::air::interaction::core_buses::RANGE_CHECK,
-        tabula_stark::air::interaction::core_buses::STATIC_TABLE_LOOKUP,
-    ];
-    tabula_witness::trace::debug_validate_trace_map(&chips, &intra_tier_buses, &trace_map)
-        .expect("all-chip trace map must satisfy constraints and bus balances");
+
+    validate_intra_tier(&trace_map);
 }
 
 #[test]
-fn trace_builder_dsl_execute_witness_all_chip_e2e() {
+fn trace_builder_dsl_execute_all_chip_e2e() {
     let source = "\
 table accounts { balance: u64 }
 tx touch(id: u64) {
@@ -347,24 +176,25 @@ tx touch(id: u64) {
             .expect("compiled tx must register");
     }
 
-    let sender = [7u8; 32];
     let batch = Batch {
         transactions: vec![Transaction {
             tx_type: TxTypeId(0),
             params: vec![Value::U64(10)],
-            sender,
+            sender: [7u8; 32],
             nonce: 0,
             signature: vec![],
         }],
     };
 
     let mut snapshot = InMemoryState::new();
-    let key = CellKey {
-        table: TableId(0),
-        col: ColId(0),
-        row: RowKey(10),
-    };
-    snapshot.set(key, Value::U64(50));
+    snapshot.set(
+        CellKey {
+            table: TableId(0),
+            col: ColId(0),
+            row: RowKey(10),
+        },
+        Value::U64(50),
+    );
 
     let hasher = PoseidonHasher::new();
     let static_tables = InMemoryStaticTables::new();
@@ -380,35 +210,6 @@ tx touch(id: u64) {
     };
     let execution_result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
         .expect("batch execution should succeed");
-    assert_eq!(execution_result.successful_events().count(), 2);
-
-    let commit_hasher = PoseidonHasher::new();
-    let codec = KoalaBearCodec;
-
-    let mut entries_by_col: EncodedColumnEntries = BTreeMap::new();
-    entries_by_col
-        .entry((TableId(0), ColId(0)))
-        .or_default()
-        .push((RowKey(10), codec.encode(&Value::U64(50)).expect("encode")));
-
-    let mut old_column_states = BTreeMap::new();
-    for schema in &compiled.schemas {
-        for col in &schema.columns {
-            let mut entries = entries_by_col
-                .remove(&(schema.id, col.id))
-                .unwrap_or_default();
-            entries.sort_by_key(|(row, _)| *row);
-            let (state, _com) = ColumnState::commit(
-                &commit_hasher,
-                schema.id,
-                col.id,
-                entries,
-                scheme_tags::SSMC,
-            )
-            .unwrap();
-            old_column_states.insert((schema.id, col.id), state);
-        }
-    }
 
     let schemas_by_id: BTreeMap<TableId, tabula_core::TableSchema> = compiled
         .schemas
@@ -416,27 +217,59 @@ tx touch(id: u64) {
         .cloned()
         .map(|s| (s.id, s))
         .collect();
-    let wg = WitnessGenerator::new(PoseidonHasher::new());
-    let witness = wg
-        .generate(&execution_result, &schemas_by_id, &old_column_states)
-        .expect("witness generation should succeed");
-    assert_eq!(witness.columns.len(), 1);
-    assert_eq!(witness.columns[0].access_rows.len(), 2);
-    assert_eq!(witness.columns[0].access_rows[0].tx_index, 0);
-    assert_eq!(witness.columns[0].access_rows[0].effect_ordinal_in_tx, 0);
-    assert_eq!(witness.columns[0].access_rows[1].tx_index, 0);
-    assert_eq!(witness.columns[0].access_rows[1].effect_ordinal_in_tx, 1);
+    let prepared = ExecutionInputPreparer::new(PoseidonHasher::new())
+        .prepare_execution_inputs(
+            &execution_result,
+            &schemas_by_id,
+            [(TableId(0), ColId(0))].iter(),
+        )
+        .expect("prepared inputs");
+    assert_eq!(
+        prepared.access_rows_by_col[&(TableId(0), ColId(0))].len(),
+        2
+    );
+    assert_eq!(
+        prepared.access_rows_by_col[&(TableId(0), ColId(0))][0].effect_ordinal_in_tx,
+        0
+    );
+    assert_eq!(
+        prepared.access_rows_by_col[&(TableId(0), ColId(0))][1].effect_ordinal_in_tx,
+        1
+    );
 
+    let old_entries = vec![(RowKey(10), encode_u64(50))];
+    let (old_state, _) = ColumnState::commit(
+        &PoseidonHasher::new(),
+        TableId(0),
+        ColId(0),
+        old_entries,
+        scheme_tags::SSMC,
+    )
+    .unwrap();
+    let writes = prepared.writes_by_col[&(TableId(0), ColId(0))].clone();
+    let meta = build_ssmc_meta(
+        &PoseidonHasher::new(),
+        TableId(0),
+        ColId(0),
+        &old_state,
+        &writes,
+        true,
+    );
+    let (old_state_root, new_state_root) = roots_from_metas(std::slice::from_ref(&meta));
     let (smt_col_paths, smt_table_paths) = build_smt_paths_from_metas(
-        &witness.column_metas,
-        &witness.old_state_root,
-        &witness.new_state_root,
+        std::slice::from_ref(&meta),
+        &old_state_root,
+        &new_state_root,
     );
 
     let execution_records = lower_execution_records::<3>(&execution_result, &schemas_by_id)
         .expect("execution record lowering");
 
-    let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(&witness);
+    let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(BuiltinTraceContext {
+        column_metas: std::slice::from_ref(&meta),
+        old_state_root: &old_state_root,
+        new_state_root: &new_state_root,
+    });
     let store = builder
         .populate_store(AllTraceInputs {
             execution_records: &execution_records,
@@ -450,13 +283,6 @@ tx touch(id: u64) {
     let consumers = tabula_chips::core_bus_consumers();
     let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)
         .expect("all-chip trace assembly from execution result should succeed");
-    // Only validate intra-tier buses. Cross-tier buses balance across
-    // execution+column+root tiers in the sharded architecture.
-    let intra_tier_buses = vec![
-        tabula_stark::air::interaction::core_buses::POSEIDON_PERM,
-        tabula_stark::air::interaction::core_buses::RANGE_CHECK,
-        tabula_stark::air::interaction::core_buses::STATIC_TABLE_LOOKUP,
-    ];
-    tabula_witness::trace::debug_validate_trace_map(&chips, &intra_tier_buses, &trace_map)
-        .expect("DSL->execute->witness->trace map must satisfy all chip checks");
+
+    validate_intra_tier(&trace_map);
 }

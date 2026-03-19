@@ -1,284 +1,162 @@
 use std::collections::BTreeMap;
 
-use tabula_core::{BatchResult, TxResult, Value};
-use tabula_witness::witness::route::KeyRoute;
+use tabula_commitment::{ColumnMeta, ColumnState, MockFieldHasher};
+use tabula_core::traits::ValueCodec;
+use tabula_core::{BatchResult, ColId, RowKey, TableId, TxResult, Value};
+use tabula_witness::proof_column_commitment;
 
 use super::*;
 
-// -- State root tests --
-
-#[test]
-fn state_root_deterministic() {
-    let wg = make_wg();
-
-    let result = BatchResult {
-        read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        write_set_final: vec![],
-        txs: vec![TxResult::success(
-            vec![read_event(1, 0, 1, 10, 1, 0)],
-            vec![],
-        )],
+fn build_meta(
+    table: TableId,
+    col: ColId,
+    old_state: &ColumnState<MockFieldHasher>,
+    writes: &[(RowKey, Option<Vec<p3_koala_bear::KoalaBear>>)],
+    is_touched: bool,
+) -> ColumnMeta {
+    let com_old = proof_column_commitment(table, col, old_state).expect("old commitment");
+    let tag = old_state.scheme_tag();
+    let is_empty_old = old_state.is_empty();
+    let (new_state, _, _) = if is_touched {
+        old_state.apply_writes(&MockFieldHasher, table, col, writes)
+    } else {
+        (old_state.clone(), com_old, None)
     };
-    let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
-    let w1 = wg.generate(&result, &schema, &states).unwrap();
-    let w2 = wg.generate(&result, &schema, &states).unwrap();
-    assert_eq!(w1.old_state_root, w2.old_state_root);
-    assert_eq!(w1.new_state_root, w2.new_state_root);
+    let com_new = proof_column_commitment(table, col, &new_state).expect("new commitment");
+
+    ColumnMeta {
+        table,
+        col,
+        tag,
+        com_old,
+        com_new,
+        is_empty_old,
+        is_empty_new: new_state.is_empty(),
+        is_touched,
+    }
 }
 
 #[test]
-fn state_root_changes_on_write() {
-    let wg = make_wg();
+fn state_root_deterministic_for_same_metadata() {
+    let preparer = make_preparer();
+    let meta = build_meta(
+        t(1),
+        c(0),
+        &column_state_with(1, 0, &[(1, 10)]).1,
+        &[],
+        false,
+    );
 
-    let result = BatchResult {
-        read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(20)))],
-        txs: vec![TxResult::success(
-            vec![
-                read_event(1, 0, 1, 10, 1, 0),
-                write_event(1, 0, 1, 20, 2, 0),
-            ],
-            vec![],
-        )],
-    };
-    let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
-    assert_ne!(witness.old_state_root, witness.new_state_root);
+    let roots_1 = preparer.compute_state_roots_from_metas(std::slice::from_ref(&meta));
+    let roots_2 = preparer.compute_state_roots_from_metas(std::slice::from_ref(&meta));
+
+    assert_eq!(roots_1, roots_2);
 }
 
 #[test]
-fn state_root_empty_state() {
-    let wg = make_wg();
-
-    let result = BatchResult {
-        read_set_old: vec![(ck(1, 0, 1), None)],
-        write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(1)))],
-        txs: vec![TxResult::success(
-            vec![
-                null_read_event(1, 0, 1, 1, 0),
-                write_event(1, 0, 1, 1, 2, 0),
-            ],
-            vec![],
-        )],
-    };
-    let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [empty_column_state(1, 0)].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
-    assert_ne!(witness.old_state_root, witness.new_state_root);
-}
-
-// -- End-to-end tests --
-
-#[test]
-fn e2e_full_flow_single_column() {
-    let wg = make_wg();
-
-    let result = BatchResult {
-        read_set_old: vec![
-            (ck(1, 0, 1), Some(Value::U64(10))),
-            (ck(1, 0, 2), Some(Value::U64(20))),
-        ],
-        write_set_final: vec![
-            (ck(1, 0, 1), Some(Value::U64(15))),
-            (ck(1, 0, 3), Some(Value::U64(30))),
-        ],
-        txs: vec![TxResult::success(
-            vec![
-                read_event(1, 0, 1, 10, 1, 0),
-                read_event(1, 0, 2, 20, 2, 0),
-                write_event(1, 0, 1, 15, 3, 0),
-                write_event(1, 0, 3, 30, 4, 0),
-            ],
-            vec![],
-        )],
-    };
-    let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10), (2, 20)])].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
-
-    assert_eq!(witness.columns.len(), 1);
-    let col_w = &witness.columns[0];
-    assert_eq!(col_w.init_rows.len(), 2);
-    assert_eq!(col_w.access_rows.len(), 4);
-    assert!(col_w.meta.is_touched);
-    assert!(col_w.merge_trace.is_some());
-    assert_eq!(witness.tx_results.len(), 1);
-}
-
-#[test]
-fn e2e_two_columns_multi_tx() {
-    let wg = make_wg();
-
-    let result = BatchResult {
-        read_set_old: vec![
-            (ck(1, 0, 1), Some(Value::U64(10))),
-            (ck(1, 1, 1), Some(Value::U64(100))),
-        ],
-        write_set_final: vec![
-            (ck(1, 0, 1), Some(Value::U64(15))),
-            (ck(1, 1, 1), Some(Value::U64(200))),
-        ],
-        txs: vec![
-            // tx 0: read+write col 0
-            TxResult::success(
-                vec![
-                    read_event(1, 0, 1, 10, 1, 0),
-                    write_event(1, 0, 1, 15, 2, 0),
-                ],
-                vec![],
+fn state_root_changes_when_column_commitment_changes() {
+    let preparer = make_preparer();
+    let old_state = column_state_with(1, 0, &[(1, 10)]).1;
+    let unchanged = build_meta(t(1), c(0), &old_state, &[], false);
+    let changed = build_meta(
+        t(1),
+        c(0),
+        &old_state,
+        &[(
+            r(1),
+            Some(
+                tabula_commitment::KoalaBearCodec
+                    .encode(&Value::U64(20))
+                    .unwrap(),
             ),
-            // tx 1: read+write col 1
-            TxResult::success(
-                vec![
-                    read_event(1, 1, 1, 100, 3, 1),
-                    write_event(1, 1, 1, 200, 4, 1),
-                ],
-                vec![],
+        )],
+        true,
+    );
+
+    let roots_old = preparer.compute_state_roots_from_metas(std::slice::from_ref(&unchanged));
+    let roots_new = preparer.compute_state_roots_from_metas(std::slice::from_ref(&changed));
+
+    assert_ne!(roots_old.1, roots_new.1);
+}
+
+#[test]
+fn state_root_handles_empty_to_non_empty_transition() {
+    let preparer = make_preparer();
+    let meta = build_meta(
+        t(1),
+        c(0),
+        &empty_column_state(1, 0).1,
+        &[(
+            r(1),
+            Some(
+                tabula_commitment::KoalaBearCodec
+                    .encode(&Value::U64(1))
+                    .unwrap(),
             ),
-        ],
-    };
-    let schema = schemas(vec![u64_schema(1, &[0, 1])]);
-    let states: BTreeMap<_, _> = [
-        column_state_with(1, 0, &[(1, 10)]),
-        column_state_with(1, 1, &[(1, 100)]),
-    ]
-    .into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
-
-    assert_eq!(witness.columns.len(), 2);
-    assert!(witness.columns.iter().all(|c| c.meta.is_touched));
-    assert_eq!(witness.tx_results.len(), 2);
-    assert_ne!(witness.old_state_root, witness.new_state_root);
-}
-
-#[test]
-fn missing_schema_returns_error() {
-    let wg = make_wg();
-
-    let result = BatchResult {
-        read_set_old: vec![],
-        write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        txs: vec![TxResult::success(
-            vec![write_event(1, 0, 1, 10, 1, 0)],
-            vec![],
         )],
-    };
-    let schema = schemas(vec![]); // no schemas!
-    let states: BTreeMap<_, _> = [empty_column_state(1, 0)].into();
-    assert!(wg.generate(&result, &schema, &states).is_err());
+        true,
+    );
+
+    let (old_root, new_root) = preparer.compute_state_roots_from_metas(std::slice::from_ref(&meta));
+
+    assert_ne!(old_root, new_root);
 }
 
 #[test]
-fn touched_column_missing_from_old_states_returns_error() {
-    let wg = make_wg();
-    let result = BatchResult {
-        read_set_old: vec![],
-        write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        txs: vec![TxResult::success(
-            vec![write_event(1, 0, 1, 10, 1, 0)],
-            vec![],
-        )],
-    };
-    let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = BTreeMap::new(); // no column states!
-    let err = wg.generate(&result, &schema, &states).unwrap_err();
-    assert!(err.to_string().contains("not in old_column_states"));
-}
-
-#[test]
-fn column_metas_populated_and_sorted() {
-    let wg = make_wg();
-
+fn prepared_inputs_and_roots_cover_multiple_columns() {
+    let preparer = make_preparer();
     let result = BatchResult {
         read_set_old: vec![
             (ck(1, 0, 1), Some(Value::U64(10))),
             (ck(1, 1, 1), Some(Value::U64(20))),
         ],
-        write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(15)))],
+        write_set_final: vec![
+            (ck(1, 0, 1), Some(Value::U64(15))),
+            (ck(1, 1, 2), Some(Value::U64(25))),
+        ],
         txs: vec![TxResult::success(
             vec![
                 read_event(1, 0, 1, 10, 1, 0),
                 read_event(1, 1, 1, 20, 2, 0),
                 write_event(1, 0, 1, 15, 3, 0),
+                write_event(1, 1, 2, 25, 4, 0),
             ],
             vec![],
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0, 1])]);
+    let prepared = preparer
+        .prepare_execution_inputs(&result, &schema, [(t(1), c(0)), (t(1), c(1))].iter())
+        .expect("prepared execution inputs");
+
+    assert_eq!(prepared.init_rows_by_col.len(), 2);
+    assert_eq!(prepared.access_rows_by_col.len(), 2);
+    assert_eq!(prepared.writes_by_col.len(), 2);
+
     let states: BTreeMap<_, _> = [
         column_state_with(1, 0, &[(1, 10)]),
         column_state_with(1, 1, &[(1, 20)]),
     ]
     .into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
+    let metas: Vec<_> = states
+        .into_iter()
+        .map(|((table, col), state)| {
+            let writes = prepared
+                .writes_by_col
+                .get(&(table, col))
+                .cloned()
+                .unwrap_or_default();
+            build_meta(
+                table,
+                col,
+                &state,
+                &writes,
+                prepared.touched.contains(&(table, col)),
+            )
+        })
+        .collect();
+    let (old_root, new_root) = preparer.compute_state_roots_from_metas(&metas);
 
-    // column_metas should have 2 entries, sorted by (table, col).
-    assert_eq!(witness.column_metas.len(), 2);
-    assert_eq!(witness.column_metas[0].table, t(1));
-    assert_eq!(witness.column_metas[0].col, c(0));
-    assert_eq!(witness.column_metas[1].table, t(1));
-    assert_eq!(witness.column_metas[1].col, c(1));
-    // col 0 was written to, col 1 was only read.
-    assert!(witness.column_metas[0].is_touched);
-    assert!(witness.column_metas[1].is_touched);
+    assert_ne!(old_root, new_root);
+    assert_eq!(metas.len(), 2);
 }
-
-#[test]
-fn tx_results_preserved() {
-    let wg = make_wg();
-
-    let result = BatchResult {
-        read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        write_set_final: vec![],
-        txs: vec![
-            TxResult::success(vec![read_event(1, 0, 1, 10, 1, 0)], vec![]),
-            TxResult::Failed {
-                reason: "overflow".into(),
-                partial_events: vec![],
-                failed_instruction: Some(3),
-            },
-        ],
-    };
-    let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
-    assert_eq!(witness.tx_results.len(), 2);
-    assert!(matches!(witness.tx_results[1], TxResult::Failed { .. }));
-}
-
-// -- Key routing integration --
-
-#[test]
-fn key_routes_populated() {
-    let wg = make_wg();
-
-    let k_read = ck(1, 0, 1);
-    let k_write = ck(1, 0, 2);
-    let result = BatchResult {
-        read_set_old: vec![
-            (k_read, Some(Value::U64(10))),
-            (k_write, Some(Value::U64(20))),
-        ],
-        write_set_final: vec![(k_write, Some(Value::U64(99)))],
-        txs: vec![TxResult::success(
-            vec![
-                read_event(1, 0, 1, 10, 1, 0),
-                read_event(1, 0, 2, 20, 2, 0),
-                write_event(1, 0, 2, 99, 3, 0),
-            ],
-            vec![],
-        )],
-    };
-    let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10), (2, 20)])].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
-
-    assert_eq!(witness.key_routes.len(), 2);
-    assert_eq!(witness.key_routes[&k_read], KeyRoute::ReadOnly);
-    assert_eq!(witness.key_routes[&k_write], KeyRoute::SortedMemory);
-}
-
-// SortedMem integration tests removed -- SortedMem chip eliminated in 5-chip architecture.
-// TODO(Phase 4): Add WitnessGenerator -> StateColumn integration tests.

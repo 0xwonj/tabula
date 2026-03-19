@@ -12,6 +12,7 @@ pub fn ms_touched(com_old: NativeDigest, com_new: NativeDigest) -> MetaShardRow 
         is_empty_old: false,
         is_empty_new: false,
         is_touched: true,
+        has_commitment_proof: true,
         empty_read_count: 0,
     }
 }
@@ -24,6 +25,7 @@ pub fn ms_untouched(com: NativeDigest) -> MetaShardRow {
         is_empty_old: false,
         is_empty_new: false,
         is_touched: false,
+        has_commitment_proof: true,
         empty_read_count: 0,
     }
 }
@@ -36,6 +38,7 @@ pub fn ms_empty_to_nonempty(com_empty: NativeDigest, com_new: NativeDigest) -> M
         is_empty_old: true,
         is_empty_new: false,
         is_touched: true,
+        has_commitment_proof: true,
         empty_read_count: 0,
     }
 }
@@ -48,6 +51,7 @@ pub fn ms_both_empty(com_empty: NativeDigest) -> MetaShardRow {
         is_empty_old: true,
         is_empty_new: true,
         is_touched: false,
+        has_commitment_proof: true,
         empty_read_count: 0,
     }
 }

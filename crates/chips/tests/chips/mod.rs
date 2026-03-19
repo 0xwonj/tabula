@@ -5,6 +5,7 @@ mod poseidon;
 mod range_check;
 mod smt_commitment;
 mod smt_path;
+mod smt_state_shard;
 mod ssmc_commitment;
 mod ssmc_property;
 mod state_shard;

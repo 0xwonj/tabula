@@ -95,6 +95,7 @@ impl RuntimeBuilder {
         let resolved_columns = resolve_column_views_with_factories(
             &self.compiled_program,
             self.base.scheme_factories(),
+            self.base.root_profile_id(),
         )?;
         let proof_columns = resolved_columns.proof_columns.clone();
         let runtime_program =
@@ -187,9 +188,12 @@ impl RuntimeBuilder {
 mod tests {
     use std::sync::Arc;
 
+    use tabula_artifact::SchemeDescriptor;
     use tabula_compiler::register_program;
     use tabula_core::error::TabulaError;
-    use tabula_core::{ColId, SchemeId, TableId, TableSchema, TxTypeId, ValueType};
+    use tabula_core::{
+        ColId, ColumnLayoutKind, RootProfileId, SchemeId, TableId, TableSchema, TxTypeId, ValueType,
+    };
     use tabula_executor::precompile::PrecompileHandler;
     use tabula_ir::{AggregateKind, Instruction, PrecompileId, PropertyQuery, TxTypeDef};
     use tabula_machine::prelude::{ChipIdAllocator, DynChip};
@@ -197,7 +201,32 @@ mod tests {
 
     use super::RuntimeBuilder;
     use crate::error::RuntimeError;
-    use crate::{ColumnPlan, ColumnSchemeFactory, ColumnViews, ProofInputBuilder, RuntimeColumn};
+    use crate::{
+        ColumnPlan, ColumnProofInput, ColumnSchemeFactory, ColumnTransitionBackend,
+        ColumnTransitionInput, ColumnViews, RuntimeColumn,
+    };
+
+    fn custom_descriptor(scheme_id: SchemeId) -> SchemeDescriptor {
+        SchemeDescriptor {
+            scheme_id,
+            scheme_version: 1,
+            layout_kind: ColumnLayoutKind::SSMC_V1,
+            params_hash: [scheme_id.raw() as u8; 32],
+            root_profile_id: RootProfileId::SMT_V1,
+            supported_property_query_kinds: vec![],
+        }
+    }
+
+    fn unsupported_layout_descriptor(scheme_id: SchemeId) -> SchemeDescriptor {
+        SchemeDescriptor {
+            scheme_id,
+            scheme_version: 1,
+            layout_kind: ColumnLayoutKind(0x9000),
+            params_hash: [scheme_id.raw() as u8; 32],
+            root_profile_id: RootProfileId::SMT_V1,
+            supported_property_query_kinds: vec![],
+        }
+    }
 
     fn compiled_program_with_property_query() -> tabula_compiler::CompiledProgram {
         let schema = TableSchema {
@@ -290,15 +319,28 @@ mod tests {
             Ok(ColumnChipSet {
                 airs: vec![],
                 dyn_chips: vec![],
+                bus_consumers: vec![],
             })
         }
     }
 
-    struct EmptyProofInputBuilder {
+    struct EmptyTransitionBackend {
         plan: ColumnPlan,
     }
 
-    impl ProofInputBuilder for EmptyProofInputBuilder {
+    impl EmptyTransitionBackend {
+        fn new(plan: ColumnPlan) -> Result<Self, SetupError> {
+            if plan.scheme_descriptor.layout_kind != ColumnLayoutKind::SSMC_V1 {
+                return Err(SetupError::SetupFailed(format!(
+                    "unsupported transition layout {}",
+                    plan.scheme_descriptor.layout_kind.0,
+                )));
+            }
+            Ok(Self { plan })
+        }
+    }
+
+    impl ColumnTransitionBackend for EmptyTransitionBackend {
         fn name(&self) -> &str {
             "empty"
         }
@@ -314,13 +356,24 @@ mod tests {
         fn scheme_id(&self) -> SchemeId {
             self.plan.scheme_id
         }
+
+        fn build_proof_input(
+            &self,
+            _input: ColumnTransitionInput,
+            _property_reads: &[tabula_witness::trace::builtin::PropertyReadRecord],
+        ) -> Result<ColumnProofInput, TabulaError> {
+            Err(TabulaError::ProofError {
+                phase: "runtime_builder_test",
+                detail: "empty transition backend should not be used in prove flow".to_string(),
+            })
+        }
     }
 
     struct EmptySchemeFactory;
 
     impl ColumnSchemeFactory for EmptySchemeFactory {
-        fn scheme_id(&self) -> SchemeId {
-            SchemeId(0x1000)
+        fn descriptor(&self) -> SchemeDescriptor {
+            custom_descriptor(SchemeId(0x1000))
         }
 
         fn name(&self) -> &str {
@@ -331,7 +384,28 @@ mod tests {
             Ok(ColumnViews::new(
                 Arc::new(EmptyRuntimeColumn),
                 Arc::new(EmptyProofColumn { plan: plan.clone() }),
-                Arc::new(EmptyProofInputBuilder { plan }),
+                Arc::new(EmptyTransitionBackend::new(plan)?),
+            ))
+        }
+    }
+
+    struct UnsupportedLayoutSchemeFactory;
+
+    impl ColumnSchemeFactory for UnsupportedLayoutSchemeFactory {
+        fn descriptor(&self) -> SchemeDescriptor {
+            unsupported_layout_descriptor(SchemeId(0x1000))
+        }
+
+        fn name(&self) -> &str {
+            "unsupported_layout"
+        }
+
+        fn build_column(&self, plan: ColumnPlan) -> Result<ColumnViews, SetupError> {
+            let transition = Arc::new(EmptyTransitionBackend::new(plan.clone())?);
+            Ok(ColumnViews::new(
+                Arc::new(EmptyRuntimeColumn),
+                Arc::new(EmptyProofColumn { plan: plan.clone() }),
+                transition,
             ))
         }
     }
@@ -370,15 +444,16 @@ mod tests {
             Ok(ColumnChipSet {
                 airs: vec![],
                 dyn_chips: vec![],
+                bus_consumers: vec![],
             })
         }
     }
 
-    struct UnsupportedPropertyProofInputBuilder {
+    struct UnsupportedPropertyTransitionBackend {
         plan: ColumnPlan,
     }
 
-    impl ProofInputBuilder for UnsupportedPropertyProofInputBuilder {
+    impl ColumnTransitionBackend for UnsupportedPropertyTransitionBackend {
         fn name(&self) -> &str {
             "unsupported"
         }
@@ -394,13 +469,25 @@ mod tests {
         fn scheme_id(&self) -> SchemeId {
             self.plan.scheme_id
         }
+
+        fn build_proof_input(
+            &self,
+            _input: ColumnTransitionInput,
+            _property_reads: &[tabula_witness::trace::builtin::PropertyReadRecord],
+        ) -> Result<ColumnProofInput, TabulaError> {
+            Err(TabulaError::ProofError {
+                phase: "runtime_builder_test",
+                detail: "unsupported transition backend should not be used in prove flow"
+                    .to_string(),
+            })
+        }
     }
 
     struct UnsupportedPropertySchemeFactory;
 
     impl ColumnSchemeFactory for UnsupportedPropertySchemeFactory {
-        fn scheme_id(&self) -> SchemeId {
-            SchemeId(0x1001)
+        fn descriptor(&self) -> SchemeDescriptor {
+            custom_descriptor(SchemeId(0x1001))
         }
 
         fn name(&self) -> &str {
@@ -416,7 +503,7 @@ mod tests {
             Ok(ColumnViews::new(
                 Arc::new(UnsupportedPropertyRuntimeColumn),
                 Arc::new(UnsupportedPropertyProofColumn { plan: plan.clone() }),
-                Arc::new(UnsupportedPropertyProofInputBuilder { plan }),
+                Arc::new(UnsupportedPropertyTransitionBackend { plan }),
             ))
         }
     }
@@ -438,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_scheme_factory_can_prepare_runtime() {
+    fn custom_scheme_factory_resolves_transition_backend() {
         let schema = TableSchema {
             id: TableId(1),
             name: "accounts".to_string(),
@@ -456,9 +543,10 @@ mod tests {
         };
         let compiled = register_program(&[schema], &[tx]).expect("register program");
         compiled.as_program_artifact();
-        let plan = compiled.column_proof_plan()[0];
+        let plan = compiled.column_proof_plan()[0].clone();
         let mut artifact = compiled.into_program_artifact();
         artifact.column_proof_plan[0].scheme_id = SchemeId(0x1000);
+        artifact.column_proof_plan[0].scheme_descriptor = custom_descriptor(SchemeId(0x1000));
         let compiled = tabula_compiler::register_program_artifact(&artifact).expect("compiled");
 
         let runtime = RuntimeBuilder::new(compiled)
@@ -468,12 +556,76 @@ mod tests {
             .expect("runtime");
 
         assert_eq!(runtime.runtime_program().runtime_columns().len(), 1);
+        assert_eq!(runtime.runtime_program().transition_backends().len(), 1);
         let plan = runtime
             .runtime_program()
             .column_plans()
             .get(&(plan.table_id, plan.col_id))
             .expect("column plan");
         assert_eq!(plan.scheme_id, SchemeId(0x1000));
+    }
+
+    #[test]
+    fn runtime_rejects_explicit_state_backend_for_unsupported_layout() {
+        let schema = TableSchema {
+            id: TableId(1),
+            name: "accounts".to_string(),
+            columns: vec![tabula_core::ColumnDef {
+                id: ColId(0),
+                name: "balance".to_string(),
+                value_type: ValueType::U64,
+            }],
+        };
+        let tx = TxTypeDef {
+            id: TxTypeId(1),
+            name: "noop".to_string(),
+            param_schema: vec![],
+            body: vec![],
+        };
+        let compiled = register_program(&[schema], &[tx]).expect("register program");
+        let mut artifact = compiled.into_program_artifact();
+        artifact.column_proof_plan[0].scheme_id = SchemeId(0x1000);
+        artifact.column_proof_plan[0].scheme_descriptor =
+            unsupported_layout_descriptor(SchemeId(0x1000));
+        let compiled = tabula_compiler::register_program_artifact(&artifact).expect("compiled");
+
+        let err = RuntimeBuilder::new(compiled)
+            .with_scheme(UnsupportedLayoutSchemeFactory)
+            .expect("register custom scheme")
+            .build()
+            .expect_err("unsupported layout should fail");
+
+        match err {
+            RuntimeError::MachineSetup(SetupError::SetupFailed(detail)) => {
+                assert!(detail.contains("unsupported transition layout"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn built_in_runtime_registers_transition_backends() {
+        let schema = TableSchema {
+            id: TableId(1),
+            name: "accounts".to_string(),
+            columns: vec![tabula_core::ColumnDef {
+                id: ColId(0),
+                name: "balance".to_string(),
+                value_type: ValueType::U64,
+            }],
+        };
+        let tx = TxTypeDef {
+            id: TxTypeId(1),
+            name: "noop".to_string(),
+            param_schema: vec![],
+            body: vec![],
+        };
+        let compiled = register_program(&[schema], &[tx]).expect("register program");
+
+        let runtime = RuntimeBuilder::new(compiled).build().expect("runtime");
+
+        assert_eq!(runtime.runtime_program().runtime_columns().len(), 1);
+        assert_eq!(runtime.runtime_program().transition_backends().len(), 1);
     }
 
     #[test]
@@ -496,6 +648,7 @@ mod tests {
         let compiled = register_program(&[schema], &[tx]).expect("register program");
         let mut artifact = compiled.into_program_artifact();
         artifact.column_proof_plan[0].scheme_id = SchemeId(0x1000);
+        artifact.column_proof_plan[0].scheme_descriptor = custom_descriptor(SchemeId(0x1000));
         let compiled = tabula_compiler::register_program_artifact(&artifact).expect("compiled");
 
         let err = RuntimeBuilder::new(compiled)
@@ -514,6 +667,7 @@ mod tests {
         let compiled = compiled_program_with_unsupported_property_query();
         let mut artifact = compiled.into_program_artifact();
         artifact.column_proof_plan[0].scheme_id = SchemeId(0x1001);
+        artifact.column_proof_plan[0].scheme_descriptor = custom_descriptor(SchemeId(0x1001));
         let compiled = tabula_compiler::register_program_artifact(&artifact).expect("compiled");
 
         let err = RuntimeBuilder::new(compiled)
@@ -550,18 +704,22 @@ mod tests {
     }
 
     #[test]
-    fn runtime_materializes_matching_proof_input_builders() {
+    fn runtime_materializes_matching_transition_backends() {
         let compiled = compiled_program_with_property_query();
         let runtime = RuntimeBuilder::new(compiled).build().expect("runtime");
 
         assert_eq!(
             runtime.runtime_program().runtime_columns().len(),
-            runtime.runtime_program().proof_input_builders().len()
+            runtime.runtime_program().transition_backends().len()
+        );
+        assert_eq!(
+            runtime.runtime_program().runtime_columns().len(),
+            runtime.runtime_program().transition_backends().len()
         );
 
-        for (&(table_id, col_id), builder) in runtime.runtime_program().proof_input_builders() {
-            assert_eq!(builder.table_id(), table_id);
-            assert_eq!(builder.col_id(), col_id);
+        for (&(table_id, col_id), backend) in runtime.runtime_program().transition_backends() {
+            assert_eq!(backend.table_id(), table_id);
+            assert_eq!(backend.col_id(), col_id);
         }
     }
 

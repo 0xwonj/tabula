@@ -37,20 +37,23 @@ pub(crate) fn execution_tier_setup() -> Result<TierSetup, SetupError> {
 
 pub(crate) fn column_tier_setup(column: &dyn ProofColumn) -> Result<TierSetup, SetupError> {
     let mut alloc = ChipIdAllocator::for_shards();
-    let chip_set = column.create_chips(&mut alloc)?;
+    let crate::columns::ColumnChipSet {
+        airs,
+        mut dyn_chips,
+        mut bus_consumers,
+    } = column.create_chips(&mut alloc)?;
 
     let mut registry = ChipRegistry::new();
-    registry.register_boxed(chip_set.airs);
+    registry.register_boxed(airs);
     registry.register(PoseidonChip);
     registry.register(RangeCheckChip);
     registry.validate()?;
 
-    let mut dyn_chips = chip_set.dyn_chips;
     dyn_chips.push(Box::new(PoseidonChip));
     dyn_chips.push(Box::new(RangeCheckChip));
 
-    let bus_consumers: Vec<Box<dyn BusConsumer>> =
-        vec![Box::new(PoseidonChip), Box::new(RangeCheckChip)];
+    bus_consumers.push(Box::new(PoseidonChip));
+    bus_consumers.push(Box::new(RangeCheckChip));
 
     let proving_key = TabulaProvingKey::from_registry(&registry);
     let verifying_key = TabulaVerifyingKey::from_proving_key(&proving_key);
@@ -91,13 +94,64 @@ pub(crate) fn root_tier_setup(root_proof: &dyn RootProof) -> Result<TierSetup, S
 
 #[cfg(test)]
 mod tests {
+    use p3_koala_bear::KoalaBear;
+    use tabula_core::error::TabulaError;
     use tabula_core::{ColId, TableId};
-    use tabula_stark::chips::core_chips;
+    use tabula_stark::air::interaction::BusId;
+    use tabula_stark::chips::{ChipIdAllocator, core_chips};
+    use tabula_stark::debug::RecordedInteraction;
+    use tabula_stark::trace::column_commitment::BusConsumer;
+    use tabula_stark::trace::contributor::WitnessStore;
 
     use crate::setup::root::SmtRootProof;
     use crate::testing::TestSsmcProofColumn;
+    use crate::{AnyRap, ColumnChipSet, ProofColumn, SetupError};
 
     use super::{TierSetup, column_tier_setup, execution_tier_setup, root_tier_setup};
+
+    struct DummyConsumer;
+
+    impl BusConsumer for DummyConsumer {
+        fn consumed_buses(&self) -> Vec<BusId> {
+            vec![]
+        }
+
+        fn collect(
+            &self,
+            _interactions: &[RecordedInteraction<KoalaBear>],
+            _store: &mut WitnessStore,
+        ) -> Result<(), TabulaError> {
+            Ok(())
+        }
+    }
+
+    struct TestConsumerProofColumn;
+
+    impl ProofColumn for TestConsumerProofColumn {
+        fn name(&self) -> &str {
+            "test-consumer"
+        }
+
+        fn table_id(&self) -> TableId {
+            TableId(1)
+        }
+
+        fn col_id(&self) -> ColId {
+            ColId(9)
+        }
+
+        fn scheme_id(&self) -> tabula_core::SchemeId {
+            tabula_core::SchemeId::SSMC
+        }
+
+        fn create_chips(&self, _alloc: &mut ChipIdAllocator) -> Result<ColumnChipSet, SetupError> {
+            Ok(ColumnChipSet {
+                airs: Vec::<Box<dyn AnyRap>>::new(),
+                dyn_chips: vec![],
+                bus_consumers: vec![Box::new(DummyConsumer)],
+            })
+        }
+    }
 
     #[test]
     fn execution_tier_has_correct_chips() {
@@ -130,6 +184,13 @@ mod tests {
 
         assert_eq!(setup.dyn_chips.len(), 5);
         assert_eq!(setup.bus_consumers.len(), 2);
+    }
+
+    #[test]
+    fn column_tier_accepts_scheme_owned_bus_consumers() {
+        let setup = column_tier_setup(&TestConsumerProofColumn).unwrap();
+        assert_eq!(setup.bus_consumers.len(), 3);
+        assert_eq!(setup.dyn_chips.len(), 2);
     }
 
     #[test]

@@ -31,6 +31,10 @@ pub mod scheme_tags {
 // ── ColumnState ──────────────────────────────────────────────────────────────
 
 /// Per-column state holding the underlying data structure.
+///
+/// Architecture note: this enum is still closed over built-in layouts. A
+/// fully open scheme platform will need a registry-backed replacement shared
+/// by commitment materialization, witness generation, and root binding.
 #[derive(Clone, Debug)]
 pub enum ColumnState<H: FieldHasher> {
     /// SSMC-backed column (small).

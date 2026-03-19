@@ -1,140 +1,102 @@
-//! Memory-layer chip input preparation from [`BatchWitness`].
+//! Memory-layer chip input preparation from explicit per-column parts.
 //!
-//! Provides built-in SSMC shard witness preparation helpers.
-//! Produces per-column data for MemoryShard + StateShard + MetaShard chips.
+//! Provides built-in shard witness helpers that operate on runtime-owned
+//! execution rows and scheme-owned state transition artifacts.
 
 use std::collections::BTreeMap;
 
 use p3_koala_bear::KoalaBear;
 
-use tabula_commitment::{FieldHasher, NativeDigest};
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId};
-
-use crate::witness::{BatchWitness, ColumnWitness};
 
 pub(crate) mod chain;
 pub(crate) mod inter_tx;
 pub(crate) mod state;
 
 use chain::populate_state_chain_accumulators;
-use inter_tx::build_inter_tx_rows;
-use state::{build_state_rows, sort_state_rows};
-
-fn build_empty_read_mults<H>(witness: &BatchWitness<H>) -> BTreeMap<(TableId, ColId), u32>
-where
-    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
-{
-    let mut mults = BTreeMap::new();
-    for column in &witness.columns {
-        if !column.meta.is_empty_old {
-            continue;
-        }
-        let cnt = column
-            .access_rows
-            .iter()
-            .filter(|r| !r.is_write && r.val_is_null)
-            .count() as u32;
-        if cnt > 0 {
-            mults.insert((column.table, column.col), cnt);
-        }
-    }
-    mults
-}
+use inter_tx::build_inter_tx_rows_for_parts;
+use state::{build_state_rows_for_parts, sort_state_rows};
 
 // ── Shard witness preparation ──────────────────────────────────────────────
 
 use tabula_chips::shards::memory::trace::MemoryShardRow;
 use tabula_chips::shards::meta::trace::MetaShardRow;
-use tabula_chips::shards::ssmc::{SsmcColumnWitness, SsmcWitness};
+use tabula_chips::shards::ssmc::SsmcColumnWitness;
 use tabula_chips::shards::state::trace::StateShardRow;
 
-fn empty_read_count_for_column<H>(column: &ColumnWitness<H>) -> u32
-where
-    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
-{
-    if !column.meta.is_empty_old {
-        return 0;
-    }
-
-    column
-        .access_rows
-        .iter()
-        .filter(|r| !r.is_write && r.val_is_null)
-        .count() as u32
+/// Prepare the shared MemoryShard rows for one committed column from explicit parts.
+pub fn prepare_memory_shard_rows_from_parts<const W: usize>(
+    table: TableId,
+    col: ColId,
+    init_rows: &[crate::witness::InitRow],
+    access_rows: &[crate::witness::AccessRow],
+) -> Result<Vec<MemoryShardRow>, TabulaError> {
+    Ok(
+        build_inter_tx_rows_for_parts::<W>(table, col, init_rows, access_rows)?
+            .into_iter()
+            .map(MemoryShardRow::from)
+            .collect(),
+    )
 }
 
-/// Prepare SSMC shard witness rows for one touched column.
-pub fn prepare_ssmc_column_witness<H, const W: usize>(
-    column: &ColumnWitness<H>,
-) -> Result<SsmcColumnWitness, TabulaError>
-where
-    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
-{
-    let empty_count = empty_read_count_for_column(column);
+/// Build one MetaShard witness row from explicit column metadata and access rows.
+pub fn prepare_meta_shard_row_from_parts(
+    meta: &tabula_commitment::ColumnMeta,
+    access_rows: &[crate::witness::AccessRow],
+    has_commitment_proof: bool,
+) -> MetaShardRow {
+    let empty_read_count = if meta.is_empty_old {
+        access_rows
+            .iter()
+            .filter(|r| !r.is_write && r.val_is_null)
+            .count() as u32
+    } else {
+        0
+    };
 
-    // Build InterTxOrder rows, then convert to MemoryShardRows.
-    let itx_rows = build_inter_tx_rows::<H, W>(column)?;
-    let memory_rows: Vec<MemoryShardRow> = itx_rows.into_iter().map(MemoryShardRow::from).collect();
+    MetaShardRow {
+        com_old: meta.com_old,
+        com_new: meta.com_new,
+        is_empty_old: meta.is_empty_old,
+        is_empty_new: meta.is_empty_new,
+        is_touched: meta.is_touched,
+        has_commitment_proof,
+        empty_read_count,
+    }
+}
 
-    // Build StateColumn rows, sort, populate hash chain accumulators,
-    // then convert to StateShardRows.
-    let mut sc_rows = build_state_rows::<H, W>(column)?;
+/// Prepare SSMC shard witness rows from explicit column parts.
+pub fn prepare_ssmc_column_witness_from_parts<const W: usize>(
+    column: (TableId, ColId),
+    init_rows: &[crate::witness::InitRow],
+    access_rows: &[crate::witness::AccessRow],
+    old_entries: &BTreeMap<tabula_core::RowKey, Vec<KoalaBear>>,
+    new_entries: &BTreeMap<tabula_core::RowKey, Vec<KoalaBear>>,
+    meta: &tabula_commitment::ColumnMeta,
+    has_commitment_proof: bool,
+) -> Result<SsmcColumnWitness, TabulaError> {
+    let (table, col) = column;
+    let memory_rows =
+        prepare_memory_shard_rows_from_parts::<W>(table, col, init_rows, access_rows)?;
+
+    let mut sc_rows = build_state_rows_for_parts::<W>(
+        table,
+        col,
+        access_rows,
+        old_entries,
+        new_entries,
+        meta.is_touched,
+    )?;
     sort_state_rows(&mut sc_rows);
     populate_state_chain_accumulators::<W>(&mut sc_rows);
 
     let state_rows: Vec<StateShardRow> = sc_rows.into_iter().map(StateShardRow::from).collect();
-
-    let meta_row = MetaShardRow {
-        com_old: column.meta.com_old,
-        com_new: column.meta.com_new,
-        is_empty_old: column.meta.is_empty_old,
-        is_empty_new: column.meta.is_empty_new,
-        is_touched: column.meta.is_touched,
-        empty_read_count: empty_count,
-    };
+    let meta_row = prepare_meta_shard_row_from_parts(meta, access_rows, has_commitment_proof);
 
     Ok(SsmcColumnWitness {
         memory_rows,
         state_rows,
         meta_row: Some(meta_row),
     })
-}
-
-/// Prepare per-column SSMC shard witness data from a [`BatchWitness`].
-///
-/// Builds [`SsmcWitness`] containing per-column `MemoryShardRow`,
-/// `StateShardRow`, and `MetaShardRow` data suitable for shard chip
-/// trace generation. Each column's data is self-contained.
-///
-/// Used by the sharded prover to produce per-column proof instances.
-pub fn prepare_ssmc_shard_witness<H, const W: usize>(
-    witness: &BatchWitness<H>,
-) -> Result<SsmcWitness, TabulaError>
-where
-    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
-{
-    let empty_read_mults = build_empty_read_mults::<H>(witness);
-    let mut ssmc_witness = SsmcWitness::default();
-
-    for column in &witness.columns {
-        // Skip untouched columns — they don't need column proofs.
-        // Their leaf digests appear implicitly as SMT siblings in
-        // touched columns' Merkle paths.
-        if !column.meta.is_touched {
-            continue;
-        }
-
-        let mut col_witness = prepare_ssmc_column_witness::<H, W>(column)?;
-        if let Some(meta_row) = col_witness.meta_row.as_mut() {
-            meta_row.empty_read_count = empty_read_mults
-                .get(&(column.table, column.col))
-                .copied()
-                .unwrap_or(0);
-        }
-
-        ssmc_witness.insert(column.table, column.col, col_witness);
-    }
-
-    Ok(ssmc_witness)
 }

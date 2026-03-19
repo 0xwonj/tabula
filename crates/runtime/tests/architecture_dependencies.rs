@@ -59,6 +59,10 @@ fn cargo_metadata() -> Value {
     serde_json::from_slice(&output.stdout).expect("parse cargo metadata")
 }
 
+fn read_workspace_file(rel: &str) -> String {
+    fs::read_to_string(workspace_root().join(rel)).expect("read workspace file")
+}
+
 #[test]
 fn proof_crate_dependencies_respect_boundary_contract() {
     let metadata = cargo_metadata();
@@ -89,17 +93,64 @@ fn proof_crate_dependencies_respect_boundary_contract() {
         "tabula-chips",
         &["tabula-witness", "tabula-machine", "tabula-runtime"],
     );
-    assert_forbidden(&metadata, "tabula-witness", &["tabula-machine", "tabula-runtime"]);
-    assert_forbidden(&metadata, "tabula-machine", &["tabula-witness", "tabula-runtime"]);
+    assert_forbidden(
+        &metadata,
+        "tabula-witness",
+        &["tabula-machine", "tabula-runtime"],
+    );
+    assert_forbidden(
+        &metadata,
+        "tabula-machine",
+        &["tabula-witness", "tabula-runtime"],
+    );
 }
 
 #[test]
 fn stark_root_does_not_export_public_gadgets_module() {
-    let stark_lib = workspace_root().join("crates/stark/src/lib.rs");
-    let source = fs::read_to_string(&stark_lib).expect("read tabula-stark lib.rs");
+    let source = read_workspace_file("crates/stark/src/lib.rs");
 
     assert!(
         !source.contains("pub mod gadgets;"),
         "tabula-stark root must not re-export a public gadgets module"
     );
+}
+
+#[test]
+fn shared_prove_path_does_not_depend_on_legacy_witness_or_layout_dispatch() {
+    let prepare_rs = read_workspace_file("crates/runtime/src/proving/prepare.rs");
+    let traces_rs = read_workspace_file("crates/runtime/src/proving/traces.rs");
+    let materialize_rs = read_workspace_file("crates/runtime/src/assembly/materialize.rs");
+    let runtime_program_rs = read_workspace_file("crates/runtime/src/program/runtime_program.rs");
+
+    for (name, source) in [
+        ("proving/prepare.rs", prepare_rs.as_str()),
+        ("proving/traces.rs", traces_rs.as_str()),
+        ("assembly/materialize.rs", materialize_rs.as_str()),
+        ("program/runtime_program.rs", runtime_program_rs.as_str()),
+    ] {
+        assert!(
+            !source.contains("ColumnWitness"),
+            "{name} must not depend on legacy ColumnWitness"
+        );
+        assert!(
+            !source.contains("BatchWitness"),
+            "{name} must not depend on legacy BatchWitness"
+        );
+        assert!(
+            !source.contains("ProofInputBuilder"),
+            "{name} must not reference removed ProofInputBuilder"
+        );
+        assert!(
+            !source.contains("ColumnStateBackend"),
+            "{name} must not reference removed ColumnStateBackend"
+        );
+        assert!(
+            !source.contains("PlanColumnStateBackend"),
+            "{name} must not reference removed plan-based backend"
+        );
+        assert!(
+            !source.contains("layout_kind"),
+            "{name} must not dispatch on layout_kind in the shared prove path"
+        );
+    }
 }

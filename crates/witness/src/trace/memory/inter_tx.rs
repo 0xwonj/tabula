@@ -4,11 +4,11 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
 use tabula_chips::shards::memory::trace::MemoryShardRow;
-use tabula_commitment::{FieldHasher, NativeDigest};
 use tabula_core::RowKey;
 use tabula_core::error::TabulaError;
+use tabula_core::{ColId, TableId};
 
-use crate::witness::ColumnWitness;
+use crate::witness::{AccessRow, InitRow};
 
 /// A single row for building inter-tx ordering data.
 ///
@@ -52,23 +52,23 @@ impl From<InterTxOrderRow> for MemoryShardRow {
     }
 }
 
-pub(super) fn build_inter_tx_rows<H, const W: usize>(
-    column: &ColumnWitness<H>,
-) -> Result<Vec<InterTxOrderRow>, TabulaError>
-where
-    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
-{
+pub(super) fn build_inter_tx_rows_for_parts<const W: usize>(
+    table: TableId,
+    col: ColId,
+    init_rows: &[InitRow],
+    access_rows: &[AccessRow],
+) -> Result<Vec<InterTxOrderRow>, TabulaError> {
     let mut keys = BTreeSet::new();
 
     let mut init_by_key: BTreeMap<RowKey, (Vec<KoalaBear>, bool)> = BTreeMap::new();
-    for init in &column.init_rows {
+    for init in init_rows {
         if init.value_fes.len() != W {
             return Err(TabulaError::ProofError {
                 phase: "memory",
                 detail: format!(
                     "init row width mismatch for ({:?}, {:?}): expected {}, got {}",
-                    column.table,
-                    column.col,
+                    table,
+                    col,
                     W,
                     init.value_fes.len()
                 ),
@@ -78,16 +78,15 @@ where
         init_by_key.insert(init.key.row, (init.value_fes.clone(), init.val_is_null));
     }
 
-    let mut by_key_tx: BTreeMap<RowKey, BTreeMap<u32, Vec<&crate::witness::AccessRow>>> =
-        BTreeMap::new();
-    for access in &column.access_rows {
+    let mut by_key_tx: BTreeMap<RowKey, BTreeMap<u32, Vec<&AccessRow>>> = BTreeMap::new();
+    for access in access_rows {
         if access.value_fes.len() != W {
             return Err(TabulaError::ProofError {
                 phase: "memory",
                 detail: format!(
                     "access row width mismatch for ({:?}, {:?}): expected {}, got {}",
-                    column.table,
-                    column.col,
+                    table,
+                    col,
                     W,
                     access.value_fes.len()
                 ),

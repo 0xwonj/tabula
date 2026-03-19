@@ -28,8 +28,8 @@ fn trace(row: Option<&MetaShardRow>) -> RowMajorMatrix<KoalaBear> {
 // ── Column width ──
 
 #[test]
-fn width_is_96() {
-    assert_eq!(META_SHARD_WIDTH, 96);
+fn width_is_97() {
+    assert_eq!(META_SHARD_WIDTH, 97);
 }
 
 // ── A. Valid traces ──
@@ -92,6 +92,7 @@ fn invalid_untouched_com_mismatch() {
         is_empty_old: false,
         is_empty_new: false,
         is_touched: false,
+        has_commitment_proof: true,
         empty_read_count: 0,
     };
     debug_check(&chip(), &trace(Some(&r))).expect_err("untouched com mismatch should fail");
@@ -106,6 +107,7 @@ fn invalid_untouched_empty_changed() {
         is_empty_old: true,
         is_empty_new: false, // changed despite untouched
         is_touched: false,
+        has_commitment_proof: true,
         empty_read_count: 0,
     };
     debug_check(&chip(), &trace(Some(&r))).expect_err("untouched empty changed should fail");
@@ -121,6 +123,7 @@ fn invalid_empty_stays_empty_when_touched() {
         is_empty_old: true,
         is_empty_new: true, // should be 0 since touched + was empty
         is_touched: true,
+        has_commitment_proof: true,
         empty_read_count: 0,
     };
     debug_check(&chip(), &trace(Some(&r))).expect_err("empty_old=1 ∧ touched=1 ⟹ empty_new=0");
@@ -136,6 +139,7 @@ fn invalid_com_empty_wrong_com_old() {
         is_empty_old: true,
         is_empty_new: false,
         is_touched: true,
+        has_commitment_proof: true,
         empty_read_count: 0,
     };
     debug_check(&chip(), &trace(Some(&r)))
@@ -152,6 +156,7 @@ fn invalid_com_empty_wrong_com_new() {
         is_empty_old: false,
         is_empty_new: true,
         is_touched: true,
+        has_commitment_proof: true,
         empty_read_count: 0,
     };
     debug_check(&chip(), &trace(Some(&r)))
@@ -169,6 +174,7 @@ fn invalid_com_empty_wrong_table_col() {
         is_empty_old: true,
         is_empty_new: false,
         is_touched: true,
+        has_commitment_proof: true,
         empty_read_count: 0,
     };
     let c = MetaShardChip::new(ChipId(102), 1, 0, scheme_tags::SSMC, true);

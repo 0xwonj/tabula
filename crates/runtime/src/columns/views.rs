@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use tabula_machine::ProofColumn;
 
-use crate::columns::RuntimeColumn;
 #[cfg(feature = "prove")]
-use crate::columns::ProofInputBuilder;
+use crate::columns::ColumnTransitionBackend;
+use crate::columns::RuntimeColumn;
 
 /// Runtime/preparation result for one committed column.
 #[derive(Clone)]
@@ -12,7 +12,7 @@ pub struct ColumnViews {
     runtime: Arc<dyn RuntimeColumn>,
     proof: Arc<dyn ProofColumn>,
     #[cfg(feature = "prove")]
-    proof_input: Arc<dyn ProofInputBuilder>,
+    transition: Arc<dyn ColumnTransitionBackend>,
 }
 
 impl ColumnViews {
@@ -21,12 +21,12 @@ impl ColumnViews {
     pub fn new(
         runtime: Arc<dyn RuntimeColumn>,
         proof: Arc<dyn ProofColumn>,
-        proof_input: Arc<dyn ProofInputBuilder>,
+        transition: Arc<dyn ColumnTransitionBackend>,
     ) -> Self {
         Self {
             runtime,
             proof,
-            proof_input,
+            transition,
         }
     }
 
@@ -46,22 +46,22 @@ impl ColumnViews {
         &self.proof
     }
 
-    /// Borrow the proof-input builder view.
+    /// Borrow the column transition backend view.
     #[cfg(feature = "prove")]
-    pub fn proof_input(&self) -> &Arc<dyn ProofInputBuilder> {
-        &self.proof_input
+    pub fn transition(&self) -> &Arc<dyn ColumnTransitionBackend> {
+        &self.transition
     }
 
     /// Consume into the column views.
     #[cfg(feature = "prove")]
-    pub fn into_parts(
+    pub(crate) fn into_parts(
         self,
     ) -> (
         Arc<dyn RuntimeColumn>,
         Arc<dyn ProofColumn>,
-        Arc<dyn ProofInputBuilder>,
+        Arc<dyn ColumnTransitionBackend>,
     ) {
-        (self.runtime, self.proof, self.proof_input)
+        (self.runtime, self.proof, self.transition)
     }
 
     /// Consume into the column views.
@@ -76,22 +76,29 @@ impl std::fmt::Debug for ColumnViews {
         f.debug_struct("ColumnViews")
             .field("runtime_scheme", &self.runtime.name())
             .field("proof_scheme", &self.proof.name())
-            .field(
-                "proof_input_scheme",
-                &{
-                    #[cfg(feature = "prove")]
-                    {
-                        self.proof_input.name()
-                    }
-                    #[cfg(not(feature = "prove"))]
-                    {
-                        self.proof.name()
-                    }
-                },
-            )
+            .field("transition_scheme", &{
+                #[cfg(feature = "prove")]
+                {
+                    self.transition.name()
+                }
+                #[cfg(not(feature = "prove"))]
+                {
+                    self.proof.name()
+                }
+            })
             .field("table_id", &self.proof.table_id())
             .field("col_id", &self.proof.col_id())
             .field("scheme_id", &self.proof.scheme_id())
+            .field("has_transition_backend", &{
+                #[cfg(feature = "prove")]
+                {
+                    true
+                }
+                #[cfg(not(feature = "prove"))]
+                {
+                    false
+                }
+            })
             .finish()
     }
 }

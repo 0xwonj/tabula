@@ -13,7 +13,10 @@
 pub mod memory;
 pub mod meta;
 pub mod property;
+/// Shared shard witness plumbing reused by all column schemes.
+pub mod shared;
 pub mod smt;
+pub mod smt_state;
 pub mod ssmc;
 pub mod state;
 

@@ -1,10 +1,8 @@
 use super::*;
 
-// -- E2E helpers for IR-based lowering tests ----
-
-/// Compile DSL, execute a batch, and generate a witness -- shared scaffolding for
-/// the IR-lowering and unified-pipeline E2E tests.
-pub(super) fn compile_execute_witness(
+/// Compile DSL, execute a batch, and derive the builtin trace context from the
+/// new execution-input preparation path.
+pub(super) fn compile_execute_context(
     source: &str,
     initial_cells: &[(TableId, ColId, RowKey, Value)],
     transactions: Vec<Transaction>,
@@ -12,7 +10,7 @@ pub(super) fn compile_execute_witness(
     Program,
     Batch,
     tabula_core::BatchResult,
-    BatchWitness<PoseidonHasher>,
+    TraceProofContext,
     BTreeMap<TableId, tabula_core::TableSchema>,
 ) {
     let compiled = compile(source).expect("DSL compilation");
@@ -45,9 +43,22 @@ pub(super) fn compile_execute_witness(
     let result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
         .expect("batch execution");
 
-    let commit_hasher = PoseidonHasher::new();
-    let codec = KoalaBearCodec;
+    let schemas_by_id: BTreeMap<TableId, tabula_core::TableSchema> = compiled
+        .schemas
+        .iter()
+        .cloned()
+        .map(|s| (s.id, s))
+        .collect();
+    let planned_columns: Vec<(TableId, ColId)> = schemas_by_id
+        .iter()
+        .flat_map(|(table, schema)| schema.columns.iter().map(move |col| (*table, col.id)))
+        .collect();
+    let preparer = ExecutionInputPreparer::new(PoseidonHasher::new());
+    let prepared = preparer
+        .prepare_execution_inputs(&result, &schemas_by_id, planned_columns.iter())
+        .expect("prepared execution inputs");
 
+    let codec = KoalaBearCodec;
     let mut entries_by_col: EncodedColumnEntries = BTreeMap::new();
     for &(table, col, row, value) in initial_cells {
         entries_by_col
@@ -56,37 +67,49 @@ pub(super) fn compile_execute_witness(
             .push((row, codec.encode(&value).expect("encode")));
     }
 
-    let mut old_column_states = BTreeMap::new();
+    let mut metas = Vec::new();
     for schema in &compiled.schemas {
         for col_def in &schema.columns {
             let mut entries = entries_by_col
                 .remove(&(schema.id, col_def.id))
                 .unwrap_or_default();
             entries.sort_by_key(|(row, _)| *row);
-            let (state, _com) = ColumnState::commit(
-                &commit_hasher,
+            let (old_state, _) = ColumnState::commit(
+                &PoseidonHasher::new(),
                 schema.id,
                 col_def.id,
                 entries,
                 scheme_tags::SSMC,
             )
             .unwrap();
-            old_column_states.insert((schema.id, col_def.id), state);
+            let writes = prepared
+                .writes_by_col
+                .get(&(schema.id, col_def.id))
+                .cloned()
+                .unwrap_or_default();
+            metas.push(build_ssmc_meta(
+                &PoseidonHasher::new(),
+                schema.id,
+                col_def.id,
+                &old_state,
+                &writes,
+                prepared.touched.contains(&(schema.id, col_def.id)),
+            ));
         }
     }
+    let (old_state_root, new_state_root) = preparer.compute_state_roots_from_metas(&metas);
 
-    let schemas_by_id: BTreeMap<TableId, tabula_core::TableSchema> = compiled
-        .schemas
-        .iter()
-        .cloned()
-        .map(|s| (s.id, s))
-        .collect();
-    let wg = WitnessGenerator::new(PoseidonHasher::new());
-    let witness = wg
-        .generate(&result, &schemas_by_id, &old_column_states)
-        .expect("witness generation");
-
-    (program, batch, result, witness, schemas_by_id)
+    (
+        program,
+        batch,
+        result,
+        TraceProofContext {
+            column_metas: metas,
+            old_state_root,
+            new_state_root,
+        },
+        schemas_by_id,
+    )
 }
 
 pub(super) fn make_tx(params: Vec<Value>) -> Transaction {
@@ -99,26 +122,48 @@ pub(super) fn make_tx(params: Vec<Value>) -> Transaction {
     }
 }
 
+fn lower_for_context(
+    program: &Program,
+    batch: &Batch,
+    result: &tabula_core::BatchResult,
+    context: &TraceProofContext,
+    schemas: &BTreeMap<TableId, tabula_core::TableSchema>,
+) -> tabula_witness::trace::builtin::lowering::LoweringOutput {
+    let empty_columns: BTreeSet<(TableId, ColId)> = context
+        .column_metas
+        .iter()
+        .filter(|meta| meta.is_empty_old)
+        .map(|meta| (meta.table, meta.col))
+        .collect();
+
+    lower_program_batch::<3>(
+        program,
+        batch,
+        result,
+        schemas,
+        &InMemoryStaticTables::new(),
+        &empty_columns,
+    )
+    .expect("IR lowering")
+}
+
 /// Run IR-based lowering + full trace build + validation.
 pub(super) fn lower_build_validate(
     program: &Program,
     batch: &Batch,
     result: &tabula_core::BatchResult,
-    witness: &BatchWitness<PoseidonHasher>,
+    context: &TraceProofContext,
     schemas: &BTreeMap<TableId, tabula_core::TableSchema>,
 ) {
-    let static_tables = InMemoryStaticTables::new();
+    let lowering = lower_for_context(program, batch, result, context, schemas);
 
-    let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(witness);
+    let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(BuiltinTraceContext {
+        column_metas: &context.column_metas,
+        old_state_root: &context.old_state_root,
+        new_state_root: &context.new_state_root,
+    });
     let store = builder
-        .prepare_witness_store(
-            program,
-            batch,
-            result,
-            schemas,
-            &static_tables,
-            PoseidonHasher::new(),
-        )
+        .prepare_witness_store(&lowering, PoseidonHasher::new())
         .expect("witness store preparation")
         .store;
 
@@ -127,8 +172,6 @@ pub(super) fn lower_build_validate(
     let trace_map =
         tabula_witness::trace::build_all_traces(&chips, &consumers, store).expect("trace assembly");
 
-    // Only validate intra-tier buses. Cross-tier buses (ReadAccess, WriteAccess,
-    // etc.) balance across execution+column+root tiers in the sharded architecture.
     let intra_tier_buses = vec![
         tabula_stark::air::interaction::core_buses::POSEIDON_PERM,
         tabula_stark::air::interaction::core_buses::RANGE_CHECK,
@@ -138,12 +181,8 @@ pub(super) fn lower_build_validate(
         .expect("constraint + bus validation");
 }
 
-// -- IR-lowering E2E tests --
-
 #[test]
 fn trace_builder_arith_add_sub_ir_lowering_e2e() {
-    // Single-column program: read x, compute x+x, then (x+x)-x, write back.
-    // Exercises: Read, Add, Sub, Write -- all operands are Slot references.
     let source = "\
 table t { val: u64 }
 tx op(id: u64) {
@@ -151,19 +190,17 @@ tx op(id: u64) {
     let y = x + x
     t[id].val = y - x
 }";
-    let (program, batch, result, witness, schemas) = compile_execute_witness(
+    let (program, batch, result, context, schemas) = compile_execute_context(
         source,
         &[(TableId(0), ColId(0), RowKey(10), Value::U64(100))],
         vec![make_tx(vec![Value::U64(10)])],
     );
     assert!(matches!(result.txs[0], TxResult::Success { .. }));
-    lower_build_validate(&program, &batch, &result, &witness, &schemas);
+    lower_build_validate(&program, &batch, &result, &context, &schemas);
 }
 
 #[test]
 fn trace_builder_cmp_assert_ir_lowering_e2e() {
-    // Single-column program: read x, compute x+x, assert x+x >= x, write (x+x)-x.
-    // Exercises: Read, Add, Cmp(Gte), Assert, Sub, Write.
     let source = "\
 table t { val: u64 }
 tx op(id: u64) {
@@ -172,13 +209,13 @@ tx op(id: u64) {
     assert y >= x
     t[id].val = y - x
 }";
-    let (program, batch, result, witness, schemas) = compile_execute_witness(
+    let (program, batch, result, context, schemas) = compile_execute_context(
         source,
         &[(TableId(0), ColId(0), RowKey(5), Value::U64(100))],
         vec![make_tx(vec![Value::U64(5)])],
     );
     assert!(matches!(result.txs[0], TxResult::Success { .. }));
-    lower_build_validate(&program, &batch, &result, &witness, &schemas);
+    lower_build_validate(&program, &batch, &result, &context, &schemas);
 }
 
 #[test]
@@ -189,23 +226,21 @@ tx touch(id: u64) {
     let bal = accounts[id].balance
     accounts[id].balance = bal
 }";
-    let (program, batch, result, witness, schemas) = compile_execute_witness(
+    let (program, batch, result, context, schemas) = compile_execute_context(
         source,
         &[(TableId(0), ColId(0), RowKey(10), Value::U64(50))],
         vec![make_tx(vec![Value::U64(10)])],
     );
     assert!(matches!(result.txs[0], TxResult::Success { .. }));
 
-    let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(&witness);
+    let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(BuiltinTraceContext {
+        column_metas: &context.column_metas,
+        old_state_root: &context.old_state_root,
+        new_state_root: &context.new_state_root,
+    });
+    let lowering = lower_for_context(&program, &batch, &result, &context, &schemas);
     let store = builder
-        .prepare_witness_store(
-            &program,
-            &batch,
-            &result,
-            &schemas,
-            &InMemoryStaticTables::new(),
-            PoseidonHasher::new(),
-        )
+        .prepare_witness_store(&lowering, PoseidonHasher::new())
         .expect("unified pipeline")
         .store;
 
@@ -226,6 +261,7 @@ tx touch(id: u64) {
 #[test]
 fn trace_builder_transfer_param_debug_lowering() {
     use p3_field::PrimeField32;
+
     let source = "\
 table balances { balance: u64 }
 tx transfer(from: u64, to: u64, amount: u64) {
@@ -235,7 +271,7 @@ tx transfer(from: u64, to: u64, amount: u64) {
     balances[from].balance = sender_bal - amount
     balances[to].balance = recv_bal + amount
 }";
-    let (program, batch, result, witness, schemas) = compile_execute_witness(
+    let (program, batch, result, context, schemas) = compile_execute_context(
         source,
         &[
             (TableId(0), ColId(0), RowKey(0), Value::U64(1000)),
@@ -243,7 +279,7 @@ tx transfer(from: u64, to: u64, amount: u64) {
         ],
         vec![make_tx(vec![Value::U64(0), Value::U64(1), Value::U64(300)])],
     );
-    let empty_columns: BTreeSet<(TableId, ColId)> = witness
+    let empty_columns: BTreeSet<(TableId, ColId)> = context
         .column_metas
         .iter()
         .filter(|m| m.is_empty_old)
@@ -292,7 +328,7 @@ tx transfer(from: u64, to: u64, amount: u64) {
     balances[from].balance = sender_bal - amount
     balances[to].balance = recv_bal + amount
 }";
-    let (program, batch, result, witness, schemas) = compile_execute_witness(
+    let (program, batch, result, context, schemas) = compile_execute_context(
         source,
         &[
             (TableId(0), ColId(0), RowKey(0), Value::U64(1000)),
@@ -301,11 +337,9 @@ tx transfer(from: u64, to: u64, amount: u64) {
         vec![make_tx(vec![Value::U64(0), Value::U64(1), Value::U64(300)])],
     );
     assert!(matches!(result.txs[0], TxResult::Success { .. }));
-    lower_build_validate(&program, &batch, &result, &witness, &schemas);
+    lower_build_validate(&program, &batch, &result, &context, &schemas);
 }
 
-/// Reproduces the exact daemon web IDE scenario: 3 accounts, 3 txs, with emit.
-/// This is the `transfer_example_bundle()` from tabula-compiler.
 #[test]
 fn trace_builder_transfer_3tx_with_emit_e2e() {
     let source = "\
@@ -319,7 +353,7 @@ tx transfer(from: u64, to: u64, amount: u64) {
     emit \"transfer\" (from, to, amount)
 }";
     let sender = [1u8; 32];
-    let (program, batch, result, witness, schemas) = compile_execute_witness(
+    let (program, batch, result, context, schemas) = compile_execute_context(
         source,
         &[
             (TableId(0), ColId(0), RowKey(0), Value::U64(1000)),
@@ -356,5 +390,5 @@ tx transfer(from: u64, to: u64, amount: u64) {
             "tx {i} should succeed, got: {outcome:?}"
         );
     }
-    lower_build_validate(&program, &batch, &result, &witness, &schemas);
+    lower_build_validate(&program, &batch, &result, &context, &schemas);
 }

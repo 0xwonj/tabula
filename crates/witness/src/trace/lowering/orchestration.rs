@@ -17,6 +17,7 @@ use tabula_ir::Program;
 
 use tabula_chips::execution::MAX_SLOTS;
 use tabula_chips::execution::trace::{InstructionRecord, Opcode};
+use tabula_chips::shards::property::trace::PropertyReadRecord;
 use tabula_chips::static_table::trace::StaticTableRow;
 
 use super::context::LoweringContext;
@@ -235,6 +236,32 @@ pub struct LoweringOutput {
     pub instruction_records: Vec<InstructionRecord>,
     /// Static table rows accumulated from Lookup instructions.
     pub static_table_rows: Vec<StaticTableRow>,
+}
+
+impl LoweringOutput {
+    /// Extract lowered `PropertyRead` records grouped by `(table, col)`.
+    pub fn property_read_records(&self) -> BTreeMap<(TableId, ColId), Vec<PropertyReadRecord>> {
+        let mut result: BTreeMap<(TableId, ColId), Vec<PropertyReadRecord>> = BTreeMap::new();
+        for rec in &self.instruction_records {
+            if rec.opcode != Opcode::PropertyRead {
+                continue;
+            }
+            let table = TableId(rec.access_t.unwrap_or(0));
+            let col = ColId(rec.access_c.unwrap_or(0));
+            result
+                .entry((table, col))
+                .or_default()
+                .push(PropertyReadRecord {
+                    query_type: rec.property_query_type.unwrap_or(0),
+                    query_arg0: rec.property_query_arg0.clone(),
+                    query_arg1: rec.property_query_arg1.clone(),
+                    result_val: rec.property_result_val.clone(),
+                    result_key: rec.property_result_key.clone(),
+                    is_null: rec.property_result_is_null,
+                });
+        }
+        result
+    }
 }
 
 /// Lower a full batch execution from IR programs.

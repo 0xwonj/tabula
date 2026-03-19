@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use tabula_artifact::SchemeDescriptor;
 
 use tabula_core::{ColId, SchemeId, TableId, ValueType};
 use tabula_ir::PropertyQueryKind;
@@ -12,6 +13,8 @@ pub struct ColumnPlan {
     pub col_id: ColId,
     /// Portable scheme identifier selected by the compiler.
     pub scheme_id: SchemeId,
+    /// Sealed scheme descriptor selected by the compiler.
+    pub scheme_descriptor: SchemeDescriptor,
     /// Column value type from the sealed schema surface.
     pub value_type: ValueType,
     /// Whether this column participates in the root commitment.

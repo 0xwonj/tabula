@@ -148,8 +148,11 @@ impl ProgramVerifierBuilder {
 
         self.validate(&compiled_program)?;
 
-        let columns =
-            resolve_proof_columns_with_factories(&compiled_program, self.base.scheme_factories())?;
+        let columns = resolve_proof_columns_with_factories(
+            &compiled_program,
+            self.base.scheme_factories(),
+            self.base.root_profile_id(),
+        )?;
         let (mut machine_builder, _scheme_factories) = self.base.into_parts();
         for verifier in self.precompile_verifiers.into_values() {
             machine_builder = machine_builder.with_extension_boxed(verifier);

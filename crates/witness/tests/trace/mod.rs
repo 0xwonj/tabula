@@ -17,12 +17,19 @@ use tabula_core::{InMemoryState, InMemoryStaticTables, NoopSigVerifier, Sequenti
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_ir::Program;
 use tabula_lang::compile;
-use tabula_witness::WitnessGenerator;
 use tabula_witness::trace::builtin::lowering::{lower_execution_records, lower_program_batch};
-use tabula_witness::{AllTraceInputs, BuiltinTraceBuilder};
-use tabula_witness::witness::{AccessRow, BatchWitness, ColumnWitness, InitRow, KeyRoute};
+use tabula_witness::{
+    AllTraceInputs, BuiltinTraceBuilder, BuiltinTraceContext, ExecutionInputPreparer,
+    proof_column_commitment,
+};
 
 pub(super) type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<KoalaBear>)>>;
+
+pub(super) struct TraceProofContext {
+    pub column_metas: Vec<ColumnMeta>,
+    pub old_state_root: NativeDigest,
+    pub new_state_root: NativeDigest,
+}
 
 pub(super) fn mk_codec() -> KoalaBearCodec {
     KoalaBearCodec
@@ -212,6 +219,40 @@ pub(super) fn build_smt_paths_from_metas(
     }
 
     (col_paths, table_paths)
+}
+
+pub(super) fn roots_from_metas(metas: &[ColumnMeta]) -> (NativeDigest, NativeDigest) {
+    ExecutionInputPreparer::new(PoseidonHasher::new()).compute_state_roots_from_metas(metas)
+}
+
+pub(super) fn build_ssmc_meta(
+    hasher: &PoseidonHasher,
+    table: TableId,
+    col: ColId,
+    old_state: &ColumnState<PoseidonHasher>,
+    writes: &[(RowKey, Option<Vec<KoalaBear>>)],
+    is_touched: bool,
+) -> ColumnMeta {
+    let com_old = proof_column_commitment(table, col, old_state).expect("old commitment");
+    let tag = old_state.scheme_tag();
+    let is_empty_old = old_state.is_empty();
+    let (new_state, _, _) = if is_touched {
+        old_state.apply_writes(hasher, table, col, writes)
+    } else {
+        (old_state.clone(), com_old, None)
+    };
+    let com_new = proof_column_commitment(table, col, &new_state).expect("new commitment");
+
+    ColumnMeta {
+        table,
+        col,
+        tag,
+        com_old,
+        com_new,
+        is_empty_old,
+        is_empty_new: new_state.is_empty(),
+        is_touched,
+    }
 }
 
 mod ir_lowering;

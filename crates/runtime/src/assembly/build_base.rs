@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use tabula_core::SchemeId;
+use tabula_core::{RootProfileId, SchemeId};
 use tabula_machine::{ChipExtension, MachineBuilder, RootProof, TabulaStarkConfig};
 
 use crate::columns::{ColumnSchemeFactory, default_factories};
@@ -10,6 +10,7 @@ use crate::error::RuntimeError;
 /// Shared machine/scheme build state used by runtime and verifier builders.
 pub(crate) struct BuildBase {
     machine_builder: MachineBuilder,
+    root_profile_id: RootProfileId,
     scheme_factories: BTreeMap<SchemeId, Arc<dyn ColumnSchemeFactory>>,
 }
 
@@ -17,6 +18,7 @@ impl BuildBase {
     pub(crate) fn new() -> Self {
         Self {
             machine_builder: MachineBuilder::new(),
+            root_profile_id: RootProfileId::SMT_V1,
             scheme_factories: default_factories(),
         }
     }
@@ -27,6 +29,7 @@ impl BuildBase {
     }
 
     pub(crate) fn with_root_proof(mut self, root: impl RootProof + 'static) -> Self {
+        self.root_profile_id = root.profile_id();
         self.machine_builder = self.machine_builder.with_root_proof(root);
         self
     }
@@ -55,6 +58,10 @@ impl BuildBase {
 
     pub(crate) fn scheme_factories(&self) -> &BTreeMap<SchemeId, Arc<dyn ColumnSchemeFactory>> {
         &self.scheme_factories
+    }
+
+    pub(crate) fn root_profile_id(&self) -> RootProfileId {
+        self.root_profile_id
     }
 
     pub(crate) fn into_parts(

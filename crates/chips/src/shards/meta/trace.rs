@@ -31,6 +31,8 @@ pub struct MetaShardRow {
     pub is_empty_new: bool,
     /// Column was modified in this batch.
     pub is_touched: bool,
+    /// Whether a scheme-owned state chip is expected to provide C6 commitments.
+    pub has_commitment_proof: bool,
     /// Number of Execution empty-col reads targeting this `(t,c)`.
     pub empty_read_count: u32,
 }
@@ -62,6 +64,7 @@ pub fn generate_meta_shard_trace(
         cols.is_empty_old = bool_fe(r.is_empty_old);
         cols.is_empty_new = bool_fe(r.is_empty_new);
         cols.is_touched = bool_fe(r.is_touched);
+        cols.has_commitment_proof = bool_fe(r.has_commitment_proof);
         cols.empty_read_mult = KoalaBear::new(r.empty_read_count);
 
         // Com_empty verification
@@ -129,11 +132,10 @@ impl TraceGenerator for super::air::MetaShardChip {
 
 use crate::ChipSpec;
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, TableId};
 use tabula_stark::trace::contributor::{TraceContributor, TracePhase, WitnessStore};
 use tabula_stark::trace::trace_map::TraceMap;
 
-use super::super::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
+use super::super::shared::{SHARED_COLUMN_WITNESS_LABEL, SharedColumnWitness};
 
 impl TraceContributor for super::air::MetaShardChip {
     fn phase(&self) -> TracePhase {
@@ -141,15 +143,12 @@ impl TraceContributor for super::air::MetaShardChip {
     }
 
     fn contribute(&self, store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {
-        let witness = store.get::<SsmcWitness>(SSMC_WITNESS_LABEL)?;
-        let meta_row = witness
-            .get(TableId(self.table_id()), ColId(self.col_id()))
-            .and_then(|data| data.meta_row.clone());
+        let witness = store.get::<SharedColumnWitness>(SHARED_COLUMN_WITNESS_LABEL)?;
         let trace = generate_meta_shard_trace(
             self.table_id(),
             self.col_id(),
             self.scheme_tag(),
-            meta_row.as_ref(),
+            witness.meta_row.as_ref(),
         );
         map.insert(self.chip_id(), trace);
         Ok(())

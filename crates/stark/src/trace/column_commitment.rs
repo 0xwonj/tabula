@@ -84,7 +84,7 @@ pub struct ColumnPlan {
 
 /// Per-batch proof plan mapping each column to a commitment scheme.
 ///
-/// Generated from `BatchWitness` + schema metadata. The plan drives:
+/// Generated from column metadata and scheme selection. The plan drives:
 /// - Which shard chips are registered
 /// - How witness data is routed per-column
 /// - Which columns can be built in parallel

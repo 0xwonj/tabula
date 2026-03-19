@@ -1,19 +1,14 @@
 //! Value encoding and SSMC hash-chain utilities.
 //!
-//! Pure encoding functions extracted from `WitnessGenerator`:
+//! Pure encoding and commitment helpers for witness preparation:
 //! - Value → field element encoding with null handling
 //! - Poseidon2 hash-chain input construction for SSMC commitments
 //! - Proof-compatible column commitment computation
 
-use std::collections::BTreeMap;
-
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
-use tabula_commitment::{
-    ColumnState, DOMAIN_SSMC, FieldHasher, NativeDigest, compute_leaf,
-    compute_state_root as sr_compute_state_root, compute_table_root, encode_u64_limbs,
-};
+use tabula_commitment::{ColumnState, DOMAIN_SSMC, FieldHasher, NativeDigest, encode_u64_limbs};
 use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
 use tabula_core::{ColId, TableId, Value, ValueType};
@@ -111,7 +106,8 @@ pub(crate) fn build_ssmc_hash_input(
 /// - continuation: `Poseidon(prev_hash[8], key[3], value, 0, ..., 0)`
 ///
 /// For SMT columns, the tree root is already the native commitment.
-pub(crate) fn proof_column_commitment<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
+#[doc(hidden)]
+pub fn proof_column_commitment<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
     table: TableId,
     col: ColId,
     state: &ColumnState<H>,
@@ -157,29 +153,4 @@ pub(crate) fn proof_column_commitment<H: FieldHasher<F = KoalaBear, Digest = Nat
         }
         ColumnState::Smt(tree) => Ok(tree.root()),
     }
-}
-
-/// Compute the two-level state root from column states.
-///
-/// Groups columns by table, computes per-column leaf hashes and per-table
-/// roots, then combines into a single state root.
-pub(crate) fn compute_state_root<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
-    hasher: &H,
-    column_states: &BTreeMap<(TableId, ColId), ColumnState<H>>,
-) -> Result<NativeDigest, TabulaError> {
-    // Group by table → columns.
-    let mut tables: BTreeMap<TableId, BTreeMap<ColId, NativeDigest>> = BTreeMap::new();
-    for (&(table, col), state) in column_states {
-        let com = proof_column_commitment(table, col, state)?;
-        let leaf = compute_leaf(hasher, table, col, state.scheme_tag(), &com);
-        tables.entry(table).or_default().insert(col, leaf);
-    }
-
-    // table roots → state root.
-    let mut table_roots = BTreeMap::new();
-    for (table, col_leaves) in &tables {
-        table_roots.insert(*table, compute_table_root(hasher, col_leaves));
-    }
-
-    Ok(sr_compute_state_root(hasher, &table_roots))
 }

@@ -44,6 +44,7 @@ pub(crate) fn derive_column_plans(
                 table_id: plan.table_id,
                 col_id: plan.col_id,
                 scheme_id: plan.scheme_id,
+                scheme_descriptor: plan.scheme_descriptor.clone(),
                 value_type,
                 receives_commitment: plan.receives_commitment,
                 required_property_query_kinds: required_property_query_kinds

@@ -1,14 +1,17 @@
 //! Witness pipeline and trace builder for the Tabula proof system.
 //!
-//! Transforms executor output (`BatchWitness`) into canonical chip traces
-//! (`TraceMap`) for STARK proving.
+//! Transforms executor output and runtime-owned proof inputs into canonical
+//! chip traces (`TraceMap`) for STARK proving.
 
+pub mod prepare;
 pub mod trace;
-pub mod witness;
+mod witness;
 
 // Convenience re-exports.
-pub use trace::builtin::{AllTraceInputs, BuiltinTraceBuilder, BuiltinWitnessInputs};
+pub use prepare::{ExecutionInputPreparer, PreparedExecutionInputs};
+pub use trace::builtin::{
+    AllTraceInputs, BuiltinTraceBuilder, BuiltinTraceContext, BuiltinWitnessInputs,
+};
 pub use witness::{
-    AccessPattern, AccessRow, BatchWitness, ColumnWitness, InitRow, KeyRoute, LiteralCell,
-    ProgramInfo, TemplateId, WitnessGenerator, route_keys,
+    AccessRow, InitRow, LiteralCell, ProgramInfo, TemplateId, proof_column_commitment,
 };

@@ -221,11 +221,10 @@ impl<const W: usize> TraceGenerator for MemoryShardChip<W> {
 
 use crate::ChipSpec;
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, TableId};
 use tabula_stark::trace::contributor::{TraceContributor, TracePhase, WitnessStore};
 use tabula_stark::trace::trace_map::TraceMap;
 
-use super::super::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
+use super::super::shared::{SHARED_COLUMN_WITNESS_LABEL, SharedColumnWitness};
 
 impl<const W: usize> TraceContributor for MemoryShardChip<W> {
     fn phase(&self) -> TracePhase {
@@ -233,19 +232,9 @@ impl<const W: usize> TraceContributor for MemoryShardChip<W> {
     }
 
     fn contribute(&self, store: &WitnessStore, map: &mut TraceMap) -> Result<(), TabulaError> {
-        let witness = store.get::<SsmcWitness>(SSMC_WITNESS_LABEL)?;
-        let col_data = witness
-            .get(TableId(self.table_id()), ColId(self.col_id()))
-            .ok_or_else(|| TabulaError::ProofError {
-                phase: "memory_shard_trace",
-                detail: format!(
-                    "no SSMC witness data for ({}, {})",
-                    self.table_id(),
-                    self.col_id()
-                ),
-            })?;
+        let witness = store.get::<SharedColumnWitness>(SHARED_COLUMN_WITNESS_LABEL)?;
         let trace =
-            generate_memory_shard_trace::<W>(self.table_id(), self.col_id(), &col_data.memory_rows);
+            generate_memory_shard_trace::<W>(self.table_id(), self.col_id(), &witness.memory_rows);
         map.insert(self.chip_id(), trace);
         Ok(())
     }

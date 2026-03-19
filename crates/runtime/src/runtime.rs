@@ -131,8 +131,12 @@ impl TabulaRuntime {
         &self,
         input: &ProveInput<'_>,
     ) -> Result<ExecutionStatement, RuntimeError> {
-        let artifacts =
-            proving::prepare_witness_artifacts(&self.runtime_program, input.state, input.executed)?;
+        let artifacts = proving::prepare_witness_artifacts(
+            &self.runtime_program,
+            input.state,
+            input.batch,
+            input.executed,
+        )?;
 
         proving::build_execution_statement(
             &self.runtime_program,
@@ -148,9 +152,12 @@ impl TabulaRuntime {
     /// Pipeline: column states -> witness -> traces -> prove.
     #[tracing::instrument(skip_all, name = "prove")]
     pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, RuntimeError> {
-        let artifacts =
-            proving::prepare_witness_artifacts(&self.runtime_program, input.state, input.executed)?;
-        let batch = proving::convert_batch(input.batch)?;
+        let artifacts = proving::prepare_witness_artifacts(
+            &self.runtime_program,
+            input.state,
+            input.batch,
+            input.executed,
+        )?;
         let statement = proving::build_execution_statement(
             &self.runtime_program,
             input.state,
@@ -159,14 +166,9 @@ impl TabulaRuntime {
             &artifacts.air_statement,
         )?;
 
-        let traces = proving::build_traces(
-            &self.machine,
-            &self.runtime_program,
-            &artifacts.witness,
-            &batch,
-            &artifacts.batch_result,
-        )?;
-        let column_identities = proving::extract_column_identities(&artifacts.witness, &traces)?;
+        let column_identities = artifacts.proof_input.column_identities();
+        let traces =
+            proving::build_traces(&self.machine, artifacts.proof_input, &artifacts.lowering)?;
 
         let proof = {
             let _span = tracing::info_span!("stark_prove").entered();
@@ -309,10 +311,13 @@ mod tests {
         let executed = runtime
             .execute(&bundle.state, &bundle.batch)
             .expect("execution succeeds");
-        let artifacts =
-            proving::prepare_witness_artifacts(runtime.runtime_program(), &bundle.state, &executed)
-                .expect("witness artifacts");
-        let batch = proving::convert_batch(&bundle.batch).expect("batch conversion");
+        let artifacts = proving::prepare_witness_artifacts(
+            runtime.runtime_program(),
+            &bundle.state,
+            &bundle.batch,
+            &executed,
+        )
+        .expect("witness artifacts");
         let statement = proving::build_execution_statement(
             runtime.runtime_program(),
             &bundle.state,
@@ -321,16 +326,13 @@ mod tests {
             &artifacts.air_statement,
         )
         .expect("execution statement");
+        let column_identities = artifacts.proof_input.column_identities();
         let traces = proving::build_traces(
             runtime.machine(),
-            runtime.runtime_program(),
-            &artifacts.witness,
-            &batch,
-            &artifacts.batch_result,
+            artifacts.proof_input,
+            &artifacts.lowering,
         )
         .expect("proof traces");
-        let column_identities =
-            proving::extract_column_identities(&artifacts.witness, &traces).expect("identities");
 
         let proof = runtime
             .machine()

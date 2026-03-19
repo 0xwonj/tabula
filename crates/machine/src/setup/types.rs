@@ -53,7 +53,10 @@ impl TierSetup {
 
 impl MachineSetup {
     pub(crate) fn new(config: TabulaStarkConfig, proof_setups: ProofSetups) -> Self {
-        Self { config, proof_setups }
+        Self {
+            config,
+            proof_setups,
+        }
     }
 
     /// The STARK configuration used by this backend setup.

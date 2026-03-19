@@ -1,17 +1,21 @@
-use std::collections::BTreeMap;
-
 use tabula_commitment::KoalaBearCodec;
 use tabula_core::traits::ValueCodec;
-use tabula_core::{AccessEvent, BatchResult, ColId, OpKind, TxResult, Value};
+use tabula_core::{AccessEvent, BatchResult, ColId, OpKind, TableId, TxResult, Value};
 
 use super::*;
 
-// -- Init row tests --
+fn prepare(
+    result: &BatchResult,
+    schema: &std::collections::BTreeMap<TableId, tabula_core::TableSchema>,
+    planned: &[(TableId, ColId)],
+) -> tabula_witness::PreparedExecutionInputs {
+    make_preparer()
+        .prepare_execution_inputs(result, schema, planned.iter())
+        .expect("prepared execution inputs")
+}
 
 #[test]
 fn init_rows_from_read_set_present() {
-    let wg = make_wg();
-
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 10), Some(Value::U64(42)))],
         write_set_final: vec![],
@@ -21,20 +25,16 @@ fn init_rows_from_read_set_present() {
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(10, 42)])].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
+    let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    assert_eq!(witness.columns.len(), 1);
-    let col_w = &witness.columns[0];
-    assert_eq!(col_w.init_rows.len(), 1);
-    assert!(!col_w.init_rows[0].val_is_null);
-    assert_eq!(col_w.init_rows[0].key.row, r(10));
+    let rows = &prepared.init_rows_by_col[&(t(1), c(0))];
+    assert_eq!(rows.len(), 1);
+    assert!(!rows[0].val_is_null);
+    assert_eq!(rows[0].key.row, r(10));
 }
 
 #[test]
-fn init_rows_from_read_set_null() {
-    let wg = make_wg();
-
+fn init_rows_from_read_set_null_are_canonical_zero() {
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 5), None)],
         write_set_final: vec![(ck(1, 0, 5), Some(Value::U64(99)))],
@@ -47,22 +47,19 @@ fn init_rows_from_read_set_null() {
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [empty_column_state(1, 0)].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
+    let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    let col_w = &witness.columns[0];
-    assert_eq!(col_w.init_rows.len(), 1);
-    assert!(col_w.init_rows[0].val_is_null);
-    // Canonical zero: encoded U64(0)
-    let codec = KoalaBearCodec;
-    let expected_fes = codec.encode(&Value::U64(0)).unwrap();
-    assert_eq!(col_w.init_rows[0].value_fes, expected_fes);
+    let rows = &prepared.init_rows_by_col[&(t(1), c(0))];
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].val_is_null);
+    assert_eq!(
+        rows[0].value_fes,
+        KoalaBearCodec.encode(&Value::U64(0)).unwrap()
+    );
 }
 
 #[test]
-fn init_rows_sorted_by_key() {
-    let wg = make_wg();
-
+fn init_rows_are_sorted_by_key() {
     let result = BatchResult {
         read_set_old: vec![
             (ck(1, 0, 30), Some(Value::U64(3))),
@@ -80,112 +77,17 @@ fn init_rows_sorted_by_key() {
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(10, 1), (20, 2), (30, 3)])].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
+    let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    let rows = &witness.columns[0].init_rows;
-    assert_eq!(rows.len(), 3);
-    assert_eq!(rows[0].key.row.0, 10);
-    assert_eq!(rows[1].key.row.0, 20);
-    assert_eq!(rows[2].key.row.0, 30);
+    let rows = &prepared.init_rows_by_col[&(t(1), c(0))];
+    assert_eq!(
+        rows.iter().map(|row| row.key.row.0).collect::<Vec<_>>(),
+        vec![10, 20, 30]
+    );
 }
 
 #[test]
-fn init_rows_multi_column() {
-    let wg = make_wg();
-
-    let result = BatchResult {
-        read_set_old: vec![
-            (ck(1, 0, 1), Some(Value::U64(10))),
-            (ck(1, 1, 1), Some(Value::U64(20))),
-        ],
-        write_set_final: vec![],
-        txs: vec![TxResult::success(
-            vec![read_event(1, 0, 1, 10, 1, 0), read_event(1, 1, 1, 20, 2, 0)],
-            vec![],
-        )],
-    };
-    let schema = schemas(vec![u64_schema(1, &[0, 1])]);
-    let states: BTreeMap<_, _> = [
-        column_state_with(1, 0, &[(1, 10)]),
-        column_state_with(1, 1, &[(1, 20)]),
-    ]
-    .into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
-    assert_eq!(witness.columns.len(), 2);
-}
-
-// -- Access row tests --
-
-#[test]
-fn access_rows_read_write() {
-    let wg = make_wg();
-
-    let result = BatchResult {
-        read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(20)))],
-        txs: vec![TxResult::success(
-            vec![
-                read_event(1, 0, 1, 10, 1, 0),
-                write_event(1, 0, 1, 20, 2, 0),
-            ],
-            vec![],
-        )],
-    };
-    let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
-
-    let access = &witness.columns[0].access_rows;
-    assert_eq!(access.len(), 2);
-    assert!(!access[0].is_write);
-    assert!(access[1].is_write);
-}
-
-#[test]
-fn access_rows_null_read() {
-    let wg = make_wg();
-
-    let result = BatchResult {
-        read_set_old: vec![(ck(1, 0, 5), None)],
-        write_set_final: vec![],
-        txs: vec![TxResult::success(
-            vec![null_read_event(1, 0, 5, 1, 0)],
-            vec![],
-        )],
-    };
-    let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [empty_column_state(1, 0)].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
-
-    let access = &witness.columns[0].access_rows;
-    assert_eq!(access.len(), 1);
-    assert!(access[0].val_is_null);
-}
-
-#[test]
-fn access_rows_time_carried_through() {
-    let wg = make_wg();
-
-    let result = BatchResult {
-        read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        write_set_final: vec![],
-        txs: vec![TxResult::success(
-            vec![read_event(1, 0, 1, 10, 42, 0)],
-            vec![],
-        )],
-    };
-    let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
-
-    assert_eq!(witness.columns[0].access_rows[0].time, 42);
-}
-
-#[test]
-fn access_rows_multi_tx() {
-    let wg = make_wg();
-
+fn access_rows_preserve_event_order_and_metadata() {
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(30)))],
@@ -207,130 +109,134 @@ fn access_rows_multi_tx() {
         ],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
+    let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    let access = &witness.columns[0].access_rows;
+    let access = &prepared.access_rows_by_col[&(t(1), c(0))];
     assert_eq!(access.len(), 4);
+    assert!(!access[0].is_write);
+    assert!(access[1].is_write);
     assert_eq!(access[0].tx_index, 0);
     assert_eq!(access[3].tx_index, 1);
+    assert_eq!(access[0].time, 1);
+    assert_eq!(access[3].time, 4);
 }
 
-// -- Column witness tests --
-
 #[test]
-fn column_witness_single_write() {
-    let wg = make_wg();
-
+fn null_reads_remain_null_in_access_rows() {
     let result = BatchResult {
-        read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(20)))],
+        read_set_old: vec![(ck(1, 0, 5), None)],
+        write_set_final: vec![],
         txs: vec![TxResult::success(
-            vec![
-                read_event(1, 0, 1, 10, 1, 0),
-                write_event(1, 0, 1, 20, 2, 0),
-            ],
+            vec![null_read_event(1, 0, 5, 1, 0)],
             vec![],
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
+    let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    let col_w = &witness.columns[0];
-    assert!(col_w.meta.is_touched);
-    assert_ne!(col_w.meta.com_old, col_w.meta.com_new);
+    let access = &prepared.access_rows_by_col[&(t(1), c(0))];
+    assert_eq!(access.len(), 1);
+    assert!(access[0].val_is_null);
 }
 
 #[test]
-fn column_witness_delete() {
-    let wg = make_wg();
-
+fn writes_are_grouped_and_sorted() {
     let result = BatchResult {
-        read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        write_set_final: vec![(ck(1, 0, 1), None)],
+        read_set_old: vec![],
+        write_set_final: vec![
+            (ck(1, 0, 30), Some(Value::U64(3))),
+            (ck(1, 0, 10), Some(Value::U64(1))),
+            (ck(1, 0, 20), None),
+        ],
         txs: vec![TxResult::success(
             vec![
-                read_event(1, 0, 1, 10, 1, 0),
+                write_event(1, 0, 30, 3, 1, 0),
+                write_event(1, 0, 10, 1, 2, 0),
                 AccessEvent {
-                    key: ck(1, 0, 1),
+                    key: ck(1, 0, 20),
                     op: OpKind::Write,
                     value: Value::U64(0),
                     val_is_null: true,
-                    time: 2,
-                    effect_ordinal_in_tx: 1,
+                    time: 3,
+                    effect_ordinal_in_tx: 2,
                 },
             ],
             vec![],
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [column_state_with(1, 0, &[(1, 10)])].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
+    let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    let col_w = &witness.columns[0];
-    assert!(col_w.meta.is_touched);
-    assert!(!col_w.meta.is_empty_old);
-    assert!(col_w.meta.is_empty_new);
+    let writes = &prepared.writes_by_col[&(t(1), c(0))];
+    assert_eq!(
+        writes.iter().map(|(row, _)| row.0).collect::<Vec<_>>(),
+        vec![10, 20, 30]
+    );
+    assert!(writes[1].1.is_none());
 }
 
 #[test]
-fn column_witness_untouched() {
-    let wg = make_wg();
-
-    // Access col 0, but col 1 is untouched
+fn touched_columns_include_reads_and_writes_only() {
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
-        write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(20)))],
+        write_set_final: vec![(ck(1, 1, 2), Some(Value::U64(20)))],
         txs: vec![TxResult::success(
             vec![
                 read_event(1, 0, 1, 10, 1, 0),
-                write_event(1, 0, 1, 20, 2, 0),
+                write_event(1, 1, 2, 20, 2, 0),
             ],
             vec![],
         )],
     };
-    let schema = schemas(vec![u64_schema(1, &[0, 1])]);
-    let states: BTreeMap<_, _> = [
-        column_state_with(1, 0, &[(1, 10)]),
-        column_state_with(1, 1, &[(1, 99)]),
-    ]
-    .into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
+    let schema = schemas(vec![u64_schema(1, &[0, 1, 2])]);
+    let prepared = prepare(
+        &result,
+        &schema,
+        &[(t(1), c(0)), (t(1), c(1)), (t(1), c(2))],
+    );
 
-    assert_eq!(witness.columns.len(), 2);
-    let untouched = witness
-        .columns
-        .iter()
-        .find(|cw| cw.col == ColId(1))
-        .unwrap();
-    assert!(!untouched.meta.is_touched);
-    assert_eq!(untouched.meta.com_old, untouched.meta.com_new);
+    assert!(prepared.touched.contains(&(t(1), c(0))));
+    assert!(prepared.touched.contains(&(t(1), c(1))));
+    assert!(!prepared.touched.contains(&(t(1), c(2))));
+    assert!(prepared.type_map.contains_key(&(t(1), c(2))));
 }
 
-// -- ColumnMeta tests --
+#[test]
+fn missing_schema_returns_error() {
+    let preparer = make_preparer();
+    let result = BatchResult {
+        read_set_old: vec![],
+        write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
+        txs: vec![TxResult::success(
+            vec![write_event(1, 0, 1, 10, 1, 0)],
+            vec![],
+        )],
+    };
+    let schema = schemas(vec![]);
+
+    assert!(
+        preparer
+            .prepare_execution_inputs(&result, &schema, [(t(1), c(0))].iter())
+            .is_err()
+    );
+}
 
 #[test]
-fn column_meta_empty_to_nonempty() {
-    let wg = make_wg();
-
+fn touched_column_missing_from_planned_columns_returns_error() {
+    let preparer = make_preparer();
     let result = BatchResult {
-        read_set_old: vec![(ck(1, 0, 1), None)],
-        write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(42)))],
+        read_set_old: vec![],
+        write_set_final: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         txs: vec![TxResult::success(
-            vec![
-                null_read_event(1, 0, 1, 1, 0),
-                write_event(1, 0, 1, 42, 2, 0),
-            ],
+            vec![write_event(1, 0, 1, 10, 1, 0)],
             vec![],
         )],
     };
     let schema = schemas(vec![u64_schema(1, &[0])]);
-    let states: BTreeMap<_, _> = [empty_column_state(1, 0)].into();
-    let witness = wg.generate(&result, &schema, &states).unwrap();
+    let err = preparer
+        .prepare_execution_inputs(&result, &schema, std::iter::empty())
+        .err()
+        .expect("missing planned column error");
 
-    let meta = &witness.columns[0].meta;
-    assert!(meta.is_empty_old);
-    assert!(!meta.is_empty_new);
-    assert!(meta.is_touched);
+    assert!(err.to_string().contains("not in planned columns"));
 }

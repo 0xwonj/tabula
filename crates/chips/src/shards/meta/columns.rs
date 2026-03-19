@@ -36,6 +36,8 @@ pub struct MetaShardCols<T> {
     pub is_empty_new: T,
     /// Column was modified in this batch.
     pub is_touched: T,
+    /// Whether a scheme-owned state chip is expected to provide C6 commitments.
+    pub has_commitment_proof: T,
     /// How many Execution empty-col reads target this `(t,c)` (prover witness).
     pub empty_read_mult: T,
 

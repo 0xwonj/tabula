@@ -49,10 +49,12 @@ pub use execute::{BatchInput, CompiledBatchInput, ExecutedBatch, run_batch, run_
 pub use builder::RuntimeBuilder;
 #[cfg(feature = "prove")]
 pub use capabilities::PrecompileRegistration;
+#[cfg(feature = "prove")]
+pub use columns::{
+    BatchProofInput, ColumnProofInput, ColumnTransitionBackend, ColumnTransitionInput,
+};
 #[cfg(any(feature = "prove", feature = "verify"))]
 pub use columns::{ColumnPlan, ColumnSchemeFactory, ColumnViews, RuntimeColumn};
-#[cfg(feature = "prove")]
-pub use columns::ProofInputBuilder;
 #[cfg(any(feature = "prove", feature = "verify"))]
 pub use columns::{SmtScheme, SsmcScheme};
 #[cfg(any(feature = "prove", feature = "verify"))]

@@ -22,7 +22,10 @@ pub use load::{
     parse_program_definition,
 };
 pub use program::CompiledProgram;
-pub use register::{register_program, register_program_artifact, register_program_definition};
+pub use register::{
+    SchemeDescriptorCatalog, register_program, register_program_artifact,
+    register_program_definition, register_program_definition_with_scheme_catalog,
+};
 pub use sources::{ColumnSchemeSelection, ProgramDefinition};
 
 #[cfg(test)]
@@ -30,8 +33,10 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use tabula_artifact::ProgramArtifact;
-    use tabula_core::{SchemeId, TableId, TableSchema, TxTypeId, Value, ValueType};
+    use tabula_artifact::{ProgramArtifact, SchemeDescriptor};
+    use tabula_core::{
+        ColumnLayoutKind, RootProfileId, SchemeId, TableId, TableSchema, TxTypeId, Value, ValueType,
+    };
     use tabula_ir::{Instruction, ParamDef, RowExpr, ValueExpr};
 
     use tabula_contract::{
@@ -237,6 +242,7 @@ mod tests {
             .expect("compile sources")
             .as_program_artifact();
         program.column_proof_plan[0].scheme_id = SchemeId::SMT;
+        program.column_proof_plan[0].scheme_descriptor = SchemeDescriptor::builtin_smt();
 
         let compiled =
             register_program_artifact(&program).expect("artifact with explicit scheme plan");
@@ -274,9 +280,58 @@ mod tests {
         assert_eq!(program.column_schemes[1].col_id, tabula_core::ColId(1));
         assert_eq!(program.column_schemes[1].scheme_id, SchemeId(42));
 
-        let compiled = register_program_definition(&program).expect("register source");
+        let err = register_program_definition(&program).expect_err("custom scheme needs catalog");
+        match err {
+            CompilerError::InvalidProgram(source) => {
+                assert!(source.to_string().contains("custom scheme id 42"));
+            }
+            other => panic!("unexpected compiler error: {other}"),
+        }
+
+        let mut scheme_catalog = SchemeDescriptorCatalog::new();
+        scheme_catalog.insert(
+            SchemeId(42),
+            SchemeDescriptor {
+                scheme_id: SchemeId(42),
+                scheme_version: 1,
+                layout_kind: ColumnLayoutKind::SMT_V1,
+                params_hash: [0x42; 32],
+                root_profile_id: RootProfileId::SMT_V1,
+                supported_property_query_kinds: vec![],
+            },
+        );
+        let compiled = register_program_definition_with_scheme_catalog(&program, &scheme_catalog)
+            .expect("register source");
         assert_eq!(compiled.column_proof_plan()[0].scheme_id, SchemeId::SMT);
         assert_eq!(compiled.column_proof_plan()[1].scheme_id, SchemeId(42));
+    }
+
+    #[test]
+    fn register_program_definition_rejects_mismatched_custom_scheme_catalog_entry() {
+        let source = "table t { a: u64 @scheme(42) }\ntx noop() {}";
+        let program = compile_program_source(source).expect("compile source");
+
+        let mut scheme_catalog = SchemeDescriptorCatalog::new();
+        scheme_catalog.insert(
+            SchemeId(42),
+            SchemeDescriptor {
+                scheme_id: SchemeId(99),
+                scheme_version: 1,
+                layout_kind: ColumnLayoutKind::SMT_V1,
+                params_hash: [0x42; 32],
+                root_profile_id: RootProfileId::SMT_V1,
+                supported_property_query_kinds: vec![],
+            },
+        );
+
+        let err = register_program_definition_with_scheme_catalog(&program, &scheme_catalog)
+            .expect_err("catalog mismatch should fail");
+        match err {
+            CompilerError::InvalidProgram(source) => {
+                assert!(source.to_string().contains("catalog mismatch"));
+            }
+            other => panic!("unexpected compiler error: {other}"),
+        }
     }
 
     #[test]

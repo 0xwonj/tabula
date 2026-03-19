@@ -56,6 +56,10 @@ impl ProofColumn for TestSsmcProofColumn {
         ];
         let dyn_chips: Vec<Box<dyn DynChip>> = vec![Box::new(mem), Box::new(state), Box::new(meta)];
 
-        Ok(ColumnChipSet { airs, dyn_chips })
+        Ok(ColumnChipSet {
+            airs,
+            dyn_chips,
+            bus_consumers: vec![],
+        })
     }
 }

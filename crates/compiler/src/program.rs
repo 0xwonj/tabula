@@ -112,6 +112,15 @@ impl CompiledProgram {
 
         let mut actual = BTreeSet::new();
         for plan in &self.column_proof_plan {
+            if plan.scheme_descriptor.scheme_id != plan.scheme_id {
+                return Err(format!(
+                    "column proof plan descriptor mismatch for table {} col {}: scheme_id={} descriptor.scheme_id={}",
+                    plan.table_id.0,
+                    plan.col_id.0,
+                    plan.scheme_id.0,
+                    plan.scheme_descriptor.scheme_id.0,
+                ));
+            }
             let key = (plan.table_id, plan.col_id);
             if !actual.insert(key) {
                 return Err(format!(
@@ -148,7 +157,7 @@ impl CompiledProgram {
         Ok(self
             .column_proof_plan
             .iter()
-            .copied()
+            .cloned()
             .map(|plan| ((plan.table_id, plan.col_id), plan))
             .collect())
     }

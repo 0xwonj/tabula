@@ -13,7 +13,7 @@ mod state;
 pub use error::ArtifactError;
 
 // Program
-pub use program::{ColumnProofPlan, ProgramArtifact};
+pub use program::{ColumnProofPlan, ProgramArtifact, SchemeDescriptor};
 
 // State
 pub use state::{StateEntry, StateSnapshot, merge_output_state_entries, normalize_state};

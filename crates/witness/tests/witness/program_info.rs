@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_core::{ColId, RowKey, TableId, TxTypeId};
-use tabula_witness::witness::program_info::{LiteralCell, ProgramInfo, TemplateId};
+use tabula_witness::{LiteralCell, ProgramInfo, TemplateId};
 
 #[test]
 fn program_info_construction() {

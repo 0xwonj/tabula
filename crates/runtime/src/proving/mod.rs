@@ -1,7 +1,7 @@
 mod artifacts;
+mod prepare;
 mod statement;
 mod traces;
-mod witness;
 
 use serde::{Deserialize, Serialize};
 use tabula_machine::TabulaProof;
@@ -10,7 +10,6 @@ pub(crate) use artifacts::prepare_witness_artifacts;
 pub(crate) use statement::build_execution_statement;
 pub use statement::digest_to_hex;
 pub(crate) use traces::build_traces;
-pub(crate) use witness::{convert_batch, extract_column_identities};
 
 /// Inputs for the proving pipeline.
 ///

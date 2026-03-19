@@ -9,7 +9,6 @@ use tabula_commitment::{
 use tabula_core::TableId;
 use tabula_core::error::TabulaError;
 
-use crate::witness::BatchWitness;
 use tabula_chips::smt_path::trace::{SmtPathWitness, SmtTablePathWitness};
 use tabula_stark::air::statement::PublicStatement;
 
@@ -64,14 +63,14 @@ pub(super) fn validate_smt_path_shapes(
     Ok(())
 }
 
-/// Build a [`PublicStatement`] from batch witness state roots.
-pub(super) fn smt_table_public_statement<H>(witness: &BatchWitness<H>) -> PublicStatement
-where
-    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
-{
+/// Build a [`PublicStatement`] from batch proof state roots.
+pub(super) fn smt_table_public_statement(
+    old_root: &NativeDigest,
+    new_root: &NativeDigest,
+) -> PublicStatement {
     PublicStatement {
-        old_root: witness.old_state_root,
-        new_root: witness.new_state_root,
+        old_root: *old_root,
+        new_root: *new_root,
     }
 }
 

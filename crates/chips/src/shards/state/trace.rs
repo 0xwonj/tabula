@@ -374,6 +374,9 @@ use tabula_core::{ColId, TableId};
 use tabula_stark::trace::contributor::{TraceContributor, TracePhase, WitnessStore};
 use tabula_stark::trace::trace_map::TraceMap;
 
+use super::super::property::trace::{
+    PROPERTY_READ_WITNESS_LABEL, PropertyReadRecord, ssmc_property_anchor_multiplicities,
+};
 use super::super::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
 
 impl<const W: usize> TraceContributor for StateShardChip<W> {
@@ -393,8 +396,17 @@ impl<const W: usize> TraceContributor for StateShardChip<W> {
                     self.col_id()
                 ),
             })?;
-        let trace =
-            generate_state_shard_trace::<W>(self.table_id(), self.col_id(), &col_data.state_rows);
+        let property_claims = store
+            .get::<Vec<PropertyReadRecord>>(PROPERTY_READ_WITNESS_LABEL)
+            .cloned()
+            .unwrap_or_default();
+        let anchor_mults = ssmc_property_anchor_multiplicities::<W>(&property_claims, col_data)?;
+        let trace = generate_state_shard_trace_with_anchor_mults::<W>(
+            self.table_id(),
+            self.col_id(),
+            &col_data.state_rows,
+            &anchor_mults,
+        );
         map.insert(self.chip_id(), trace);
         Ok(())
     }
