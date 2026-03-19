@@ -29,7 +29,7 @@ mod state_root;
 #[cfg(feature = "stark")]
 pub use codec::{KoalaBearCodec, decode_trace, encode_trace, trace_width};
 #[cfg(feature = "stark")]
-pub use column_meta::{ColumnMeta, ColumnState, scheme_tags};
+pub use column_meta::{ColumnMeta, ColumnState, proof_column_commitment, scheme_tags};
 #[cfg(feature = "stark")]
 pub use field::{
     COL_DATA_SMT_DEPTH, COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_HASH_IR, DOMAIN_LEAF, DOMAIN_SMT,

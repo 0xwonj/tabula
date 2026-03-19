@@ -186,343 +186,23 @@ impl RuntimeBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use tabula_artifact::SchemeDescriptor;
     use tabula_compiler::register_program;
     use tabula_core::error::TabulaError;
-    use tabula_core::{
-        ColId, ColumnLayoutKind, RootProfileId, SchemeId, TableId, TableSchema, TxTypeId, ValueType,
-    };
+    use tabula_core::{ColId, SchemeId, TableId, TableSchema, TxTypeId, ValueType};
     use tabula_executor::precompile::PrecompileHandler;
-    use tabula_ir::{AggregateKind, Instruction, PrecompileId, PropertyQuery, TxTypeDef};
-    use tabula_machine::prelude::{ChipIdAllocator, DynChip};
-    use tabula_machine::{ChipExtension, ColumnChipSet, ProofColumn, SetupError};
+    use tabula_ir::{PrecompileId, TxTypeDef};
+    use tabula_machine::SetupError;
+    use tabula_testing::exec::compiled_program_from_artifact;
 
     use super::RuntimeBuilder;
     use crate::error::RuntimeError;
-    use crate::{
-        ColumnPlan, ColumnProofInput, ColumnSchemeFactory, ColumnTransitionBackend,
-        ColumnTransitionInput, ColumnViews, RuntimeColumn,
+    use crate::testing::fixtures::{
+        compiled_program_with_property_query, compiled_program_with_unsupported_property_query,
     };
-
-    fn custom_descriptor(scheme_id: SchemeId) -> SchemeDescriptor {
-        SchemeDescriptor {
-            scheme_id,
-            scheme_version: 1,
-            layout_kind: ColumnLayoutKind::SSMC_V1,
-            params_hash: [scheme_id.raw() as u8; 32],
-            root_profile_id: RootProfileId::SMT_V1,
-            supported_property_query_kinds: vec![],
-        }
-    }
-
-    fn unsupported_layout_descriptor(scheme_id: SchemeId) -> SchemeDescriptor {
-        SchemeDescriptor {
-            scheme_id,
-            scheme_version: 1,
-            layout_kind: ColumnLayoutKind(0x9000),
-            params_hash: [scheme_id.raw() as u8; 32],
-            root_profile_id: RootProfileId::SMT_V1,
-            supported_property_query_kinds: vec![],
-        }
-    }
-
-    fn compiled_program_with_property_query() -> tabula_compiler::CompiledProgram {
-        let schema = TableSchema {
-            id: TableId(1),
-            name: "accounts".to_string(),
-            columns: vec![tabula_core::ColumnDef {
-                id: ColId(0),
-                name: "balance".to_string(),
-                value_type: ValueType::U64,
-            }],
-        };
-        let tx = TxTypeDef {
-            id: TxTypeId(1),
-            name: "scan".to_string(),
-            param_schema: vec![],
-            body: vec![Instruction::PropertyRead {
-                dst_val: 0,
-                dst_key: 1,
-                dst_is_null: 2,
-                table: TableId(1),
-                col: ColId(0),
-                query: PropertyQuery::Successor {
-                    key: tabula_core::RowKey(0),
-                },
-            }],
-        };
-
-        register_program(&[schema], &[tx]).expect("register program")
-    }
-
-    fn compiled_program_with_unsupported_property_query() -> tabula_compiler::CompiledProgram {
-        let schema = TableSchema {
-            id: TableId(1),
-            name: "accounts".to_string(),
-            columns: vec![tabula_core::ColumnDef {
-                id: ColId(0),
-                name: "balance".to_string(),
-                value_type: ValueType::U64,
-            }],
-        };
-        let tx = TxTypeDef {
-            id: TxTypeId(1),
-            name: "scan".to_string(),
-            param_schema: vec![],
-            body: vec![Instruction::PropertyRead {
-                dst_val: 0,
-                dst_key: 1,
-                dst_is_null: 2,
-                table: TableId(1),
-                col: ColId(0),
-                query: PropertyQuery::Aggregate {
-                    kind: AggregateKind::Count,
-                },
-            }],
-        };
-
-        register_program(&[schema], &[tx]).expect("register program")
-    }
-
-    struct EmptyRuntimeColumn;
-
-    impl RuntimeColumn for EmptyRuntimeColumn {
-        fn name(&self) -> &str {
-            "empty"
-        }
-    }
-
-    struct EmptyProofColumn {
-        plan: ColumnPlan,
-    }
-
-    impl ProofColumn for EmptyProofColumn {
-        fn name(&self) -> &str {
-            "empty"
-        }
-
-        fn table_id(&self) -> TableId {
-            self.plan.table_id
-        }
-
-        fn col_id(&self) -> ColId {
-            self.plan.col_id
-        }
-
-        fn scheme_id(&self) -> SchemeId {
-            self.plan.scheme_id
-        }
-
-        fn create_chips(&self, _alloc: &mut ChipIdAllocator) -> Result<ColumnChipSet, SetupError> {
-            Ok(ColumnChipSet {
-                airs: vec![],
-                dyn_chips: vec![],
-                bus_consumers: vec![],
-            })
-        }
-    }
-
-    struct EmptyTransitionBackend {
-        plan: ColumnPlan,
-    }
-
-    impl EmptyTransitionBackend {
-        fn new(plan: ColumnPlan) -> Result<Self, SetupError> {
-            if plan.scheme_descriptor.layout_kind != ColumnLayoutKind::SSMC_V1 {
-                return Err(SetupError::SetupFailed(format!(
-                    "unsupported transition layout {}",
-                    plan.scheme_descriptor.layout_kind.0,
-                )));
-            }
-            Ok(Self { plan })
-        }
-    }
-
-    impl ColumnTransitionBackend for EmptyTransitionBackend {
-        fn name(&self) -> &str {
-            "empty"
-        }
-
-        fn table_id(&self) -> TableId {
-            self.plan.table_id
-        }
-
-        fn col_id(&self) -> ColId {
-            self.plan.col_id
-        }
-
-        fn scheme_id(&self) -> SchemeId {
-            self.plan.scheme_id
-        }
-
-        fn build_proof_input(
-            &self,
-            _input: ColumnTransitionInput,
-            _property_reads: &[tabula_witness::trace::builtin::PropertyReadRecord],
-        ) -> Result<ColumnProofInput, TabulaError> {
-            Err(TabulaError::ProofError {
-                phase: "runtime_builder_test",
-                detail: "empty transition backend should not be used in prove flow".to_string(),
-            })
-        }
-    }
-
-    struct EmptySchemeFactory;
-
-    impl ColumnSchemeFactory for EmptySchemeFactory {
-        fn descriptor(&self) -> SchemeDescriptor {
-            custom_descriptor(SchemeId(0x1000))
-        }
-
-        fn name(&self) -> &str {
-            "empty"
-        }
-
-        fn build_column(&self, plan: ColumnPlan) -> Result<ColumnViews, SetupError> {
-            Ok(ColumnViews::new(
-                Arc::new(EmptyRuntimeColumn),
-                Arc::new(EmptyProofColumn { plan: plan.clone() }),
-                Arc::new(EmptyTransitionBackend::new(plan)?),
-            ))
-        }
-    }
-
-    struct UnsupportedLayoutSchemeFactory;
-
-    impl ColumnSchemeFactory for UnsupportedLayoutSchemeFactory {
-        fn descriptor(&self) -> SchemeDescriptor {
-            unsupported_layout_descriptor(SchemeId(0x1000))
-        }
-
-        fn name(&self) -> &str {
-            "unsupported_layout"
-        }
-
-        fn build_column(&self, plan: ColumnPlan) -> Result<ColumnViews, SetupError> {
-            let transition = Arc::new(EmptyTransitionBackend::new(plan.clone())?);
-            Ok(ColumnViews::new(
-                Arc::new(EmptyRuntimeColumn),
-                Arc::new(EmptyProofColumn { plan: plan.clone() }),
-                transition,
-            ))
-        }
-    }
-
-    #[derive(Clone)]
-    struct UnsupportedPropertyRuntimeColumn;
-
-    impl RuntimeColumn for UnsupportedPropertyRuntimeColumn {
-        fn name(&self) -> &str {
-            "unsupported"
-        }
-    }
-
-    struct UnsupportedPropertyProofColumn {
-        plan: ColumnPlan,
-    }
-
-    impl ProofColumn for UnsupportedPropertyProofColumn {
-        fn name(&self) -> &str {
-            "unsupported"
-        }
-
-        fn table_id(&self) -> TableId {
-            self.plan.table_id
-        }
-
-        fn col_id(&self) -> ColId {
-            self.plan.col_id
-        }
-
-        fn scheme_id(&self) -> SchemeId {
-            self.plan.scheme_id
-        }
-
-        fn create_chips(&self, _alloc: &mut ChipIdAllocator) -> Result<ColumnChipSet, SetupError> {
-            Ok(ColumnChipSet {
-                airs: vec![],
-                dyn_chips: vec![],
-                bus_consumers: vec![],
-            })
-        }
-    }
-
-    struct UnsupportedPropertyTransitionBackend {
-        plan: ColumnPlan,
-    }
-
-    impl ColumnTransitionBackend for UnsupportedPropertyTransitionBackend {
-        fn name(&self) -> &str {
-            "unsupported"
-        }
-
-        fn table_id(&self) -> TableId {
-            self.plan.table_id
-        }
-
-        fn col_id(&self) -> ColId {
-            self.plan.col_id
-        }
-
-        fn scheme_id(&self) -> SchemeId {
-            self.plan.scheme_id
-        }
-
-        fn build_proof_input(
-            &self,
-            _input: ColumnTransitionInput,
-            _property_reads: &[tabula_witness::trace::builtin::PropertyReadRecord],
-        ) -> Result<ColumnProofInput, TabulaError> {
-            Err(TabulaError::ProofError {
-                phase: "runtime_builder_test",
-                detail: "unsupported transition backend should not be used in prove flow"
-                    .to_string(),
-            })
-        }
-    }
-
-    struct UnsupportedPropertySchemeFactory;
-
-    impl ColumnSchemeFactory for UnsupportedPropertySchemeFactory {
-        fn descriptor(&self) -> SchemeDescriptor {
-            custom_descriptor(SchemeId(0x1001))
-        }
-
-        fn name(&self) -> &str {
-            "unsupported"
-        }
-
-        fn build_column(&self, plan: ColumnPlan) -> Result<ColumnViews, SetupError> {
-            if !plan.required_property_query_kinds.is_empty() {
-                return Err(SetupError::SetupFailed(
-                    "unsupported property query".to_string(),
-                ));
-            }
-            Ok(ColumnViews::new(
-                Arc::new(UnsupportedPropertyRuntimeColumn),
-                Arc::new(UnsupportedPropertyProofColumn { plan: plan.clone() }),
-                Arc::new(UnsupportedPropertyTransitionBackend { plan }),
-            ))
-        }
-    }
-
-    struct DummyVerifierExtension;
-
-    impl ChipExtension for DummyVerifierExtension {
-        fn name(&self) -> &str {
-            "dummy_verifier"
-        }
-
-        fn airs(&self) -> Vec<Box<dyn tabula_machine::AnyRap>> {
-            vec![]
-        }
-
-        fn dyn_chips(&self) -> Vec<Box<dyn DynChip>> {
-            vec![]
-        }
-    }
+    use crate::testing::prove::{
+        DummyVerifierExtension, EmptySchemeFactory, UnsupportedLayoutSchemeFactory,
+        UnsupportedPropertySchemeFactory, custom_descriptor, unsupported_layout_descriptor,
+    };
 
     #[test]
     fn custom_scheme_factory_resolves_transition_backend() {
@@ -547,7 +227,7 @@ mod tests {
         let mut artifact = compiled.into_program_artifact();
         artifact.column_proof_plan[0].scheme_id = SchemeId(0x1000);
         artifact.column_proof_plan[0].scheme_descriptor = custom_descriptor(SchemeId(0x1000));
-        let compiled = tabula_compiler::register_program_artifact(&artifact).expect("compiled");
+        let compiled = compiled_program_from_artifact(&artifact);
 
         let runtime = RuntimeBuilder::new(compiled)
             .with_scheme(EmptySchemeFactory)
@@ -587,7 +267,7 @@ mod tests {
         artifact.column_proof_plan[0].scheme_id = SchemeId(0x1000);
         artifact.column_proof_plan[0].scheme_descriptor =
             unsupported_layout_descriptor(SchemeId(0x1000));
-        let compiled = tabula_compiler::register_program_artifact(&artifact).expect("compiled");
+        let compiled = compiled_program_from_artifact(&artifact);
 
         let err = RuntimeBuilder::new(compiled)
             .with_scheme(UnsupportedLayoutSchemeFactory)
@@ -649,7 +329,7 @@ mod tests {
         let mut artifact = compiled.into_program_artifact();
         artifact.column_proof_plan[0].scheme_id = SchemeId(0x1000);
         artifact.column_proof_plan[0].scheme_descriptor = custom_descriptor(SchemeId(0x1000));
-        let compiled = tabula_compiler::register_program_artifact(&artifact).expect("compiled");
+        let compiled = compiled_program_from_artifact(&artifact);
 
         let err = RuntimeBuilder::new(compiled)
             .build()
@@ -668,7 +348,7 @@ mod tests {
         let mut artifact = compiled.into_program_artifact();
         artifact.column_proof_plan[0].scheme_id = SchemeId(0x1001);
         artifact.column_proof_plan[0].scheme_descriptor = custom_descriptor(SchemeId(0x1001));
-        let compiled = tabula_compiler::register_program_artifact(&artifact).expect("compiled");
+        let compiled = compiled_program_from_artifact(&artifact);
 
         let err = RuntimeBuilder::new(compiled)
             .with_scheme(UnsupportedPropertySchemeFactory)

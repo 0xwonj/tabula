@@ -1,4 +1,6 @@
 use super::*;
+use tabula_testing::fixtures::cases::touch_trace_case;
+use tabula_testing::witness::{build_trace_map, compile_execute_case, prepare_execution_inputs};
 
 fn validate_intra_tier(trace_map: &tabula_stark::trace::TraceMap) {
     let chips = tabula_chips::core_dyn_chips();
@@ -158,72 +160,9 @@ fn trace_builder_builds_and_validates_all_chip_bundle() {
 
 #[test]
 fn trace_builder_dsl_execute_all_chip_e2e() {
-    let source = "\
-table accounts { balance: u64 }
-tx touch(id: u64) {
-    let bal = accounts[id].balance
-    accounts[id].balance = bal
-}";
-    let compiled = compile(source).expect("DSL source should compile for e2e test");
-
-    let mut program = Program::new();
-    for schema in &compiled.schemas {
-        program.add_schema(schema.clone());
-    }
-    for tx in &compiled.tx_types {
-        program
-            .register(tx.clone())
-            .expect("compiled tx must register");
-    }
-
-    let batch = Batch {
-        transactions: vec![Transaction {
-            tx_type: TxTypeId(0),
-            params: vec![Value::U64(10)],
-            sender: [7u8; 32],
-            nonce: 0,
-            signature: vec![],
-        }],
-    };
-
-    let mut snapshot = InMemoryState::new();
-    snapshot.set(
-        CellKey {
-            table: TableId(0),
-            col: ColId(0),
-            row: RowKey(10),
-        },
-        Value::U64(50),
-    );
-
-    let hasher = PoseidonHasher::new();
-    let static_tables = InMemoryStaticTables::new();
-    let property_queries = tabula_executor::property::PropertyQueryRegistry::new();
-    let env = BatchEnv {
-        hasher: &hasher,
-        sig_verifier: &NoopSigVerifier,
-        nonce_policy: &SequentialNonce,
-        static_tables: &static_tables,
-        precompiles: None,
-        committed_state: None,
-        property_queries: &property_queries,
-    };
-    let execution_result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
-        .expect("batch execution should succeed");
-
-    let schemas_by_id: BTreeMap<TableId, tabula_core::TableSchema> = compiled
-        .schemas
-        .iter()
-        .cloned()
-        .map(|s| (s.id, s))
-        .collect();
-    let prepared = ExecutionInputPreparer::new(PoseidonHasher::new())
-        .prepare_execution_inputs(
-            &execution_result,
-            &schemas_by_id,
-            [(TableId(0), ColId(0))].iter(),
-        )
-        .expect("prepared inputs");
+    let case = touch_trace_case();
+    let setup = compile_execute_case(&case);
+    let prepared = prepare_execution_inputs(&setup).expect("prepared inputs");
     assert_eq!(
         prepared.access_rows_by_col[&(TableId(0), ColId(0))].len(),
         2
@@ -237,52 +176,8 @@ tx touch(id: u64) {
         1
     );
 
-    let old_entries = vec![(RowKey(10), encode_u64(50))];
-    let (old_state, _) = ColumnState::commit(
-        &PoseidonHasher::new(),
-        TableId(0),
-        ColId(0),
-        old_entries,
-        scheme_tags::SSMC,
-    )
-    .unwrap();
-    let writes = prepared.writes_by_col[&(TableId(0), ColId(0))].clone();
-    let meta = build_ssmc_meta(
-        &PoseidonHasher::new(),
-        TableId(0),
-        ColId(0),
-        &old_state,
-        &writes,
-        true,
-    );
-    let (old_state_root, new_state_root) = roots_from_metas(std::slice::from_ref(&meta));
-    let (smt_col_paths, smt_table_paths) = build_smt_paths_from_metas(
-        std::slice::from_ref(&meta),
-        &old_state_root,
-        &new_state_root,
-    );
-
-    let execution_records = lower_execution_records::<3>(&execution_result, &schemas_by_id)
-        .expect("execution record lowering");
-
-    let builder = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(BuiltinTraceContext {
-        column_metas: std::slice::from_ref(&meta),
-        old_state_root: &old_state_root,
-        new_state_root: &new_state_root,
-    });
-    let store = builder
-        .populate_store(AllTraceInputs {
-            execution_records: &execution_records,
-            static_table_rows: &[],
-            smt_col_paths: &smt_col_paths,
-            smt_table_paths: &smt_table_paths,
-        })
-        .expect("witness store")
-        .store;
-    let chips = tabula_chips::core_dyn_chips();
-    let consumers = tabula_chips::core_bus_consumers();
-    let trace_map = tabula_witness::trace::build_all_traces(&chips, &consumers, store)
-        .expect("all-chip trace assembly from execution result should succeed");
+    let trace_map =
+        build_trace_map::<3>(&setup).expect("all-chip trace assembly from execution result");
 
     validate_intra_tier(&trace_map);
 }

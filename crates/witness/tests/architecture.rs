@@ -31,6 +31,27 @@ fn root_surface_does_not_reexport_legacy_witness_types() {
         !lib.contains("WitnessGenerator"),
         "legacy WitnessGenerator must not be re-exported from crate root"
     );
+    for forbidden in [
+        "BuiltinTraceBuilder",
+        "BuiltinTraceContext",
+        "BuiltinWitnessInputs",
+        "AllTraceInputs",
+        "proof_column_commitment",
+        "ExecutionInputPreparer",
+    ] {
+        assert!(
+            !lib.contains(forbidden),
+            "broad convenience re-export '{forbidden}' must not remain at crate root"
+        );
+    }
+    assert!(
+        lib.contains("pub use prepare::{BatchInputPreparer, PreparedExecutionInputs};"),
+        "root must expose the minimal preparation seam"
+    );
+    assert!(
+        lib.contains("pub use witness::{AccessRow, InitRow};"),
+        "root must expose shared execution row types"
+    );
 }
 
 #[test]
@@ -43,9 +64,19 @@ fn builtin_memory_surface_exports_from_parts_only() {
         "legacy memory helper namespace must be removed"
     );
     assert!(
-        builtin.contains(
-            "pub mod memory {\n    pub use super::memory_impl::{\n        prepare_memory_shard_rows_from_parts, prepare_meta_shard_row_from_parts,\n        prepare_ssmc_column_witness_from_parts,\n    };\n}"
-        ),
-        "builtin memory surface must expose only part-based helpers"
+        builtin.contains("prepare_memory_shard_rows_from_parts"),
+        "builtin memory surface must expose shared memory helpers"
+    );
+    assert!(
+        builtin.contains("prepare_meta_shard_row_from_parts"),
+        "builtin memory surface must expose meta-row helpers"
+    );
+    assert!(
+        builtin.contains("prepare_ssmc_column_witness_from_parts"),
+        "builtin memory surface must expose SSMC assembly from explicit parts"
+    );
+    assert!(
+        builtin.contains("SsmcColumnWitnessParts"),
+        "builtin memory surface must expose the explicit SSMC witness-parts bundle"
     );
 }

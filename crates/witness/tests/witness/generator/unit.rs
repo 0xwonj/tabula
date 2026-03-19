@@ -176,7 +176,7 @@ fn writes_are_grouped_and_sorted() {
 }
 
 #[test]
-fn touched_columns_include_reads_and_writes_only() {
+fn written_columns_include_effective_writes_only() {
     let result = BatchResult {
         read_set_old: vec![(ck(1, 0, 1), Some(Value::U64(10)))],
         write_set_final: vec![(ck(1, 1, 2), Some(Value::U64(20)))],
@@ -195,9 +195,9 @@ fn touched_columns_include_reads_and_writes_only() {
         &[(t(1), c(0)), (t(1), c(1)), (t(1), c(2))],
     );
 
-    assert!(prepared.touched.contains(&(t(1), c(0))));
-    assert!(prepared.touched.contains(&(t(1), c(1))));
-    assert!(!prepared.touched.contains(&(t(1), c(2))));
+    assert!(!prepared.written_columns.contains(&(t(1), c(0))));
+    assert!(prepared.written_columns.contains(&(t(1), c(1))));
+    assert!(!prepared.written_columns.contains(&(t(1), c(2))));
     assert!(prepared.type_map.contains_key(&(t(1), c(2))));
 }
 
@@ -222,7 +222,7 @@ fn missing_schema_returns_error() {
 }
 
 #[test]
-fn touched_column_missing_from_planned_columns_returns_error() {
+fn written_column_missing_from_planned_columns_returns_error() {
     let preparer = make_preparer();
     let result = BatchResult {
         read_set_old: vec![],
@@ -235,8 +235,7 @@ fn touched_column_missing_from_planned_columns_returns_error() {
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let err = preparer
         .prepare_execution_inputs(&result, &schema, std::iter::empty())
-        .err()
-        .expect("missing planned column error");
+        .expect_err("missing planned column error");
 
     assert!(err.to_string().contains("not in planned columns"));
 }

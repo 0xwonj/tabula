@@ -10,6 +10,8 @@
 //! It sits between the executor (zero-crypto deterministic VM) and
 //! the machine (advanced STARK backend). It assembles the execution pipeline:
 //! normalize state -> build snapshot -> execute -> consistency check -> merge.
+//! Runtime-owned transition backends turn shared execution rows into
+//! per-column proof inputs before the machine sees prepared traces only.
 //!
 //! ```text
 //! compiler (compile/load/register) -> runtime (execute/prove) -> machine (STARK)
@@ -39,6 +41,8 @@ mod program;
 mod proving;
 #[cfg(feature = "prove")]
 mod runtime;
+#[cfg(test)]
+mod testing;
 #[cfg(feature = "verify")]
 mod verifier;
 

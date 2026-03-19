@@ -25,6 +25,24 @@ use tabula_chips::shards::meta::trace::MetaShardRow;
 use tabula_chips::shards::ssmc::SsmcColumnWitness;
 use tabula_chips::shards::state::trace::StateShardRow;
 
+/// Explicit parts needed to assemble one SSMC column witness.
+pub struct SsmcColumnWitnessParts<'a> {
+    /// Column identity `(table, col)`.
+    pub column: (TableId, ColId),
+    /// Shared init rows derived from the executor read-set.
+    pub init_rows: &'a [crate::witness::InitRow],
+    /// Shared access rows derived from execution events.
+    pub access_rows: &'a [crate::witness::AccessRow],
+    /// Old committed entries keyed by row.
+    pub old_entries: &'a BTreeMap<tabula_core::RowKey, Vec<KoalaBear>>,
+    /// New committed entries keyed by row.
+    pub new_entries: &'a BTreeMap<tabula_core::RowKey, Vec<KoalaBear>>,
+    /// Verifier-visible column metadata.
+    pub meta: &'a tabula_commitment::ColumnMeta,
+    /// Whether the scheme emits a commitment proof row for this column.
+    pub has_commitment_proof: bool,
+}
+
 /// Prepare the shared MemoryShard rows for one committed column from explicit parts.
 pub fn prepare_memory_shard_rows_from_parts<const W: usize>(
     table: TableId,
@@ -68,31 +86,29 @@ pub fn prepare_meta_shard_row_from_parts(
 
 /// Prepare SSMC shard witness rows from explicit column parts.
 pub fn prepare_ssmc_column_witness_from_parts<const W: usize>(
-    column: (TableId, ColId),
-    init_rows: &[crate::witness::InitRow],
-    access_rows: &[crate::witness::AccessRow],
-    old_entries: &BTreeMap<tabula_core::RowKey, Vec<KoalaBear>>,
-    new_entries: &BTreeMap<tabula_core::RowKey, Vec<KoalaBear>>,
-    meta: &tabula_commitment::ColumnMeta,
-    has_commitment_proof: bool,
+    parts: &SsmcColumnWitnessParts<'_>,
 ) -> Result<SsmcColumnWitness, TabulaError> {
-    let (table, col) = column;
+    let (table, col) = parts.column;
     let memory_rows =
-        prepare_memory_shard_rows_from_parts::<W>(table, col, init_rows, access_rows)?;
+        prepare_memory_shard_rows_from_parts::<W>(table, col, parts.init_rows, parts.access_rows)?;
 
     let mut sc_rows = build_state_rows_for_parts::<W>(
         table,
         col,
-        access_rows,
-        old_entries,
-        new_entries,
-        meta.is_touched,
+        parts.access_rows,
+        parts.old_entries,
+        parts.new_entries,
+        parts.meta.is_touched,
     )?;
     sort_state_rows(&mut sc_rows);
     populate_state_chain_accumulators::<W>(&mut sc_rows);
 
     let state_rows: Vec<StateShardRow> = sc_rows.into_iter().map(StateShardRow::from).collect();
-    let meta_row = prepare_meta_shard_row_from_parts(meta, access_rows, has_commitment_proof);
+    let meta_row = prepare_meta_shard_row_from_parts(
+        parts.meta,
+        parts.access_rows,
+        parts.has_commitment_proof,
+    );
 
     Ok(SsmcColumnWitness {
         memory_rows,

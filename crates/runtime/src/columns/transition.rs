@@ -57,7 +57,7 @@ pub struct ColumnTransitionInput {
     pub access_rows: Vec<AccessRow>,
     /// Final coalesced writes for this column.
     pub writes: Vec<(RowKey, Option<Vec<KoalaBear>>)>,
-    /// Whether the column was touched by this batch.
+    /// Whether this batch contains at least one effective final write for the column.
     pub is_touched: bool,
 }
 

@@ -9,7 +9,8 @@ use super::meta::trace::MetaShardRow;
 pub struct SharedColumnWitness {
     /// Memory shard rows for this column.
     pub memory_rows: Vec<MemoryShardRow>,
-    /// Meta shard row for this column, or `None` for a trivial trace.
+    /// Meta shard row for this column, or `None` when the scheme emits no
+    /// verifier-visible meta work for an untouched trivial case.
     pub meta_row: Option<MetaShardRow>,
 }
 

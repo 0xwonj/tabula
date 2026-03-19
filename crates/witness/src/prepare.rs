@@ -17,11 +17,14 @@ use crate::{AccessRow, InitRow};
 /// Per-column writes: `(row_key, encoded_value)` pairs. `None` = delete.
 pub type EncodedColumnWrites = Vec<(RowKey, Option<Vec<KoalaBear>>)>;
 
+/// Per-column write-set map keyed by `(table, col)`.
+pub type EncodedColumnWritesByColumn = BTreeMap<(TableId, ColId), EncodedColumnWrites>;
+
 /// Shared execution-derived inputs used by runtime-owned transition backends.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PreparedExecutionInputs {
-    /// Columns touched by reads, writes, or execution events in this batch.
-    pub touched: BTreeSet<(TableId, ColId)>,
+    /// Columns with at least one effective final write in this batch.
+    pub written_columns: BTreeSet<(TableId, ColId)>,
     /// Schema-derived value types for every planned column.
     pub type_map: BTreeMap<(TableId, ColId), ValueType>,
     /// Base-state init rows grouped by column.
@@ -29,7 +32,7 @@ pub struct PreparedExecutionInputs {
     /// Access rows grouped by column in execution order.
     pub access_rows_by_col: BTreeMap<(TableId, ColId), Vec<AccessRow>>,
     /// Final coalesced writes grouped by column.
-    pub writes_by_col: BTreeMap<(TableId, ColId), EncodedColumnWrites>,
+    pub writes_by_col: EncodedColumnWritesByColumn,
 }
 
 /// Minimal public helper for runtime-owned proof-input preparation.
@@ -37,12 +40,12 @@ pub struct PreparedExecutionInputs {
 /// This surface intentionally exposes only the shared execution-row
 /// preparation and state-root helpers used by runtime-owned transition
 /// backends.
-pub struct ExecutionInputPreparer<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> {
+pub struct BatchInputPreparer<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> {
     hasher: H,
     codec: KoalaBearCodec,
 }
 
-impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> ExecutionInputPreparer<H> {
+impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> BatchInputPreparer<H> {
     /// Create a new preparer with the given field hasher.
     pub fn new(hasher: H) -> Self {
         Self {
@@ -59,14 +62,14 @@ impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> ExecutionInputPrepare
         all_columns: impl IntoIterator<Item = &'a (TableId, ColId)>,
     ) -> Result<PreparedExecutionInputs, TabulaError> {
         let all_columns: BTreeSet<(TableId, ColId)> = all_columns.into_iter().copied().collect();
-        let touched = Self::collect_touched(result);
+        let written_columns = Self::collect_written_columns(result);
 
-        for tc in &touched {
+        for tc in &written_columns {
             if !all_columns.contains(tc) {
                 return Err(TabulaError::ProofError {
                     phase: "witness",
                     detail: format!(
-                        "touched column ({:?}, {:?}) not in planned columns",
+                        "written column ({:?}, {:?}) not in planned columns",
                         tc.0, tc.1
                     ),
                 });
@@ -79,7 +82,7 @@ impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> ExecutionInputPrepare
         let writes_by_col = self.group_writes(result, &type_map)?;
 
         Ok(PreparedExecutionInputs {
-            touched,
+            written_columns,
             type_map,
             init_rows_by_col,
             access_rows_by_col,
@@ -121,16 +124,13 @@ impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> ExecutionInputPrepare
         )
     }
 
-    /// Collect all `(table, col)` pairs touched by events or writes.
-    fn collect_touched(result: &BatchResult) -> BTreeSet<(TableId, ColId)> {
-        let mut touched = BTreeSet::new();
-        for event in result.successful_events() {
-            touched.insert((event.key.table, event.key.col));
-        }
+    /// Collect all `(table, col)` pairs with at least one effective final write.
+    fn collect_written_columns(result: &BatchResult) -> BTreeSet<(TableId, ColId)> {
+        let mut written = BTreeSet::new();
         for (key, _) in &result.write_set_final {
-            touched.insert((key.table, key.col));
+            written.insert((key.table, key.col));
         }
-        touched
+        written
     }
 
     /// Build a `(table, col) -> ValueType` mapping from schemas.
@@ -228,8 +228,8 @@ impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> ExecutionInputPrepare
         &self,
         result: &BatchResult,
         type_map: &BTreeMap<(TableId, ColId), ValueType>,
-    ) -> Result<BTreeMap<(TableId, ColId), EncodedColumnWrites>, TabulaError> {
-        let mut grouped: BTreeMap<(TableId, ColId), EncodedColumnWrites> = BTreeMap::new();
+    ) -> Result<EncodedColumnWritesByColumn, TabulaError> {
+        let mut grouped: EncodedColumnWritesByColumn = BTreeMap::new();
 
         for (key, value) in &result.write_set_final {
             let tc = (key.table, key.col);

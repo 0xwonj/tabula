@@ -6,10 +6,7 @@ use std::sync::Arc;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
-use tabula_artifact::{
-    ProgramArtifact, SchemeDescriptor, StateEntry, StateSnapshot, TransactionBatch,
-    TransactionInput,
-};
+use tabula_artifact::{ProgramArtifact, SchemeDescriptor, StateEntry, StateSnapshot};
 use tabula_chips::shards::memory::MemoryShardChip;
 use tabula_chips::shards::meta::MetaShardChip;
 use tabula_chips::shards::property::SsmcPropertyChip;
@@ -22,12 +19,9 @@ use tabula_chips::shards::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
 use tabula_chips::shards::state::StateShardChip;
 use tabula_commitment::{
     COL_DATA_SMT_DEPTH, ColumnMeta, ColumnState, FieldHasher, NativeDigest, PoseidonHasher,
-    scheme_tags,
+    proof_column_commitment, scheme_tags,
 };
-use tabula_compiler::{
-    SchemeDescriptorCatalog, compile_program_source, register_program, register_program_artifact,
-    register_program_definition_with_scheme_catalog,
-};
+use tabula_compiler::{SchemeDescriptorCatalog, register_program};
 use tabula_core::error::TabulaError;
 use tabula_core::{
     CellKey, ColId, ColumnDef, ColumnLayoutKind, PropertyQueryResult, RootProfileId, RowKey,
@@ -44,12 +38,17 @@ use tabula_stark::air::interaction::BusId;
 use tabula_stark::debug::RecordedInteraction;
 use tabula_stark::trace::BusConsumer;
 use tabula_stark::trace::WitnessStore;
+use tabula_testing::exec::{
+    compiled_program_from_artifact, program_artifact_from_source_with_catalog,
+};
+use tabula_testing::fixtures::batch::{no_param_batch, single_tx_batch};
+use tabula_testing::fixtures::state::single_cell_u64;
 use tabula_witness::trace::builtin::PropertyReadRecord as BuiltinPropertyReadRecord;
 use tabula_witness::trace::builtin::memory::{
-    prepare_memory_shard_rows_from_parts, prepare_meta_shard_row_from_parts,
-    prepare_ssmc_column_witness_from_parts,
+    SsmcColumnWitnessParts, prepare_memory_shard_rows_from_parts,
+    prepare_meta_shard_row_from_parts, prepare_ssmc_column_witness_from_parts,
 };
-use tabula_witness::{AccessRow, InitRow, proof_column_commitment};
+use tabula_witness::{AccessRow, InitRow};
 
 const INDEXED_SCHEME_ID: SchemeId = SchemeId(0x4301);
 const ORDERBOOK_SCHEME_ID: SchemeId = SchemeId(0x4302);
@@ -95,39 +94,6 @@ fn profile(
     }
 }
 
-fn single_column_state(value: u64) -> StateSnapshot {
-    StateSnapshot {
-        cells: vec![StateEntry {
-            table: 0,
-            row: 0,
-            col: 0,
-            value: Some(Value::U64(value)),
-        }],
-    }
-}
-
-fn single_tx_batch(amount: u64) -> TransactionBatch {
-    TransactionBatch {
-        transactions: vec![TransactionInput {
-            tx_type: 0,
-            params: vec![Value::U64(amount)],
-            sender: "01".repeat(32),
-            nonce: 0,
-        }],
-    }
-}
-
-fn no_param_batch() -> TransactionBatch {
-    TransactionBatch {
-        transactions: vec![TransactionInput {
-            tx_type: 1,
-            params: vec![],
-            sender: "01".repeat(32),
-            nonce: 0,
-        }],
-    }
-}
-
 fn source_artifact_for_scheme(
     scheme_id: SchemeId,
     descriptor: &SchemeDescriptor,
@@ -145,12 +111,9 @@ tx bump(amount: u64) {{
 ",
         scheme_id.0
     );
-    let definition = compile_program_source(&source).expect("compile source");
     let mut catalog = SchemeDescriptorCatalog::new();
     catalog.insert(scheme_id, descriptor.clone());
-    register_program_definition_with_scheme_catalog(&definition, &catalog)
-        .expect("register custom scheme source")
-        .into_program_artifact()
+    program_artifact_from_source_with_catalog(&source, &catalog)
 }
 
 fn orderbook_artifact(descriptor: &SchemeDescriptor) -> ProgramArtifact {
@@ -702,15 +665,18 @@ impl<const W: usize> ColumnTransitionBackend for OrderedTransitionBackend<W> {
             synthesize_old_init_rows(input.table, input.col, &old_state)?
         };
 
-        let column_witness = prepare_ssmc_column_witness_from_parts::<W>(
-            (input.table, input.col),
-            &init_rows,
-            &input.access_rows,
-            &ordered_entries(&old_state)?,
-            &ordered_entries(&new_state)?,
-            &meta,
-            true,
-        )?;
+        let old_entries = ordered_entries(&old_state)?;
+        let new_entries = ordered_entries(&new_state)?;
+        let column_witness =
+            prepare_ssmc_column_witness_from_parts::<W>(&SsmcColumnWitnessParts {
+                column: (input.table, input.col),
+                init_rows: &init_rows,
+                access_rows: &input.access_rows,
+                old_entries: &old_entries,
+                new_entries: &new_entries,
+                meta: &meta,
+                has_commitment_proof: true,
+            })?;
 
         let mut store = WitnessStore::new();
         store.put(
@@ -999,15 +965,15 @@ fn indexed_merkle_like_scheme_flows_from_source_catalog_and_public_seam() {
         INDEXED_LAYOUT
     );
 
-    let compiled = register_program_artifact(&artifact).expect("compiled program");
+    let compiled = compiled_program_from_artifact(&artifact);
     let runtime = TabulaRuntime::builder(compiled)
         .with_scheme(SparseNativeScheme::<3>::new(profile.clone()))
         .expect("register indexed-merkle-like scheme")
         .build()
         .expect("runtime");
 
-    let state = single_column_state(10);
-    let batch = single_tx_batch(5);
+    let state = single_cell_u64(TableId(0), ColId(0), RowKey(0), 10);
+    let batch = single_tx_batch(0, vec![Value::U64(5)]);
     let executed = runtime.execute(&state, &batch).expect("execution succeeds");
     let proved = runtime
         .prove(&ProveInput {
@@ -1044,7 +1010,7 @@ fn orderbook_like_scheme_proves_structural_property_reads_via_public_seam() {
         ORDERBOOK_LAYOUT
     );
 
-    let compiled = register_program_artifact(&artifact).expect("compiled program");
+    let compiled = compiled_program_from_artifact(&artifact);
     let runtime = TabulaRuntime::builder(compiled)
         .with_scheme(OrderedNativeScheme::<3>::new(profile.clone()))
         .expect("register orderbook-like scheme")
@@ -1067,7 +1033,7 @@ fn orderbook_like_scheme_proves_structural_property_reads_via_public_seam() {
             },
         ],
     };
-    let batch = no_param_batch();
+    let batch = no_param_batch(1);
     let executed = runtime.execute(&state, &batch).expect("execution succeeds");
     let proved = runtime
         .prove(&ProveInput {
@@ -1099,7 +1065,7 @@ fn merkle_fri_like_scheme_accepts_extra_bus_consumer_without_shared_path_changes
         0x33,
     );
     let artifact = source_artifact_for_scheme(profile.descriptor.scheme_id, &profile.descriptor);
-    let compiled = register_program_artifact(&artifact).expect("compiled program");
+    let compiled = compiled_program_from_artifact(&artifact);
 
     let runtime = TabulaRuntime::builder(compiled)
         .with_scheme(SparseNativeScheme::<3>::new(profile.clone()))
@@ -1107,8 +1073,8 @@ fn merkle_fri_like_scheme_accepts_extra_bus_consumer_without_shared_path_changes
         .build()
         .expect("runtime");
 
-    let state = single_column_state(7);
-    let batch = single_tx_batch(8);
+    let state = single_cell_u64(TableId(0), ColId(0), RowKey(0), 7);
+    let batch = single_tx_batch(0, vec![Value::U64(8)]);
     let executed = runtime.execute(&state, &batch).expect("execution succeeds");
     let proved = runtime
         .prove(&ProveInput {

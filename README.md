@@ -193,6 +193,27 @@ TABULA_DAEMON_TOKEN=secret cargo run -p tabula-daemon -- \
 trunk serve --manifest-path crates/web/Cargo.toml
 ```
 
+## Testing
+
+CI uses `cargo nextest` for test binaries and `cargo test --doc` for doctests.
+
+```sh
+# Optional: install nextest for local parity with CI
+cargo install cargo-nextest --locked
+
+# Shared testing infra
+cargo nextest run -p tabula-testing
+
+# Proving/runtime path
+cargo nextest run -p tabula-runtime --features prove
+
+# Doctests
+cargo test --workspace --doc
+```
+
+Testing conventions and layer boundaries are documented in
+[`docs/design/testing-architecture.md`](docs/design/testing-architecture.md).
+
 ## License
 
 MIT OR Apache-2.0

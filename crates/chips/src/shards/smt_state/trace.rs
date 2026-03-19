@@ -37,7 +37,8 @@ pub struct SmtStatePathWitness<const W: usize> {
     pub old_is_null: bool,
     /// Whether the new key is absent.
     pub new_is_null: bool,
-    /// Whether this path corresponds to a final write.
+    /// Whether this path corresponds to a final write. Read-only paths still
+    /// appear, but they keep `write_mult = 0` and prove no state update.
     pub write_mult: bool,
     /// Old-tree sibling digests from leaf to root.
     pub old_siblings: Vec<NativeDigest>,
@@ -62,9 +63,10 @@ pub struct SmtStateWitness<const W: usize> {
     pub column_is_empty_old: bool,
     /// Whether the column commitment after the batch is empty.
     pub column_is_empty_new: bool,
-    /// Whether any final write touched this column.
+    /// Whether the batch contains any effective final write for this column.
     pub column_is_touched: bool,
-    /// Row-level path witnesses for all touched keys in this column.
+    /// Row-level path witnesses covering all keys needed by the column proof.
+    /// Read-only columns may still carry paths, but they remain no-write traces.
     pub paths: Vec<SmtStatePathWitness<W>>,
 }
 

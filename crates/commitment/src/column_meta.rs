@@ -4,12 +4,15 @@
 //! and provides operations for creating, querying, and updating column state.
 //! [`ColumnMeta`] describes a column's commitment transition during a batch.
 
+use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
+use p3_koala_bear::default_koalabear_poseidon2_16;
+use p3_symmetric::Permutation;
 
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, RowKey, TableId};
 
-use crate::field::{COL_DATA_SMT_DEPTH, DOMAIN_SMT, NativeDigest};
+use crate::field::{COL_DATA_SMT_DEPTH, DOMAIN_SMT, DOMAIN_SSMC, NativeDigest, encode_u64_limbs};
 use crate::hasher::FieldHasher;
 use crate::smt::SparseMerkleTree;
 use crate::ssmc::{SsmcEntry, SsmcList};
@@ -26,6 +29,106 @@ pub mod scheme_tags {
     pub const SSMC: u16 = 0;
     /// Sparse Merkle Tree.
     pub const SMT: u16 = 1;
+}
+
+const SSMC_MAX_VALUE_FES: usize = 5;
+
+fn build_ssmc_hash_input(
+    table: TableId,
+    col: ColId,
+    key_limbs: &[KoalaBear],
+    value: &[KoalaBear],
+    prev: Option<&NativeDigest>,
+) -> [KoalaBear; 16] {
+    let mut input = [KoalaBear::ZERO; 16];
+    match prev {
+        None => {
+            input[0] = KoalaBear::new(DOMAIN_SSMC);
+            input[1] = KoalaBear::new(table.0);
+            input[2] = KoalaBear::new(col.0 as u32);
+            for (i, &limb) in key_limbs.iter().enumerate() {
+                input[3 + i] = limb;
+            }
+            for (i, &v) in value.iter().enumerate() {
+                input[6 + i] = v;
+            }
+        }
+        Some(prev_digest) => {
+            input[..8].copy_from_slice(&prev_digest.0);
+            for (i, &limb) in key_limbs.iter().enumerate() {
+                input[8 + i] = limb;
+            }
+            for (i, &v) in value.iter().enumerate() {
+                input[11 + i] = v;
+            }
+        }
+    }
+    input
+}
+
+fn proof_ssmc_step(input: [KoalaBear; 16]) -> NativeDigest {
+    let mut state = input;
+    default_koalabear_poseidon2_16().permute_mut(&mut state);
+    NativeDigest(core::array::from_fn(|i| state[i]))
+}
+
+/// Compute the proof-compatible column commitment for one committed column.
+///
+/// For SSMC this matches the AIR hash-chain layout used by the state shard.
+/// For SMT the native tree root already matches the proof commitment.
+pub fn proof_column_commitment<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
+    table: TableId,
+    col: ColId,
+    state: &ColumnState<H>,
+) -> Result<NativeDigest, TabulaError> {
+    match state {
+        ColumnState::Ssmc(list) => {
+            if list.table != table || list.col != col {
+                return Err(TabulaError::ProofError {
+                    phase: "commitment",
+                    detail: format!(
+                        "SSMC list identity mismatch: expected ({:?},{:?}), got ({:?},{:?})",
+                        table, col, list.table, list.col
+                    ),
+                });
+            }
+
+            if list.entries().is_empty() {
+                return Ok(proof_ssmc_step(build_ssmc_hash_input(
+                    table,
+                    col,
+                    &[],
+                    &[],
+                    None,
+                )));
+            }
+
+            let mut prev = None;
+            for entry in list.entries() {
+                if entry.value.len() > SSMC_MAX_VALUE_FES {
+                    return Err(TabulaError::ProofError {
+                        phase: "commitment",
+                        detail: format!(
+                            "value width {} exceeds SSMC continuation limit (max {SSMC_MAX_VALUE_FES})",
+                            entry.value.len()
+                        ),
+                    });
+                }
+
+                let key_limbs = encode_u64_limbs(entry.key.0);
+                prev = Some(proof_ssmc_step(build_ssmc_hash_input(
+                    table,
+                    col,
+                    &key_limbs,
+                    &entry.value,
+                    prev.as_ref(),
+                )));
+            }
+
+            Ok(prev.expect("non-empty entries must produce a hash"))
+        }
+        ColumnState::Smt(tree) => Ok(tree.root()),
+    }
 }
 
 // ── ColumnState ──────────────────────────────────────────────────────────────
@@ -182,6 +285,37 @@ mod tests {
 
     fn entries(pairs: &[(u64, u32)]) -> Vec<(RowKey, Vec<KoalaBear>)> {
         pairs.iter().map(|&(k, v)| (RowKey(k), val(v))).collect()
+    }
+
+    #[test]
+    fn proof_column_commitment_matches_ssmc_commitment_for_empty_state() {
+        let (state, _) = ColumnState::commit(
+            &MockFieldHasher,
+            TableId(1),
+            ColId(0),
+            vec![],
+            scheme_tags::SSMC,
+        )
+        .unwrap();
+
+        assert!(proof_column_commitment(TableId(1), ColId(0), &state).is_ok());
+    }
+
+    #[test]
+    fn proof_column_commitment_matches_smt_root() {
+        let (state, root) = ColumnState::commit(
+            &MockFieldHasher,
+            TableId(1),
+            ColId(0),
+            entries(&[(0, 1), (1, 2)]),
+            scheme_tags::SMT,
+        )
+        .unwrap();
+
+        assert_eq!(
+            proof_column_commitment(TableId(1), ColId(0), &state).unwrap(),
+            root
+        );
     }
 
     #[test]

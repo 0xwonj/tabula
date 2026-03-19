@@ -9,6 +9,7 @@ use tabula_core::{
     ValueType,
 };
 use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
+use tabula_testing::assertions::{ExpectedTxOutcome, assert_tx_outcomes, assert_write_set_cell};
 
 use tabula_executor::batch::execute_batch;
 
@@ -129,10 +130,13 @@ fn single_successful_tx() {
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
     assert_eq!(result.txs.len(), 1);
-    assert!(result.txs[0].is_success());
-    assert_eq!(
-        result.write_set_final,
-        vec![(cell(1, 0, 0), Some(Value::U64(42)))]
+    assert_tx_outcomes(&result, &[ExpectedTxOutcome::Success]);
+    assert_write_set_cell(
+        &result,
+        TableId(1),
+        ColId(0),
+        RowKey(0),
+        Some(Value::U64(42)),
     );
 }
 
@@ -174,12 +178,16 @@ fn inter_tx_read_your_writes() {
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
     assert_eq!(result.txs.len(), 2);
-    assert!(result.txs[0].is_success());
-    assert!(result.txs[1].is_success());
-    assert!(
-        result
-            .write_set_final
-            .contains(&(cell(1, 1, 0), Some(Value::U64(100))))
+    assert_tx_outcomes(
+        &result,
+        &[ExpectedTxOutcome::Success, ExpectedTxOutcome::Success],
+    );
+    assert_write_set_cell(
+        &result,
+        TableId(1),
+        ColId(0),
+        RowKey(1),
+        Some(Value::U64(100)),
     );
 }
 
@@ -203,18 +211,27 @@ fn failed_tx_rollback() {
     prog.register(transfer_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
-    assert!(result.txs[0].is_success());
-    assert!(matches!(result.txs[1], TxResult::Failed { .. }));
-    assert!(result.txs[2].is_success());
-    assert!(
-        result
-            .write_set_final
-            .contains(&(cell(1, 0, 0), Some(Value::U64(10))))
+    assert_tx_outcomes(
+        &result,
+        &[
+            ExpectedTxOutcome::Success,
+            ExpectedTxOutcome::Failed,
+            ExpectedTxOutcome::Success,
+        ],
     );
-    assert!(
-        result
-            .write_set_final
-            .contains(&(cell(1, 1, 0), Some(Value::U64(90))))
+    assert_write_set_cell(
+        &result,
+        TableId(1),
+        ColId(0),
+        RowKey(0),
+        Some(Value::U64(10)),
+    );
+    assert_write_set_cell(
+        &result,
+        TableId(1),
+        ColId(0),
+        RowKey(1),
+        Some(Value::U64(90)),
     );
 }
 

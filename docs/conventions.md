@@ -334,10 +334,15 @@ AIR constraint functions reference the spec section they implement:
 
 ## 12. Testing
 
+Canonical layer rules and reviewer guidance live in
+[`testing-architecture.md`](./design/testing-architecture.md).
+
 ### 12.1 Organization
 
 - **Inline tests** at file bottom: `#[cfg(test)] mod tests { ... }`
-- **Shared fixtures** in `test_fixtures.rs` (per crate, `pub(crate)`)
+- **Crate-private white-box helpers** in `src/testing/`
+- **Crate-local black-box helpers** in `tests/common/`
+- **Cross-crate black-box infra** in `tabula-testing`
 - **Property-based tests** in `proptest_tests.rs` (separate file)
 - **Integration tests** in `tests/` directory (CLI crate)
 

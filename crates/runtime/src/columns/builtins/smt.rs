@@ -14,7 +14,8 @@ use tabula_chips::shards::smt_state::{
 };
 #[cfg(feature = "prove")]
 use tabula_commitment::{
-    COL_DATA_SMT_DEPTH, ColumnMeta, ColumnState, FieldHasher, PoseidonHasher, scheme_tags,
+    COL_DATA_SMT_DEPTH, ColumnMeta, ColumnState, FieldHasher, PoseidonHasher,
+    proof_column_commitment, scheme_tags,
 };
 #[cfg(feature = "prove")]
 use tabula_core::error::TabulaError;
@@ -26,8 +27,6 @@ use tabula_stark::chips::ChipIdAllocator;
 use tabula_stark::trace::DynChip;
 #[cfg(feature = "prove")]
 use tabula_stark::trace::WitnessStore;
-#[cfg(feature = "prove")]
-use tabula_witness::proof_column_commitment;
 #[cfg(feature = "prove")]
 use tabula_witness::trace::builtin::memory::{
     prepare_memory_shard_rows_from_parts, prepare_meta_shard_row_from_parts,

@@ -1,49 +1,10 @@
 //! Tests for the machine builder.
 
-use std::sync::Arc;
+mod common;
 
-use tabula_core::{ColId, SchemeId, TableId};
-use tabula_machine::{ColumnChipSet, ProofColumn, SetupError, SmtRootProof, TabulaMachine};
-use tabula_stark::chips::ChipIdAllocator;
+use common::dummy_proof_column;
+use tabula_machine::{SetupError, SmtRootProof, TabulaMachine};
 use tabula_stark::chips::core_chips;
-
-struct DummyProofColumn {
-    table_id: TableId,
-    col_id: ColId,
-}
-
-impl ProofColumn for DummyProofColumn {
-    fn name(&self) -> &str {
-        "dummy"
-    }
-
-    fn table_id(&self) -> TableId {
-        self.table_id
-    }
-
-    fn col_id(&self) -> ColId {
-        self.col_id
-    }
-
-    fn scheme_id(&self) -> SchemeId {
-        SchemeId(0x1000)
-    }
-
-    fn create_chips(&self, _alloc: &mut ChipIdAllocator) -> Result<ColumnChipSet, SetupError> {
-        Ok(ColumnChipSet {
-            airs: vec![],
-            dyn_chips: vec![],
-            bus_consumers: vec![],
-        })
-    }
-}
-
-fn dummy_proof_column(table: u32, col: u16) -> Arc<dyn ProofColumn> {
-    Arc::new(DummyProofColumn {
-        table_id: TableId(table),
-        col_id: ColId(col),
-    })
-}
 
 #[test]
 fn builder_creates_valid_machine() {

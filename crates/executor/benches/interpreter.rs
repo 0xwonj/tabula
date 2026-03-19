@@ -6,8 +6,10 @@ use criterion::{Criterion, criterion_group, criterion_main};
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, StateSnapshot, StaticTableProvider};
-use tabula_core::{CellKey, ColId, ColumnDef, RowKey, TableId, TableSchema, Value, ValueType};
+use tabula_core::{CellKey, ColId, RowKey, TableId, TableSchema, Value};
 use tabula_ir::{ArithOp, CmpOp, Instruction, RowExpr, ValueExpr};
+use tabula_testing::fixtures::schema::single_u64_column_schema;
+use tabula_testing::fixtures::state::cell_key;
 
 use tabula_executor::interpreter::{ExecContext, execute};
 use tabula_executor::overlay::Overlay;
@@ -55,27 +57,11 @@ impl StaticTableProvider for TestStaticTables {
     }
 }
 
-fn cell(t: u32, r: u64, c: u16) -> CellKey {
-    CellKey {
-        table: TableId(t),
-        col: ColId(c),
-        row: RowKey(r),
-    }
-}
-
 fn test_schemas() -> BTreeMap<TableId, TableSchema> {
     let mut m = BTreeMap::new();
     m.insert(
         TableId(1),
-        TableSchema {
-            id: TableId(1),
-            name: "test".into(),
-            columns: vec![ColumnDef {
-                id: ColId(0),
-                name: "val".into(),
-                value_type: ValueType::U64,
-            }],
-        },
+        single_u64_column_schema(TableId(1), ColId(0), "test", "val"),
     );
     m
 }
@@ -131,7 +117,7 @@ fn bench_read_write_mix(c: &mut Criterion) {
     // 50 reads from state + 50 writes.
     let mut data = BTreeMap::new();
     for i in 0..50u64 {
-        data.insert(cell(1, i, 0), Value::U64(i * 10));
+        data.insert(cell_key(1, i, 0), Value::U64(i * 10));
     }
 
     let mut instrs = Vec::new();

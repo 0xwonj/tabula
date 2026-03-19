@@ -1,0 +1,25 @@
+[package]
+name = "tabula-testing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+tabula-artifact = { workspace = true }
+tabula-chips = { workspace = true }
+tabula-commitment = { workspace = true, features = ["stark"] }
+tabula-compiler = { workspace = true }
+tabula-core = { workspace = true, features = ["test-utils"] }
+tabula-executor = { workspace = true }
+tabula-ir = { workspace = true }
+tabula-lang = { workspace = true }
+tabula-machine = { workspace = true }
+tabula-runtime = { workspace = true, features = ["prove"] }
+tabula-stark = { workspace = true }
+tabula-witness = { workspace = true }
+p3-koala-bear = { workspace = true }
+tempfile = "3"
+
+[lints]
+workspace = true

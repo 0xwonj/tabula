@@ -48,6 +48,7 @@ prove = [
 [dev-dependencies]
 tabula-contract = { workspace = true }
 tabula-core = { workspace = true, features = ["test-utils"] }
+tabula-testing = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]

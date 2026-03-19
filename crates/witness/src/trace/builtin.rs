@@ -8,8 +8,8 @@ pub mod lowering {
 /// Builtin per-column memory witness helpers.
 pub mod memory {
     pub use super::memory_impl::{
-        prepare_memory_shard_rows_from_parts, prepare_meta_shard_row_from_parts,
-        prepare_ssmc_column_witness_from_parts,
+        SsmcColumnWitnessParts, prepare_memory_shard_rows_from_parts,
+        prepare_meta_shard_row_from_parts, prepare_ssmc_column_witness_from_parts,
     };
 }
 

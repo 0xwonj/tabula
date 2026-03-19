@@ -24,6 +24,7 @@ tabula-stark = { workspace = true }
 tabula-executor = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-lang = { workspace = true }
+tabula-testing = { workspace = true }
 p3-koala-bear = { workspace = true }
 p3-field = { workspace = true }
 criterion = { workspace = true }

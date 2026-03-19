@@ -101,7 +101,7 @@ fn proof_crate_dependencies_respect_boundary_contract() {
     assert_forbidden(
         &metadata,
         "tabula-machine",
-        &["tabula-witness", "tabula-runtime"],
+        &["tabula-ir", "tabula-witness", "tabula-runtime"],
     );
 }
 
@@ -129,11 +129,15 @@ fn shared_prove_path_does_not_depend_on_legacy_witness_or_layout_dispatch() {
         ("program/runtime_program.rs", runtime_program_rs.as_str()),
     ] {
         assert!(
-            !source.contains("ColumnWitness"),
+            !source.contains("tabula_witness::legacy::ColumnWitness")
+                && !source.contains("use tabula_witness::legacy::ColumnWitness")
+                && !source.contains("pub type ColumnWitness"),
             "{name} must not depend on legacy ColumnWitness"
         );
         assert!(
-            !source.contains("BatchWitness"),
+            !source.contains("tabula_witness::legacy::BatchWitness")
+                && !source.contains("use tabula_witness::legacy::BatchWitness")
+                && !source.contains("pub type BatchWitness"),
             "{name} must not depend on legacy BatchWitness"
         );
         assert!(
@@ -153,4 +157,37 @@ fn shared_prove_path_does_not_depend_on_legacy_witness_or_layout_dispatch() {
             "{name} must not dispatch on layout_kind in the shared prove path"
         );
     }
+}
+
+#[test]
+fn witness_root_surface_stays_minimal_and_namespaced() {
+    let lib_rs = read_workspace_file("crates/witness/src/lib.rs");
+
+    for forbidden in [
+        "pub use trace::builtin::{",
+        "BuiltinTraceBuilder",
+        "BuiltinTraceContext",
+        "BuiltinWitnessInputs",
+        "AllTraceInputs",
+        "proof_column_commitment",
+        "ExecutionInputPreparer",
+    ] {
+        assert!(
+            !lib_rs.contains(forbidden),
+            "witness root must not expose broad convenience re-export '{forbidden}'"
+        );
+    }
+    assert!(
+        !lib_rs.contains("pub use witness::{AccessRow, InitRow,"),
+        "witness root must not re-export additional witness internals"
+    );
+
+    assert!(
+        lib_rs.contains("pub use prepare::{BatchInputPreparer, PreparedExecutionInputs};"),
+        "witness root must expose the minimal preparation seam"
+    );
+    assert!(
+        lib_rs.contains("pub use witness::{AccessRow, InitRow};"),
+        "witness root must expose shared execution row types"
+    );
 }

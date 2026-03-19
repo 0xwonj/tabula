@@ -198,114 +198,25 @@ fn validate_free_execution_requirements(
 
 #[cfg(test)]
 mod tests {
-    use tabula_artifact::{StateEntry, StateSnapshot, TransactionBatch, TransactionInput};
-    use tabula_compiler::{CompiledProgram, register_program};
+    use tabula_artifact::StateEntry;
+    use tabula_core::Value;
     use tabula_core::mock::Blake3Hasher;
-    use tabula_core::{TableId, TableSchema, TxTypeId, Value, ValueType};
-    use tabula_ir::{Instruction, PrecompileId, PropertyQuery, RowExpr, TxTypeDef, ValueExpr};
+    use tabula_testing::fixtures::compiled::{
+        compiled_empty_batch_case, compiled_precompile_requirement_case,
+        compiled_property_successor_case, compiled_single_write_case,
+    };
+    use tabula_testing::fixtures::state::empty_state;
 
     use super::{CompiledBatchInput, RuntimeError, run_compiled_batch};
-    fn compiled_program() -> CompiledProgram {
-        let schema = TableSchema {
-            id: TableId(1),
-            name: "accounts".to_string(),
-            columns: vec![tabula_core::ColumnDef {
-                id: tabula_core::ColId(0),
-                name: "balance".to_string(),
-                value_type: ValueType::U64,
-            }],
-        };
-        let tx_def = TxTypeDef {
-            id: TxTypeId(1),
-            name: "set_balance".to_string(),
-            param_schema: vec![],
-            body: vec![Instruction::Write {
-                table: TableId(1),
-                row: RowExpr::Literal(tabula_core::RowKey(0)),
-                col: tabula_core::ColId(0),
-                src_val: ValueExpr::Literal(Value::U64(7)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
-            }],
-        };
-
-        register_program(&[schema], &[tx_def]).expect("register program")
-    }
-
-    fn batch_file() -> TransactionBatch {
-        TransactionBatch {
-            transactions: vec![TransactionInput {
-                tx_type: 1,
-                params: vec![],
-                sender: String::new(),
-                nonce: 0,
-            }],
-        }
-    }
-
-    fn compiled_program_with_precompile() -> CompiledProgram {
-        register_program(
-            &[],
-            &[TxTypeDef {
-                id: TxTypeId(1),
-                name: "call".to_string(),
-                param_schema: vec![],
-                body: vec![Instruction::Precompile {
-                    id: PrecompileId(7),
-                    dst_slots: vec![0],
-                    inputs: vec![ValueExpr::Literal(Value::U64(1))],
-                }],
-            }],
-        )
-        .expect("register precompile program")
-    }
-
-    fn compiled_program_with_property_query() -> CompiledProgram {
-        let schema = TableSchema {
-            id: TableId(1),
-            name: "accounts".to_string(),
-            columns: vec![tabula_core::ColumnDef {
-                id: tabula_core::ColId(0),
-                name: "balance".to_string(),
-                value_type: ValueType::U64,
-            }],
-        };
-        register_program(
-            &[schema],
-            &[TxTypeDef {
-                id: TxTypeId(1),
-                name: "scan".to_string(),
-                param_schema: vec![],
-                body: vec![Instruction::PropertyRead {
-                    dst_val: 0,
-                    dst_key: 1,
-                    dst_is_null: 2,
-                    table: TableId(1),
-                    col: tabula_core::ColId(0),
-                    query: PropertyQuery::Successor {
-                        key: tabula_core::RowKey(0),
-                    },
-                }],
-            }],
-        )
-        .expect("register property program")
-    }
 
     #[test]
     fn run_compiled_batch_applies_writes() {
-        let compiled = compiled_program();
-        let state = StateSnapshot {
-            cells: vec![StateEntry {
-                table: 1,
-                row: 0,
-                col: 0,
-                value: Some(Value::U64(1)),
-            }],
-        };
+        let case = compiled_single_write_case();
 
         let executed = run_compiled_batch(&CompiledBatchInput {
-            compiled_program: &compiled,
-            state: &state,
-            batch: &batch_file(),
+            compiled_program: &case.compiled_program,
+            state: &case.state,
+            batch: &case.batch,
             hasher: &Blake3Hasher,
         })
         .expect("execute compiled batch");
@@ -321,8 +232,8 @@ mod tests {
 
     #[test]
     fn run_compiled_batch_rejects_invalid_state() {
-        let compiled = compiled_program();
-        let invalid_state = StateSnapshot {
+        let case = compiled_single_write_case();
+        let invalid_state = tabula_artifact::StateSnapshot {
             cells: vec![StateEntry {
                 table: 1,
                 row: 0,
@@ -332,9 +243,9 @@ mod tests {
         };
 
         let err = run_compiled_batch(&CompiledBatchInput {
-            compiled_program: &compiled,
+            compiled_program: &case.compiled_program,
             state: &invalid_state,
-            batch: &batch_file(),
+            batch: &case.batch,
             hasher: &Blake3Hasher,
         })
         .expect_err("invalid state must fail");
@@ -344,23 +255,12 @@ mod tests {
 
     #[test]
     fn run_compiled_batch_handles_empty_batch() {
-        let compiled = compiled_program();
-        let state = StateSnapshot {
-            cells: vec![StateEntry {
-                table: 1,
-                row: 0,
-                col: 0,
-                value: Some(Value::U64(1)),
-            }],
-        };
-        let empty_batch = TransactionBatch {
-            transactions: vec![],
-        };
+        let case = compiled_empty_batch_case();
 
         let executed = run_compiled_batch(&CompiledBatchInput {
-            compiled_program: &compiled,
-            state: &state,
-            batch: &empty_batch,
+            compiled_program: &case.compiled_program,
+            state: &case.state,
+            batch: &case.batch,
             hasher: &Blake3Hasher,
         })
         .expect("empty batch should succeed");
@@ -375,11 +275,11 @@ mod tests {
 
     #[test]
     fn run_compiled_batch_rejects_required_precompiles() {
-        let compiled = compiled_program_with_precompile();
+        let case = compiled_precompile_requirement_case();
         let err = run_compiled_batch(&CompiledBatchInput {
-            compiled_program: &compiled,
-            state: &StateSnapshot { cells: vec![] },
-            batch: &batch_file(),
+            compiled_program: &case.compiled_program,
+            state: &empty_state(),
+            batch: &case.batch,
             hasher: &Blake3Hasher,
         })
         .expect_err("free execute should reject required precompiles");
@@ -394,11 +294,11 @@ mod tests {
 
     #[test]
     fn run_compiled_batch_rejects_required_property_requirements() {
-        let compiled = compiled_program_with_property_query();
+        let case = compiled_property_successor_case();
         let err = run_compiled_batch(&CompiledBatchInput {
-            compiled_program: &compiled,
-            state: &StateSnapshot { cells: vec![] },
-            batch: &batch_file(),
+            compiled_program: &case.compiled_program,
+            state: &empty_state(),
+            batch: &case.batch,
             hasher: &Blake3Hasher,
         })
         .expect_err("free execute should reject required property requirements");

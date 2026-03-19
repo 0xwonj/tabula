@@ -6,10 +6,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateSnapshot, StaticTableProvider};
-use tabula_core::{
-    CellKey, ColId, ColumnDef, RowKey, TableId, TableSchema, Transaction, Value, ValueType,
-};
+use tabula_core::{CellKey, ColId, RowKey, TableId, TableSchema, Transaction, Value};
 use tabula_ir::{Instruction, RowExpr, ValueExpr};
+use tabula_testing::fixtures::batch::core_tx_with_sender;
+use tabula_testing::fixtures::schema::single_u64_column_schema;
+use tabula_testing::fixtures::state::cell_key;
 
 use tabula_executor::interpreter::{ExecContext, InterpreterError, TxExecutionOutput};
 use tabula_executor::overlay::{Overlay, OverlayResult};
@@ -157,22 +158,12 @@ impl StaticTableProvider for EmptyStaticTables {
 
 /// Shorthand for building a `CellKey`.
 pub fn cell(t: u32, r: u64, c: u16) -> CellKey {
-    CellKey {
-        table: TableId(t),
-        col: ColId(c),
-        row: RowKey(r),
-    }
+    cell_key(t, r, c)
 }
 
 /// Build a `Transaction` with an empty signature.
 pub fn make_tx(tx_type: u32, params: Vec<Value>, sender: [u8; 32], nonce: u64) -> Transaction {
-    Transaction {
-        tx_type: tabula_core::TxTypeId(tx_type),
-        params,
-        sender,
-        nonce,
-        signature: vec![],
-    }
+    core_tx_with_sender(tx_type, params, sender, nonce)
 }
 
 /// Build a `BatchEnv` using the standard test doubles.
@@ -196,15 +187,7 @@ pub fn test_schemas() -> BTreeMap<TableId, TableSchema> {
     let mut m = BTreeMap::new();
     m.insert(
         TableId(1),
-        TableSchema {
-            id: TableId(1),
-            name: "test".into(),
-            columns: vec![ColumnDef {
-                id: ColId(0),
-                name: "val".into(),
-                value_type: ValueType::U64,
-            }],
-        },
+        single_u64_column_schema(TableId(1), ColId(0), "test", "val"),
     );
     m
 }

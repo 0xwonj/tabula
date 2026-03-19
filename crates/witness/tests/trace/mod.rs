@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
@@ -9,19 +9,12 @@ use tabula_chips::smt_path::trace::{SmtPathWitness, SmtTablePathWitness};
 use tabula_commitment::{
     ColumnMeta, ColumnState, DOMAIN_COL, DOMAIN_TABLE, KoalaBearCodec, MockFieldHasher,
     NativeDigest, PoseidonHasher, SparseMerkleTree, compute_leaf, compute_state_root,
-    compute_table_root, scheme_tags,
+    compute_table_root, proof_column_commitment, scheme_tags,
 };
 use tabula_core::traits::ValueCodec;
-use tabula_core::{Batch, CellKey, ColId, RowKey, TableId, Transaction, TxResult, TxTypeId, Value};
-use tabula_core::{InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce};
-use tabula_executor::batch::{BatchEnv, execute_batch};
-use tabula_ir::Program;
-use tabula_lang::compile;
-use tabula_witness::trace::builtin::lowering::{lower_execution_records, lower_program_batch};
-use tabula_witness::{
-    AllTraceInputs, BuiltinTraceBuilder, BuiltinTraceContext, ExecutionInputPreparer,
-    proof_column_commitment,
-};
+use tabula_core::{ColId, RowKey, TableId, TxResult, Value};
+use tabula_witness::BatchInputPreparer;
+use tabula_witness::trace::builtin::{AllTraceInputs, BuiltinTraceBuilder, BuiltinTraceContext};
 
 pub(super) type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<(RowKey, Vec<KoalaBear>)>>;
 
@@ -222,7 +215,7 @@ pub(super) fn build_smt_paths_from_metas(
 }
 
 pub(super) fn roots_from_metas(metas: &[ColumnMeta]) -> (NativeDigest, NativeDigest) {
-    ExecutionInputPreparer::new(PoseidonHasher::new()).compute_state_roots_from_metas(metas)
+    BatchInputPreparer::new(PoseidonHasher::new()).compute_state_roots_from_metas(metas)
 }
 
 pub(super) fn build_ssmc_meta(

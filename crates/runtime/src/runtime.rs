@@ -276,52 +276,56 @@ const _: () = {
 
 #[cfg(test)]
 mod tests {
-    use tabula_compiler::{register_program_artifact, transfer_example_bundle};
     use tabula_machine::MachineProofInput;
+    use tabula_testing::assertions::assert_statement_matches_artifact;
+    use tabula_testing::fixtures::examples::transfer_example_compiled_case;
 
     use super::*;
     use crate::proving;
 
     #[test]
     fn runtime_prove_and_verify_smoke() {
-        let bundle = transfer_example_bundle().expect("example bundle");
-        let compiled = register_program_artifact(&bundle.program).expect("compiled program");
-        let runtime = TabulaRuntime::builder(compiled).build().expect("runtime");
+        let case = transfer_example_compiled_case();
+        let artifact = case.compiled_program.as_program_artifact();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .build()
+            .expect("runtime");
         let executed = runtime
-            .execute(&bundle.state, &bundle.batch)
+            .execute(&case.state, &case.batch)
             .expect("execution succeeds");
-
         let verified = runtime
             .prove_and_verify(&ProveInput {
-                state: &bundle.state,
-                batch: &bundle.batch,
+                state: &case.state,
+                batch: &case.batch,
                 executed: &executed,
             })
             .expect("prove and verify");
 
         assert!(verified.verified);
         assert!(!verified.proof.columns.is_empty());
+        assert_statement_matches_artifact(&verified.statement, &artifact);
     }
 
     #[test]
     fn machine_backend_proves_from_prepared_traces() {
-        let bundle = transfer_example_bundle().expect("example bundle");
-        let compiled = register_program_artifact(&bundle.program).expect("compiled program");
-        let runtime = TabulaRuntime::builder(compiled).build().expect("runtime");
+        let case = transfer_example_compiled_case();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .build()
+            .expect("runtime");
         let executed = runtime
-            .execute(&bundle.state, &bundle.batch)
+            .execute(&case.state, &case.batch)
             .expect("execution succeeds");
         let artifacts = proving::prepare_witness_artifacts(
             runtime.runtime_program(),
-            &bundle.state,
-            &bundle.batch,
+            &case.state,
+            &case.batch,
             &executed,
         )
         .expect("witness artifacts");
         let statement = proving::build_execution_statement(
             runtime.runtime_program(),
-            &bundle.state,
-            &bundle.batch,
+            &case.state,
+            &case.batch,
             &executed.state_after,
             &artifacts.air_statement,
         )

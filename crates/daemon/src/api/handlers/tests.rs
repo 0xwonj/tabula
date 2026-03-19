@@ -9,28 +9,34 @@ use crate::api::handlers::blocking::run_blocking;
 use crate::runtime::config::ServerConfig;
 use crate::runtime::state::AppState;
 use crate::service::{FileAccessPolicy, LocalEngine};
+use tabula_testing::fs::{TempDir, tempdir};
 
-fn test_state(queue_timeout_ms: u64, request_timeout_ms: u64) -> Arc<AppState> {
-    let policy = FileAccessPolicy::new(vec![std::env::temp_dir()]).expect("policy");
+fn test_state(queue_timeout_ms: u64, request_timeout_ms: u64) -> (Arc<AppState>, TempDir) {
+    let root = tempdir();
+    let allowed_root = root.path().to_path_buf();
+    let policy = FileAccessPolicy::new(vec![allowed_root.clone()]).expect("policy");
     let engine = Arc::new(LocalEngine::new(policy));
-    Arc::new(AppState::new(
-        ServerConfig {
-            bind_addr: "127.0.0.1:0".parse().expect("valid bind addr"),
-            auth_token: None,
-            allowed_roots: vec![std::env::temp_dir()],
-            allow_origins: vec![HeaderValue::from_static("http://localhost:3000")],
-            max_body_bytes: 1024,
-            max_concurrent_jobs: 1,
-            queue_timeout: Duration::from_millis(queue_timeout_ms),
-            request_timeout: Duration::from_millis(request_timeout_ms),
-        },
-        engine,
-    ))
+    (
+        Arc::new(AppState::new(
+            ServerConfig {
+                bind_addr: "127.0.0.1:0".parse().expect("valid bind addr"),
+                auth_token: None,
+                allowed_roots: vec![allowed_root],
+                allow_origins: vec![HeaderValue::from_static("http://localhost:3000")],
+                max_body_bytes: 1024,
+                max_concurrent_jobs: 1,
+                queue_timeout: Duration::from_millis(queue_timeout_ms),
+                request_timeout: Duration::from_millis(request_timeout_ms),
+            },
+            engine,
+        )),
+        root,
+    )
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn timeout_keeps_backpressure_until_blocking_task_finishes() {
-    let state = test_state(20, 1);
+    let (state, _root) = test_state(20, 1);
 
     let first = run_blocking(&state, "timeout_case", || {
         std::thread::sleep(Duration::from_millis(100));

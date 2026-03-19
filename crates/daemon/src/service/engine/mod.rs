@@ -255,8 +255,9 @@ mod tests {
     use crate::service::ErrorKind;
     use crate::service::{CreateInstanceCommand, RunStatus, SubmitRunCommand};
     use tabula_artifact::{ExecutionStatement, StateEntry, merge_output_state_entries};
-    use tabula_compiler::transfer_example_bundle;
-    use tabula_core::Value;
+    use tabula_core::{ColId, RowKey, TableId, Value};
+    use tabula_testing::assertions::assert_state_cell;
+    use tabula_testing::fixtures::examples::transfer_example_artifact_case;
 
     #[test]
     fn inline_source_program_compiles() {
@@ -329,11 +330,11 @@ mod tests {
     fn stateful_program_instance_run_flow_commits_and_records_run() {
         let cwd = env::current_dir().expect("cwd");
         let engine = LocalEngine::new(FileAccessPolicy::new(vec![cwd]).expect("policy"));
-        let bundle = transfer_example_bundle().expect("example bundle");
+        let case = transfer_example_artifact_case();
 
         let registered = engine
             .register_program(RegisterProgramCommand {
-                program: InputRef::inline(ProgramInline::program(bundle.program.clone())),
+                program: InputRef::inline(ProgramInline::program(case.program_artifact.clone())),
                 label: Some("transfer".to_string()),
             })
             .expect("register program");
@@ -341,7 +342,7 @@ mod tests {
         let created = engine
             .create_instance(CreateInstanceCommand {
                 program_id: registered.program_id.clone(),
-                state: InputRef::inline(bundle.state.clone()),
+                state: InputRef::inline(case.state.clone()),
                 label: Some("demo".to_string()),
             })
             .expect("create instance");
@@ -350,7 +351,7 @@ mod tests {
         let submitted = engine
             .submit_run(&SubmitRunCommand {
                 instance_id: created.instance_id.clone(),
-                batch: InputRef::inline(bundle.batch.clone()),
+                batch: InputRef::inline(case.batch.clone()),
                 include_trace: false,
                 prove: true,
                 verify: false,
@@ -378,13 +379,27 @@ mod tests {
             .expect("fetch instance");
         assert_eq!(fetched.version, 1);
         assert_eq!(fetched.state_hash, submitted.state_hash_after);
-        assert_eq!(
-            value_at_row(&fetched.state, 0),
+        assert_state_cell(
+            &fetched.state,
+            TableId(0),
+            ColId(0),
+            RowKey(0),
             Some(Value::U64(750)),
-            "row=0 balance after transfers"
         );
-        assert_eq!(value_at_row(&fetched.state, 1), Some(Value::U64(600)));
-        assert_eq!(value_at_row(&fetched.state, 2), Some(Value::U64(350)));
+        assert_state_cell(
+            &fetched.state,
+            TableId(0),
+            ColId(0),
+            RowKey(1),
+            Some(Value::U64(600)),
+        );
+        assert_state_cell(
+            &fetched.state,
+            TableId(0),
+            ColId(0),
+            RowKey(2),
+            Some(Value::U64(350)),
+        );
 
         let fetched_run = engine
             .get_run(submitted.run_id.as_str())
@@ -396,18 +411,18 @@ mod tests {
     fn submit_run_rejects_stale_expected_version() {
         let cwd = env::current_dir().expect("cwd");
         let engine = LocalEngine::new(FileAccessPolicy::new(vec![cwd]).expect("policy"));
-        let bundle = transfer_example_bundle().expect("example bundle");
+        let case = transfer_example_artifact_case();
 
         let registered = engine
             .register_program(RegisterProgramCommand {
-                program: InputRef::inline(ProgramInline::program(bundle.program.clone())),
+                program: InputRef::inline(ProgramInline::program(case.program_artifact.clone())),
                 label: None,
             })
             .expect("register program");
         let created = engine
             .create_instance(CreateInstanceCommand {
                 program_id: registered.program_id,
-                state: InputRef::inline(bundle.state),
+                state: InputRef::inline(case.state),
                 label: None,
             })
             .expect("create instance");
@@ -415,7 +430,7 @@ mod tests {
         let err = engine
             .submit_run(&SubmitRunCommand {
                 instance_id: created.instance_id,
-                batch: InputRef::inline(bundle.batch),
+                batch: InputRef::inline(case.batch),
                 include_trace: false,
                 prove: false,
                 verify: false,
@@ -431,25 +446,25 @@ mod tests {
     fn verify_run_transitions_status_to_verified() {
         let cwd = env::current_dir().expect("cwd");
         let engine = LocalEngine::new(FileAccessPolicy::new(vec![cwd]).expect("policy"));
-        let bundle = transfer_example_bundle().expect("example bundle");
+        let case = transfer_example_artifact_case();
 
         let registered = engine
             .register_program(RegisterProgramCommand {
-                program: InputRef::inline(ProgramInline::program(bundle.program.clone())),
+                program: InputRef::inline(ProgramInline::program(case.program_artifact.clone())),
                 label: None,
             })
             .expect("register program");
         let created = engine
             .create_instance(CreateInstanceCommand {
                 program_id: registered.program_id,
-                state: InputRef::inline(bundle.state),
+                state: InputRef::inline(case.state),
                 label: None,
             })
             .expect("create instance");
         let submitted = engine
             .submit_run(&SubmitRunCommand {
                 instance_id: created.instance_id,
-                batch: InputRef::inline(bundle.batch),
+                batch: InputRef::inline(case.batch),
                 include_trace: false,
                 prove: true,
                 verify: false,
@@ -464,13 +479,5 @@ mod tests {
         assert!(verified.verified);
         assert!(matches!(verified.run.status, RunStatus::Verified));
         assert_eq!(verified.run.proof_verified, Some(true));
-    }
-
-    fn value_at_row(state: &StateSnapshot, row: u64) -> Option<Value> {
-        state
-            .cells
-            .iter()
-            .find(|cell| cell.table == 0 && cell.col == 0 && cell.row == row)
-            .and_then(|cell| cell.value)
     }
 }

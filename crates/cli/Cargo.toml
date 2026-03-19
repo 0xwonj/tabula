@@ -19,6 +19,7 @@ serde = { workspace = true }
 [dev-dependencies]
 tabula-executor = { workspace = true }
 tabula-ir = { workspace = true }
+tabula-testing = { workspace = true }
 
 [lints]
 workspace = true

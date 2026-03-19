@@ -17,7 +17,9 @@ use tabula_chips::shards::shared::{SHARED_COLUMN_WITNESS_LABEL, SharedColumnWitn
 use tabula_chips::shards::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
 use tabula_chips::shards::state::StateShardChip;
 #[cfg(feature = "prove")]
-use tabula_commitment::{ColumnMeta, ColumnState, PoseidonHasher, scheme_tags};
+use tabula_commitment::{
+    ColumnMeta, ColumnState, PoseidonHasher, proof_column_commitment, scheme_tags,
+};
 #[cfg(feature = "prove")]
 use tabula_core::error::TabulaError;
 use tabula_core::{ColumnLayoutKind, PropertyQueryResult, RowKey, SchemeId, Value, zero_value};
@@ -29,9 +31,9 @@ use tabula_stark::trace::DynChip;
 #[cfg(feature = "prove")]
 use tabula_stark::trace::WitnessStore;
 #[cfg(feature = "prove")]
-use tabula_witness::proof_column_commitment;
-#[cfg(feature = "prove")]
-use tabula_witness::trace::builtin::memory::prepare_ssmc_column_witness_from_parts;
+use tabula_witness::trace::builtin::memory::{
+    SsmcColumnWitnessParts, prepare_ssmc_column_witness_from_parts,
+};
 
 use crate::columns::{ColumnPlan, ColumnSchemeFactory, ColumnViews, RuntimeColumn};
 #[cfg(feature = "prove")]
@@ -289,15 +291,17 @@ impl<const W: usize> ColumnTransitionBackend for SsmcTransitionBackend<W> {
             is_touched: input.is_touched,
         };
 
-        let col_witness = prepare_ssmc_column_witness_from_parts::<W>(
-            (input.table, input.col),
-            &input.init_rows,
-            &input.access_rows,
-            &ssmc_entries(&old_state)?,
-            &ssmc_entries(&new_state)?,
-            &meta,
-            true,
-        )?;
+        let old_entries = ssmc_entries(&old_state)?;
+        let new_entries = ssmc_entries(&new_state)?;
+        let col_witness = prepare_ssmc_column_witness_from_parts::<W>(&SsmcColumnWitnessParts {
+            column: (input.table, input.col),
+            init_rows: &input.init_rows,
+            access_rows: &input.access_rows,
+            old_entries: &old_entries,
+            new_entries: &new_entries,
+            meta: &meta,
+            has_commitment_proof: true,
+        })?;
 
         let mut store = WitnessStore::new();
         store.put(

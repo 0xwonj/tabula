@@ -94,7 +94,7 @@ fn build_tier_traces(setup: &TierSetup, store: WitnessStore) -> Result<TraceMap,
 
 #[cfg(test)]
 mod tests {
-    use tabula_compiler::{register_program_artifact, transfer_example_bundle};
+    use tabula_testing::fixtures::examples::transfer_example_compiled_case;
 
     use super::*;
     use crate::TabulaRuntime;
@@ -102,16 +102,17 @@ mod tests {
 
     #[test]
     fn canonical_column_proof_inputs_assemble_one_store_per_planned_column() {
-        let bundle = transfer_example_bundle().expect("example bundle");
-        let compiled = register_program_artifact(&bundle.program).expect("compiled program");
-        let runtime = TabulaRuntime::builder(compiled).build().expect("runtime");
+        let case = transfer_example_compiled_case();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .build()
+            .expect("runtime");
         let executed = runtime
-            .execute(&bundle.state, &bundle.batch)
+            .execute(&case.state, &case.batch)
             .expect("execution succeeds");
         let artifacts = prepare_witness_artifacts(
             runtime.runtime_program(),
-            &bundle.state,
-            &bundle.batch,
+            &case.state,
+            &case.batch,
             &executed,
         )
         .expect("witness artifacts");
@@ -139,8 +140,8 @@ mod tests {
 
         let artifacts = prepare_witness_artifacts(
             runtime.runtime_program(),
-            &bundle.state,
-            &bundle.batch,
+            &case.state,
+            &case.batch,
             &executed,
         )
         .expect("witness artifacts");

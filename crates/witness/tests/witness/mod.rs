@@ -8,13 +8,13 @@ use tabula_core::{
     AccessEvent, CellKey, ColId, ColumnDef, OpKind, RowKey, TableId, TableSchema, Value, ValueType,
 };
 
-use tabula_witness::ExecutionInputPreparer;
+use tabula_witness::BatchInputPreparer;
 
 mod generator;
 mod program_info;
 
-pub(super) fn make_preparer() -> ExecutionInputPreparer<MockFieldHasher> {
-    ExecutionInputPreparer::new(MockFieldHasher)
+pub(super) fn make_preparer() -> BatchInputPreparer<MockFieldHasher> {
+    BatchInputPreparer::new(MockFieldHasher)
 }
 
 pub(super) fn t(n: u32) -> TableId {

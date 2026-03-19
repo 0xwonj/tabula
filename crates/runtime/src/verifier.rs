@@ -187,50 +187,25 @@ impl std::fmt::Debug for ProgramVerifier {
 
 #[cfg(test)]
 mod tests {
-    use tabula_compiler::register_program;
-    use tabula_core::{ColId, TableId, TableSchema, TxTypeId, ValueType};
-    use tabula_ir::{Instruction, PrecompileId, TxTypeDef};
-
     use crate::RuntimeError;
+    #[cfg(feature = "prove")]
+    use tabula_testing::assertions::assert_statement_matches_artifact;
+    #[cfg(feature = "verify")]
+    use tabula_testing::fixtures::artifacts::precompile_requirement_artifact;
 
     #[cfg(feature = "prove")]
-    use crate::{ProveInput, TabulaRuntime};
+    use tabula_testing::fixtures::examples::{
+        transfer_example_artifact_case, transfer_example_compiled_case,
+    };
     #[cfg(feature = "prove")]
-    use tabula_compiler::{register_program_artifact, transfer_example_bundle};
+    use tabula_testing::runtime::prove_compiled_case;
 
     use super::ProgramVerifier;
 
     #[cfg(feature = "verify")]
-    fn precompile_program_artifact() -> tabula_artifact::ProgramArtifact {
-        let schema = TableSchema {
-            id: TableId(1),
-            name: "accounts".to_string(),
-            columns: vec![tabula_core::ColumnDef {
-                id: ColId(0),
-                name: "balance".to_string(),
-                value_type: ValueType::U64,
-            }],
-        };
-        let tx = TxTypeDef {
-            id: TxTypeId(1),
-            name: "scan".to_string(),
-            param_schema: vec![],
-            body: vec![Instruction::Precompile {
-                id: PrecompileId(0x0001),
-                dst_slots: vec![0],
-                inputs: vec![],
-            }],
-        };
-
-        register_program(&[schema], &[tx])
-            .expect("register program")
-            .into_program_artifact()
-    }
-
-    #[cfg(feature = "verify")]
     #[test]
     fn program_verifier_rejects_missing_required_precompile() {
-        let err = ProgramVerifier::builder(precompile_program_artifact())
+        let err = ProgramVerifier::builder(precompile_requirement_artifact())
             .build()
             .expect_err("missing verifier precompile should fail");
 
@@ -245,24 +220,14 @@ mod tests {
     #[cfg(feature = "prove")]
     #[test]
     fn program_verifier_accepts_runtime_proof() {
-        let bundle = transfer_example_bundle().expect("example bundle");
-        let compiled = register_program_artifact(&bundle.program).expect("compiled program");
-        let runtime = TabulaRuntime::builder(compiled).build().expect("runtime");
-        let executed = runtime
-            .execute(&bundle.state, &bundle.batch)
-            .expect("execution succeeds");
-        let proved = runtime
-            .prove(&ProveInput {
-                state: &bundle.state,
-                batch: &bundle.batch,
-                executed: &executed,
-            })
-            .expect("proof succeeds");
+        let case = transfer_example_artifact_case();
+        let proved = prove_compiled_case(&transfer_example_compiled_case());
 
-        let verifier = ProgramVerifier::builder(bundle.program.clone())
+        let verifier = ProgramVerifier::builder(case.program_artifact.clone())
             .build()
             .expect("program verifier");
 
+        assert_statement_matches_artifact(&proved.statement, &case.program_artifact);
         verifier
             .verify(&proved.proof, &proved.statement)
             .expect("verification succeeds");
@@ -271,21 +236,10 @@ mod tests {
     #[cfg(feature = "prove")]
     #[test]
     fn program_verifier_rejects_statement_program_hash_mismatch() {
-        let bundle = transfer_example_bundle().expect("example bundle");
-        let compiled = register_program_artifact(&bundle.program).expect("compiled program");
-        let runtime = TabulaRuntime::builder(compiled).build().expect("runtime");
-        let executed = runtime
-            .execute(&bundle.state, &bundle.batch)
-            .expect("execution succeeds");
-        let proved = runtime
-            .prove(&ProveInput {
-                state: &bundle.state,
-                batch: &bundle.batch,
-                executed: &executed,
-            })
-            .expect("proof succeeds");
+        let case = transfer_example_artifact_case();
+        let proved = prove_compiled_case(&transfer_example_compiled_case());
 
-        let verifier = ProgramVerifier::builder(bundle.program.clone())
+        let verifier = ProgramVerifier::builder(case.program_artifact.clone())
             .build()
             .expect("program verifier");
         let mut statement = proved.statement.clone();

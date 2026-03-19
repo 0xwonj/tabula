@@ -1,42 +1,10 @@
 //! Tests for ChipRegistry, TabulaMachine, and proof setup.
 
+mod common;
+
+use common::dummy_proof_column;
 use tabula_chips::range_check::RangeCheckChip;
-use tabula_core::{ColId, SchemeId, TableId};
-use tabula_machine::{
-    ChipRegistry, ColumnChipSet, ProofColumn, SetupError, TabulaMachine, default_config,
-};
-use tabula_stark::chips::ChipIdAllocator;
-
-struct DummyProofColumn {
-    table_id: TableId,
-    col_id: ColId,
-}
-
-impl ProofColumn for DummyProofColumn {
-    fn name(&self) -> &str {
-        "dummy"
-    }
-
-    fn table_id(&self) -> TableId {
-        self.table_id
-    }
-
-    fn col_id(&self) -> ColId {
-        self.col_id
-    }
-
-    fn scheme_id(&self) -> SchemeId {
-        SchemeId(0x1000)
-    }
-
-    fn create_chips(&self, _alloc: &mut ChipIdAllocator) -> Result<ColumnChipSet, SetupError> {
-        Ok(ColumnChipSet {
-            airs: vec![],
-            dyn_chips: vec![],
-            bus_consumers: vec![],
-        })
-    }
-}
+use tabula_machine::{ChipRegistry, SetupError, TabulaMachine, default_config};
 
 // ── ChipRegistry standalone ────────────────────────────────────────────────
 
@@ -69,10 +37,7 @@ fn registry_validate_ok() {
 
 #[test]
 fn machine_new_creates_valid_machine() {
-    let columns = vec![std::sync::Arc::new(DummyProofColumn {
-        table_id: TableId(0),
-        col_id: ColId(0),
-    }) as std::sync::Arc<dyn ProofColumn>];
+    let columns = vec![dummy_proof_column(0, 0)];
 
     let machine = TabulaMachine::new(columns.clone()).expect("machine creation");
     let setups = machine.setup().proof_setups();
@@ -88,10 +53,7 @@ fn machine_new_creates_valid_machine() {
 
 #[test]
 fn with_config_uses_custom_config() {
-    let columns = vec![std::sync::Arc::new(DummyProofColumn {
-        table_id: TableId(0),
-        col_id: ColId(0),
-    }) as std::sync::Arc<dyn ProofColumn>];
+    let columns = vec![dummy_proof_column(0, 0)];
 
     let custom_config = default_config();
     let machine =

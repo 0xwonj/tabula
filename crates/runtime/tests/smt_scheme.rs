@@ -1,21 +1,21 @@
 //! Integration tests for SMT-backed runtime and verifier scheme seams.
 #![cfg(feature = "prove")]
 
-use tabula_artifact::{
-    ProgramArtifact, SchemeDescriptor, StateEntry, StateSnapshot, TransactionBatch,
-    TransactionInput,
-};
-use tabula_compiler::{
-    SchemeDescriptorCatalog, compile_program_source, register_program_artifact,
-    register_program_definition, register_program_definition_with_scheme_catalog,
-    transfer_example_bundle,
-};
+use tabula_artifact::{ProgramArtifact, SchemeDescriptor, StateSnapshot};
+use tabula_compiler::SchemeDescriptorCatalog;
 use tabula_core::{ColumnLayoutKind, RootProfileId, SchemeId, Value};
 use tabula_machine::SetupError;
 use tabula_runtime::{
     ColumnPlan, ColumnSchemeFactory, ColumnViews, ProgramVerifier, ProveInput, RuntimeError,
     SmtScheme, TabulaRuntime,
 };
+use tabula_testing::exec::{
+    compiled_program_from_artifact, program_artifact_from_source,
+    program_artifact_from_source_with_catalog,
+};
+use tabula_testing::fixtures::batch::single_tx_batch;
+use tabula_testing::fixtures::examples::transfer_example_artifact_case;
+use tabula_testing::fixtures::state::{liquid_shielded_state, single_cell_u64};
 
 const ALIAS_SMT_ID: SchemeId = SchemeId(0x4200);
 
@@ -80,10 +80,7 @@ tx bump(amount: u64) {
     balances[0].shielded = shielded_now + amount
 }
 ";
-    let definition = compile_program_source(source).expect("compile mixed source");
-    register_program_definition(&definition)
-        .expect("register mixed source")
-        .into_program_artifact()
+    program_artifact_from_source(source)
 }
 
 fn alias_smt_program_artifact() -> ProgramArtifact {
@@ -97,60 +94,31 @@ tx bump(amount: u64) {
     balances[0].amount = current + amount
 }
 ";
-    let definition = compile_program_source(source).expect("compile alias source");
     let mut scheme_catalog = SchemeDescriptorCatalog::new();
     scheme_catalog.insert(ALIAS_SMT_ID, alias_smt_descriptor());
-    register_program_definition_with_scheme_catalog(&definition, &scheme_catalog)
-        .expect("register alias source")
-        .into_program_artifact()
+    program_artifact_from_source_with_catalog(source, &scheme_catalog)
 }
 
 fn mixed_state() -> StateSnapshot {
-    StateSnapshot {
-        cells: vec![
-            StateEntry {
-                table: 0,
-                row: 0,
-                col: 0,
-                value: Some(Value::U64(10)),
-            },
-            StateEntry {
-                table: 0,
-                row: 0,
-                col: 1,
-                value: Some(Value::U64(20)),
-            },
-        ],
-    }
-}
-
-fn single_tx_batch(amount: u64) -> TransactionBatch {
-    TransactionBatch {
-        transactions: vec![TransactionInput {
-            tx_type: 0,
-            params: vec![Value::U64(amount)],
-            sender: "01".repeat(32),
-            nonce: 0,
-        }],
-    }
+    liquid_shielded_state(10, 20)
 }
 
 #[test]
 fn smt_only_runtime_and_verifier_accept_builtin_smt_column() {
-    let bundle = transfer_example_bundle().expect("example bundle");
-    let mut artifact = bundle.program.clone();
+    let case = transfer_example_artifact_case();
+    let mut artifact = case.program_artifact.clone();
     artifact.column_proof_plan[0].scheme_id = SchemeId::SMT;
     artifact.column_proof_plan[0].scheme_descriptor = SchemeDescriptor::builtin_smt();
 
-    let compiled = register_program_artifact(&artifact).expect("compiled program");
+    let compiled = compiled_program_from_artifact(&artifact);
     let runtime = TabulaRuntime::builder(compiled).build().expect("runtime");
     let executed = runtime
-        .execute(&bundle.state, &bundle.batch)
+        .execute(&case.state, &case.batch)
         .expect("execution succeeds");
     let proved = runtime
         .prove(&ProveInput {
-            state: &bundle.state,
-            batch: &bundle.batch,
+            state: &case.state,
+            batch: &case.batch,
             executed: &executed,
         })
         .expect("proof succeeds");
@@ -170,18 +138,16 @@ fn smt_only_runtime_and_verifier_accept_builtin_smt_column() {
 #[test]
 fn alias_smt_scheme_flows_from_source_registration_catalog() {
     let artifact = alias_smt_program_artifact();
-    let compiled = register_program_artifact(&artifact).expect("compiled program");
+    let compiled = compiled_program_from_artifact(&artifact);
     assert_eq!(compiled.column_proof_plan()[0].scheme_id, ALIAS_SMT_ID);
 
-    let state = StateSnapshot {
-        cells: vec![StateEntry {
-            table: 0,
-            row: 0,
-            col: 0,
-            value: Some(Value::U64(10)),
-        }],
-    };
-    let batch = single_tx_batch(5);
+    let state = single_cell_u64(
+        tabula_core::TableId(0),
+        tabula_core::ColId(0),
+        tabula_core::RowKey(0),
+        10,
+    );
+    let batch = single_tx_batch(0, vec![Value::U64(5)]);
 
     let runtime = TabulaRuntime::builder(compiled)
         .with_scheme(AliasSmtScheme::<3>::new(alias_smt_descriptor()))
@@ -214,8 +180,8 @@ fn mixed_ssmc_and_smt_columns_prove_and_verify() {
     assert_eq!(artifact.column_proof_plan[1].scheme_id, SchemeId::SMT);
 
     let state = mixed_state();
-    let batch = single_tx_batch(5);
-    let compiled = register_program_artifact(&artifact).expect("compiled program");
+    let batch = single_tx_batch(0, vec![Value::U64(5)]);
+    let compiled = compiled_program_from_artifact(&artifact);
     let runtime = TabulaRuntime::builder(compiled).build().expect("runtime");
     let executed = runtime.execute(&state, &batch).expect("execution succeeds");
     let proved = runtime
@@ -236,9 +202,9 @@ fn mixed_ssmc_and_smt_columns_prove_and_verify() {
 
 #[test]
 fn alias_smt_scheme_proves_and_verifies_via_public_seam() {
-    let bundle = transfer_example_bundle().expect("example bundle");
-    let artifact = alias_smt_artifact(bundle.program.clone());
-    let compiled = register_program_artifact(&artifact).expect("compiled program");
+    let case = transfer_example_artifact_case();
+    let artifact = alias_smt_artifact(case.program_artifact.clone());
+    let compiled = compiled_program_from_artifact(&artifact);
 
     let runtime = TabulaRuntime::builder(compiled)
         .with_scheme(AliasSmtScheme::<3>::new(alias_smt_descriptor()))
@@ -246,12 +212,12 @@ fn alias_smt_scheme_proves_and_verifies_via_public_seam() {
         .build()
         .expect("runtime");
     let executed = runtime
-        .execute(&bundle.state, &bundle.batch)
+        .execute(&case.state, &case.batch)
         .expect("execution succeeds");
     let proved = runtime
         .prove(&ProveInput {
-            state: &bundle.state,
-            batch: &bundle.batch,
+            state: &case.state,
+            batch: &case.batch,
             executed: &executed,
         })
         .expect("proof succeeds");
@@ -268,9 +234,9 @@ fn alias_smt_scheme_proves_and_verifies_via_public_seam() {
 
 #[test]
 fn runtime_rejects_alias_descriptor_params_mismatch() {
-    let bundle = transfer_example_bundle().expect("example bundle");
-    let artifact = alias_smt_artifact(bundle.program);
-    let compiled = register_program_artifact(&artifact).expect("compiled program");
+    let case = transfer_example_artifact_case();
+    let artifact = alias_smt_artifact(case.program_artifact);
+    let compiled = compiled_program_from_artifact(&artifact);
 
     let mut mismatched = alias_smt_descriptor();
     mismatched.params_hash = [0x99; 32];
@@ -291,9 +257,9 @@ fn runtime_rejects_alias_descriptor_params_mismatch() {
 
 #[test]
 fn runtime_rejects_alias_descriptor_supported_property_mismatch() {
-    let bundle = transfer_example_bundle().expect("example bundle");
-    let artifact = alias_smt_artifact(bundle.program);
-    let compiled = register_program_artifact(&artifact).expect("compiled program");
+    let case = transfer_example_artifact_case();
+    let artifact = alias_smt_artifact(case.program_artifact);
+    let compiled = compiled_program_from_artifact(&artifact);
 
     let mut mismatched = alias_smt_descriptor();
     mismatched.supported_property_query_kinds = vec![tabula_ir::PropertyQueryKind::Successor];
@@ -314,9 +280,9 @@ fn runtime_rejects_alias_descriptor_supported_property_mismatch() {
 
 #[test]
 fn runtime_rejects_alias_descriptor_layout_mismatch() {
-    let bundle = transfer_example_bundle().expect("example bundle");
-    let artifact = alias_smt_artifact(bundle.program);
-    let compiled = register_program_artifact(&artifact).expect("compiled program");
+    let case = transfer_example_artifact_case();
+    let artifact = alias_smt_artifact(case.program_artifact);
+    let compiled = compiled_program_from_artifact(&artifact);
 
     let mut mismatched = alias_smt_descriptor();
     mismatched.layout_kind = ColumnLayoutKind::SSMC_V1;
@@ -337,8 +303,8 @@ fn runtime_rejects_alias_descriptor_layout_mismatch() {
 
 #[test]
 fn verifier_rejects_alias_root_profile_mismatch() {
-    let bundle = transfer_example_bundle().expect("example bundle");
-    let mut artifact = alias_smt_artifact(bundle.program);
+    let case = transfer_example_artifact_case();
+    let mut artifact = alias_smt_artifact(case.program_artifact);
     artifact.column_proof_plan[0]
         .scheme_descriptor
         .root_profile_id = RootProfileId(7);

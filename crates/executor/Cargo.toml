@@ -12,6 +12,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 criterion = { workspace = true }
+tabula-testing = { workspace = true }
 
 [[bench]]
 name = "interpreter"

@@ -1,9 +1,8 @@
 use std::collections::BTreeMap;
 
-use tabula_commitment::{ColumnMeta, ColumnState, MockFieldHasher};
+use tabula_commitment::{ColumnMeta, ColumnState, MockFieldHasher, proof_column_commitment};
 use tabula_core::traits::ValueCodec;
 use tabula_core::{BatchResult, ColId, RowKey, TableId, TxResult, Value};
-use tabula_witness::proof_column_commitment;
 
 use super::*;
 
@@ -151,7 +150,7 @@ fn prepared_inputs_and_roots_cover_multiple_columns() {
                 col,
                 &state,
                 &writes,
-                prepared.touched.contains(&(table, col)),
+                prepared.written_columns.contains(&(table, col)),
             )
         })
         .collect();

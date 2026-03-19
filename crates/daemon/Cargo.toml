@@ -41,5 +41,8 @@ sha2 = { workspace = true }
 default = []
 stark = ["tabula-runtime/prove", "dep:tabula-chips", "dep:tabula-machine", "dep:tabula-witness", "dep:tabula-commitment", "tabula-commitment/stark", "dep:tabula-lang", "dep:p3-koala-bear", "dep:p3-field"]
 
+[dev-dependencies]
+tabula-testing = { workspace = true }
+
 [lints]
 workspace = true
