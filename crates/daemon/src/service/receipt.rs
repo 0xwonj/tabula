@@ -2,8 +2,8 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tabula_artifact::{ExecutionStatement, StateSnapshot, TransactionBatch};
-use tabula_compiler::CompiledProgram;
+use tabula_artifact::{State, Statement, TransactionBatch};
+use tabula_compiler::SealedProgram;
 use tabula_core::ExecutionConsistencyStatus;
 
 use super::error::{ServiceError, ServiceResult};
@@ -21,18 +21,18 @@ pub struct ReceiptVerification {
 
 /// Build a canonical execution statement from execution artifacts.
 pub fn build_execution_statement(
-    artifact: &CompiledProgram,
-    state: &StateSnapshot,
+    artifact: &SealedProgram,
+    state: &State,
     batch: &TransactionBatch,
-    state_after: &StateSnapshot,
-) -> ServiceResult<ExecutionStatement> {
-    let program_artifact = artifact.as_program_artifact();
+    state_after: &State,
+) -> ServiceResult<Statement> {
+    let artifact = artifact.as_artifact();
 
-    Ok(ExecutionStatement {
-        program_hash: program_artifact.canonical_digest().map_err(|e| {
+    Ok(Statement {
+        program_hash: artifact.canonical_digest().map_err(|e| {
             ServiceError::internal(
                 ErrorCode::InternalError,
-                format!("failed to hash program artifact: {e}"),
+                format!("failed to hash artifact: {e}"),
             )
         })?,
         state_hash: state.canonical_digest().map_err(|e| {
@@ -53,7 +53,7 @@ pub fn build_execution_statement(
                 format!("failed to hash post-state artifact: {e}"),
             )
         })?,
-        metadata_hash: bytes_to_hex(&artifact.metadata_envelope().canonical_hash()),
+        metadata_hash: artifact.contract_metadata.canonical_hash_hex(),
         old_state_root: vec![],
         new_state_root: vec![],
     })
@@ -61,7 +61,7 @@ pub fn build_execution_statement(
 
 /// Build an execution receipt from a canonical execution statement.
 pub fn build_receipt(
-    statement: &ExecutionStatement,
+    statement: &Statement,
     tx_count: usize,
     emitted_count: usize,
     consistency: &ExecutionConsistencyStatus,
@@ -85,7 +85,7 @@ pub fn build_receipt(
 /// Verify a receipt against the expected execution statement.
 pub fn verify_receipt(
     proof: &ExecutionReceipt,
-    statement: &ExecutionStatement,
+    statement: &Statement,
     expected_statement_hash: &str,
 ) -> ReceiptVerification {
     if proof.version != RECEIPT_VERSION || proof.scheme != RECEIPT_SCHEME {
@@ -98,7 +98,7 @@ pub fn verify_receipt(
         };
     }
 
-    let recomputed = ExecutionStatement {
+    let recomputed = Statement {
         program_hash: proof.program_hash.clone(),
         state_hash: proof.state_hash.clone(),
         batch_hash: proof.batch_hash.clone(),

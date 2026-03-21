@@ -103,7 +103,8 @@ fn build_setup_round_trips_through_machine() {
 
 mod test_extension {
     use tabula_core::error::TabulaError;
-    use tabula_machine::prelude::*;
+    use tabula_machine::backend::extension::ExecutionTierExtension;
+    use tabula_machine::backend::prelude::*;
     use tabula_stark::trace::trace_map::TraceMap;
 
     #[derive(Clone, Debug)]
@@ -149,7 +150,7 @@ mod test_extension {
 
     pub struct DummyExtension;
 
-    impl ChipExtension for DummyExtension {
+    impl ExecutionTierExtension for DummyExtension {
         fn name(&self) -> &str {
             "dummy-extension"
         }
@@ -169,7 +170,7 @@ fn builder_with_extension_registers_chip() {
     use test_extension::{DUMMY_CHIP_ID, DummyExtension};
 
     let machine = TabulaMachine::builder()
-        .with_extension(DummyExtension)
+        .with_backend_execution_extension(DummyExtension)
         .build()
         .expect("builder with extension");
 
@@ -187,8 +188,8 @@ fn builder_rejects_duplicate_chip_id() {
     use test_extension::DummyExtension;
 
     let result = TabulaMachine::builder()
-        .with_extension(DummyExtension)
-        .with_extension(DummyExtension)
+        .with_backend_execution_extension(DummyExtension)
+        .with_backend_execution_extension(DummyExtension)
         .build();
 
     assert!(matches!(result, Err(SetupError::DuplicateChipId(_))));

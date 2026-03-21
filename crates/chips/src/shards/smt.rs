@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use tabula_commitment::scheme_tags;
+use tabula_commitment::schemes::tags;
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId};
 
@@ -142,8 +142,7 @@ impl<const W: usize> ColumnCommitment for SmtCommitment<W> {
             let c = col.col.0;
 
             let mem_trace = generate_memory_shard_trace::<W>(t, c, &col_data.memory_rows);
-            let meta_trace =
-                generate_meta_shard_trace(t, c, scheme_tags::SMT, col_data.meta_row.as_ref());
+            let meta_trace = generate_meta_shard_trace(t, c, tags::SMT, col_data.meta_row.as_ref());
 
             entries.push((chips.memory, TraceEntry::main_only(mem_trace)));
             entries.push((chips.meta, TraceEntry::main_only(meta_trace)));

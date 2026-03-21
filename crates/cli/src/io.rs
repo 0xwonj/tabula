@@ -1,10 +1,10 @@
 //! JSON input/output types for the CLI.
 
-use tabula_artifact::{StateEntry as ArtifactStateEntry, StateSnapshot as ArtifactStateSnapshot};
+use tabula_artifact::{State as ArtifactState, StateEntry as ArtifactStateEntry};
 use tabula_core::{AccessEvent, EmittedEvent, ExecutionConsistencyStatus, TxResult};
 
-/// JSON representation of a state snapshot.
-pub type StateSnapshot = ArtifactStateSnapshot;
+/// JSON representation of state.
+pub type State = ArtifactState;
 /// JSON representation of a state entry.
 pub type StateEntry = ArtifactStateEntry;
 /// JSON representation of execution results.

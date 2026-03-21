@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use tabula_artifact::ProgramArtifact;
+use tabula_artifact::Artifact;
 
 use crate::compile::compile_program_source;
 use crate::error::{CompilerError, CompilerResult};
-use crate::program::CompiledProgram;
-use crate::register::{register_program_artifact, register_program_definition};
+use crate::program::SealedProgram;
+use crate::register::{register_artifact, register_program_definition};
 use crate::sources::ProgramDefinition;
 
 /// Load program definitions from a `.tab` file.
@@ -29,25 +29,22 @@ pub fn parse_program_definition(content: &str) -> CompilerResult<ProgramDefiniti
     compile_program_source(content)
 }
 
-/// Load a sealed program artifact from JSON.
-pub fn load_program_artifact(path: &Path) -> anyhow::Result<ProgramArtifact> {
-    load_program_artifact_strict(path).map_err(anyhow::Error::new)
+/// Load a sealed artifact from JSON.
+pub fn load_artifact(path: &Path) -> anyhow::Result<Artifact> {
+    load_artifact_strict(path).map_err(anyhow::Error::new)
 }
 
-/// Strict variant of [`load_program_artifact`] that returns typed compiler errors.
-pub fn load_program_artifact_strict(path: &Path) -> CompilerResult<ProgramArtifact> {
+/// Strict variant of [`load_artifact`] that returns typed compiler errors.
+pub fn load_artifact_strict(path: &Path) -> CompilerResult<Artifact> {
     let source = std::fs::read_to_string(path).map_err(|source| CompilerError::ReadFile {
         path: path.display().to_string(),
         source,
     })?;
-    parse_program_artifact(&source, &path.display().to_string())
+    parse_artifact(&source, &path.display().to_string())
 }
 
-/// Parse a sealed program artifact from JSON text.
-pub fn parse_program_artifact(
-    content: &str,
-    source_label: &str,
-) -> CompilerResult<ProgramArtifact> {
+/// Parse a sealed artifact from JSON text.
+pub fn parse_artifact(content: &str, source_label: &str) -> CompilerResult<Artifact> {
     serde_json::from_str(content).map_err(|source| CompilerError::ParseJson {
         path: source_label.to_string(),
         source,
@@ -55,12 +52,12 @@ pub fn parse_program_artifact(
 }
 
 /// Convenience helper: load sources from a path and register in one step.
-pub fn load_and_register_program(path: &Path) -> anyhow::Result<CompiledProgram> {
+pub fn load_and_register_program(path: &Path) -> anyhow::Result<SealedProgram> {
     if path.extension().and_then(|e| e.to_str()) == Some("tab") {
         let definition = load_program_definition_strict(path).map_err(anyhow::Error::new)?;
         register_program_definition(&definition).map_err(anyhow::Error::new)
     } else {
-        let artifact = load_program_artifact_strict(path).map_err(anyhow::Error::new)?;
-        register_program_artifact(&artifact).map_err(anyhow::Error::new)
+        let artifact = load_artifact_strict(path).map_err(anyhow::Error::new)?;
+        register_artifact(&artifact).map_err(anyhow::Error::new)
     }
 }

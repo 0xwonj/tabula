@@ -3,15 +3,14 @@
 use tabula_compiler::{TRANSFER_EXAMPLE_TAB_SOURCE, transfer_example_bundle};
 
 use crate::exec::{
-    compiled_program_from_artifact, core_batch_from_artifact_batch,
-    initial_cells_from_state_snapshot,
+    compiled_program_from_artifact, core_batch_from_artifact_batch, initial_cells_from_state,
 };
 use crate::fixtures::cases::{ArtifactRuntimeCase, CompiledRuntimeCase, TraceCase};
 
 pub fn transfer_example_artifact_case() -> ArtifactRuntimeCase {
     let bundle = transfer_example_bundle().expect("transfer example bundle");
     ArtifactRuntimeCase {
-        program_artifact: bundle.program,
+        artifact: bundle.program,
         state: bundle.state,
         batch: bundle.batch,
     }
@@ -20,7 +19,7 @@ pub fn transfer_example_artifact_case() -> ArtifactRuntimeCase {
 pub fn transfer_example_compiled_case() -> CompiledRuntimeCase {
     let artifact_case = transfer_example_artifact_case();
     CompiledRuntimeCase {
-        compiled_program: compiled_program_from_artifact(&artifact_case.program_artifact),
+        compiled_program: compiled_program_from_artifact(&artifact_case.artifact),
         state: artifact_case.state,
         batch: artifact_case.batch,
     }
@@ -32,7 +31,7 @@ pub fn transfer_example_trace_case() -> TraceCase {
         .expect("convert transfer example batch");
     TraceCase {
         source: TRANSFER_EXAMPLE_TAB_SOURCE,
-        initial_cells: initial_cells_from_state_snapshot(&artifact_case.state),
+        initial_cells: initial_cells_from_state(&artifact_case.state),
         transactions: batch.transactions,
     }
 }

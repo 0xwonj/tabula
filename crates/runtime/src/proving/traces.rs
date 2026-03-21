@@ -1,83 +1,64 @@
 use rayon::prelude::*;
-use tabula_commitment::PoseidonHasher;
 use tabula_core::error::TabulaError;
-use tabula_machine::{ProofSetups, ProofTraces, TabulaMachine, TierSetup};
-use tabula_stark::trace::{TraceMap, WitnessStore};
-use tabula_witness::trace::builtin::lowering::LoweringOutput;
-use tabula_witness::trace::builtin::{BuiltinTraceBuilder, BuiltinTraceContext};
-use tabula_witness::trace::{PartitionedStores, build_all_traces, partition_by_tier};
+use tabula_machine::{ColumnProofTrace, ProofSetups, ProofTraces, TabulaMachine, TierSetup};
+use tabula_stark::trace::{TraceMap, WitnessStore, build_all_traces};
 
-use crate::columns::BatchProofInput;
 use crate::error::RuntimeError;
 
-/// Build traces from canonical batch proof input through the full runtime-owned
-/// pipeline: builtin lowering + per-column witness stores -> tier partition -> traces.
+use super::partition::{PartitionedStores, partition_by_tier};
+use super::prepare::PreparedProofBatch;
+
+/// Build traces from a fully prepared runtime-owned proof batch.
 #[tracing::instrument(skip_all)]
-pub fn build_traces(
+pub(crate) fn build_traces(
     machine: &TabulaMachine,
-    proof_input: BatchProofInput,
-    lowering: &LoweringOutput,
+    prepared: &mut PreparedProofBatch,
 ) -> Result<ProofTraces, RuntimeError> {
-    let metas = proof_input.column_metas();
-    let prepared = BuiltinTraceBuilder::<PoseidonHasher, 3>::new(BuiltinTraceContext {
-        column_metas: &metas,
-        old_state_root: &proof_input.old_state_root,
-        new_state_root: &proof_input.new_state_root,
-    })
-    .prepare_witness_store(lowering, PoseidonHasher::new())
-    .map_err(RuntimeError::TraceBuild)?;
-
-    let column_stores = build_column_stores(proof_input);
-    let stores = partition_by_tier(prepared.store, column_stores);
-    build_proof_traces(machine.setup().proof_setups(), stores).map_err(RuntimeError::TraceBuild)
-}
-
-fn build_column_stores(
-    proof_input: BatchProofInput,
-) -> Vec<((tabula_core::TableId, tabula_core::ColId), WitnessStore)> {
-    proof_input
-        .columns
-        .into_iter()
-        .map(|column| ((column.table, column.col), column.witness_store))
-        .collect()
+    let shared_store = std::mem::take(&mut prepared.shared_store);
+    let columns = std::mem::take(&mut prepared.columns);
+    let stores = partition_by_tier(shared_store);
+    build_proof_traces(machine.setup().proof_setups(), stores, columns)
+        .map_err(RuntimeError::TraceBuild)
 }
 
 fn build_proof_traces(
     setups: &ProofSetups,
     stores: PartitionedStores,
+    columns: Vec<super::prepare::ColumnTraceInput>,
 ) -> Result<ProofTraces, TabulaError> {
     let exec_traces = build_tier_traces(&setups.execution, stores.execution)?;
 
-    let setup_index: std::collections::BTreeMap<(tabula_core::TableId, tabula_core::ColId), usize> =
-        setups
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(i, ((table_id, col_id), _))| ((*table_id, *col_id), i))
-            .collect();
+    if columns.len() != setups.columns.len() {
+        return Err(TabulaError::ProofError {
+            phase: "trace_build",
+            detail: format!(
+                "column trace input count {} does not match machine setup count {}",
+                columns.len(),
+                setups.columns.len()
+            ),
+        });
+    }
 
-    let col_traces: Vec<_> = stores
-        .columns
+    let col_traces: Vec<_> = columns
         .into_par_iter()
-        .map(|((table, col), col_store)| {
-            let idx = setup_index
-                .get(&(table, col))
-                .ok_or_else(|| TabulaError::ProofError {
+        .zip(setups.columns.par_iter())
+        .map(|(column, ((table, col), setup))| {
+            if column.identity.table_id != table.0 || column.identity.col_id != col.0 {
+                return Err(TabulaError::ProofError {
                     phase: "trace_build",
-                    detail: format!("no setup for column ({}, {})", table.0, col.0),
-                })?;
-            let traces = build_tier_traces(&setups.columns[*idx].1, col_store)?;
-            Ok(((table, col), traces))
+                    detail: format!(
+                        "prepared column ({}, {}) does not match machine setup order ({}, {})",
+                        column.identity.table_id, column.identity.col_id, table.0, col.0
+                    ),
+                });
+            }
+            let trace_map = build_tier_traces(setup, column.store)?;
+            Ok(ColumnProofTrace {
+                identity: column.identity,
+                trace_map,
+            })
         })
         .collect::<Result<Vec<_>, TabulaError>>()?;
-
-    debug_assert!(
-        col_traces
-            .iter()
-            .zip(setups.columns.iter())
-            .all(|(((t1, c1), _), ((t2, c2), _))| t1 == t2 && c1 == c2),
-        "column trace ordering must match setup ordering"
-    );
 
     let root_traces = build_tier_traces(&setups.root, stores.root)?;
 
@@ -98,10 +79,10 @@ mod tests {
 
     use super::*;
     use crate::TabulaRuntime;
-    use crate::proving::prepare_witness_artifacts;
+    use crate::proving::prepare_proof_batch;
 
     #[test]
-    fn canonical_column_proof_inputs_assemble_one_store_per_planned_column() {
+    fn prepared_proof_batch_assembles_one_store_per_planned_column() {
         let case = transfer_example_compiled_case();
         let runtime = TabulaRuntime::builder(case.compiled_program)
             .build()
@@ -109,49 +90,70 @@ mod tests {
         let executed = runtime
             .execute(&case.state, &case.batch)
             .expect("execution succeeds");
-        let artifacts = prepare_witness_artifacts(
-            runtime.runtime_program(),
+        let prepared = prepare_proof_batch(
+            runtime.resolved_program(),
+            runtime.proof_recipes(),
+            runtime.precompile_recipes(),
             &case.state,
             &case.batch,
             &executed,
         )
-        .expect("witness artifacts");
+        .expect("prepared proof batch");
 
-        let column_count = artifacts.proof_input.columns.len();
-        let expected_keys: Vec<_> = artifacts
-            .proof_input
+        let expected_keys: Vec<_> = prepared
             .columns
             .iter()
-            .map(|column| (column.table, column.col))
+            .map(|column| (column.identity.table_id, column.identity.col_id))
             .collect();
-        let stores = build_column_stores(artifacts.proof_input);
 
-        assert_eq!(stores.len(), column_count);
-        for ((table_id, col_id), _) in &stores {
+        assert_eq!(prepared.columns.len(), expected_keys.len());
+        for column in &prepared.columns {
             assert!(
-                expected_keys
-                    .iter()
-                    .any(|(table, col)| table == table_id && col == col_id),
-                "missing proof input column for ({}, {})",
-                table_id.0,
-                col_id.0
+                expected_keys.iter().any(|(table, col)| {
+                    *table == column.identity.table_id && *col == column.identity.col_id
+                }),
+                "missing prepared artifact for ({}, {})",
+                column.identity.table_id,
+                column.identity.col_id
             );
         }
+    }
 
-        let artifacts = prepare_witness_artifacts(
-            runtime.runtime_program(),
+    #[test]
+    fn prepared_proof_batch_builds_column_traces_for_all_setups() {
+        let case = transfer_example_compiled_case();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .build()
+            .expect("runtime");
+        let executed = runtime
+            .execute(&case.state, &case.batch)
+            .expect("execution succeeds");
+        let prepared = prepare_proof_batch(
+            runtime.resolved_program(),
+            runtime.proof_recipes(),
+            runtime.precompile_recipes(),
             &case.state,
             &case.batch,
             &executed,
         )
-        .expect("witness artifacts");
-        let proof_input = artifacts.proof_input;
-        let traces = build_traces(runtime.machine(), proof_input, &artifacts.lowering)
-            .expect("proof traces");
+        .expect("prepared proof batch");
+
+        let mut prepared = prepared;
+        let traces = build_traces(runtime.machine(), &mut prepared).expect("proof traces");
 
         assert_eq!(
             traces.columns.len(),
             runtime.machine().setup().proof_setups().columns.len()
+        );
+        assert!(
+            traces
+                .columns
+                .iter()
+                .zip(runtime.machine().setup().proof_setups().columns.iter())
+                .all(|(trace, ((table_id, col_id), _))| {
+                    trace.identity.table_id == table_id.0 && trace.identity.col_id == col_id.0
+                }),
+            "column trace order must match machine setup order"
         );
     }
 }

@@ -5,7 +5,7 @@ use tabula_chips::static_table::StaticTableChip;
 use tabula_stark::chips::DEFAULT_VALUE_WIDTH;
 use tabula_stark::trace::DynChip;
 
-use crate::AnyRap;
+use crate::backend::AnyRap;
 
 /// Fixed execution-layer AIRs for proving/verifying.
 pub(crate) fn execution_airs() -> Vec<Box<dyn AnyRap>> {

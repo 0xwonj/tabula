@@ -53,7 +53,7 @@ pub enum CompilerError {
     /// Program failed semantic registration.
     #[error("invalid program: {0}")]
     InvalidProgram(#[source] anyhow::Error),
-    /// Sealed program artifact diverges from the compiler-derived canonical shape.
+    /// Sealed artifact diverges from the compiler-derived canonical shape.
     #[error("sealed artifact mismatch: {detail}")]
     ArtifactMismatch {
         /// Human-readable mismatch detail.

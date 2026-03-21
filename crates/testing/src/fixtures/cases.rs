@@ -1,7 +1,7 @@
 //! Canonical scenario fixtures.
 
-use tabula_artifact::{ProgramArtifact, StateSnapshot, TransactionBatch};
-use tabula_compiler::CompiledProgram;
+use tabula_artifact::{Artifact, State, TransactionBatch};
+use tabula_compiler::SealedProgram;
 use tabula_core::{ColId, RowKey, TableId, Transaction, Value};
 
 use crate::fixtures::batch::{core_tx, single_tx_batch};
@@ -21,21 +21,21 @@ pub struct TraceCase {
 #[derive(Clone, Debug)]
 pub struct RuntimeCase {
     pub source: &'static str,
-    pub state: StateSnapshot,
+    pub state: State,
     pub batch: TransactionBatch,
 }
 
 #[derive(Clone, Debug)]
 pub struct CompiledRuntimeCase {
-    pub compiled_program: CompiledProgram,
-    pub state: StateSnapshot,
+    pub compiled_program: SealedProgram,
+    pub state: State,
     pub batch: TransactionBatch,
 }
 
 #[derive(Clone, Debug)]
 pub struct ArtifactRuntimeCase {
-    pub program_artifact: ProgramArtifact,
-    pub state: StateSnapshot,
+    pub artifact: Artifact,
+    pub state: State,
     pub batch: TransactionBatch,
 }
 

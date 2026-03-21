@@ -300,9 +300,12 @@ fn constrain_slot_written_count<AB: AirBuilder, const W: usize>(
 ) {
     let written_sum: AB::Expr = (0..MAX_SLOTS).map(|s| local.slot_written[s].into()).sum();
 
-    let expected: AB::Expr = AB::Expr::ONE - local.op_write.into() - local.op_assert.into()
-        + local.op_divmod.into()
-        + local.op_property_read.into() * AB::Expr::TWO;
+    let default_expected: AB::Expr =
+        AB::Expr::ONE - local.op_write.into() - local.op_assert.into() - local.op_precompile.into()
+            + local.op_divmod.into()
+            + local.op_property_read.into() * AB::Expr::TWO;
+    let expected =
+        default_expected + local.op_precompile.into() * local.precompile_output_count.into();
 
     builder.assert_zero(is_real * (written_sum - expected));
 }

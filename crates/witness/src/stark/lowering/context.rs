@@ -1,0 +1,381 @@
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+
+use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
+
+use tabula_commitment::KoalaBearCodec;
+use tabula_core::error::TabulaError;
+use tabula_core::traits::{StaticTableProvider, ValueCodec};
+use tabula_core::{
+    AccessEvent, ColId, PrecompileEvent, PropertyReadResult, RowKey, TableId, Value,
+};
+use tabula_ir::{RowExpr, ValueExpr};
+
+use tabula_chips::execution::MAX_SLOTS;
+use tabula_chips::execution::trace::{InstructionRecord, Opcode};
+use tabula_chips::static_table::trace::StaticTableRow;
+
+/// Mutable lowering context threaded through per-opcode lowering functions.
+///
+/// Holds slot state, accumulated records, and shared immutable references
+/// needed by all opcode lowering handlers.
+pub(super) struct LoweringContext<'a, const W: usize> {
+    // ── Slot state ──────────────────────────────────────────────────────
+    /// Value-level slot contents (for resolution).
+    pub(super) slots: Vec<Option<Value>>,
+    /// Encoded slot contents (KoalaBear FEs for trace).
+    pub(super) slot_fes: Vec<Vec<KoalaBear>>,
+    /// Slot null flags.
+    pub(super) slot_nulls: Vec<bool>,
+    /// Tracks which slots have been explicitly written within this tx.
+    pub(super) slot_initialized: Vec<bool>,
+    /// Next available slot (how many are in use).
+    pub(super) max_slot: usize,
+
+    // ── Per-instruction tracking ────────────────────────────────────────
+    /// Effect ordinal counter (increments on Read/Write).
+    pub(super) effect_ordinal: u32,
+    /// Transaction index.
+    pub(super) tx_index: u32,
+
+    // ── Accumulated output ──────────────────────────────────────────────
+    /// Instruction records.
+    pub(super) records: Vec<InstructionRecord>,
+    /// Static table rows from Lookup instructions.
+    pub(super) static_rows: Vec<StaticTableRow>,
+
+    // ── Shared immutable references ─────────────────────────────────────
+    /// Execution events for this tx.
+    pub(super) tx_events: &'a [&'a AccessEvent],
+    /// Schema type map: (table, col) -> ValueType.
+    pub(super) type_map: &'a BTreeMap<(TableId, ColId), tabula_core::ValueType>,
+    /// Static table provider.
+    pub(super) static_tables: &'a dyn StaticTableProvider,
+    /// Empty columns set.
+    pub(super) empty_columns: &'a BTreeSet<(TableId, ColId)>,
+    /// Transaction parameters.
+    pub(super) params: &'a [Value],
+    /// Value codec.
+    pub(super) codec: &'a KoalaBearCodec,
+    /// Stored precompile I/O pairs from execution (consumed sequentially).
+    pub(super) precompile_events_by_instruction: BTreeMap<usize, &'a PrecompileEvent>,
+    /// Matched precompile call-site instruction indices.
+    pub(super) matched_precompile_instructions: BTreeSet<usize>,
+    /// Stored property read results from execution (consumed sequentially).
+    pub(super) property_reads_stored: &'a [PropertyReadResult],
+    /// Index into `property_reads_stored` for the next PropertyRead instruction.
+    pub(super) property_read_idx: usize,
+}
+
+impl<'a, const W: usize> LoweringContext<'a, W> {
+    /// Create a new context with zeroed slot state.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new(
+        tx_index: u32,
+        tx_events: &'a [&'a AccessEvent],
+        type_map: &'a BTreeMap<(TableId, ColId), tabula_core::ValueType>,
+        static_tables: &'a dyn StaticTableProvider,
+        empty_columns: &'a BTreeSet<(TableId, ColId)>,
+        params: &'a [Value],
+        codec: &'a KoalaBearCodec,
+        num_instructions: usize,
+        precompile_events: &'a [PrecompileEvent],
+        property_reads_stored: &'a [PropertyReadResult],
+    ) -> Result<Self, TabulaError> {
+        Ok(Self {
+            slots: vec![None; MAX_SLOTS],
+            slot_fes: vec![vec![KoalaBear::ZERO; W]; MAX_SLOTS],
+            slot_nulls: vec![false; MAX_SLOTS],
+            slot_initialized: vec![false; MAX_SLOTS],
+            max_slot: 0,
+            effect_ordinal: 0,
+            tx_index,
+            records: Vec::with_capacity(num_instructions),
+            static_rows: Vec::new(),
+            tx_events,
+            type_map,
+            static_tables,
+            empty_columns,
+            params,
+            codec,
+            precompile_events_by_instruction: build_precompile_event_map(
+                tx_index,
+                precompile_events,
+            )?,
+            matched_precompile_instructions: BTreeSet::new(),
+            property_reads_stored,
+            property_read_idx: 0,
+        })
+    }
+
+    /// Resolve a `RowExpr` to a concrete `RowKey`.
+    pub(super) fn resolve_row(&self, expr: &RowExpr) -> Result<RowKey, TabulaError> {
+        match expr {
+            RowExpr::Literal(rk) => Ok(*rk),
+            RowExpr::Slot(s) => {
+                let v = self
+                    .slots
+                    .get(*s as usize)
+                    .and_then(|o| o.as_ref())
+                    .ok_or_else(|| TabulaError::SlotOutOfBounds {
+                        index: *s,
+                        max: self.slots.len().saturating_sub(1) as u16,
+                    })?;
+                match v {
+                    Value::U64(n) => Ok(RowKey(*n)),
+                    _ => Err(TabulaError::TypeMismatch {
+                        expected: "U64",
+                        actual: v.type_name(),
+                    }),
+                }
+            }
+            RowExpr::Param(p) => {
+                let v = self
+                    .params
+                    .get(*p as usize)
+                    .ok_or(TabulaError::ParamOutOfBounds {
+                        index: *p,
+                        max: self.params.len().saturating_sub(1) as u16,
+                    })?;
+                match v {
+                    Value::U64(n) => Ok(RowKey(*n)),
+                    _ => Err(TabulaError::TypeMismatch {
+                        expected: "U64",
+                        actual: v.type_name(),
+                    }),
+                }
+            }
+        }
+    }
+
+    /// Resolve a `ValueExpr` to a concrete `Value`.
+    pub(super) fn resolve_val(&self, expr: &ValueExpr) -> Result<Value, TabulaError> {
+        match expr {
+            ValueExpr::Literal(v) => Ok(*v),
+            ValueExpr::Slot(s) => {
+                self.slots
+                    .get(*s as usize)
+                    .and_then(|o| *o)
+                    .ok_or(TabulaError::SlotOutOfBounds {
+                        index: *s,
+                        max: self.slots.len().saturating_sub(1) as u16,
+                    })
+            }
+            ValueExpr::Param(p) => {
+                self.params
+                    .get(*p as usize)
+                    .copied()
+                    .ok_or(TabulaError::ParamOutOfBounds {
+                        index: *p,
+                        max: self.params.len().saturating_sub(1) as u16,
+                    })
+            }
+        }
+    }
+
+    /// Get slot index from a `ValueExpr`, searching existing slots for a matching value.
+    ///
+    /// `exclude_slots` prevents matching a slot that the current instruction writes to.
+    pub(super) fn resolve_slot_idx(
+        &self,
+        expr: &ValueExpr,
+        encoded: &[KoalaBear],
+        is_null: bool,
+        exclude_slots: &[usize],
+    ) -> Result<Option<usize>, TabulaError> {
+        match expr {
+            ValueExpr::Slot(s) => Ok(Some(*s as usize)),
+            ValueExpr::Param(_) | ValueExpr::Literal(_) => {
+                let found = (0..self.max_slot)
+                    .filter(|s| !exclude_slots.contains(s))
+                    .filter(|s| self.slot_initialized[*s])
+                    .find(|&s| self.slot_fes[s] == encoded && self.slot_nulls[s] == is_null);
+                if let Some(idx) = found {
+                    return Ok(Some(idx));
+                }
+                Err(TabulaError::ProofError {
+                    phase: "trace_lowering",
+                    detail: "no slot contains the required operand value (param/literal); \
+                     the current AIR requires all operands to come from slots"
+                        .to_string(),
+                })
+            }
+        }
+    }
+
+    /// Update a slot with a new value.
+    pub(super) fn update_slot(
+        &mut self,
+        slot: usize,
+        value: Value,
+        encoded: Vec<KoalaBear>,
+        is_null: bool,
+    ) -> Result<(), TabulaError> {
+        if slot >= MAX_SLOTS {
+            return Err(TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!("slot {slot} >= MAX_SLOTS ({MAX_SLOTS})"),
+            });
+        }
+        self.slots[slot] = Some(value);
+        self.slot_fes[slot] = encoded;
+        self.slot_nulls[slot] = is_null;
+        self.slot_initialized[slot] = true;
+        if slot >= self.max_slot {
+            self.max_slot = slot + 1;
+        }
+        Ok(())
+    }
+
+    /// Encode a `Value` and pad to exactly `W` field elements.
+    pub(super) fn encode_padded(&self, value: &Value) -> Result<Vec<KoalaBear>, TabulaError> {
+        let mut fes = self.codec.encode(value)?;
+        fes.resize(W, KoalaBear::ZERO);
+        Ok(fes)
+    }
+
+    /// Default InstructionRecord with zero/empty fields.
+    pub(super) fn empty_record(&self, opcode: Opcode) -> InstructionRecord {
+        InstructionRecord {
+            opcode,
+            tx_index: self.tx_index,
+            effect_ordinal_in_tx: self.effect_ordinal,
+            written_slots: vec![],
+            src1_val: vec![KoalaBear::ZERO; W],
+            src2_val: vec![KoalaBear::ZERO; W],
+            cond_val: false,
+            src1_slot_idx: None,
+            src2_slot_idx: None,
+            cond_slot_idx: None,
+            access_t: None,
+            access_c: None,
+            access_r: None,
+            access_val: None,
+            access_is_null: None,
+            writes: vec![],
+            hash_perm_input: None,
+            hash_perm_output: None,
+            is_empty_col: false,
+            precompile_id: None,
+            instruction_index: None,
+            precompile_input_count: None,
+            precompile_output_count: None,
+            precompile_event_digest: None,
+            property_query_type: None,
+            property_query_arg0: vec![],
+            property_query_arg1: vec![],
+            property_result_val: vec![],
+            property_result_key: vec![],
+            property_result_is_null: false,
+        }
+    }
+
+    /// Find the event matching the current effect ordinal.
+    ///
+    /// `tx_events` is already scoped to the current transaction, so we only
+    /// need to match on `effect_ordinal_in_tx`.
+    pub(super) fn find_event(&self, instr_idx: usize) -> Result<&'a AccessEvent, TabulaError> {
+        let tx_index = self.tx_index;
+        let effect_ordinal = self.effect_ordinal;
+        self.tx_events
+            .iter()
+            .find(|e| e.effect_ordinal_in_tx == effect_ordinal)
+            .copied()
+            .ok_or_else(|| TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!(
+                    "no event found for tx={tx_index} effect_ordinal={effect_ordinal} at instruction {instr_idx}"
+                ),
+            })
+    }
+
+    /// Append a record.
+    pub(super) fn push_record(&mut self, rec: InstructionRecord) {
+        self.records.push(rec);
+    }
+
+    /// Resolve the unique stored precompile event for one instruction index.
+    pub(super) fn precompile_event(
+        &mut self,
+        instruction_index: usize,
+    ) -> Result<&'a PrecompileEvent, TabulaError> {
+        let event = self
+            .precompile_events_by_instruction
+            .get(&instruction_index)
+            .copied()
+            .ok_or_else(|| TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!(
+                    "missing precompile event for tx={} instruction {}",
+                    self.tx_index, instruction_index
+                ),
+            })?;
+        self.matched_precompile_instructions
+            .insert(instruction_index);
+        Ok(event)
+    }
+
+    /// Ensure every stored precompile event was matched to exactly one IR call site.
+    pub(super) fn validate_precompile_events_consumed(&self) -> Result<(), TabulaError> {
+        if self.matched_precompile_instructions.len() != self.precompile_events_by_instruction.len()
+        {
+            let unmatched: Vec<_> = self
+                .precompile_events_by_instruction
+                .keys()
+                .filter(|instruction_index| {
+                    !self
+                        .matched_precompile_instructions
+                        .contains(instruction_index)
+                })
+                .copied()
+                .collect();
+            return Err(TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!(
+                    "unmatched precompile events remain for tx={} at instructions {:?}",
+                    self.tx_index, unmatched
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Append a static table row.
+    pub(super) fn push_static_row(&mut self, row: StaticTableRow) {
+        self.static_rows.push(row);
+    }
+
+    /// Consume this context and return accumulated output.
+    pub(super) fn into_output(self) -> (Vec<InstructionRecord>, Vec<StaticTableRow>) {
+        (self.records, self.static_rows)
+    }
+}
+
+fn build_precompile_event_map(
+    tx_index: u32,
+    events: &[PrecompileEvent],
+) -> Result<BTreeMap<usize, &PrecompileEvent>, TabulaError> {
+    let mut map = BTreeMap::new();
+    for event in events {
+        if event.tx_index != tx_index as usize {
+            return Err(TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!(
+                    "stored precompile event tx_index={} does not match lowering tx_index={}",
+                    event.tx_index, tx_index
+                ),
+            });
+        }
+        if map.insert(event.instruction_index, event).is_some() {
+            return Err(TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!(
+                    "duplicate precompile event for tx={} instruction {}",
+                    tx_index, event.instruction_index
+                ),
+            });
+        }
+    }
+    Ok(map)
+}

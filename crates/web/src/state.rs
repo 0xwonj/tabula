@@ -7,7 +7,7 @@
 use leptos::prelude::*;
 
 use crate::models::{
-    HealthResponse, ProgramArtifact, RunHistoryEntry, StarkProofSummary, VerifyReport, WorkspaceDoc,
+    Artifact, HealthResponse, RunHistoryEntry, StarkProofSummary, VerifyReport, WorkspaceDoc,
 };
 use crate::storage;
 
@@ -54,8 +54,8 @@ pub(crate) struct AppSignals {
     pub set_deployed_instance_id: WriteSignal<Option<String>>,
     pub deployed_instance_version: ReadSignal<u64>,
     pub set_deployed_instance_version: WriteSignal<u64>,
-    pub program_artifact: ReadSignal<Option<ProgramArtifact>>,
-    pub set_program_artifact: WriteSignal<Option<ProgramArtifact>>,
+    pub artifact: ReadSignal<Option<Artifact>>,
+    pub set_artifact: WriteSignal<Option<Artifact>>,
 
     // ── STARK proof summary ──────────────────────────────────────────
     pub stark_summary: ReadSignal<Option<StarkProofSummary>>,
@@ -113,7 +113,7 @@ impl AppSignals {
         let (_deployed_program_id, set_deployed_program_id) = signal::<Option<String>>(None);
         let (deployed_instance_id, set_deployed_instance_id) = signal::<Option<String>>(None);
         let (deployed_instance_version, set_deployed_instance_version) = signal::<u64>(0);
-        let (program_artifact, set_program_artifact) = signal::<Option<ProgramArtifact>>(None);
+        let (artifact, set_artifact) = signal::<Option<Artifact>>(None);
 
         let (stark_summary, set_stark_summary) = signal::<Option<StarkProofSummary>>(None);
 
@@ -155,8 +155,8 @@ impl AppSignals {
             set_deployed_instance_id,
             deployed_instance_version,
             set_deployed_instance_version,
-            program_artifact,
-            set_program_artifact,
+            artifact,
+            set_artifact,
             stark_summary,
             set_stark_summary,
             busy_action,

@@ -3,7 +3,7 @@
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 
-use tabula_commitment::DOMAIN_SMT;
+use tabula_commitment::primitives::DOMAIN_SMT;
 use tabula_gadgets::{
     constrain_constant_identity, constrain_is_real_prefix, constrain_is_zero, constrain_key_halves,
     integer::expr_from_u32, send_key_range_checks,

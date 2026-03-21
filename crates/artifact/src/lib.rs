@@ -13,16 +13,16 @@ mod state;
 pub use error::ArtifactError;
 
 // Program
-pub use program::{ColumnProofPlan, ProgramArtifact, SchemeDescriptor};
+pub use program::{Artifact, ColumnProofPlan, PrecompileDescriptor, SchemeDescriptor};
 
 // State
-pub use state::{StateEntry, StateSnapshot, merge_output_state_entries, normalize_state};
+pub use state::{State, StateEntry, merge_output_state_entries, normalize_state};
 
 // Batch
 pub use batch::{TransactionBatch, TransactionInput, parse_hex_32};
 
 // Statement
-pub use receipt::ExecutionStatement;
+pub use receipt::Statement;
 
 // IO (non-wasm only)
 #[cfg(not(target_arch = "wasm32"))]

@@ -70,7 +70,7 @@ pub(crate) fn WorkspacePanels(
                     <button class="action ghost" on:click=add_state_row>"+ Row"</button>
                 </div>
                 <div class="state-section">
-                    {move || render_state_editor(s.state_json, s.set_state_json, s.program_artifact, move || s.persist())}
+                    {move || render_state_editor(s.state_json, s.set_state_json, s.artifact, move || s.persist())}
                 </div>
 
                 <div class="section-divider"></div>
@@ -90,7 +90,7 @@ pub(crate) fn WorkspacePanels(
                     </div>
                 </div>
                 <div class="tx-section">
-                    {move || render_batch_editor(s.batch_json, s.set_batch_json, s.program_artifact, move || s.persist())}
+                    {move || render_batch_editor(s.batch_json, s.set_batch_json, s.artifact, move || s.persist())}
                 </div>
             </div>
         </section>

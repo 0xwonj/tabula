@@ -13,7 +13,9 @@ sha2 = { workspace = true, optional = true }
 tabula-core = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-artifact = { workspace = true }
+tabula-contract = { workspace = true }
 tabula-compiler = { workspace = true }
+tabula-ext = { workspace = true, default-features = false }
 tabula-executor = { workspace = true }
 
 # STARK proving dependencies (optional, behind `prove` feature)
@@ -29,24 +31,26 @@ rayon = { workspace = true, optional = true }
 [features]
 default = []
 verify = [
+    "tabula-ext/verify",
     "dep:tabula-machine",
     "dep:tabula-chips",
     "dep:tabula-stark",
+    "dep:tabula-commitment",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:sha2",
 ]
 prove = [
     "verify",
+    "tabula-ext/prove",
     "dep:tabula-witness",
     "dep:tabula-commitment",
     "dep:p3-koala-bear",
     "dep:p3-field",
     "dep:rayon",
-    "dep:serde",
-    "dep:serde_json",
-    "dep:sha2",
 ]
 
 [dev-dependencies]
-tabula-contract = { workspace = true }
 tabula-core = { workspace = true, features = ["test-utils"] }
 tabula-testing = { workspace = true }
 serde_json = { workspace = true }

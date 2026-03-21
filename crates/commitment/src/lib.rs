@@ -1,50 +1,43 @@
-//! Protocol-level cryptographic primitives for the Tabula kernel (out-of-circuit).
+//! Native commitment and state-root computation for the Tabula proof stack.
 //!
-//! This crate computes cryptographic commitments to state: Poseidon hashing,
-//! Sparse Merkle Trees (SMT), Small Sparse Map Commitments (SSMC), and
-//! state commitment structures.
+//! This crate owns out-of-circuit commitment semantics:
+//! - Poseidon2 over KoalaBear
+//! - Sparse Merkle Trees (SMT)
+//! - Small Sparse Map Commitments (SSMC)
+//! - per-column commitment metadata and global state-root binding
 //!
-//! All Plonky3 dependencies are behind the `stark` feature flag.
-//! Without the feature, this crate compiles as an empty shell.
+//! `tabula-runtime` and `tabula-witness` prepare proving inputs around these
+//! native commitment products. `tabula-chips` and `tabula-machine` constrain
+//! and prove the same computations in-circuit.
+//!
+//! Public module layout:
+//! - [`primitives`]: shared commitment primitives: digests, hashers, codecs, and domain/depth constants
+//! - [`schemes`]: scheme-specific native commitment implementations (`smt`, `ssmc`, `tags`)
+//! - [`roots`]: column/table/global root-binding helpers
+//!
+//! All meaningful native APIs are behind the `stark` feature flag. Without it,
+//! the crate remains only a minimal shell.
+//!
+//! SMT internal nodes intentionally use the same plain 2-to-1 Poseidon
+//! compression checked by the current proof chips. Tree/domain separation comes
+//! from domain-specific empty-leaf seeding and distinct leaf/table/column
+//! bindings, not from an additional per-node domain tag.
 
 #[cfg(feature = "stark")]
-mod codec;
+mod column;
 #[cfg(feature = "stark")]
-mod column_meta;
+/// Shared commitment primitives: digests, hashers, codecs, and constants.
+pub mod primitives;
 #[cfg(feature = "stark")]
-mod field;
+/// Column/table/global root-binding helpers.
+pub mod roots;
 #[cfg(feature = "stark")]
-mod hasher;
-#[cfg(feature = "stark")]
-mod poseidon;
-#[cfg(feature = "stark")]
-mod smt;
-#[cfg(feature = "stark")]
-mod ssmc;
-#[cfg(feature = "stark")]
-mod ssmc_merge;
-#[cfg(feature = "stark")]
-mod state_root;
+/// Scheme-specific native commitment implementations and builtin scheme tags.
+pub mod schemes;
 
 #[cfg(feature = "stark")]
-pub use codec::{KoalaBearCodec, decode_trace, encode_trace, trace_width};
+pub use column::{ColumnMeta, ColumnState};
 #[cfg(feature = "stark")]
-pub use column_meta::{ColumnMeta, ColumnState, proof_column_commitment, scheme_tags};
+pub use primitives::{FieldHasher, KoalaBearCodec, NativeDigest, PoseidonHasher};
 #[cfg(feature = "stark")]
-pub use field::{
-    COL_DATA_SMT_DEPTH, COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_HASH_IR, DOMAIN_LEAF, DOMAIN_SMT,
-    DOMAIN_SSMC, DOMAIN_TABLE, NativeDigest, TABLE_STATE_SMT_DEPTH, decode_u64_limbs,
-    encode_u64_limbs,
-};
-#[cfg(feature = "stark")]
-pub use hasher::{FieldHasher, MockFieldHasher};
-#[cfg(feature = "stark")]
-pub use poseidon::PoseidonHasher;
-#[cfg(feature = "stark")]
-pub use smt::{MerkleProof, SparseMerkleTree};
-#[cfg(feature = "stark")]
-pub use ssmc::{SsmcCommitment, SsmcEntry, SsmcList};
-#[cfg(feature = "stark")]
-pub use ssmc_merge::{MergeSource, MergeStep, MergeTrace};
-#[cfg(feature = "stark")]
-pub use state_root::{compute_leaf, compute_state_root, compute_table_root};
+pub use roots::compute_state_roots_from_metas;

@@ -84,3 +84,35 @@ pub enum RuntimeError {
     #[error("verification: {0}")]
     Verification(#[source] tabula_machine::VerificationError),
 }
+
+impl RuntimeError {
+    pub(crate) fn from_extension_setup(error: tabula_ext::ExtError) -> Self {
+        match error {
+            tabula_ext::ExtError::Validation { detail } => Self::ValidationFailed { detail },
+            #[cfg(feature = "verify")]
+            tabula_ext::ExtError::Setup(source) => Self::MachineSetup(source),
+            tabula_ext::ExtError::RuntimeHook(source)
+            | tabula_ext::ExtError::ProofPreparation(source) => Self::ValidationFailed {
+                detail: source.to_string(),
+            },
+        }
+    }
+
+    #[cfg(feature = "prove")]
+    pub(crate) fn from_extension_proof(error: tabula_ext::ExtError) -> Self {
+        match error {
+            tabula_ext::ExtError::Validation { detail } => Self::WitnessGeneration { detail },
+            tabula_ext::ExtError::Setup(source) => Self::MachineSetup(source),
+            tabula_ext::ExtError::RuntimeHook(source)
+            | tabula_ext::ExtError::ProofPreparation(source) => Self::WitnessGeneration {
+                detail: source.to_string(),
+            },
+        }
+    }
+}
+
+impl From<tabula_ext::ExtError> for RuntimeError {
+    fn from(value: tabula_ext::ExtError) -> Self {
+        Self::from_extension_setup(value)
+    }
+}

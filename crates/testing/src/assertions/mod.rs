@@ -7,7 +7,7 @@ mod runtime;
 mod state;
 
 pub use artifact::{
-    assert_program_artifact_semantically_eq, assert_state_snapshot_semantically_eq,
+    assert_artifact_semantically_eq, assert_state_semantically_eq,
     assert_transaction_batch_semantically_eq,
 };
 pub use batch::{

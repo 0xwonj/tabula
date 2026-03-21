@@ -8,7 +8,7 @@ const STATEMENT_HASH_DOMAIN: &[u8] = b"tabula.execution.statement.v2";
 /// Canonical public statement for one execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExecutionStatement {
+pub struct Statement {
     /// Program artifact hash.
     pub program_hash: String,
     /// Input state hash.
@@ -27,7 +27,7 @@ pub struct ExecutionStatement {
     pub new_state_root: Vec<String>,
 }
 
-impl ExecutionStatement {
+impl Statement {
     /// Compute the canonical statement digest bytes.
     pub fn statement_hash_bytes(&self) -> [u8; 32] {
         let mut hasher = Sha256::new();

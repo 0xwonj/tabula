@@ -5,7 +5,7 @@ use tabula_core::RootProfileId;
 use tabula_stark::air::interaction::BusId;
 use tabula_stark::trace::DynChip;
 
-use crate::AnyRap;
+use crate::backend::AnyRap;
 
 /// How column commitments are aggregated into a state root.
 pub trait RootProof: Send + Sync {

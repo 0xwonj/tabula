@@ -107,6 +107,21 @@ impl WitnessStore {
         self.entries.contains_key(&key)
     }
 
+    /// Merge another store into this one.
+    ///
+    /// Returns an error if both stores contain the same typed witness key.
+    pub fn merge(&mut self, other: WitnessStore) -> Result<(), String> {
+        for (key, value) in other.entries {
+            if self.entries.insert(key, value).is_some() {
+                return Err(format!(
+                    "duplicate witness store entry for label '{}'",
+                    key.label
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Drain all entries whose label matches one of the given labels into a new store.
     ///
     /// Entries are moved (removed from `self`, inserted into the result).
@@ -148,7 +163,7 @@ impl Default for WitnessStore {
 /// Pre-populate the [`WitnessStore`] with custom data before passing it
 /// to the runtime-owned trace assembly pipeline.
 ///
-/// [`build_all_traces()`]: tabula_witness::trace::build_all_traces
+/// [`build_all_traces()`]: crate::trace::build_all_traces
 pub mod witness_labels {
     /// `Vec<InstructionRecord>` — execution instruction trace input.
     pub const EXECUTION_RECORDS: &str = "execution_records";

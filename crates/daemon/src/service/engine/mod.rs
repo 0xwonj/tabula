@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
 
-use tabula_artifact::{ProgramArtifact, StateSnapshot, normalize_state};
+use tabula_artifact::{Artifact, State, normalize_state};
 
 use crate::protocol::error::ErrorCode;
 use crate::service::capabilities::{Capabilities, CapabilityClientKind, CapabilityInputMode};
@@ -69,10 +69,10 @@ impl LocalEngine {
         }
     }
 
-    /// Register and persist a program artifact.
+    /// Register and persist a artifact.
     pub fn register_program(&self, req: RegisterProgramCommand) -> ServiceResult<ProgramRecord> {
         let compiled_program = self.compile_program_input(&req.program)?;
-        let program: ProgramArtifact = compiled_program.as_program_artifact();
+        let program: Artifact = compiled_program.as_artifact();
 
         #[cfg(feature = "stark")]
         let prepared_runtime = Arc::new(
@@ -93,7 +93,7 @@ impl LocalEngine {
             program_hash: program.canonical_digest().map_err(|e| {
                 ServiceError::internal(
                     ErrorCode::InternalError,
-                    format!("failed to hash program artifact: {e}"),
+                    format!("failed to hash artifact: {e}"),
                 )
             })?,
             contract_schema_version: compiled_program.metadata_envelope().contract_schema_version,
@@ -131,9 +131,7 @@ impl LocalEngine {
     /// Create a stateful instance from a program and initial state.
     pub fn create_instance(&self, req: CreateInstanceCommand) -> ServiceResult<InstanceRecord> {
         let program = self.get_program_store(req.program_id.as_str())?;
-        let initial_state = self
-            .files
-            .load_json_input::<StateSnapshot>(&req.state, "state")?;
+        let initial_state = self.files.load_json_input::<State>(&req.state, "state")?;
         let normalized_state = normalize_state(&initial_state)
             .map_err(|e| ServiceError::bad_request(ErrorCode::InvalidStateCell, e.to_string()))?;
         let ts = now_ms();
@@ -254,7 +252,7 @@ mod tests {
 
     use crate::service::ErrorKind;
     use crate::service::{CreateInstanceCommand, RunStatus, SubmitRunCommand};
-    use tabula_artifact::{ExecutionStatement, StateEntry, merge_output_state_entries};
+    use tabula_artifact::{StateEntry, Statement, merge_output_state_entries};
     use tabula_core::{ColId, RowKey, TableId, Value};
     use tabula_testing::assertions::assert_state_cell;
     use tabula_testing::fixtures::examples::transfer_example_artifact_case;
@@ -283,7 +281,7 @@ mod tests {
 
     #[test]
     fn statement_hash_is_stable() {
-        let c1 = ExecutionStatement {
+        let c1 = Statement {
             program_hash: "a".to_string(),
             state_hash: "b".to_string(),
             batch_hash: "c".to_string(),
@@ -297,7 +295,7 @@ mod tests {
         let h2 = c2.statement_hash();
         assert_eq!(h1, h2);
 
-        let c3 = ExecutionStatement {
+        let c3 = Statement {
             metadata_hash: "x".to_string(),
             ..c2
         };
@@ -334,7 +332,7 @@ mod tests {
 
         let registered = engine
             .register_program(RegisterProgramCommand {
-                program: InputRef::inline(ProgramInline::program(case.program_artifact.clone())),
+                program: InputRef::inline(ProgramInline::program(case.artifact.clone())),
                 label: Some("transfer".to_string()),
             })
             .expect("register program");
@@ -415,7 +413,7 @@ mod tests {
 
         let registered = engine
             .register_program(RegisterProgramCommand {
-                program: InputRef::inline(ProgramInline::program(case.program_artifact.clone())),
+                program: InputRef::inline(ProgramInline::program(case.artifact.clone())),
                 label: None,
             })
             .expect("register program");
@@ -450,7 +448,7 @@ mod tests {
 
         let registered = engine
             .register_program(RegisterProgramCommand {
-                program: InputRef::inline(ProgramInline::program(case.program_artifact.clone())),
+                program: InputRef::inline(ProgramInline::program(case.artifact.clone())),
                 label: None,
             })
             .expect("register program");

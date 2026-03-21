@@ -1,4 +1,4 @@
-mod artifacts;
+mod partition;
 mod prepare;
 mod statement;
 mod traces;
@@ -6,7 +6,7 @@ mod traces;
 use serde::{Deserialize, Serialize};
 use tabula_machine::TabulaProof;
 
-pub(crate) use artifacts::prepare_witness_artifacts;
+pub(crate) use prepare::{PrecompileProofRecipe, prepare_proof_batch};
 pub(crate) use statement::build_execution_statement;
 pub use statement::digest_to_hex;
 pub(crate) use traces::build_traces;
@@ -17,7 +17,7 @@ pub(crate) use traces::build_traces;
 /// needed for witness generation and column state reconstruction.
 pub struct ProveInput<'a> {
     /// Pre-execution state (for building `old_column_states`).
-    pub state: &'a tabula_artifact::StateSnapshot,
+    pub state: &'a tabula_artifact::State,
     /// Transaction batch (for witness store preparation).
     pub batch: &'a tabula_artifact::TransactionBatch,
     /// Executed batch result (from [`run_batch`](crate::run_batch)).
@@ -29,7 +29,7 @@ pub struct ProveResult {
     /// The generated STARK proof.
     pub proof: TabulaProof,
     /// Canonical execution statement bound into the proof transcript.
-    pub statement: tabula_artifact::ExecutionStatement,
+    pub statement: tabula_artifact::Statement,
     /// Summary of chips contributing to the proof.
     pub summary: ProofSummary,
 }
@@ -39,7 +39,7 @@ pub struct VerifiedResult {
     /// The generated STARK proof.
     pub proof: TabulaProof,
     /// Canonical execution statement bound into the proof transcript.
-    pub statement: tabula_artifact::ExecutionStatement,
+    pub statement: tabula_artifact::Statement,
     /// Whether verification passed.
     pub verified: bool,
     /// Summary of chips contributing to the proof.

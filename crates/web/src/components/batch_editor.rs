@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use serde_json::json;
 use tabula_core::Value as CoreValue;
 
-use crate::models::{ProgramArtifact, TransactionBatch};
+use crate::models::{Artifact, TransactionBatch};
 use crate::utils::{
     format_value, parse_batch, parse_value_input, pretty_json_inline, pretty_json_value,
 };
@@ -15,11 +15,11 @@ use crate::utils::{
 pub(crate) fn render_batch_editor(
     batch_json: ReadSignal<String>,
     set_batch_json: WriteSignal<String>,
-    program_artifact: ReadSignal<Option<ProgramArtifact>>,
+    artifact: ReadSignal<Option<Artifact>>,
     persist: impl Fn() + Clone + 'static,
 ) -> impl IntoView {
     let parsed = parse_batch(&batch_json.get());
-    let artifact = program_artifact.get();
+    let artifact = artifact.get();
 
     match parsed {
         Ok(batch) => {
@@ -36,7 +36,7 @@ pub(crate) fn render_batch_editor(
 }
 
 fn render_schema_batch(
-    artifact: &ProgramArtifact,
+    artifact: &Artifact,
     batch: &TransactionBatch,
     batch_json: ReadSignal<String>,
     set_batch_json: WriteSignal<String>,

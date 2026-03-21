@@ -17,14 +17,13 @@ pub use compile::compile_program_source;
 pub use error::{CompileDiagnostic, CompilerError, CompilerResult};
 pub use example::{ExampleBundle, TRANSFER_EXAMPLE_TAB_SOURCE, transfer_example_bundle};
 pub use load::{
-    load_and_register_program, load_program_artifact, load_program_artifact_strict,
-    load_program_definition, load_program_definition_strict, parse_program_artifact,
-    parse_program_definition,
+    load_and_register_program, load_artifact, load_artifact_strict, load_program_definition,
+    load_program_definition_strict, parse_artifact, parse_program_definition,
 };
-pub use program::CompiledProgram;
+pub use program::SealedProgram;
 pub use register::{
-    SchemeDescriptorCatalog, register_program, register_program_artifact,
-    register_program_definition, register_program_definition_with_scheme_catalog,
+    CompilerCatalogs, PrecompileDescriptorCatalog, SchemeDescriptorCatalog, register_artifact,
+    register_program, register_program_definition, register_program_definition_with_catalogs,
 };
 pub use sources::{ColumnSchemeSelection, ProgramDefinition};
 
@@ -33,7 +32,7 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use tabula_artifact::{ProgramArtifact, SchemeDescriptor};
+    use tabula_artifact::{Artifact, SchemeDescriptor};
     use tabula_core::{
         ColumnLayoutKind, RootProfileId, SchemeId, TableId, TableSchema, TxTypeId, Value, ValueType,
     };
@@ -131,7 +130,7 @@ mod tests {
         assert_eq!(h1, h2);
     }
 
-    fn write_temp_program_file(program: &ProgramArtifact) -> std::path::PathBuf {
+    fn write_temp_program_file(program: &Artifact) -> std::path::PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock")
@@ -169,6 +168,48 @@ mod tests {
         }
     }
 
+    fn precompile_program_sources() -> ProgramDefinition {
+        ProgramDefinition {
+            table_schemas: vec![],
+            tx_types: vec![tabula_ir::TxTypeDef {
+                id: TxTypeId(1),
+                name: "pcall".to_string(),
+                param_schema: vec![],
+                body: vec![Instruction::Precompile {
+                    id: tabula_ir::PrecompileId(0x0001),
+                    dst_slots: vec![0],
+                    inputs: vec![],
+                }],
+            }],
+            column_schemes: vec![],
+        }
+    }
+
+    fn precompile_descriptor(id: tabula_ir::PrecompileId) -> tabula_artifact::PrecompileDescriptor {
+        tabula_artifact::PrecompileDescriptor::from_labels(
+            id,
+            1,
+            "testing.constant_one.params",
+            "testing.constant_one.semantic",
+        )
+    }
+
+    fn precompile_artifact() -> Artifact {
+        let definition = precompile_program_sources();
+        let mut precompiles = PrecompileDescriptorCatalog::new();
+        let descriptor = precompile_descriptor(tabula_ir::PrecompileId(0x0001));
+        precompiles.insert(descriptor.precompile_id, descriptor);
+        register_program_definition_with_catalogs(
+            &definition,
+            &CompilerCatalogs {
+                schemes: SchemeDescriptorCatalog::new(),
+                precompiles,
+            },
+        )
+        .expect("register precompile program")
+        .into_artifact()
+    }
+
     #[test]
     fn json_artifact_requires_contract_metadata() {
         let nonce = SystemTime::now()
@@ -191,14 +232,14 @@ mod tests {
         let program_sources = simple_valid_program_sources();
         let mut program = register_program_definition(&program_sources)
             .expect("compile sources")
-            .as_program_artifact();
+            .as_artifact();
         program.contract_metadata = tabula_contract::ContractMetadataEnvelope {
             profile_hash: [0x99; 32],
             contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
             binding_version: BINDING_VERSION_V1,
             statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
             verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
-            semantic_hash_stub: None,
+            semantic_hash_stub: Some([0x55; 32]),
         };
         let path = write_temp_program_file(&program);
         let err = load_and_register_program(&path).expect_err("metadata mismatch should fail");
@@ -219,7 +260,7 @@ mod tests {
         let program_sources = simple_valid_program_sources();
         let mut program = register_program_definition(&program_sources)
             .expect("compile sources")
-            .as_program_artifact();
+            .as_artifact();
         program.column_proof_plan.clear();
         let path = write_temp_program_file(&program);
         let err = load_and_register_program(&path).expect_err("proof plan mismatch should fail");
@@ -236,18 +277,91 @@ mod tests {
     }
 
     #[test]
-    fn json_artifact_can_override_column_scheme_plan() {
+    fn json_artifact_can_override_column_scheme_plan_with_updated_metadata() {
         let program_sources = simple_valid_program_sources();
         let mut program = register_program_definition(&program_sources)
             .expect("compile sources")
-            .as_program_artifact();
+            .as_artifact();
         program.column_proof_plan[0].scheme_id = SchemeId::SMT;
         program.column_proof_plan[0].scheme_descriptor = SchemeDescriptor::builtin_smt();
+        program.contract_metadata.semantic_hash_stub = Some(
+            profile::compute_semantic_hash_stub(
+                &program.precompile_manifest,
+                &program.required_property_requirements,
+                &program.column_proof_plan,
+            )
+            .expect("semantic hash"),
+        );
 
-        let compiled =
-            register_program_artifact(&program).expect("artifact with explicit scheme plan");
+        let compiled = register_artifact(&program).expect("artifact with explicit scheme plan");
 
         assert_eq!(compiled.column_proof_plan()[0].scheme_id, SchemeId::SMT);
+    }
+
+    #[test]
+    fn artifact_with_missing_referenced_precompile_descriptor_fails_registration() {
+        let artifact = precompile_artifact();
+        let mut malformed = artifact.clone();
+        malformed.precompile_manifest.clear();
+
+        let err = register_artifact(&malformed).expect_err("missing precompile manifest must fail");
+        match err {
+            CompilerError::InvalidProgram(source) => {
+                assert!(source.to_string().contains("precompile manifest ids"));
+            }
+            other => panic!("unexpected compiler error: {other}"),
+        }
+    }
+
+    #[test]
+    fn artifact_with_extra_unreferenced_precompile_descriptor_fails_registration() {
+        let mut artifact = precompile_artifact();
+        artifact
+            .precompile_manifest
+            .push(tabula_artifact::PrecompileDescriptor::from_labels(
+                tabula_ir::PrecompileId(0x00ff),
+                1,
+                "extra.params",
+                "extra.semantic",
+            ));
+
+        let err =
+            register_artifact(&artifact).expect_err("extra precompile manifest entry must fail");
+        match err {
+            CompilerError::InvalidProgram(source) => {
+                assert!(source.to_string().contains("precompile manifest ids"));
+            }
+            other => panic!("unexpected compiler error: {other}"),
+        }
+    }
+
+    #[test]
+    fn semantic_hash_stub_changes_with_precompile_manifest() {
+        let artifact = precompile_artifact();
+        let first = register_artifact(&artifact).expect("register original artifact");
+
+        let mut modified = artifact.clone();
+        modified.precompile_manifest[0] = tabula_artifact::PrecompileDescriptor::from_labels(
+            modified.precompile_manifest[0].precompile_id,
+            modified.precompile_manifest[0].precompile_version + 1,
+            "testing.constant_one.params.v2",
+            "testing.constant_one.semantic.v2",
+        );
+        modified.contract_metadata.semantic_hash_stub = Some([0u8; 32]);
+
+        let err = register_artifact(&modified).expect_err("stale semantic hash must fail closed");
+        match err {
+            CompilerError::ContractMetadataMismatch(source) => {
+                assert!(source.to_string().contains("semantic hash"));
+            }
+            other => panic!("unexpected compiler error: {other}"),
+        }
+
+        let second = first.metadata_envelope().semantic_hash_stub;
+        assert!(
+            second.is_some(),
+            "sealed programs must carry semantic hash stubs"
+        );
     }
 
     #[test]
@@ -300,8 +414,14 @@ mod tests {
                 supported_property_query_kinds: vec![],
             },
         );
-        let compiled = register_program_definition_with_scheme_catalog(&program, &scheme_catalog)
-            .expect("register source");
+        let compiled = register_program_definition_with_catalogs(
+            &program,
+            &CompilerCatalogs {
+                schemes: scheme_catalog,
+                precompiles: Default::default(),
+            },
+        )
+        .expect("register source");
         assert_eq!(compiled.column_proof_plan()[0].scheme_id, SchemeId::SMT);
         assert_eq!(compiled.column_proof_plan()[1].scheme_id, SchemeId(42));
     }
@@ -324,8 +444,14 @@ mod tests {
             },
         );
 
-        let err = register_program_definition_with_scheme_catalog(&program, &scheme_catalog)
-            .expect_err("catalog mismatch should fail");
+        let err = register_program_definition_with_catalogs(
+            &program,
+            &CompilerCatalogs {
+                schemes: scheme_catalog,
+                precompiles: Default::default(),
+            },
+        )
+        .expect_err("catalog mismatch should fail");
         match err {
             CompilerError::InvalidProgram(source) => {
                 assert!(source.to_string().contains("catalog mismatch"));

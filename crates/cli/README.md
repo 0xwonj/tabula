@@ -1,18 +1,25 @@
 # tabula-cli
 
-Command-line interface for the Tabula kernel.
+Command-line interface for local Tabula compiler and runtime workflows.
 
 ## Role
 
-Executes batches against JSON-encoded programs and state files.
-Supports `.tab` source compilation, program inspection, and
-example file generation.
-Runtime command paths are routed through `tabula-orchestrator`.
+- compile `.tab` source to registered JSON artifacts
+- validate programs (`check`)
+- execute batches against states
+- inspect state files
+- generate example inputs for local testing
+
+`tabula-cli` calls `tabula-compiler` and `tabula-runtime` directly.
 
 ## Usage
 
 ```sh
-tabula-cli execute --program program.json --state state.json --batch batch.json
-tabula-cli inspect --program program.json
-tabula-cli example
+cargo run -p tabula-cli -- check path/to/program.tab
+cargo run -p tabula-cli -- compile path/to/program.tab
+cargo run -p tabula-cli -- execute --program program.json --state state.json --batch batch.json
+cargo run -p tabula-cli -- inspect --state state.json
+cargo run -p tabula-cli -- example --dir /tmp/tabula-example
 ```
+
+If installed as a binary, the command name is `tabula`.

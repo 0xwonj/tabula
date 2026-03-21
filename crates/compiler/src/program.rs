@@ -2,14 +2,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use tabula_artifact::{ColumnProofPlan, ProgramArtifact};
+use tabula_artifact::{Artifact, ColumnProofPlan, PrecompileDescriptor};
 use tabula_contract::{ContractCompatibilityPolicy, ContractMetadataEnvelope};
 use tabula_core::{ColId, TableId, TableSchema};
-use tabula_ir::{PrecompileId, Program, PropertyRequirement, TxTypeDef};
+use tabula_ir::{Program, PropertyRequirement, TxTypeDef};
 
 /// In-memory semantic artifact produced by the compiler/registration phase.
 #[derive(Debug, Clone)]
-pub struct CompiledProgram {
+pub struct SealedProgram {
     /// Registered IR program.
     program: Program,
     /// Canonical table schemas consumed during registration.
@@ -17,7 +17,7 @@ pub struct CompiledProgram {
     /// Canonical transaction definitions consumed during registration.
     tx_types: Vec<TxTypeDef>,
     /// Capability manifest: precompiles required by the program.
-    required_precompile_ids: Vec<PrecompileId>,
+    precompile_manifest: Vec<PrecompileDescriptor>,
     /// Capability manifest: exact structural property requirements required by the program.
     required_property_requirements: Vec<PropertyRequirement>,
     /// Compiler-owned proof plan for all committed columns.
@@ -26,13 +26,13 @@ pub struct CompiledProgram {
     metadata_envelope: ContractMetadataEnvelope,
 }
 
-impl CompiledProgram {
+impl SealedProgram {
     /// Create a compiler-owned semantic artifact after invariant checks.
     pub(crate) fn new(
         program: Program,
         table_schemas: Vec<TableSchema>,
         tx_types: Vec<TxTypeDef>,
-        required_precompile_ids: Vec<PrecompileId>,
+        precompile_manifest: Vec<PrecompileDescriptor>,
         required_property_requirements: Vec<PropertyRequirement>,
         column_proof_plan: Vec<ColumnProofPlan>,
         metadata_envelope: ContractMetadataEnvelope,
@@ -41,11 +41,12 @@ impl CompiledProgram {
             program,
             table_schemas,
             tx_types,
-            required_precompile_ids,
+            precompile_manifest,
             required_property_requirements,
             column_proof_plan,
             metadata_envelope,
         };
+        compiled.validate_precompile_manifest()?;
         compiled.validate_column_proof_plan()?;
         Ok(compiled)
     }
@@ -66,8 +67,8 @@ impl CompiledProgram {
     }
 
     /// Capability manifest: precompiles required by the program.
-    pub fn required_precompile_ids(&self) -> &[PrecompileId] {
-        &self.required_precompile_ids
+    pub fn precompile_manifest(&self) -> &[PrecompileDescriptor] {
+        &self.precompile_manifest
     }
 
     /// Capability manifest: exact structural property requirements required by the program.
@@ -95,6 +96,37 @@ impl CompiledProgram {
             expected_verifier_profile_version: self.metadata_envelope.verifier_profile_version,
             expected_semantic_hash_stub: self.metadata_envelope.semantic_hash_stub,
         }
+    }
+
+    /// Validate that the sealed precompile manifest is sorted, unique, and
+    /// exactly matches the precompile IDs referenced from the IR body.
+    pub fn validate_precompile_manifest(&self) -> Result<(), String> {
+        let manifest_ids: Vec<_> = self
+            .precompile_manifest
+            .iter()
+            .map(|descriptor| descriptor.precompile_id)
+            .collect();
+
+        let mut sorted_unique_manifest_ids = manifest_ids.clone();
+        sorted_unique_manifest_ids.sort();
+        sorted_unique_manifest_ids.dedup();
+        if manifest_ids != sorted_unique_manifest_ids {
+            return Err(
+                "precompile manifest must be sorted by precompile_id and contain no duplicates"
+                    .to_string(),
+            );
+        }
+
+        let referenced_ids: Vec<_> = derive_referenced_precompile_ids(&self.program)
+            .into_iter()
+            .collect();
+        if manifest_ids != referenced_ids {
+            return Err(format!(
+                "precompile manifest ids {manifest_ids:?} do not match IR-referenced precompile ids {referenced_ids:?}",
+            ));
+        }
+
+        Ok(())
     }
 
     /// Validate that the proof plan covers each schema column exactly once.
@@ -163,11 +195,11 @@ impl CompiledProgram {
     }
 
     /// Clone into a sealed portable artifact.
-    pub fn as_program_artifact(&self) -> ProgramArtifact {
-        ProgramArtifact {
+    pub fn as_artifact(&self) -> Artifact {
+        Artifact {
             table_schemas: self.table_schemas.clone(),
             tx_types: self.tx_types.clone(),
-            required_precompile_ids: self.required_precompile_ids.clone(),
+            precompile_manifest: self.precompile_manifest.clone(),
             required_property_requirements: self.required_property_requirements.clone(),
             column_proof_plan: self.column_proof_plan.clone(),
             contract_metadata: self.metadata_envelope.clone(),
@@ -175,19 +207,18 @@ impl CompiledProgram {
     }
 
     /// Convert into a sealed portable artifact.
-    pub fn into_program_artifact(self) -> ProgramArtifact {
-        ProgramArtifact {
+    pub fn into_artifact(self) -> Artifact {
+        Artifact {
             table_schemas: self.table_schemas,
             tx_types: self.tx_types,
-            required_precompile_ids: self.required_precompile_ids,
+            precompile_manifest: self.precompile_manifest,
             required_property_requirements: self.required_property_requirements,
             column_proof_plan: self.column_proof_plan,
             contract_metadata: self.metadata_envelope,
         }
     }
+}
 
-    /// Backward-compatible alias for older call sites.
-    pub fn into_program_file(self) -> ProgramArtifact {
-        self.into_program_artifact()
-    }
+fn derive_referenced_precompile_ids(program: &Program) -> Vec<tabula_ir::PrecompileId> {
+    program.referenced_precompile_ids().into_iter().collect()
 }

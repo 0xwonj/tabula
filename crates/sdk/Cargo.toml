@@ -1,0 +1,43 @@
+[package]
+name = "tabula-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["prove"]
+verify = [
+    "dep:tabula-executor",
+    "dep:tabula-ext",
+    "dep:tabula-ir",
+    "dep:tabula-machine",
+    "dep:tabula-stark",
+    "tabula-ext/verify",
+    "tabula-runtime/verify",
+]
+prove = [
+    "verify",
+    "tabula-ext/prove",
+    "tabula-runtime/prove",
+]
+
+[dependencies]
+blake3 = { workspace = true }
+thiserror = { workspace = true }
+tabula-artifact = { workspace = true }
+tabula-compiler = { workspace = true }
+tabula-core = { workspace = true }
+tabula-ext = { workspace = true, optional = true, default-features = false }
+tabula-runtime = { path = "../runtime", default-features = false }
+tabula-executor = { workspace = true, optional = true }
+tabula-ir = { workspace = true, optional = true }
+tabula-machine = { workspace = true, optional = true }
+tabula-stark = { workspace = true, optional = true }
+
+[dev-dependencies]
+tabula-ext = { workspace = true, features = ["prove"] }
+tabula-contract = { workspace = true }
+tabula-testing = { workspace = true }
+
+[lints]
+workspace = true

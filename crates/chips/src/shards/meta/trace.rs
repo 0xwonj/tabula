@@ -7,7 +7,8 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
-use tabula_commitment::{DOMAIN_LEAF, NativeDigest};
+use tabula_commitment::NativeDigest;
+use tabula_commitment::primitives::DOMAIN_LEAF;
 use tabula_gadgets::bool_fe;
 use tabula_stark::air::columns::borrow_cols_mut;
 

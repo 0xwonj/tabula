@@ -8,7 +8,7 @@ use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{ProverConstraintFolder, SymbolicAirBuilder, VerifierConstraintFolder};
 
-use crate::AnyRap;
+use crate::backend::AnyRap;
 use crate::config::TabulaStarkConfig;
 use tabula_stark::rap::prover::RapProverFolder;
 use tabula_stark::rap::verifier::RapVerifierFolder;

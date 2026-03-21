@@ -1,4 +1,4 @@
-//! State snapshot models and utilities.
+//! State models and utilities.
 
 use std::collections::BTreeMap;
 
@@ -9,10 +9,10 @@ use tabula_core::{CellKey, ColId, RowKey, TableId, Value};
 use crate::ArtifactError;
 use crate::canonical::{bytes_to_hex, canonical_json_bytes, canonical_json_digest};
 
-/// Canonical state snapshot.
+/// Canonical state value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StateSnapshot {
+pub struct State {
     /// All state cells.
     pub cells: Vec<StateEntry>,
 }
@@ -31,7 +31,7 @@ pub struct StateEntry {
     pub value: Option<Value>,
 }
 
-impl StateSnapshot {
+impl State {
     /// Serialize this state into canonical bytes after normalization.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ArtifactError> {
         let normalized = normalize_state(self)?;
@@ -115,18 +115,18 @@ pub fn merge_output_state_entries(
         .collect()
 }
 
-/// Normalize a state snapshot by deduplicating cells on `(table, row, col)`.
+/// Normalize a state by deduplicating cells on `(table, row, col)`.
 ///
 /// When multiple cells share the same key, the last one wins. Each resulting
 /// cell has a non-`None` value.
-pub fn normalize_state(input: &StateSnapshot) -> Result<StateSnapshot, ArtifactError> {
+pub fn normalize_state(input: &State) -> Result<State, ArtifactError> {
     let mut merged = BTreeMap::new();
     for cell in &input.cells {
         let (key, value) = cell.to_cell_pair()?;
         merged.insert((key.table.0, key.row.0, key.col.0), value);
     }
 
-    Ok(StateSnapshot {
+    Ok(State {
         cells: merged
             .into_iter()
             .map(|((table, row, col), value)| StateEntry {
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn state_file_serde_roundtrip() {
-        let state = StateSnapshot {
+        let state = State {
             cells: vec![
                 StateEntry {
                     table: 0,
@@ -163,7 +163,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&state).expect("serialize");
-        let back: StateSnapshot = serde_json::from_str(&json).expect("deserialize");
+        let back: State = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.cells.len(), 2);
         assert_eq!(back.cells[0].value, Some(Value::U64(42)));
         assert_eq!(back.cells[1].value, Some(Value::Bool(true)));
@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn normalize_state_deduplicates_and_sorts() {
-        let state = StateSnapshot {
+        let state = State {
             cells: vec![
                 StateEntry {
                     table: 0,
@@ -269,7 +269,7 @@ mod tests {
 
     #[test]
     fn normalize_state_rejects_null_values() {
-        let state = StateSnapshot {
+        let state = State {
             cells: vec![StateEntry {
                 table: 0,
                 row: 0,
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn canonical_digest_normalizes_equivalent_states() {
-        let left = StateSnapshot {
+        let left = State {
             cells: vec![
                 StateEntry {
                     table: 1,
@@ -319,7 +319,7 @@ mod tests {
                 },
             ],
         };
-        let right = StateSnapshot {
+        let right = State {
             cells: vec![StateEntry {
                 table: 1,
                 row: 0,

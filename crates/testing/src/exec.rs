@@ -2,17 +2,15 @@
 
 use std::collections::BTreeMap;
 
-use tabula_artifact::{
-    ArtifactError, ProgramArtifact, StateSnapshot as ArtifactStateSnapshot, TransactionBatch,
-};
+use tabula_artifact::{Artifact, ArtifactError, State as ArtifactState, TransactionBatch};
 use tabula_compiler::{
-    CompiledProgram, SchemeDescriptorCatalog, compile_program_source, register_program,
-    register_program_artifact, register_program_definition,
-    register_program_definition_with_scheme_catalog,
+    CompilerCatalogs, SchemeDescriptorCatalog, SealedProgram, compile_program_source,
+    register_artifact, register_program, register_program_definition,
+    register_program_definition_with_catalogs,
 };
 use tabula_core::error::TabulaError;
 use tabula_core::mock::Blake3Hasher;
-use tabula_core::traits::StateSnapshot;
+use tabula_core::traits::StateView;
 use tabula_core::{
     Batch, CellKey, ColId, InMemoryState, InMemoryStaticTables, NoopSigVerifier, RowKey, TableId,
     Transaction, TxTypeId, Value,
@@ -36,30 +34,36 @@ pub fn program_from_source(source: &str) -> Program {
     program
 }
 
-pub fn compiled_program_from_source(source: &str) -> CompiledProgram {
+pub fn compiled_program_from_source(source: &str) -> SealedProgram {
     let definition = compile_program_source(source).expect("compile source");
     register_program_definition(&definition).expect("register compiled program")
 }
 
-pub fn compiled_program_from_artifact(artifact: &ProgramArtifact) -> CompiledProgram {
-    register_program_artifact(artifact).expect("register compiled artifact")
+pub fn compiled_program_from_artifact(artifact: &Artifact) -> SealedProgram {
+    register_artifact(artifact).expect("register compiled artifact")
 }
 
-pub fn program_artifact_from_source(source: &str) -> ProgramArtifact {
-    compiled_program_from_source(source).into_program_artifact()
+pub fn artifact_from_source(source: &str) -> Artifact {
+    compiled_program_from_source(source).into_artifact()
 }
 
-pub fn program_artifact_from_source_with_catalog(
+pub fn artifact_from_source_with_catalog(
     source: &str,
     catalog: &SchemeDescriptorCatalog,
-) -> ProgramArtifact {
+) -> Artifact {
     let definition = compile_program_source(source).expect("compile source");
-    register_program_definition_with_scheme_catalog(&definition, catalog)
-        .expect("register source with scheme catalog")
-        .into_program_artifact()
+    register_program_definition_with_catalogs(
+        &definition,
+        &CompilerCatalogs {
+            schemes: catalog.clone(),
+            precompiles: Default::default(),
+        },
+    )
+    .expect("register source with scheme catalog")
+    .into_artifact()
 }
 
-pub fn compiled_property_successor_program() -> CompiledProgram {
+pub fn compiled_property_successor_program() -> SealedProgram {
     let schema = single_u64_column_schema(TableId(1), ColId(0), "accounts", "balance");
     let tx = TxTypeDef {
         id: TxTypeId(1),
@@ -97,9 +101,7 @@ pub fn core_batch_from_artifact_batch(batch: &TransactionBatch) -> Result<Batch,
     })
 }
 
-pub fn initial_cells_from_state_snapshot(
-    snapshot: &ArtifactStateSnapshot,
-) -> Vec<(TableId, ColId, RowKey, Value)> {
+pub fn initial_cells_from_state(snapshot: &ArtifactState) -> Vec<(TableId, ColId, RowKey, Value)> {
     snapshot
         .cells
         .iter()
@@ -124,7 +126,7 @@ pub fn in_memory_state_from_cells(cells: &[(TableId, ColId, RowKey, Value)]) -> 
     snapshot
 }
 
-pub fn in_memory_state_from_snapshot(snapshot: &ArtifactStateSnapshot) -> InMemoryState {
+pub fn in_memory_state_from_state(snapshot: &ArtifactState) -> InMemoryState {
     let mut state = InMemoryState::new();
     for entry in &snapshot.cells {
         if let Some(value) = entry.value {
@@ -141,7 +143,7 @@ pub fn in_memory_state_from_snapshot(snapshot: &ArtifactStateSnapshot) -> InMemo
     state
 }
 
-pub fn execute_batch_with_defaults<S: StateSnapshot>(
+pub fn execute_batch_with_defaults<S: StateView>(
     batch: &Batch,
     program: &Program,
     snapshot: &S,

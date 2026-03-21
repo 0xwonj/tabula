@@ -6,7 +6,7 @@ use crate::{CellKey, ColId, RowKey, TableId, Value};
 /// Read-only access to the committed state (snapshot).
 ///
 /// The executor uses this to resolve reads that miss the overlay.
-pub trait StateSnapshot: Send + Sync {
+pub trait StateView: Send + Sync {
     /// Read a cell from committed state. Returns `None` if absent.
     fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError>;
     /// Check whether a table exists.

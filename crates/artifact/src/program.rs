@@ -11,6 +11,7 @@ use crate::ArtifactError;
 use crate::canonical::{bytes_to_hex, canonical_json_bytes, canonical_json_digest};
 
 const SCHEME_DESCRIPTOR_HASH_DOMAIN: &[u8] = b"tabula.artifact.scheme_descriptor.v1";
+const PRECOMPILE_DESCRIPTOR_HASH_DOMAIN: &[u8] = b"tabula.artifact.precompile_descriptor.v1";
 const BUILTIN_SCHEME_VERSION_V1: u16 = 1;
 
 /// Canonical descriptor binding one column scheme to a verifier-visible contract.
@@ -68,6 +69,45 @@ fn hash_scheme_params(label: &str) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+/// Canonical descriptor binding one precompile capability to a verifier-visible contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrecompileDescriptor {
+    /// Portable precompile identifier.
+    pub precompile_id: PrecompileId,
+    /// Precompile implementation/profile version.
+    pub precompile_version: u16,
+    /// Canonical hash of the precompile parameter profile.
+    pub params_hash: [u8; 32],
+    /// Canonical hash of the precompile semantic contract.
+    pub semantic_hash: [u8; 32],
+}
+
+impl PrecompileDescriptor {
+    /// Build a descriptor from a portable identifier plus stable parameter/semantic labels.
+    pub fn from_labels(
+        precompile_id: PrecompileId,
+        precompile_version: u16,
+        params_label: &str,
+        semantic_label: &str,
+    ) -> Self {
+        Self {
+            precompile_id,
+            precompile_version,
+            params_hash: hash_precompile_descriptor("params", params_label),
+            semantic_hash: hash_precompile_descriptor("semantic", semantic_label),
+        }
+    }
+}
+
+fn hash_precompile_descriptor(domain_suffix: &str, label: &str) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(PRECOMPILE_DESCRIPTOR_HASH_DOMAIN);
+    hasher.update(domain_suffix.as_bytes());
+    hasher.update(label.as_bytes());
+    hasher.finalize().into()
+}
+
 /// Canonical proof-planning metadata for one committed column.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -84,17 +124,17 @@ pub struct ColumnProofPlan {
     pub receives_commitment: bool,
 }
 
-/// Sealed program artifact used for storage, transport, and verification.
+/// Sealed artifact used for storage, transport, and verification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProgramArtifact {
+pub struct Artifact {
     /// Table schema definitions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub table_schemas: Vec<TableSchema>,
     /// Transaction type definitions.
     pub tx_types: Vec<TxTypeDef>,
     /// Capability manifest: precompiles required by this program.
-    pub required_precompile_ids: Vec<PrecompileId>,
+    pub precompile_manifest: Vec<PrecompileDescriptor>,
     /// Capability manifest: exact structural property requirements required by this program.
     pub required_property_requirements: Vec<PropertyRequirement>,
     /// Compiler-owned proof plan for all committed columns.
@@ -103,7 +143,7 @@ pub struct ProgramArtifact {
     pub contract_metadata: ContractMetadataEnvelope,
 }
 
-impl ProgramArtifact {
+impl Artifact {
     /// Serialize this sealed artifact into its canonical byte representation.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ArtifactError> {
         canonical_json_bytes(self)
@@ -127,13 +167,14 @@ mod tests {
         STATEMENT_SCHEMA_VERSION_V1, VERIFIER_PROFILE_VERSION_V1,
     };
     use tabula_core::{ColId, SchemeId, TableId, TableSchema, TxTypeId, ValueType};
+    use tabula_ir::PrecompileId;
     use tabula_ir::TxTypeDef;
 
-    use super::{ColumnProofPlan, ProgramArtifact, SchemeDescriptor};
+    use super::{Artifact, ColumnProofPlan, PrecompileDescriptor, SchemeDescriptor};
 
     #[test]
-    fn program_artifact_canonical_digest_is_deterministic() {
-        let artifact = ProgramArtifact {
+    fn artifact_canonical_digest_is_deterministic() {
+        let artifact = Artifact {
             table_schemas: vec![TableSchema {
                 id: TableId(1),
                 name: "accounts".to_string(),
@@ -149,7 +190,12 @@ mod tests {
                 param_schema: vec![],
                 body: vec![],
             }],
-            required_precompile_ids: vec![],
+            precompile_manifest: vec![PrecompileDescriptor::from_labels(
+                PrecompileId(0x0001),
+                1,
+                "builtin:test:params",
+                "builtin:test:semantic",
+            )],
             required_property_requirements: vec![],
             column_proof_plan: vec![ColumnProofPlan {
                 table_id: TableId(1),

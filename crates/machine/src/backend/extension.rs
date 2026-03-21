@@ -1,8 +1,8 @@
-//! Extension framework for custom chip integration.
+//! Backend-only execution-tier extension framework.
 //!
-//! [`ChipExtension`] packages custom AIR chips, trace generators, and bus
-//! declarations into a distributable unit. Register extensions via
-//! [`MachineBuilder::with_extension()`](crate::MachineBuilder).
+//! [`ExecutionTierExtension`] packages AIR chips, trace generators, and
+//! dependent bus consumers into a unit that the machine builder can attach to
+//! the execution tier. This is an advanced backend API.
 //!
 //! # Bus protocol
 //!
@@ -12,62 +12,17 @@
 
 use tabula_stark::trace::DynChip;
 use tabula_stark::trace::column_commitment::BusConsumer;
-use tabula_stark::trace::contributor::WitnessStore;
 
-use crate::AnyRap;
+use crate::backend::AnyRap;
 
-/// Context provided to extensions during witness population.
-///
-/// Gives extensions access to batch-level information needed to generate
-/// witness data. Expanded in future phases with precompile events,
-/// batch metadata, and proof plan information.
-pub struct ExtensionContext {
-    // Minimal for Phase 1. Future fields:
-    // - precompile_events: Vec<PrecompileEvent>,
-    // - batch_metadata: BatchMetadata,
-    // - proof_plan: ProofPlan,
-}
-
-impl ExtensionContext {
-    /// Create a new extension context.
-    ///
-    /// Phase 1 provides an empty context. Future phases will populate
-    /// precompile events, batch metadata, and proof plan data.
-    #[allow(dead_code)] // Used in Phase 2+ witness population pipeline
-    pub(crate) fn new() -> Self {
-        Self {}
-    }
-}
-
-/// A packaged set of custom chips for Tabula's execution tier.
-///
-/// Extensions are the primary distribution unit for custom AIR chips.
-/// Each extension provides:
-/// - **AIRs**: Type-erased constraint systems for proving/verification
-/// - **DynChips**: Trace generators for witness-to-trace conversion
-/// - **BusConsumers** (optional): Chips that collect bus interaction data
-/// - **Witness population** (optional): Logic to populate the WitnessStore
-///
-/// # Example
-///
-/// ```ignore
-/// use tabula_machine::prelude::*;
-///
-/// struct MyExtension;
-///
-/// impl ChipExtension for MyExtension {
-///     fn name(&self) -> &str { "my-extension" }
-///     fn airs(&self) -> Vec<Box<dyn AnyRap>> { vec![Box::new(MyChip)] }
-///     fn dyn_chips(&self) -> Vec<Box<dyn DynChip>> { vec![Box::new(MyChip)] }
-/// }
-/// ```
-pub trait ChipExtension: Send + Sync {
+/// A packaged set of backend execution-tier chips.
+pub trait ExecutionTierExtension: Send + Sync {
     /// Human-readable name for this extension (e.g., `"lighter-dex"`).
     fn name(&self) -> &str;
 
     /// AIR implementations for proving and verification.
     ///
-    /// Each AIR is registered in the execution tier's [`ChipRegistry`](crate::ChipRegistry).
+    /// Each AIR is registered in the execution tier's [`ChipRegistry`](crate::backend::ChipRegistry).
     /// Chips must implement [`AnyRap`] (satisfied automatically via blanket impl
     /// for any type implementing `ChipSpec + BaseAir + Air<...>`).
     fn airs(&self) -> Vec<Box<dyn AnyRap>>;
@@ -86,13 +41,5 @@ pub trait ChipExtension: Send + Sync {
     /// that consume bus interactions (like PoseidonChip or RangeCheckChip).
     fn bus_consumers(&self) -> Vec<Box<dyn BusConsumer>> {
         vec![]
-    }
-
-    /// Populate witness data for this extension's chips.
-    ///
-    /// Called after core witness data is populated but before trace building.
-    /// Store custom data in the [`WitnessStore`] under extension-specific labels.
-    fn populate_witness(&self, _store: &mut WitnessStore, _ctx: &ExtensionContext) {
-        // Default: no custom witness population.
     }
 }

@@ -27,7 +27,7 @@ pub struct LoweredProgram {
 }
 
 /// Backward-compatible alias for older call sites.
-pub type CompiledProgram = LoweredProgram;
+pub type SealedProgram = LoweredProgram;
 
 /// Lower an AST program to IR.
 pub fn lower(program: &ast::Program) -> Result<LoweredProgram, Vec<CompileError>> {

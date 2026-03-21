@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use tabula_artifact::{ProgramArtifact, StateEntry, StateSnapshot, TransactionBatch};
+use tabula_artifact::{Artifact, State, StateEntry, TransactionBatch};
 use tabula_core::{AccessEvent, EmittedEvent, ExecutionConsistencyStatus, TxResult};
 
 macro_rules! define_id {
@@ -110,7 +110,7 @@ pub struct ExecutionSummary {
     pub consistency: ExecutionConsistencyStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace: Option<Vec<AccessEvent>>,
-    pub state_after: StateSnapshot,
+    pub state_after: State,
 }
 
 /// Serializable execution receipt used by daemon APIs.
@@ -173,7 +173,7 @@ pub struct ProgramRecord {
     pub binding_version: u32,
     pub statement_schema_version: u32,
     pub verifier_profile_version: u32,
-    pub program: ProgramArtifact,
+    pub program: Artifact,
 }
 
 /// Stateful instance record.
@@ -189,7 +189,7 @@ pub struct InstanceRecord {
     pub version: u64,
     pub status: InstanceStatus,
     pub state_hash: String,
-    pub state: StateSnapshot,
+    pub state: State,
 }
 
 /// Run record.
@@ -249,11 +249,11 @@ pub enum InputRef<T> {
 #[serde(untagged)]
 pub enum ProgramInline {
     Source { source: String },
-    Program(ProgramArtifact),
+    Program(Artifact),
 }
 
 pub type ProgramInputRef = InputRef<ProgramInline>;
-pub type StateInputRef = InputRef<StateSnapshot>;
+pub type StateInputRef = InputRef<State>;
 pub type BatchInputRef = InputRef<TransactionBatch>;
 
 impl<T> InputRef<T> {
@@ -281,7 +281,7 @@ impl ProgramInline {
         }
     }
 
-    pub fn program(program: ProgramArtifact) -> Self {
+    pub fn program(program: Artifact) -> Self {
         Self::Program(program)
     }
 }

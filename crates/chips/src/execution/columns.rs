@@ -71,6 +71,14 @@ pub struct ExecutionCols<T, const W: usize> {
 
     /// Precompile ID witness (populated when op_precompile=1).
     pub precompile_id: T,
+    /// Instruction index within the tx body (populated when op_precompile=1).
+    pub instruction_index: T,
+    /// Number of precompile input values.
+    pub precompile_input_count: T,
+    /// Number of precompile output values / written slots.
+    pub precompile_output_count: T,
+    /// Canonical transcript digest for the precompile call.
+    pub precompile_event_digest: [T; 8],
 
     // ── Arith sub-selectors (gated by op_arith) ──
     /// 1 if Sub, 0 otherwise.

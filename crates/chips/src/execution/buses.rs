@@ -163,10 +163,10 @@ pub(super) fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
     // diff2 proven by Limb2Bits, no RC send needed
 }
 
-/// C5 PoseidonPermutation bus send for Hash and Precompile opcodes.
+/// C5 PoseidonPermutation bus send for Hash opcodes.
 ///
-/// Both opcodes use the Poseidon permutation columns, so both contribute
-/// to the POSEIDON_PERM bus.
+/// Precompile transcript hashing is proven in the dedicated
+/// `PrecompileTranscript` lane, not through execution-row hash columns.
 pub(super) fn send_hash_permutation<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -177,8 +177,7 @@ pub(super) fn send_hash_permutation<AB: InteractionAirBuilder, const W: usize>(
     let _ = HASH_INSTRUCTION_DOMAIN_TAG;
     let _ = HASH_INSTRUCTION_INPUT_COUNT;
 
-    let multiplicity: AB::Expr =
-        local.is_real.into() * (local.op_hash.into() + local.op_precompile.into());
+    let multiplicity: AB::Expr = local.is_real.into() * local.op_hash.into();
 
     let mut values: Vec<AB::Expr> = Vec::with_capacity(24);
     for i in 0..16 {
@@ -244,9 +243,10 @@ pub(super) fn send_property_read<AB: InteractionAirBuilder, const W: usize>(
     );
 }
 
-/// C17 Precompile bus send: I/O commitment for precompile calls.
+/// C17 Precompile bus send: canonical precompile call header.
 ///
-/// Tuple: `(precompile_id, hash_perm_output[0..8])`.
+/// Tuple:
+/// `(tx_index, instruction_index, precompile_id, input_count, output_count, event_digest[0..8])`.
 /// Multiplicity: `is_real * op_precompile`.
 pub(super) fn send_precompile<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
@@ -254,11 +254,14 @@ pub(super) fn send_precompile<AB: InteractionAirBuilder, const W: usize>(
 ) {
     let multiplicity: AB::Expr = local.is_real.into() * local.op_precompile.into();
 
-    // 9 FE: (precompile_id, hash_perm_output[0..8])
-    let mut values: Vec<AB::Expr> = Vec::with_capacity(9);
+    let mut values: Vec<AB::Expr> = Vec::with_capacity(13);
+    values.push(local.tx_index.into());
+    values.push(local.instruction_index.into());
     values.push(local.precompile_id.into());
+    values.push(local.precompile_input_count.into());
+    values.push(local.precompile_output_count.into());
     for i in 0..8 {
-        values.push(local.hash_perm_output[i].into());
+        values.push(local.precompile_event_digest[i].into());
     }
 
     builder.send(AirInteraction {

@@ -1,8 +1,6 @@
 //! Built-in transfer example program and bundle.
 
-use tabula_artifact::{
-    ProgramArtifact, StateEntry, StateSnapshot, TransactionBatch, TransactionInput,
-};
+use tabula_artifact::{Artifact, State, StateEntry, TransactionBatch, TransactionInput};
 use tabula_core::Value;
 
 use crate::compile::compile_program_source;
@@ -29,10 +27,10 @@ tx transfer(from: u64, to: u64, amount: u64) {
 pub struct ExampleBundle {
     /// `.tab` source text.
     pub program_tab_source: String,
-    /// Sealed program artifact JSON payload.
-    pub program: ProgramArtifact,
+    /// Sealed artifact JSON payload.
+    pub program: Artifact,
     /// Initial state payload.
-    pub state: StateSnapshot,
+    pub state: State,
     /// Batch payload.
     pub batch: TransactionBatch,
 }
@@ -43,9 +41,9 @@ pub fn transfer_example_bundle() -> anyhow::Result<ExampleBundle> {
         compile_program_source(TRANSFER_EXAMPLE_TAB_SOURCE).map_err(anyhow::Error::new)?;
     let program = register_program_definition(&program_sources)
         .map_err(anyhow::Error::new)?
-        .into_program_artifact();
+        .into_artifact();
 
-    let state = StateSnapshot {
+    let state = State {
         cells: vec![
             StateEntry {
                 table: 0,

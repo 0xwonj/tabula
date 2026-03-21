@@ -1,43 +1,25 @@
 use std::sync::Arc;
 
-#[cfg(feature = "prove")]
-use std::collections::BTreeMap;
-
-#[cfg(feature = "prove")]
-use p3_koala_bear::KoalaBear;
 use tabula_artifact::SchemeDescriptor;
 use tabula_chips::shards::memory::MemoryShardChip;
 use tabula_chips::shards::meta::MetaShardChip;
 use tabula_chips::shards::property::SsmcPropertyChip;
-#[cfg(feature = "prove")]
-use tabula_chips::shards::property::trace::{PROPERTY_READ_WITNESS_LABEL, PropertyReadRecord};
-#[cfg(feature = "prove")]
-use tabula_chips::shards::shared::{SHARED_COLUMN_WITNESS_LABEL, SharedColumnWitness};
-#[cfg(feature = "prove")]
-use tabula_chips::shards::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
 use tabula_chips::shards::state::StateShardChip;
-#[cfg(feature = "prove")]
-use tabula_commitment::{
-    ColumnMeta, ColumnState, PoseidonHasher, proof_column_commitment, scheme_tags,
-};
-#[cfg(feature = "prove")]
-use tabula_core::error::TabulaError;
+use tabula_commitment::schemes::tags;
 use tabula_core::{ColumnLayoutKind, PropertyQueryResult, RowKey, SchemeId, Value, zero_value};
+use tabula_ext::ExtError;
 use tabula_ir::{PropertyQuery, PropertyQueryKind};
-use tabula_machine::AnyRap;
-use tabula_machine::{ColumnChipSet, ProofColumn, SetupError};
+use tabula_machine::SetupError;
+use tabula_machine::backend::{AnyRap, ColumnChipSet, ProofColumn};
 use tabula_stark::chips::ChipIdAllocator;
 use tabula_stark::trace::DynChip;
 #[cfg(feature = "prove")]
-use tabula_stark::trace::WitnessStore;
-#[cfg(feature = "prove")]
-use tabula_witness::trace::builtin::memory::{
-    SsmcColumnWitnessParts, prepare_ssmc_column_witness_from_parts,
-};
+use tabula_witness::stark::schemes::ssmc::{PreparedSsmcProof, SsmcProofInput, prepare_ssmc_proof};
 
-use crate::columns::{ColumnPlan, ColumnSchemeFactory, ColumnViews, RuntimeColumn};
+use crate::columns::{ColumnSchemeFactory, ResolvedColumnPlan, RuntimeColumn};
+use crate::proof_extensions::ProofSchemeFactory;
 #[cfg(feature = "prove")]
-use crate::columns::{ColumnProofInput, ColumnTransitionBackend, ColumnTransitionInput};
+use crate::proof_extensions::{ColumnProofContext, ColumnProofPreparer, PreparedColumnProof};
 
 /// SSMC commitment scheme factory.
 pub struct SsmcScheme<const W: usize>;
@@ -55,51 +37,73 @@ impl<const W: usize> ColumnSchemeFactory for SsmcScheme<W> {
         "ssmc"
     }
 
-    fn build_column(&self, plan: ColumnPlan) -> Result<ColumnViews, SetupError> {
-        if plan.scheme_descriptor.layout_kind != ColumnLayoutKind::SSMC_V1 {
-            return Err(SetupError::SetupFailed(format!(
-                "scheme factory '{}' cannot prepare column layout {}",
-                self.name(),
-                plan.scheme_descriptor.layout_kind.0,
-            )));
-        }
-
-        if let Some(kind) = plan
-            .required_property_query_kinds
-            .iter()
-            .find(|kind| !SSMC_SUPPORTED_QUERY_KINDS.contains(kind))
-        {
-            return Err(SetupError::SetupFailed(format!(
-                "scheme '{}' does not support property query {:?} for table {} col {}",
-                self.name(),
-                kind,
-                plan.table_id.0,
-                plan.col_id.0,
-            )));
-        }
-
-        #[cfg(feature = "prove")]
-        {
-            Ok(ColumnViews::new(
-                Arc::new(SsmcRuntimeColumn { plan: plan.clone() }),
-                Arc::new(SsmcProofColumn::<W> { plan: plan.clone() }),
-                Arc::new(SsmcTransitionBackend::<W>::new(plan)?),
-            ))
-        }
-
-        #[cfg(not(feature = "prove"))]
-        {
-            Ok(ColumnViews::new(
-                Arc::new(SsmcRuntimeColumn { plan: plan.clone() }),
-                Arc::new(SsmcProofColumn::<W> { plan }),
-            ))
-        }
+    fn build_runtime_column(
+        &self,
+        plan: &ResolvedColumnPlan,
+    ) -> Result<Arc<dyn RuntimeColumn>, ExtError> {
+        validate_runtime_plan(plan, ColumnSchemeFactory::name(self))?;
+        Ok(Arc::new(SsmcRuntimeColumn { plan: plan.clone() }))
     }
+}
+
+impl<const W: usize> ProofSchemeFactory for SsmcScheme<W> {
+    fn descriptor(&self) -> SchemeDescriptor {
+        SchemeDescriptor::builtin_ssmc()
+    }
+
+    fn name(&self) -> &str {
+        "ssmc"
+    }
+
+    fn build_proof_column(
+        &self,
+        plan: &ResolvedColumnPlan,
+    ) -> Result<Arc<dyn ProofColumn>, ExtError> {
+        validate_proof_plan(plan, ProofSchemeFactory::name(self))?;
+        Ok(Arc::new(SsmcProofColumn::<W> { plan: plan.clone() }))
+    }
+
+    #[cfg(feature = "prove")]
+    fn build_proof_preparer(
+        &self,
+        plan: &ResolvedColumnPlan,
+    ) -> Result<Arc<dyn ColumnProofPreparer>, ExtError> {
+        validate_proof_plan(plan, ProofSchemeFactory::name(self))?;
+        Ok(Arc::new(SsmcProofPreparer::<W> { plan: plan.clone() }))
+    }
+}
+
+fn validate_plan_detail(plan: &ResolvedColumnPlan, scheme_name: &str) -> Result<(), String> {
+    if plan.scheme_descriptor.layout_kind != ColumnLayoutKind::SSMC_V1 {
+        return Err(format!(
+            "scheme factory '{scheme_name}' cannot prepare column layout {}",
+            plan.scheme_descriptor.layout_kind.0,
+        ));
+    }
+    if let Some(kind) = plan
+        .required_property_query_kinds
+        .iter()
+        .find(|kind| !SSMC_SUPPORTED_QUERY_KINDS.contains(kind))
+    {
+        return Err(format!(
+            "scheme '{scheme_name}' does not support property query {:?} for table {} col {}",
+            kind, plan.table_id.0, plan.col_id.0,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_runtime_plan(plan: &ResolvedColumnPlan, scheme_name: &str) -> Result<(), ExtError> {
+    validate_plan_detail(plan, scheme_name).map_err(ExtError::validation)
+}
+
+fn validate_proof_plan(plan: &ResolvedColumnPlan, scheme_name: &str) -> Result<(), ExtError> {
+    validate_plan_detail(plan, scheme_name).map_err(ExtError::validation)
 }
 
 #[derive(Debug)]
 struct SsmcRuntimeColumn {
-    plan: ColumnPlan,
+    plan: ResolvedColumnPlan,
 }
 
 impl RuntimeColumn for SsmcRuntimeColumn {
@@ -159,7 +163,7 @@ impl RuntimeColumn for SsmcRuntimeColumn {
 
 #[derive(Debug)]
 struct SsmcProofColumn<const W: usize> {
-    plan: ColumnPlan,
+    plan: ResolvedColumnPlan,
 }
 
 impl<const W: usize> ProofColumn for SsmcProofColumn<W> {
@@ -189,13 +193,7 @@ impl<const W: usize> ProofColumn for SsmcProofColumn<W> {
 
         let mem = MemoryShardChip::<W>::new(mem_id, t, c);
         let state = StateShardChip::<W>::new(state_id, t, c);
-        let meta = MetaShardChip::new(
-            meta_id,
-            t,
-            c,
-            scheme_tags::SSMC,
-            self.plan.receives_commitment,
-        );
+        let meta = MetaShardChip::new(meta_id, t, c, tags::SSMC, self.plan.receives_commitment);
 
         let mut airs: Vec<Box<dyn AnyRap>> = vec![
             Box::new(mem.clone()),
@@ -222,125 +220,44 @@ impl<const W: usize> ProofColumn for SsmcProofColumn<W> {
 
 #[cfg(feature = "prove")]
 #[derive(Debug)]
-struct SsmcTransitionBackend<const W: usize> {
-    plan: ColumnPlan,
+struct SsmcProofPreparer<const W: usize> {
+    plan: ResolvedColumnPlan,
 }
 
 #[cfg(feature = "prove")]
-impl<const W: usize> SsmcTransitionBackend<W> {
-    fn new(plan: ColumnPlan) -> Result<Self, SetupError> {
-        if plan.scheme_descriptor.layout_kind != ColumnLayoutKind::SSMC_V1 {
-            return Err(SetupError::SetupFailed(format!(
-                "SSMC transition backend cannot prepare column layout {}",
-                plan.scheme_descriptor.layout_kind.0,
-            )));
-        }
-        Ok(Self { plan })
-    }
-}
-
-#[cfg(feature = "prove")]
-impl<const W: usize> ColumnTransitionBackend for SsmcTransitionBackend<W> {
+impl<const W: usize> ColumnProofPreparer for SsmcProofPreparer<W> {
     fn name(&self) -> &str {
         "ssmc"
-    }
-
-    fn table_id(&self) -> tabula_core::TableId {
-        self.plan.table_id
-    }
-
-    fn col_id(&self) -> tabula_core::ColId {
-        self.plan.col_id
     }
 
     fn scheme_id(&self) -> SchemeId {
         self.plan.scheme_id
     }
 
-    fn build_proof_input(
-        &self,
-        input: ColumnTransitionInput,
-        property_reads: &[PropertyReadRecord],
-    ) -> Result<ColumnProofInput, TabulaError> {
-        debug_assert_eq!(input.table, self.plan.table_id);
-        debug_assert_eq!(input.col, self.plan.col_id);
+    fn prepare_column(&self, context: ColumnProofContext) -> Result<PreparedColumnProof, ExtError> {
+        let ColumnProofContext {
+            column,
+            old_entries,
+            property_reads,
+        } = context;
+        let table = column.table;
+        let col = column.col;
+        debug_assert_eq!(table, self.plan.table_id);
+        debug_assert_eq!(col, self.plan.col_id);
 
-        let hasher = PoseidonHasher::new();
-        let (old_state, _) = ColumnState::commit(
-            &hasher,
-            input.table,
-            input.col,
-            input.old_entries,
-            scheme_tags::SSMC,
-        )?;
-        let com_old = proof_column_commitment(input.table, input.col, &old_state)?;
-        let is_empty_old = old_state.is_empty();
-        let (new_state, _runtime_com_new, _merge_trace) = if input.is_touched {
-            old_state.apply_writes(&hasher, input.table, input.col, &input.writes)
-        } else {
-            (old_state.clone(), com_old, None)
-        };
-        let meta = ColumnMeta {
-            table: input.table,
-            col: input.col,
-            tag: scheme_tags::SSMC,
-            com_old,
-            com_new: proof_column_commitment(input.table, input.col, &new_state)?,
-            is_empty_old,
-            is_empty_new: new_state.is_empty(),
-            is_touched: input.is_touched,
-        };
-
-        let old_entries = ssmc_entries(&old_state)?;
-        let new_entries = ssmc_entries(&new_state)?;
-        let col_witness = prepare_ssmc_column_witness_from_parts::<W>(&SsmcColumnWitnessParts {
-            column: (input.table, input.col),
-            init_rows: &input.init_rows,
-            access_rows: &input.access_rows,
+        let PreparedSsmcProof { meta, store } = prepare_ssmc_proof::<W>(SsmcProofInput {
+            table,
+            col,
+            value_type: column.value_type,
             old_entries: &old_entries,
-            new_entries: &new_entries,
-            meta: &meta,
-            has_commitment_proof: true,
-        })?;
-
-        let mut store = WitnessStore::new();
-        store.put(
-            SHARED_COLUMN_WITNESS_LABEL,
-            SharedColumnWitness {
-                memory_rows: col_witness.memory_rows.clone(),
-                meta_row: col_witness.meta_row.clone(),
-            },
-        );
-        let mut single_witness = SsmcWitness::default();
-        single_witness.insert(self.plan.table_id, self.plan.col_id, col_witness);
-        store.put(SSMC_WITNESS_LABEL, single_witness);
-
-        if !property_reads.is_empty() {
-            store.put(PROPERTY_READ_WITNESS_LABEL, property_reads.to_vec());
-        }
-
-        Ok(ColumnProofInput {
-            table: input.table,
-            col: input.col,
-            meta,
-            witness_store: store,
+            init_cells: &column.init_cells,
+            access_events: &column.access_events,
+            writes: &column.writes,
+            is_touched: column.is_touched(),
+            property_reads: &property_reads,
         })
-    }
-}
+        .map_err(ExtError::proof_preparation)?;
 
-#[cfg(feature = "prove")]
-fn ssmc_entries(
-    state: &ColumnState<PoseidonHasher>,
-) -> Result<BTreeMap<RowKey, Vec<KoalaBear>>, TabulaError> {
-    match state {
-        ColumnState::Ssmc(list) => Ok(list
-            .entries()
-            .iter()
-            .map(|entry| (entry.key, entry.value.clone()))
-            .collect()),
-        ColumnState::Smt(_) => Err(TabulaError::ProofError {
-            phase: "ssmc_transition",
-            detail: "only SSMC-backed columns are supported".to_string(),
-        }),
+        Ok(PreparedColumnProof { meta, store })
     }
 }

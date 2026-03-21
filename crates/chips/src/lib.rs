@@ -8,6 +8,7 @@ pub mod test_utils;
 
 pub mod execution;
 pub mod poseidon;
+pub mod precompile_transcript;
 pub mod range_check;
 pub mod shards;
 pub mod smt_path;

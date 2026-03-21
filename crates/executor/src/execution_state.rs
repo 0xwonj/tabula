@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::traits::StateSnapshot;
+use tabula_core::traits::StateView;
 use tabula_core::{CellKey, Value};
 
 /// An undo-log entry for reverting a single mutation.
@@ -31,7 +31,7 @@ pub(crate) type CellEntries = Vec<(CellKey, Option<Value>)>;
 ///
 /// Handles the write buffer, read cache, and undo log for
 /// checkpoint/rollback. Does NOT record events.
-pub(crate) struct ExecutionState<'a, S: StateSnapshot> {
+pub(crate) struct ExecutionState<'a, S: StateView> {
     pub(crate) snapshot: &'a S,
     pub(crate) write_buffer: BTreeMap<CellKey, Option<Value>>,
     pub(crate) read_cache: BTreeMap<CellKey, Option<Value>>,
@@ -39,7 +39,7 @@ pub(crate) struct ExecutionState<'a, S: StateSnapshot> {
     pub(crate) checkpoints: Vec<StateCheckpoint>,
 }
 
-impl<'a, S: StateSnapshot> ExecutionState<'a, S> {
+impl<'a, S: StateView> ExecutionState<'a, S> {
     pub(crate) fn new(snapshot: &'a S) -> Self {
         Self {
             snapshot,

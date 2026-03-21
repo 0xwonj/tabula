@@ -4,7 +4,7 @@
 //! runtime's machine and program-scoped setup instead of rebuilding them
 //! for each run.
 
-use tabula_artifact::ExecutionStatement;
+use tabula_artifact::Statement;
 use tabula_runtime::{ProofSummary, ProveInput, TabulaRuntime};
 
 use super::error::{ServiceError, ServiceResult};
@@ -16,7 +16,7 @@ use crate::protocol::error::ErrorCode;
 pub fn prove_batch(
     executed: &ExecutedBatch,
     runtime: &TabulaRuntime,
-) -> ServiceResult<(StarkProofSummary, ExecutionStatement)> {
+) -> ServiceResult<(StarkProofSummary, Statement)> {
     let prove_start = std::time::Instant::now();
     let prove_result = runtime
         .prove(&ProveInput {
@@ -64,7 +64,7 @@ pub fn mock_stark_summary() -> StarkProofSummary {
 
 fn summary_from_proof(
     summary: &ProofSummary,
-    statement: &ExecutionStatement,
+    statement: &Statement,
     verified: bool,
     prove_time_ms: u64,
     verify_time_ms: u64,

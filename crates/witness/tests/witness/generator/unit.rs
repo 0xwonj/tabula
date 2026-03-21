@@ -1,14 +1,20 @@
-use tabula_commitment::KoalaBearCodec;
-use tabula_core::traits::ValueCodec;
 use tabula_core::{AccessEvent, BatchResult, ColId, OpKind, TableId, TxResult, Value};
 
 use super::*;
+
+fn prepared_column(
+    prepared: &tabula_witness::PreparedExecutionColumns,
+    table: TableId,
+    col: ColId,
+) -> &tabula_witness::PreparedExecutionColumn {
+    prepared.column(table, col).expect("prepared column")
+}
 
 fn prepare(
     result: &BatchResult,
     schema: &std::collections::BTreeMap<TableId, tabula_core::TableSchema>,
     planned: &[(TableId, ColId)],
-) -> tabula_witness::PreparedExecutionInputs {
+) -> tabula_witness::PreparedExecutionColumns {
     make_preparer()
         .prepare_execution_inputs(result, schema, planned.iter())
         .expect("prepared execution inputs")
@@ -27,9 +33,9 @@ fn init_rows_from_read_set_present() {
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    let rows = &prepared.init_rows_by_col[&(t(1), c(0))];
+    let rows = &prepared_column(&prepared, t(1), c(0)).init_cells;
     assert_eq!(rows.len(), 1);
-    assert!(!rows[0].val_is_null);
+    assert!(!rows[0].is_null);
     assert_eq!(rows[0].key.row, r(10));
 }
 
@@ -49,13 +55,10 @@ fn init_rows_from_read_set_null_are_canonical_zero() {
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    let rows = &prepared.init_rows_by_col[&(t(1), c(0))];
+    let rows = &prepared_column(&prepared, t(1), c(0)).init_cells;
     assert_eq!(rows.len(), 1);
-    assert!(rows[0].val_is_null);
-    assert_eq!(
-        rows[0].value_fes,
-        KoalaBearCodec.encode(&Value::U64(0)).unwrap()
-    );
+    assert!(rows[0].is_null);
+    assert_eq!(rows[0].value, Value::U64(0));
 }
 
 #[test]
@@ -79,7 +82,7 @@ fn init_rows_are_sorted_by_key() {
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    let rows = &prepared.init_rows_by_col[&(t(1), c(0))];
+    let rows = &prepared_column(&prepared, t(1), c(0)).init_cells;
     assert_eq!(
         rows.iter().map(|row| row.key.row.0).collect::<Vec<_>>(),
         vec![10, 20, 30]
@@ -111,7 +114,7 @@ fn access_rows_preserve_event_order_and_metadata() {
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    let access = &prepared.access_rows_by_col[&(t(1), c(0))];
+    let access = &prepared_column(&prepared, t(1), c(0)).access_events;
     assert_eq!(access.len(), 4);
     assert!(!access[0].is_write);
     assert!(access[1].is_write);
@@ -134,9 +137,9 @@ fn null_reads_remain_null_in_access_rows() {
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    let access = &prepared.access_rows_by_col[&(t(1), c(0))];
+    let access = &prepared_column(&prepared, t(1), c(0)).access_events;
     assert_eq!(access.len(), 1);
-    assert!(access[0].val_is_null);
+    assert!(access[0].is_null);
 }
 
 #[test]
@@ -167,12 +170,12 @@ fn writes_are_grouped_and_sorted() {
     let schema = schemas(vec![u64_schema(1, &[0])]);
     let prepared = prepare(&result, &schema, &[(t(1), c(0))]);
 
-    let writes = &prepared.writes_by_col[&(t(1), c(0))];
+    let writes = &prepared_column(&prepared, t(1), c(0)).writes;
     assert_eq!(
-        writes.iter().map(|(row, _)| row.0).collect::<Vec<_>>(),
+        writes.iter().map(|write| write.row.0).collect::<Vec<_>>(),
         vec![10, 20, 30]
     );
-    assert!(writes[1].1.is_none());
+    assert!(writes[1].value.is_none());
 }
 
 #[test]
@@ -195,10 +198,14 @@ fn written_columns_include_effective_writes_only() {
         &[(t(1), c(0)), (t(1), c(1)), (t(1), c(2))],
     );
 
-    assert!(!prepared.written_columns.contains(&(t(1), c(0))));
-    assert!(prepared.written_columns.contains(&(t(1), c(1))));
-    assert!(!prepared.written_columns.contains(&(t(1), c(2))));
-    assert!(prepared.type_map.contains_key(&(t(1), c(2))));
+    assert!(!prepared_column(&prepared, t(1), c(0)).is_touched());
+    assert!(prepared_column(&prepared, t(1), c(1)).is_touched());
+    assert!(!prepared_column(&prepared, t(1), c(2)).is_touched());
+    assert_eq!(prepared.columns.len(), 3);
+    assert_eq!(
+        prepared_column(&prepared, t(1), c(2)).value_type,
+        tabula_core::ValueType::U64
+    );
 }
 
 #[test]

@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::models::{
     CapabilitiesResponse, CreateInstanceResponse, DaemonErrorEnvelope, HealthResponse,
-    RegisterProgramResponse, StateSnapshot, SubmitRunResponse, TransactionBatch, VerifyRunResponse,
+    RegisterProgramResponse, State, SubmitRunResponse, TransactionBatch, VerifyRunResponse,
 };
 
 #[derive(Debug, Clone)]
@@ -55,7 +55,7 @@ impl ApiClient {
     pub async fn create_instance(
         &self,
         program_id: &str,
-        state: StateSnapshot,
+        state: State,
     ) -> Result<CreateInstanceResponse, ApiClientError> {
         let payload = json!({
             "program_id": program_id,

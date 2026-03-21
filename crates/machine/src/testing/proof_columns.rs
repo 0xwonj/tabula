@@ -5,7 +5,8 @@ use tabula_core::{ColId, SchemeId, TableId};
 use tabula_stark::chips::ChipIdAllocator;
 use tabula_stark::trace::DynChip;
 
-use crate::{AnyRap, ColumnChipSet, ProofColumn, SetupError};
+use crate::SetupError;
+use crate::backend::{AnyRap, ColumnChipSet, ProofColumn};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TestSsmcProofColumn {

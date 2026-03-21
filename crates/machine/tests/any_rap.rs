@@ -14,7 +14,7 @@ use tabula_chips::shards::meta::MetaShardChip;
 use tabula_chips::shards::state::StateShardChip;
 use tabula_chips::smt_path::{SmtColPathChip, SmtTablePathChip};
 use tabula_chips::static_table::StaticTableChip;
-use tabula_machine::AnyRap;
+use tabula_machine::backend::AnyRap;
 use tabula_stark::chips::{ChipIdAllocator, core_chips};
 
 // ── Object-safety assertions (compile-time) ────────────────────────────────

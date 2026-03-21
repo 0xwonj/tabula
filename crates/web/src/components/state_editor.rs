@@ -6,18 +6,18 @@ use leptos::prelude::*;
 use serde_json::json;
 use tabula_core::Value as CoreValue;
 
-use crate::models::{ProgramArtifact, StateEntry, StateSnapshot};
+use crate::models::{Artifact, State, StateEntry};
 use crate::utils::{format_value, parse_state, parse_value_input, pretty_json_value};
 
 /// Top-level state editor: dispatches to schema-aware or flat view.
 pub(crate) fn render_state_editor(
     state_json: ReadSignal<String>,
     set_state_json: WriteSignal<String>,
-    program_artifact: ReadSignal<Option<ProgramArtifact>>,
+    artifact: ReadSignal<Option<Artifact>>,
     persist: impl Fn() + Clone + 'static,
 ) -> impl IntoView {
     let parsed = parse_state(&state_json.get());
-    let artifact = program_artifact.get();
+    let artifact = artifact.get();
 
     match parsed {
         Ok(state) => {
@@ -34,8 +34,8 @@ pub(crate) fn render_state_editor(
 }
 
 fn render_schema_state_tables(
-    artifact: &ProgramArtifact,
-    state: &StateSnapshot,
+    artifact: &Artifact,
+    state: &State,
     state_json: ReadSignal<String>,
     set_state_json: WriteSignal<String>,
     persist: impl Fn() + Clone + 'static,
@@ -163,7 +163,7 @@ fn render_schema_state_tables(
 }
 
 fn render_flat_state_table(
-    state: &StateSnapshot,
+    state: &State,
     state_json: ReadSignal<String>,
     set_state_json: WriteSignal<String>,
     persist: impl Fn() + Clone + 'static,

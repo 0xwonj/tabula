@@ -1,11 +1,16 @@
-//! Profile hash computation for program contract identity.
+//! Profile and semantic hash computation for program contract identity.
 
 use anyhow::Context;
+use serde::Serialize;
+use sha2::{Digest as _, Sha256};
 
+use tabula_artifact::{ColumnProofPlan, PrecompileDescriptor};
 use tabula_core::TableSchema;
+use tabula_ir::PropertyRequirement;
 use tabula_ir::TxTypeDef;
 
 const PROFILE_HASH_DOMAIN: &[u8] = b"tabula.driver.profile_hash.v1";
+const SEMANTIC_HASH_DOMAIN: &[u8] = b"tabula.driver.semantic_hash.v1";
 
 pub(crate) fn compute_profile_hash(
     schemas: &[TableSchema],
@@ -27,6 +32,32 @@ pub(crate) fn compute_profile_hash(
     }
 
     Ok(*hasher.finalize().as_bytes())
+}
+
+pub(crate) fn compute_semantic_hash_stub(
+    precompile_manifest: &[PrecompileDescriptor],
+    required_property_requirements: &[PropertyRequirement],
+    column_proof_plan: &[ColumnProofPlan],
+) -> anyhow::Result<[u8; 32]> {
+    #[derive(Serialize)]
+    struct SemanticContract<'a> {
+        precompile_manifest: &'a [PrecompileDescriptor],
+        required_property_requirements: &'a [PropertyRequirement],
+        column_proof_plan: &'a [ColumnProofPlan],
+    }
+
+    let payload = serde_json::to_vec(&SemanticContract {
+        precompile_manifest,
+        required_property_requirements,
+        column_proof_plan,
+    })
+    .context("failed to canonicalize semantic contract")?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(SEMANTIC_HASH_DOMAIN);
+    hasher.update((payload.len() as u32).to_be_bytes());
+    hasher.update(payload);
+    Ok(hasher.finalize().into())
 }
 
 fn canonicalize_schemas(schemas: &[TableSchema]) -> Vec<TableSchema> {

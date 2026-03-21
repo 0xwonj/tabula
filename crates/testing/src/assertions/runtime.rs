@@ -1,8 +1,8 @@
-use tabula_artifact::StateSnapshot;
+use tabula_artifact::State;
 use tabula_core::ExecutionConsistencyStatus;
 use tabula_runtime::ExecutedBatch;
 
-use crate::assertions::assert_state_snapshot_semantically_eq;
+use crate::assertions::assert_state_semantically_eq;
 
 /// Assert that runtime consistency checks passed.
 pub fn assert_runtime_consistency_passed(executed: &ExecutedBatch) {
@@ -14,6 +14,6 @@ pub fn assert_runtime_consistency_passed(executed: &ExecutedBatch) {
 }
 
 /// Assert that the runtime post-state matches the expected snapshot.
-pub fn assert_state_after_matches_expected(executed: &ExecutedBatch, expected: &StateSnapshot) {
-    assert_state_snapshot_semantically_eq(&executed.state_after, expected);
+pub fn assert_state_after_matches_expected(executed: &ExecutedBatch, expected: &State) {
+    assert_state_semantically_eq(&executed.state_after, expected);
 }

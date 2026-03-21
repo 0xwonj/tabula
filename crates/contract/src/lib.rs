@@ -62,7 +62,7 @@ pub use policy::{ContractCompatibilityPolicy, ContractValidationError};
 // Binding
 pub use binding::{
     BindingRegistry, BindingStatus, DeferredBinding, DeferredReasonCode, PUBLIC_INPUT_FIELDS,
-    PublicInputField, PublicInputs, access_bus_field_names, binding_registry_v1,
+    ProgramBinding, PublicInputField, PublicInputs, access_bus_field_names, binding_registry_v1,
 };
 
 // Rules

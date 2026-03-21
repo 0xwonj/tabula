@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use tabula_commitment::scheme_tags;
+use tabula_commitment::schemes::tags;
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId};
 
@@ -163,7 +163,7 @@ impl<const W: usize> ColumnCommitment for SsmcCommitment<W> {
                 &property_anchor_mults,
             );
             let meta_trace =
-                generate_meta_shard_trace(t, c, scheme_tags::SSMC, col_data.meta_row.as_ref());
+                generate_meta_shard_trace(t, c, tags::SSMC, col_data.meta_row.as_ref());
 
             entries.push((chips.memory, TraceEntry::main_only(mem_trace)));
             entries.push((chips.state, TraceEntry::main_only(state_trace)));

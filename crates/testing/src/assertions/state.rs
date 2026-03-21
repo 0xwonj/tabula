@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use tabula_artifact::{StateSnapshot, normalize_state};
+use tabula_artifact::{State, normalize_state};
 use tabula_core::{CellKey, ColId, RowKey, TableId, Value};
 
 /// Canonical state-cell expectation used by semantic assertions.
@@ -12,7 +12,7 @@ pub struct ExpectedStateCell {
     pub value: Option<Value>,
 }
 
-fn normalized_state_map(state: &StateSnapshot) -> BTreeMap<CellKey, Option<Value>> {
+fn normalized_state_map(state: &State) -> BTreeMap<CellKey, Option<Value>> {
     let normalized = normalize_state(state).expect("normalize state for assertion");
     normalized
         .cells
@@ -32,7 +32,7 @@ fn normalized_state_map(state: &StateSnapshot) -> BTreeMap<CellKey, Option<Value
 
 /// Assert that one logical cell matches the expected value after normalization.
 pub fn assert_state_cell(
-    state: &StateSnapshot,
+    state: &State,
     table: TableId,
     col: ColId,
     row: RowKey,
@@ -49,8 +49,8 @@ pub fn assert_state_cell(
     );
 }
 
-/// Assert that a state snapshot contains exactly the expected cells after normalization.
-pub fn assert_state_cells_exact(state: &StateSnapshot, expected_cells: &[ExpectedStateCell]) {
+/// Assert that a state contains exactly the expected cells after normalization.
+pub fn assert_state_cells_exact(state: &State, expected_cells: &[ExpectedStateCell]) {
     let actual = normalized_state_map(state);
     let expected: BTreeMap<_, _> = expected_cells
         .iter()

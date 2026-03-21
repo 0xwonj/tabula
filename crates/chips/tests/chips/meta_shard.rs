@@ -4,7 +4,7 @@ use p3_koala_bear::KoalaBear;
 
 use p3_matrix::dense::RowMajorMatrix;
 
-use tabula_commitment::scheme_tags;
+use tabula_commitment::schemes::tags;
 
 use tabula_chips::shards::meta::air::MetaShardChip;
 use tabula_chips::shards::meta::columns::META_SHARD_WIDTH;
@@ -18,11 +18,11 @@ use tabula_chips::test_utils::builders::{
 use tabula_chips::test_utils::values::{com_empty, distinct_digest};
 
 fn chip() -> MetaShardChip {
-    MetaShardChip::new(ChipId(100), 0, 0, scheme_tags::SSMC, true)
+    MetaShardChip::new(ChipId(100), 0, 0, tags::SSMC, true)
 }
 
 fn trace(row: Option<&MetaShardRow>) -> RowMajorMatrix<KoalaBear> {
-    generate_meta_shard_trace(0, 0, scheme_tags::SSMC, row)
+    generate_meta_shard_trace(0, 0, tags::SSMC, row)
 }
 
 // ── Column width ──
@@ -75,8 +75,8 @@ fn valid_smt_tag() {
     let d2 = distinct_digest(2);
     let r = ms_touched(d1, d2);
     // SMT scheme: scheme_tag=1, receives_commitment=false
-    let c = MetaShardChip::new(ChipId(101), 0, 0, scheme_tags::SMT, false);
-    let t = generate_meta_shard_trace(0, 0, scheme_tags::SMT, Some(&r));
+    let c = MetaShardChip::new(ChipId(101), 0, 0, tags::SMT, false);
+    let t = generate_meta_shard_trace(0, 0, tags::SMT, Some(&r));
     debug_check(&c, &t).expect("SMT tag should pass");
 }
 
@@ -177,8 +177,8 @@ fn invalid_com_empty_wrong_table_col() {
         has_commitment_proof: true,
         empty_read_count: 0,
     };
-    let c = MetaShardChip::new(ChipId(102), 1, 0, scheme_tags::SSMC, true);
-    let t = generate_meta_shard_trace(1, 0, scheme_tags::SSMC, Some(&r));
+    let c = MetaShardChip::new(ChipId(102), 1, 0, tags::SSMC, true);
+    let t = generate_meta_shard_trace(1, 0, tags::SSMC, Some(&r));
     debug_check(&c, &t).expect_err("Com_empty for wrong (t,c) should fail");
 }
 
@@ -188,9 +188,9 @@ fn invalid_com_empty_wrong_table_col() {
 fn valid_different_table_col() {
     let d1 = distinct_digest(1);
     let d2 = distinct_digest(2);
-    let c = MetaShardChip::new(ChipId(103), 3, 7, scheme_tags::SSMC, true);
+    let c = MetaShardChip::new(ChipId(103), 3, 7, tags::SSMC, true);
     let r = ms_touched(d1, d2);
-    let t = generate_meta_shard_trace(3, 7, scheme_tags::SSMC, Some(&r));
+    let t = generate_meta_shard_trace(3, 7, tags::SSMC, Some(&r));
     debug_check(&c, &t).expect("different (t,c) chip should pass");
 }
 
@@ -198,8 +198,8 @@ fn valid_different_table_col() {
 fn valid_com_empty_different_table_col() {
     let d = com_empty(3, 7);
     let d_new = distinct_digest(1);
-    let c = MetaShardChip::new(ChipId(104), 3, 7, scheme_tags::SSMC, true);
+    let c = MetaShardChip::new(ChipId(104), 3, 7, tags::SSMC, true);
     let r = ms_empty_to_nonempty(d, d_new);
-    let t = generate_meta_shard_trace(3, 7, scheme_tags::SSMC, Some(&r));
+    let t = generate_meta_shard_trace(3, 7, tags::SSMC, Some(&r));
     debug_check(&c, &t).expect("Com_empty for (3,7) should pass");
 }

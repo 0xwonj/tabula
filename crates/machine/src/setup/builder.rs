@@ -11,7 +11,8 @@ use tabula_chips::range_check::RangeCheckChip;
 use tabula_stark::trace::DynChip;
 use tabula_stark::trace::column_commitment::BusConsumer;
 
-use crate::backend::extension::ChipExtension;
+use crate::backend::AnyRap;
+use crate::backend::extension::ExecutionTierExtension;
 use crate::columns::ProofColumn;
 use crate::config::{TabulaStarkConfig, default_config};
 use crate::setup::build::{column_tier_setup, execution_tier_setup, root_tier_setup};
@@ -26,7 +27,7 @@ pub struct MachineBuilder {
     columns: Vec<Arc<dyn ProofColumn>>,
     config: TabulaStarkConfig,
     root_proof: Box<dyn RootProof>,
-    extensions: Vec<Box<dyn ChipExtension>>,
+    extensions: Vec<Box<dyn ExecutionTierExtension>>,
 }
 
 impl MachineBuilder {
@@ -58,14 +59,20 @@ impl MachineBuilder {
         self
     }
 
-    /// Register a chip extension for the execution tier.
-    pub fn with_extension(mut self, ext: impl ChipExtension + 'static) -> Self {
+    /// Register a backend execution-tier extension.
+    pub fn with_backend_execution_extension(
+        mut self,
+        ext: impl ExecutionTierExtension + 'static,
+    ) -> Self {
         self.extensions.push(Box::new(ext));
         self
     }
 
-    /// Register a boxed chip extension for the execution tier.
-    pub fn with_extension_boxed(mut self, ext: Box<dyn ChipExtension>) -> Self {
+    /// Register a boxed backend execution-tier extension.
+    pub fn with_backend_execution_extension_boxed(
+        mut self,
+        ext: Box<dyn ExecutionTierExtension>,
+    ) -> Self {
         self.extensions.push(ext);
         self
     }
@@ -154,7 +161,7 @@ impl Default for MachineBuilder {
 }
 
 fn validate_chip_id_consistency(
-    airs: &[Box<dyn crate::AnyRap>],
+    airs: &[Box<dyn AnyRap>],
     dyn_chips: &[Box<dyn DynChip>],
     ext_name: &str,
 ) -> Result<(), SetupError> {

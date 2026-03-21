@@ -1,14 +1,14 @@
-use tabula_artifact::{ProgramArtifact, StateSnapshot, TransactionBatch};
+use tabula_artifact::{Artifact, State, TransactionBatch};
 
 use crate::assertions::state::{ExpectedStateCell, assert_state_cells_exact};
 
-/// Assert that two sealed program artifacts are semantically identical.
-pub fn assert_program_artifact_semantically_eq(lhs: &ProgramArtifact, rhs: &ProgramArtifact) {
+/// Assert that two sealed artifacts are semantically identical.
+pub fn assert_artifact_semantically_eq(lhs: &Artifact, rhs: &Artifact) {
     assert_eq!(lhs.table_schemas, rhs.table_schemas, "table schemas differ");
     assert_eq!(lhs.tx_types, rhs.tx_types, "transaction types differ");
     assert_eq!(
-        lhs.required_precompile_ids, rhs.required_precompile_ids,
-        "required precompile ids differ"
+        lhs.precompile_manifest, rhs.precompile_manifest,
+        "precompile manifests differ"
     );
     assert_eq!(
         lhs.required_property_requirements, rhs.required_property_requirements,
@@ -24,8 +24,8 @@ pub fn assert_program_artifact_semantically_eq(lhs: &ProgramArtifact, rhs: &Prog
     );
 }
 
-/// Assert semantic equality of two state snapshots after normalization.
-pub fn assert_state_snapshot_semantically_eq(lhs: &StateSnapshot, rhs: &StateSnapshot) {
+/// Assert semantic equality of two states after normalization.
+pub fn assert_state_semantically_eq(lhs: &State, rhs: &State) {
     let normalized_rhs = tabula_artifact::normalize_state(rhs).expect("normalize expected state");
     let expected: Vec<_> = normalized_rhs
         .cells

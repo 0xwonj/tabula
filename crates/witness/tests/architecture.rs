@@ -32,10 +32,11 @@ fn root_surface_does_not_reexport_legacy_witness_types() {
         "legacy WitnessGenerator must not be re-exported from crate root"
     );
     for forbidden in [
-        "BuiltinTraceBuilder",
-        "BuiltinTraceContext",
-        "BuiltinWitnessInputs",
-        "AllTraceInputs",
+        "SharedStoreBuilder",
+        "SharedStoreContext",
+        "ProgramInfo",
+        "TemplateId",
+        "LiteralCell",
         "proof_column_commitment",
         "ExecutionInputPreparer",
     ] {
@@ -45,38 +46,123 @@ fn root_surface_does_not_reexport_legacy_witness_types() {
         );
     }
     assert!(
-        lib.contains("pub use prepare::{BatchInputPreparer, PreparedExecutionInputs};"),
+        lib.contains(
+            "pub use prepare::{ExecutionInputPreparer, PreparedExecutionColumn, PreparedExecutionColumns};"
+        ),
         "root must expose the minimal preparation seam"
     );
     assert!(
-        lib.contains("pub use witness::{AccessRow, InitRow};"),
-        "root must expose shared execution row types"
+        lib.contains(
+            "pub use types::{AccessEvent, ColumnWrite, CommittedEntry, InitCell, PropertyReadClaim};"
+        ),
+        "root must expose logical preparation types"
+    );
+    assert!(
+        lib.contains("pub mod stark;"),
+        "witness crate must expose STARK-specific helpers under a namespaced module"
     );
 }
 
 #[test]
-fn builtin_memory_surface_exports_from_parts_only() {
-    let builtin = fs::read_to_string(crate_root().join("src/trace/builtin.rs"))
-        .expect("read trace/builtin.rs");
+fn witness_manifest_contains_stark_dependencies_after_consolidation() {
+    let manifest =
+        fs::read_to_string(crate_root().join("Cargo.toml")).expect("read witness Cargo.toml");
+
+    for required in [
+        "tabula-commitment",
+        "tabula-stark",
+        "tabula-gadgets",
+        "tabula-chips",
+        "tabula-ir",
+        "p3-air",
+        "p3-koala-bear",
+        "p3-field",
+        "p3-matrix",
+    ] {
+        assert!(
+            manifest.contains(required),
+            "consolidated witness crate must depend on required backend crate '{required}'"
+        );
+    }
+}
+
+#[test]
+fn stale_witness_stark_crate_is_removed() {
+    assert!(
+        !crate_root()
+            .parent()
+            .expect("witness under crates")
+            .join("witness-stark")
+            .exists(),
+        "witness-stark crate directory must be removed after consolidation"
+    );
+}
+
+#[test]
+fn program_info_metadata_is_removed() {
+    assert!(
+        !crate_root().join("src/witness").exists(),
+        "legacy witness metadata module must be removed from the consolidated witness crate"
+    );
+}
+
+#[test]
+fn stark_module_keeps_low_level_memory_helpers_internal() {
+    let stark_mod =
+        fs::read_to_string(crate_root().join("src/stark/mod.rs")).expect("read stark mod.rs");
 
     assert!(
-        !builtin.contains("pub mod legacy_memory"),
-        "legacy memory helper namespace must be removed"
+        stark_mod.contains("pub mod schemes;"),
+        "family-specific STARK witness helpers should be grouped under stark::schemes"
     );
     assert!(
-        builtin.contains("prepare_memory_shard_rows_from_parts"),
-        "builtin memory surface must expose shared memory helpers"
+        !stark_mod.contains("pub mod ssmc;"),
+        "SSMC helpers should live under stark::schemes rather than the stark root"
     );
     assert!(
-        builtin.contains("prepare_meta_shard_row_from_parts"),
-        "builtin memory surface must expose meta-row helpers"
+        !stark_mod.contains("pub mod smt_state;"),
+        "SMT helpers should live under stark::schemes rather than the stark root"
     );
     assert!(
-        builtin.contains("prepare_ssmc_column_witness_from_parts"),
-        "builtin memory surface must expose SSMC assembly from explicit parts"
+        !stark_mod.contains("pub mod memory;"),
+        "memory row assembly helpers must stay internal to the STARK witness module"
     );
     assert!(
-        builtin.contains("SsmcColumnWitnessParts"),
-        "builtin memory surface must expose the explicit SSMC witness-parts bundle"
+        !stark_mod.contains("pub use memory::{"),
+        "low-level memory witness helpers must not be re-exported broadly"
+    );
+    for forbidden in [
+        "pub use crate::CommittedEntry;",
+        "pub use crate::PropertyReadClaim;",
+    ] {
+        assert!(
+            !stark_mod.contains(forbidden),
+            "logical proof-prep types must not be re-exported from the stark namespace: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn trace_encoding_helpers_are_local_to_witness_stark() {
+    let encoding =
+        fs::read_to_string(crate_root().join("src/stark/encoding.rs")).expect("read encoding.rs");
+
+    for required in [
+        "pub(crate) fn trace_width(",
+        "pub(crate) fn encode_trace(",
+        "pub(crate) fn decode_trace(",
+    ] {
+        assert!(
+            encoding.contains(required),
+            "trace encoding helpers should live in witness::stark::encoding: {required}"
+        );
+    }
+
+    let lib = fs::read_to_string(crate_root().join("src/lib.rs")).expect("read lib.rs");
+    assert!(
+        !lib.contains("encode_trace")
+            && !lib.contains("decode_trace")
+            && !lib.contains("trace_width"),
+        "trace encoding helpers must not leak into the witness root surface"
     );
 }

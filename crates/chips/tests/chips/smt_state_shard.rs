@@ -10,9 +10,9 @@ use tabula_chips::shards::smt_state::air::SmtStateShardChip;
 use tabula_chips::shards::smt_state::trace::{
     SmtStatePathWitness, SmtStateWitness, generate_smt_state_shard_trace,
 };
-use tabula_commitment::{
-    COL_DATA_SMT_DEPTH, DOMAIN_SMT, FieldHasher, NativeDigest, PoseidonHasher, SparseMerkleTree,
-};
+use tabula_commitment::primitives::{COL_DATA_SMT_DEPTH, DOMAIN_SMT};
+use tabula_commitment::schemes::smt::SparseMerkleTree;
+use tabula_commitment::{FieldHasher, NativeDigest, PoseidonHasher};
 use tabula_stark::chips::ChipId;
 use tabula_stark::debug::debug_check;
 
@@ -60,18 +60,18 @@ fn build_witness(
         .collect();
 
     for (&key, value) in &old_map {
-        old_tree.insert(key, digest_value(&hasher, value));
+        old_tree.insert(key, digest_value(&hasher, value)).unwrap();
     }
     for (&key, value) in &new_map {
-        new_tree.insert(key, digest_value(&hasher, value));
+        new_tree.insert(key, digest_value(&hasher, value)).unwrap();
     }
 
     let write_key_set: BTreeSet<u64> = write_keys.iter().copied().collect();
     let paths = touched_keys
         .iter()
         .map(|key| {
-            let old_proof = old_tree.prove(*key);
-            let new_proof = new_tree.prove(*key);
+            let old_proof = old_tree.prove(*key).unwrap();
+            let new_proof = new_tree.prove(*key).unwrap();
             let old_val = old_map.get(key).copied().unwrap_or([KoalaBear::ZERO; W]);
             let new_val = new_map.get(key).copied().unwrap_or([KoalaBear::ZERO; W]);
 

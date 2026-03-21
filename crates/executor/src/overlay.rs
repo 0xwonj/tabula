@@ -13,7 +13,7 @@
 //! rollback will roll back state only while preserving the event trace.
 
 use tabula_core::error::TabulaError;
-use tabula_core::traits::StateSnapshot;
+use tabula_core::traits::StateView;
 use tabula_core::{AccessEvent, CellKey, LogicalTime, OpKind, Value, ValueType};
 
 use crate::execution_state::ExecutionState;
@@ -34,7 +34,7 @@ pub struct OverlayResult {
 
 // ── Overlay (public facade) ─────────────────────────────────────────────
 
-/// A local overlay sitting on top of a `StateSnapshot`.
+/// A local overlay sitting on top of a `StateView`.
 ///
 /// All reads go through the overlay; writes are buffered locally.
 /// Supports checkpoint/rollback for per-tx failure recovery.
@@ -44,12 +44,12 @@ pub struct OverlayResult {
 ///
 /// Internally composed of **ExecutionState** (state management) and
 /// **TraceRecorder** (event recording). The public API is unchanged.
-pub struct Overlay<'a, S: StateSnapshot> {
+pub struct Overlay<'a, S: StateView> {
     state: ExecutionState<'a, S>,
     recorder: TraceRecorder,
 }
 
-impl<'a, S: StateSnapshot> Overlay<'a, S> {
+impl<'a, S: StateView> Overlay<'a, S> {
     /// Create a new overlay on top of a snapshot.
     pub fn new(snapshot: &'a S) -> Self {
         Self {
@@ -159,7 +159,7 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use tabula_core::error::TabulaError;
-    use tabula_core::traits::StateSnapshot;
+    use tabula_core::traits::StateView;
     use tabula_core::{CellKey, ColId, OpKind, RowKey, TableId, Value, ValueType};
 
     use crate::execution_state::ExecutionState;
@@ -193,7 +193,7 @@ mod tests {
         }
     }
 
-    impl StateSnapshot for CountingSnapshot {
+    impl StateView for CountingSnapshot {
         fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
             self.call_count.fetch_add(1, Ordering::Relaxed);
             Ok(self.data.get(key).copied())

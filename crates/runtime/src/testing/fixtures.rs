@@ -1,14 +1,14 @@
-use tabula_compiler::{CompiledProgram, register_program};
+use tabula_compiler::{SealedProgram, register_program};
 use tabula_core::{ColId, TableId, TableSchema, TxTypeId, ValueType};
 use tabula_ir::{AggregateKind, Instruction, PropertyQuery, TxTypeDef};
 use tabula_testing::exec::compiled_property_successor_program;
 
-pub(crate) fn compiled_program_with_property_query() -> CompiledProgram {
+pub(crate) fn compiled_program_with_property_query() -> SealedProgram {
     compiled_property_successor_program()
 }
 
 #[cfg(feature = "prove")]
-pub(crate) fn compiled_program_with_unsupported_property_query() -> CompiledProgram {
+pub(crate) fn compiled_program_with_unsupported_property_query() -> SealedProgram {
     let schema = TableSchema {
         id: TableId(1),
         name: "accounts".to_string(),

@@ -1,12 +1,9 @@
-use tabula_artifact::{ExecutionStatement, ProgramArtifact};
+use tabula_artifact::{Artifact, Statement};
 use tabula_machine::TabulaProof;
-use tabula_runtime::ProgramVerifier;
+use tabula_runtime::Verifier;
 
-/// Assert that a statement is bound to the expected sealed program artifact.
-pub fn assert_statement_matches_artifact(
-    statement: &ExecutionStatement,
-    artifact: &ProgramArtifact,
-) {
+/// Assert that a statement is bound to the expected sealed artifact.
+pub fn assert_statement_matches_artifact(statement: &Statement, artifact: &Artifact) {
     let expected_program_hash = artifact
         .canonical_digest()
         .expect("compute expected program digest");
@@ -22,11 +19,7 @@ pub fn assert_statement_matches_artifact(
 }
 
 /// Assert that a verifier accepts the given proof and statement.
-pub fn assert_proof_verifies(
-    verifier: &ProgramVerifier,
-    proof: &TabulaProof,
-    statement: &ExecutionStatement,
-) {
+pub fn assert_proof_verifies(verifier: &Verifier, proof: &TabulaProof, statement: &Statement) {
     verifier
         .verify(proof, statement)
         .expect("proof should verify against statement");

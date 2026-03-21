@@ -54,7 +54,8 @@ fn key_types_are_send_sync() {
 fn setup_types_are_send_sync() {
     use std::sync::Arc;
 
-    use tabula_machine::{ProofColumn, ProofSetups, ProofTraces, TierSetup};
+    use tabula_machine::backend::ProofColumn;
+    use tabula_machine::{ProofSetups, ProofTraces, TierSetup};
 
     assert_send_sync::<Arc<dyn ProofColumn>>();
     assert_send_sync::<ProofTraces>();

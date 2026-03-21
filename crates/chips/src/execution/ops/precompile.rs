@@ -1,31 +1,17 @@
 //! AIR constraints for the Precompile opcode.
 //!
-//! When `op_precompile = 1`, the row reuses the Hash opcode's Poseidon
-//! permutation columns. The I/O commitment is computed as:
+//! The generic execution lane proves:
+//! - call-site metadata (`instruction_index`, `precompile_id`, input/output counts)
+//! - actual program-visible destination-slot writes
+//! - canonical transcript digest relay to the shared PRECOMPILE bus
 //!
-//!   `io_commitment = Poseidon(PRECOMPILE_DOMAIN_TAG, precompile_id, ...)`
-//!
-//! The commitment digest (`hash_perm_output[0..W]`) is bound to the written
-//! slot, and `(precompile_id, hash_perm_output[0..8])` is sent on the
-//! PRECOMPILE bus.
+//! The digest itself is proven in the separate transcript lane.
 
 use p3_air::AirBuilder;
 
 use super::super::columns::{ExecutionCols, MAX_SLOTS};
-use tabula_gadgets::integer::expr_from_u32;
-
-/// Domain separator for precompile I/O commitments.
-///
-/// Distinct from `HASH_INSTRUCTION_DOMAIN_TAG` (0x20) to prevent cross-domain
-/// hash collisions.
-pub const PRECOMPILE_DOMAIN_TAG: u32 = 0x30;
 
 /// Constrain the Precompile opcode.
-///
-/// When `op_precompile = 1`:
-/// - `hash_perm_input[0] = PRECOMPILE_DOMAIN_TAG`
-/// - `hash_perm_input[1] = precompile_id`
-/// - Result binding: `hash_perm_output[0..W]` written to the destination slot, not null
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn constrain_precompile<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
@@ -34,25 +20,13 @@ pub(crate) fn constrain_precompile<AB: AirBuilder, const W: usize>(
 ) {
     let gate: AB::Expr = is_real * local.op_precompile.into();
 
-    // Domain tag check
-    builder.assert_zero(
-        gate.clone()
-            * (local.hash_perm_input[0].into() - expr_from_u32::<AB>(PRECOMPILE_DOMAIN_TAG)),
-    );
+    // Output count must exactly match the number of written destination slots.
+    let written_sum: AB::Expr = (0..MAX_SLOTS).map(|s| local.slot_written[s].into()).sum();
+    builder.assert_zero(gate.clone() * (written_sum - local.precompile_output_count.into()));
 
-    // Precompile ID consistency
-    builder
-        .assert_zero(gate.clone() * (local.hash_perm_input[1].into() - local.precompile_id.into()));
-
-    // Result binding: hash_perm_output[0..W] -> written slot, not null
+    // All program-visible precompile outputs are concrete, not null.
     for s in 0..MAX_SLOTS {
         let slot_gate: AB::Expr = gate.clone() * local.slot_written[s].into();
-        for i in 0..W {
-            builder.assert_zero(
-                slot_gate.clone() * (local.slots[s][i].into() - local.hash_perm_output[i].into()),
-            );
-        }
-        // Written slot must not be null
         builder.assert_zero(slot_gate * local.slot_is_null[s].into());
     }
 }

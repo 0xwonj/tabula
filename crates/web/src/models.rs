@@ -111,11 +111,11 @@ pub struct VerifyRunResponse {
 
 // ── Shared canonical artifact types ──────────────────────────────────
 
-pub type StateSnapshot = tabula_artifact::StateSnapshot;
+pub type State = tabula_artifact::State;
 pub type StateEntry = tabula_artifact::StateEntry;
 pub type TransactionBatch = tabula_artifact::TransactionBatch;
 pub type TransactionInput = tabula_artifact::TransactionInput;
-pub type ProgramArtifact = tabula_artifact::ProgramArtifact;
+pub type Artifact = tabula_artifact::Artifact;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -174,7 +174,7 @@ pub struct ProgramRecord {
     pub binding_version: u32,
     pub statement_schema_version: u32,
     pub verifier_profile_version: u32,
-    pub program: ProgramArtifact,
+    pub program: Artifact,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,7 +188,7 @@ pub struct InstanceRecord {
     pub version: u64,
     pub status: String,
     pub state_hash: String,
-    pub state: StateSnapshot,
+    pub state: State,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,7 +201,7 @@ pub struct ExecutionSummary {
     pub emitted: Vec<Value>,
     pub consistency: Value,
     pub trace: Option<Vec<Value>>,
-    pub state_after: StateSnapshot,
+    pub state_after: State,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

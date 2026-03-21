@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::bail;
 
-use tabula_artifact::{ColumnProofPlan, ProgramArtifact, SchemeDescriptor};
+use tabula_artifact::{Artifact, ColumnProofPlan, PrecompileDescriptor, SchemeDescriptor};
 use tabula_contract::{
     BINDING_VERSION_V1, CONTRACT_SCHEMA_VERSION_V1, ContractMetadataEnvelope,
     STATEMENT_SCHEMA_VERSION_V1, VERIFIER_PROFILE_VERSION_V1, binding_registry_v1,
@@ -13,47 +13,63 @@ use tabula_core::{ColId, SchemeId, TableId, TableSchema};
 use tabula_ir::{PrecompileId, Program, PropertyRequirement, TxTypeDef};
 
 use crate::error::{CompilerError, CompilerResult};
-use crate::profile::compute_profile_hash;
-use crate::program::CompiledProgram;
+use crate::profile::{compute_profile_hash, compute_semantic_hash_stub};
+use crate::program::SealedProgram;
 use crate::sources::{ColumnSchemeSelection, ProgramDefinition};
 
 const DEFAULT_COLUMN_SCHEME_ID: SchemeId = SchemeId::SSMC;
 
 /// Source-registration catalog for custom scheme descriptors.
 pub type SchemeDescriptorCatalog = BTreeMap<SchemeId, SchemeDescriptor>;
+/// Source-registration catalog for custom precompile descriptors.
+pub type PrecompileDescriptorCatalog = BTreeMap<PrecompileId, PrecompileDescriptor>;
+
+/// Compiler-owned semantic catalogs used during sealing.
+#[derive(Debug, Clone, Default)]
+pub struct CompilerCatalogs {
+    /// Scheme descriptors available to source-level scheme selection.
+    pub schemes: SchemeDescriptorCatalog,
+    /// Precompile descriptors available to source-level precompile references.
+    pub precompiles: PrecompileDescriptorCatalog,
+}
 
 /// Register source-derived program definitions.
 pub fn register_program_definition(
     definition: &ProgramDefinition,
-) -> CompilerResult<CompiledProgram> {
-    register_program_definition_with_scheme_catalog(definition, &SchemeDescriptorCatalog::new())
+) -> CompilerResult<SealedProgram> {
+    register_program_definition_with_catalogs(definition, &CompilerCatalogs::default())
 }
 
-/// Register source-derived program definitions with custom scheme descriptors.
-pub fn register_program_definition_with_scheme_catalog(
+/// Register source-derived program definitions with custom semantic catalogs.
+pub fn register_program_definition_with_catalogs(
     definition: &ProgramDefinition,
-    scheme_catalog: &SchemeDescriptorCatalog,
-) -> CompilerResult<CompiledProgram> {
+    catalogs: &CompilerCatalogs,
+) -> CompilerResult<SealedProgram> {
     let column_proof_plan = derive_column_proof_plan(
         &definition.table_schemas,
         &definition.column_schemes,
-        scheme_catalog,
+        &catalogs.schemes,
     )
     .map_err(|err| CompilerError::InvalidProgram(anyhow::Error::msg(err)))?;
+    let precompile_manifest =
+        derive_precompile_manifest(&definition.tx_types, &catalogs.precompiles)
+            .map_err(|err| CompilerError::InvalidProgram(anyhow::Error::msg(err)))?;
     register_program_with_plan(
         &definition.table_schemas,
         &definition.tx_types,
         column_proof_plan,
+        precompile_manifest,
     )
     .map_err(CompilerError::InvalidProgram)
 }
 
-/// Register a sealed program artifact and validate its contract metadata.
-pub fn register_program_artifact(artifact: &ProgramArtifact) -> CompilerResult<CompiledProgram> {
+/// Register a sealed artifact and validate its contract metadata.
+pub fn register_artifact(artifact: &Artifact) -> CompilerResult<SealedProgram> {
     let compiled = register_program_with_plan(
         &artifact.table_schemas,
         &artifact.tx_types,
         artifact.column_proof_plan.clone(),
+        artifact.precompile_manifest.clone(),
     )
     .map_err(CompilerError::InvalidProgram)?;
     compiled
@@ -68,11 +84,13 @@ pub fn register_program_artifact(artifact: &ProgramArtifact) -> CompilerResult<C
 pub fn register_program(
     schemas: &[TableSchema],
     tx_types: &[TxTypeDef],
-) -> anyhow::Result<CompiledProgram> {
+) -> anyhow::Result<SealedProgram> {
     register_program_with_plan(
         schemas,
         tx_types,
         derive_column_proof_plan(schemas, &[], &SchemeDescriptorCatalog::new())
+            .map_err(anyhow::Error::msg)?,
+        derive_precompile_manifest(tx_types, &PrecompileDescriptorCatalog::new())
             .map_err(anyhow::Error::msg)?,
     )
 }
@@ -81,7 +99,8 @@ fn register_program_with_plan(
     schemas: &[TableSchema],
     tx_types: &[TxTypeDef],
     column_proof_plan: Vec<ColumnProofPlan>,
-) -> anyhow::Result<CompiledProgram> {
+    precompile_manifest: Vec<PrecompileDescriptor>,
+) -> anyhow::Result<SealedProgram> {
     validate_schema_coverage(schemas, tx_types)?;
 
     let mut program = Program::new();
@@ -99,22 +118,26 @@ fn register_program_with_plan(
         .map_err(|e| anyhow::anyhow!(e))?;
 
     let profile_hash = compute_profile_hash(schemas, tx_types)?;
-    let required_precompile_ids = derive_required_precompile_ids(&program);
     let required_property_requirements = derive_required_property_requirements(&program);
+    let semantic_hash_stub = compute_semantic_hash_stub(
+        &precompile_manifest,
+        &required_property_requirements,
+        &column_proof_plan,
+    )?;
     let metadata_envelope = ContractMetadataEnvelope {
         profile_hash,
         contract_schema_version: CONTRACT_SCHEMA_VERSION_V1,
         binding_version: BINDING_VERSION_V1,
         statement_schema_version: STATEMENT_SCHEMA_VERSION_V1,
         verifier_profile_version: VERIFIER_PROFILE_VERSION_V1,
-        semantic_hash_stub: None,
+        semantic_hash_stub: Some(semantic_hash_stub),
     };
 
-    CompiledProgram::new(
+    SealedProgram::new(
         program,
         schemas.to_vec(),
         tx_types.to_vec(),
-        required_precompile_ids,
+        precompile_manifest,
         required_property_requirements,
         column_proof_plan,
         metadata_envelope,
@@ -122,14 +145,10 @@ fn register_program_with_plan(
     .map_err(anyhow::Error::msg)
 }
 
-fn validate_artifact_shape(
-    artifact: &ProgramArtifact,
-    compiled: &CompiledProgram,
-) -> CompilerResult<()> {
-    if artifact.required_precompile_ids != compiled.required_precompile_ids() {
+fn validate_artifact_shape(artifact: &Artifact, compiled: &SealedProgram) -> CompilerResult<()> {
+    if artifact.precompile_manifest != compiled.precompile_manifest() {
         return Err(CompilerError::ArtifactMismatch {
-            detail: "required_precompile_ids do not match compiler-derived capabilities"
-                .to_string(),
+            detail: "precompile_manifest does not match compiler-derived capabilities".to_string(),
         });
     }
     if artifact.required_property_requirements != compiled.required_property_requirements() {
@@ -205,8 +224,30 @@ fn ensure_table_col_exists(
     Ok(())
 }
 
-fn derive_required_precompile_ids(program: &Program) -> Vec<PrecompileId> {
-    program.referenced_precompile_ids().into_iter().collect()
+fn derive_precompile_manifest(
+    tx_types: &[TxTypeDef],
+    catalog: &PrecompileDescriptorCatalog,
+) -> Result<Vec<PrecompileDescriptor>, String> {
+    let mut referenced = BTreeSet::new();
+    for tx in tx_types {
+        for instr in &tx.body {
+            if let tabula_ir::Instruction::Precompile { id, .. } = instr {
+                referenced.insert(*id);
+            }
+        }
+    }
+
+    referenced
+        .into_iter()
+        .map(|id| {
+            catalog.get(&id).cloned().ok_or_else(|| {
+                format!(
+                    "program references precompile 0x{:04x} but no descriptor is registered",
+                    id.0
+                )
+            })
+        })
+        .collect()
 }
 
 fn derive_required_property_requirements(program: &Program) -> Vec<PropertyRequirement> {

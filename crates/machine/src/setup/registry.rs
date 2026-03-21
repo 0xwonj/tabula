@@ -7,7 +7,7 @@ use tabula_chips::poseidon::PoseidonChip;
 use tabula_chips::range_check::RangeCheckChip;
 use tabula_stark::chips::ChipId;
 
-use crate::AnyRap;
+use crate::backend::AnyRap;
 use crate::setup::execution::execution_airs;
 
 /// A chip registered in the [`ChipRegistry`], pairing identity with a type-erased AIR.

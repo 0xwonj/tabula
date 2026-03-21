@@ -1239,9 +1239,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
+checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "js-sys"
@@ -2709,6 +2709,7 @@ dependencies = [
  "borsh",
  "serde",
  "serde_json",
+ "sha2",
  "tabula-artifact",
  "tabula-contract",
  "tabula-core",
@@ -2776,6 +2777,27 @@ dependencies = [
  "tabula-core",
  "tabula-ir",
  "tabula-testing",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tabula-ext"
+version = "0.1.0"
+dependencies = [
+ "p3-air",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-matrix",
+ "tabula-artifact",
+ "tabula-commitment",
+ "tabula-contract",
+ "tabula-core",
+ "tabula-executor",
+ "tabula-gadgets",
+ "tabula-ir",
+ "tabula-machine",
+ "tabula-stark",
+ "tabula-witness",
  "thiserror 2.0.18",
 ]
 
@@ -2855,6 +2877,7 @@ dependencies = [
  "tabula-contract",
  "tabula-core",
  "tabula-executor",
+ "tabula-ext",
  "tabula-ir",
  "tabula-machine",
  "tabula-stark",
@@ -2862,6 +2885,25 @@ dependencies = [
  "tabula-witness",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "tabula-sdk"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "tabula-artifact",
+ "tabula-compiler",
+ "tabula-contract",
+ "tabula-core",
+ "tabula-executor",
+ "tabula-ext",
+ "tabula-ir",
+ "tabula-machine",
+ "tabula-runtime",
+ "tabula-stark",
+ "tabula-testing",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2885,13 +2927,18 @@ dependencies = [
 name = "tabula-testing"
 version = "0.1.0"
 dependencies = [
+ "p3-air",
+ "p3-field",
  "p3-koala-bear",
+ "p3-matrix",
  "tabula-artifact",
  "tabula-chips",
  "tabula-commitment",
  "tabula-compiler",
  "tabula-core",
  "tabula-executor",
+ "tabula-ext",
+ "tabula-gadgets",
  "tabula-ir",
  "tabula-lang",
  "tabula-machine",

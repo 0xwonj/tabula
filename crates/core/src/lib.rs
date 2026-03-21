@@ -24,7 +24,7 @@ pub use tx::{Batch, ProgramBudgets, Transaction};
 // ── Execution output ──
 pub use event::{
     AccessEvent, BatchResult, ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, LogicalTime,
-    OpKind, PrecompileIo, PropertyQueryResult, PropertyReadResult, TxResult,
+    OpKind, PrecompileEvent, PropertyQueryResult, PropertyReadResult, TxResult,
 };
 
 // ── Default implementations ──

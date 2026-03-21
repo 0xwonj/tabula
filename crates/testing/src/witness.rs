@@ -5,9 +5,10 @@ use p3_koala_bear::KoalaBear;
 use crate::exec::{in_memory_state_from_cells, program_from_source};
 use crate::fixtures::cases::TraceCase;
 
+use tabula_commitment::schemes::tags;
 use tabula_commitment::{
-    ColumnMeta, ColumnState, KoalaBearCodec, NativeDigest, PoseidonHasher, proof_column_commitment,
-    scheme_tags,
+    ColumnMeta, ColumnState, KoalaBearCodec, NativeDigest, PoseidonHasher,
+    compute_state_roots_from_metas,
 };
 use tabula_core::error::TabulaError;
 use tabula_core::traits::ValueCodec;
@@ -19,16 +20,18 @@ use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::property::PropertyQueryRegistry;
 use tabula_ir::Program;
 use tabula_stark::air::interaction::core_buses;
-use tabula_witness::trace::builtin::lowering::{LoweringOutput, lower_program_batch};
-use tabula_witness::trace::builtin::{BuiltinTraceBuilder, BuiltinTraceContext};
-use tabula_witness::trace::{TraceMap, WitnessStore, build_all_traces, debug_validate_trace_map};
-use tabula_witness::{BatchInputPreparer, PreparedExecutionInputs};
+use tabula_stark::trace::{TraceMap, WitnessStore, build_all_traces, debug_validate_trace_map};
+use tabula_witness::stark::{
+    LoweringOutput, SharedStoreBuilder, SharedStoreContext, lower_program_batch,
+};
+use tabula_witness::{ExecutionInputPreparer, PreparedExecutionColumns};
 
 type EncodedColumnEntry = (RowKey, Vec<KoalaBear>);
 type EncodedColumnEntries = BTreeMap<(TableId, ColId), Vec<EncodedColumnEntry>>;
+type EncodedWrites = Vec<(RowKey, Option<Vec<KoalaBear>>)>;
 
-/// Shared builtin witness/trace harness used by tests, benches, and E2E checks.
-pub struct BuiltinTraceHarness {
+/// Shared STARK witness/trace harness used by tests, benches, and E2E checks.
+pub struct StarkTraceHarness {
     pub program: Program,
     pub batch: Batch,
     pub result: tabula_core::BatchResult,
@@ -38,9 +41,9 @@ pub struct BuiltinTraceHarness {
     pub schemas_by_id: BTreeMap<TableId, TableSchema>,
 }
 
-impl BuiltinTraceHarness {
-    pub fn builtin_trace_context(&self) -> BuiltinTraceContext<'_> {
-        BuiltinTraceContext {
+impl StarkTraceHarness {
+    pub fn shared_store_context(&self) -> SharedStoreContext<'_> {
+        SharedStoreContext {
             column_metas: &self.column_metas,
             old_state_root: &self.old_state_root,
             new_state_root: &self.new_state_root,
@@ -56,7 +59,7 @@ impl BuiltinTraceHarness {
     }
 }
 
-pub fn compile_execute_case(case: &TraceCase) -> BuiltinTraceHarness {
+pub fn compile_execute_case(case: &TraceCase) -> StarkTraceHarness {
     compile_execute_context_impl(case.source, &case.initial_cells, case.transactions.clone())
 }
 
@@ -64,19 +67,19 @@ pub fn compile_execute_context(
     source: &str,
     initial_cells: &[(TableId, ColId, RowKey, Value)],
     transactions: Vec<Transaction>,
-) -> BuiltinTraceHarness {
+) -> StarkTraceHarness {
     compile_execute_context_impl(source, initial_cells, transactions)
 }
 
 pub fn prepare_execution_inputs(
-    harness: &BuiltinTraceHarness,
-) -> Result<PreparedExecutionInputs, TabulaError> {
+    harness: &StarkTraceHarness,
+) -> Result<PreparedExecutionColumns, TabulaError> {
     let planned_columns: Vec<(TableId, ColId)> = harness
         .schemas_by_id
         .iter()
         .flat_map(|(table, schema)| schema.columns.iter().map(move |column| (*table, column.id)))
         .collect();
-    BatchInputPreparer::new(PoseidonHasher::new()).prepare_execution_inputs(
+    ExecutionInputPreparer::new().prepare_execution_inputs(
         &harness.result,
         &harness.schemas_by_id,
         planned_columns.iter(),
@@ -87,7 +90,7 @@ fn compile_execute_context_impl(
     source: &str,
     initial_cells: &[(TableId, ColId, RowKey, Value)],
     transactions: Vec<Transaction>,
-) -> BuiltinTraceHarness {
+) -> StarkTraceHarness {
     let program = program_from_source(source);
     let compiled_schemas: Vec<TableSchema> = program.schemas().values().cloned().collect();
     let snapshot = in_memory_state_from_cells(initial_cells);
@@ -118,7 +121,7 @@ fn compile_execute_context_impl(
         .iter()
         .flat_map(|(table, schema)| schema.columns.iter().map(move |column| (*table, column.id)))
         .collect();
-    let preparer = BatchInputPreparer::new(PoseidonHasher::new());
+    let preparer = ExecutionInputPreparer::new();
     let prepared = preparer
         .prepare_execution_inputs(&result, &schemas_by_id, planned_columns.iter())
         .expect("prepared execution inputs");
@@ -136,31 +139,37 @@ fn compile_execute_context_impl(
     let hasher = PoseidonHasher::new();
     for schema in &compiled_schemas {
         for column in &schema.columns {
+            let prepared_column = prepared
+                .columns
+                .iter()
+                .find(|prepared_column| {
+                    prepared_column.table == schema.id && prepared_column.col == column.id
+                })
+                .expect("prepared column");
             let mut entries = entries_by_col
                 .remove(&(schema.id, column.id))
                 .unwrap_or_default();
             entries.sort_by_key(|(row, _)| *row);
             let (old_state, _) =
-                ColumnState::commit(&hasher, schema.id, column.id, entries, scheme_tags::SSMC)
+                ColumnState::commit(&hasher, schema.id, column.id, entries, tags::SSMC)
                     .expect("commit old state");
-            let writes = prepared
-                .writes_by_col
-                .get(&(schema.id, column.id))
-                .cloned()
-                .unwrap_or_default();
+            let encoded_writes =
+                encode_writes(&codec, &prepared_column.writes).expect("encode writes");
             metas.push(build_ssmc_meta(
                 &hasher,
                 schema.id,
                 column.id,
                 &old_state,
-                &writes,
-                prepared.written_columns.contains(&(schema.id, column.id)),
+                &encoded_writes,
+                prepared_column.is_touched(),
             ));
         }
     }
-    let (old_state_root, new_state_root) = preparer.compute_state_roots_from_metas(&metas);
+    let (old_state_root, new_state_root) =
+        compute_state_roots_from_metas(&PoseidonHasher::new(), &metas)
+            .expect("compute state roots");
 
-    BuiltinTraceHarness {
+    StarkTraceHarness {
         program,
         batch: Batch { transactions },
         result,
@@ -172,7 +181,7 @@ fn compile_execute_context_impl(
 }
 
 pub fn lower_program_batch_for_harness<const WIDTH: usize>(
-    harness: &BuiltinTraceHarness,
+    harness: &StarkTraceHarness,
 ) -> LoweringOutput {
     lower_program_batch::<WIDTH>(
         &harness.program,
@@ -186,18 +195,15 @@ pub fn lower_program_batch_for_harness<const WIDTH: usize>(
 }
 
 pub fn prepare_witness_store<const WIDTH: usize>(
-    harness: &BuiltinTraceHarness,
+    harness: &StarkTraceHarness,
     lowering: &LoweringOutput,
 ) -> Result<WitnessStore, TabulaError> {
-    Ok(
-        BuiltinTraceBuilder::<PoseidonHasher, WIDTH>::new(harness.builtin_trace_context())
-            .prepare_witness_store(lowering, PoseidonHasher::new())?
-            .store,
-    )
+    SharedStoreBuilder::<PoseidonHasher, WIDTH>::new(harness.shared_store_context())
+        .prepare_witness_store(lowering, PoseidonHasher::new())
 }
 
 pub fn build_trace_map<const WIDTH: usize>(
-    harness: &BuiltinTraceHarness,
+    harness: &StarkTraceHarness,
 ) -> Result<TraceMap, TabulaError> {
     let lowering = lower_program_batch_for_harness::<WIDTH>(harness);
     let store = prepare_witness_store::<WIDTH>(harness, &lowering)?;
@@ -217,7 +223,7 @@ pub fn debug_validate_core_trace_map(trace_map: &TraceMap) -> Result<(), TabulaE
 }
 
 pub fn build_and_validate_trace_map<const WIDTH: usize>(
-    harness: &BuiltinTraceHarness,
+    harness: &StarkTraceHarness,
 ) -> Result<TraceMap, TabulaError> {
     let trace_map = build_trace_map::<WIDTH>(harness)?;
     debug_validate_core_trace_map(&trace_map)?;
@@ -232,15 +238,21 @@ fn build_ssmc_meta(
     writes: &[(RowKey, Option<Vec<KoalaBear>>)],
     is_touched: bool,
 ) -> ColumnMeta {
-    let com_old = proof_column_commitment(table, col, old_state).expect("old commitment");
+    let com_old = old_state
+        .proof_commitment(table, col)
+        .expect("old commitment");
     let tag = old_state.scheme_tag();
     let is_empty_old = old_state.is_empty();
-    let (new_state, _, _) = if is_touched {
-        old_state.apply_writes(hasher, table, col, writes)
+    let (new_state, _) = if is_touched {
+        old_state
+            .apply_writes(hasher, table, col, writes)
+            .expect("apply writes")
     } else {
-        (old_state.clone(), com_old, None)
+        (old_state.clone(), com_old)
     };
-    let com_new = proof_column_commitment(table, col, &new_state).expect("new commitment");
+    let com_new = new_state
+        .proof_commitment(table, col)
+        .expect("new commitment");
 
     ColumnMeta {
         table,
@@ -252,4 +264,23 @@ fn build_ssmc_meta(
         is_empty_new: new_state.is_empty(),
         is_touched,
     }
+}
+
+fn encode_writes(
+    codec: &KoalaBearCodec,
+    writes: &[tabula_witness::ColumnWrite],
+) -> Result<EncodedWrites, TabulaError> {
+    writes
+        .iter()
+        .map(|write| {
+            Ok((
+                write.row,
+                write
+                    .value
+                    .as_ref()
+                    .map(|value| codec.encode(value))
+                    .transpose()?,
+            ))
+        })
+        .collect()
 }

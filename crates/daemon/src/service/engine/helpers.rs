@@ -6,8 +6,8 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde_json::json;
 
 use tabula_compiler::{
-    CompiledProgram, CompilerError, compile_program_source, parse_program_artifact,
-    register_program_artifact, register_program_definition,
+    CompilerError, SealedProgram, compile_program_source, parse_artifact, register_artifact,
+    register_program_definition,
 };
 
 use crate::protocol::error::ErrorCode;
@@ -71,7 +71,7 @@ impl super::LocalEngine {
     pub(super) fn compile_program_input(
         &self,
         input: &ProgramInputRef,
-    ) -> ServiceResult<CompiledProgram> {
+    ) -> ServiceResult<SealedProgram> {
         use super::{InputRef, ProgramInline};
 
         match input {
@@ -80,7 +80,7 @@ impl super::LocalEngine {
                     .and_then(|definition| register_program_definition(&definition))
                     .map_err(|e| map_compiler_error(&e)),
                 ProgramInline::Program(program) => {
-                    register_program_artifact(program).map_err(|e| map_compiler_error(&e))
+                    register_artifact(program).map_err(|e| map_compiler_error(&e))
                 }
             },
             InputRef::File { file_path } => self.load_program_from_file(file_path),
@@ -91,15 +91,15 @@ impl super::LocalEngine {
         }
     }
 
-    fn load_program_from_file(&self, path: &std::path::Path) -> ServiceResult<CompiledProgram> {
+    fn load_program_from_file(&self, path: &std::path::Path) -> ServiceResult<SealedProgram> {
         let source = self.files.read_utf8_file(path, "program")?;
         if path.extension().and_then(|e| e.to_str()) == Some("tab") {
             compile_program_source(&source)
                 .and_then(|definition| register_program_definition(&definition))
                 .map_err(|e| map_compiler_error(&e))
         } else {
-            parse_program_artifact(&source, &path.display().to_string())
-                .and_then(|artifact| register_program_artifact(&artifact))
+            parse_artifact(&source, &path.display().to_string())
+                .and_then(|artifact| register_artifact(&artifact))
                 .map_err(|e| map_compiler_error(&e))
         }
     }

@@ -4,6 +4,7 @@ use tabula_core::{ColId, TableId};
 use tabula_stark::trace::{BusConsumer, DynChip, TraceMap};
 
 use crate::config::TabulaStarkConfig;
+use crate::proof::types::ColumnProofTrace;
 use crate::setup::registry::ChipRegistry;
 use crate::{TabulaProvingKey, TabulaVerifyingKey};
 
@@ -75,8 +76,8 @@ impl MachineSetup {
 pub struct ProofTraces {
     /// Execution tier traces.
     pub execution: TraceMap,
-    /// Column tier traces keyed by `(table, col)`.
-    pub columns: Vec<((TableId, ColId), TraceMap)>,
+    /// Column tier traces bundled with ordered identities.
+    pub columns: Vec<ColumnProofTrace>,
     /// Root tier traces.
     pub root: TraceMap,
 }

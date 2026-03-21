@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use p3_field::PrimeCharacteristicRing;
 use rayon::prelude::*;
 
-use tabula_core::{ColId, TableId};
 use tabula_stark::air::interaction::BusId;
 use tabula_stark::trace::TraceMap;
 
@@ -45,7 +44,7 @@ impl MachineSetup {
 }
 
 impl<'a> Prover<'a> {
-    /// Generate a multi-proof from traces and column identities.
+    /// Generate a multi-proof from traces and bundled column identities.
     pub fn prove(&self, input: MachineProofInput) -> Result<TabulaProof, ProveError> {
         self.prove_inner(input)
     }
@@ -62,13 +61,11 @@ impl<'a> Prover<'a> {
 
         let MachineProofInput {
             traces,
-            column_identities,
             statement,
             statement_digest,
         } = input;
 
-        let (inputs, num_cols) =
-            Self::assemble_instance_inputs(proof_setups, traces, column_identities)?;
+        let (inputs, num_cols) = Self::assemble_instance_inputs(proof_setups, traces)?;
 
         let mut instances: Vec<LabeledInstance<'_>> = inputs
             .into_par_iter()
@@ -172,7 +169,6 @@ impl<'a> Prover<'a> {
     fn assemble_instance_inputs<'b>(
         setups: &'b ProofSetups,
         traces: ProofTraces,
-        column_identities: Vec<ColumnIdentity>,
     ) -> Result<(Vec<InstanceInput<'b>>, usize), ProveError> {
         let ProofTraces {
             execution: exec_traces,
@@ -180,78 +176,17 @@ impl<'a> Prover<'a> {
             root: root_traces,
         } = traces;
 
-        let setup_by_column: BTreeMap<_, _> = setups
-            .columns
-            .iter()
-            .map(|((table_id, col_id), setup)| {
-                ((*table_id, *col_id), (&setup.registry, &setup.proving_key))
-            })
-            .collect();
-
-        let mut traces_by_column = BTreeMap::new();
-        for ((table_id, col_id), trace_map) in col_traces {
-            let key = (table_id, col_id);
-            if !setup_by_column.contains_key(&key) {
-                return Err(ProveError::InvalidProofInput {
-                    detail: format!(
-                        "column traces contain unexpected table {} col {}",
-                        table_id.0, col_id.0
-                    ),
-                });
-            }
-            if traces_by_column.insert(key, trace_map).is_some() {
-                return Err(ProveError::InvalidProofInput {
-                    detail: format!(
-                        "column traces contain duplicate table {} col {}",
-                        table_id.0, col_id.0
-                    ),
-                });
-            }
+        if col_traces.len() != setups.columns.len() {
+            return Err(ProveError::InvalidProofInput {
+                detail: format!(
+                    "column trace count {} does not match machine setup count {}",
+                    col_traces.len(),
+                    setups.columns.len()
+                ),
+            });
         }
 
-        let mut identities_by_column = BTreeMap::new();
-        for identity in column_identities {
-            let key = (TableId(identity.table_id), ColId(identity.col_id));
-            if !setup_by_column.contains_key(&key) {
-                return Err(ProveError::InvalidProofInput {
-                    detail: format!(
-                        "column identities contain unexpected table {} col {}",
-                        identity.table_id, identity.col_id,
-                    ),
-                });
-            }
-            if identities_by_column.insert(key, identity).is_some() {
-                return Err(ProveError::InvalidProofInput {
-                    detail: format!(
-                        "column identities contain duplicate table {} col {}",
-                        identity.table_id, identity.col_id,
-                    ),
-                });
-            }
-        }
-
-        for &(table_id, col_id) in traces_by_column.keys() {
-            if !identities_by_column.contains_key(&(table_id, col_id)) {
-                return Err(ProveError::InvalidProofInput {
-                    detail: format!(
-                        "missing column identity for table {} col {}",
-                        table_id.0, col_id.0
-                    ),
-                });
-            }
-        }
-        for &(table_id, col_id) in identities_by_column.keys() {
-            if !traces_by_column.contains_key(&(table_id, col_id)) {
-                return Err(ProveError::InvalidProofInput {
-                    detail: format!(
-                        "missing column traces for table {} col {}",
-                        table_id.0, col_id.0
-                    ),
-                });
-            }
-        }
-
-        let num_cols = traces_by_column.len();
+        let num_cols = col_traces.len();
         let mut inputs = Vec::with_capacity(2 + num_cols);
         inputs.push(InstanceInput {
             tier: ProofTier::Execution,
@@ -261,42 +196,28 @@ impl<'a> Prover<'a> {
             trace_map: exec_traces,
         });
 
-        for ((table_id, col_id), trace_map) in traces_by_column {
-            let identity = identities_by_column
-                .remove(&(table_id, col_id))
-                .ok_or_else(|| ProveError::InvalidProofInput {
-                    detail: format!(
-                        "missing column identity for table {} col {}",
-                        table_id.0, col_id.0
-                    ),
-                })?;
-            let Some((registry, proving_key)) = setup_by_column.get(&(table_id, col_id)).copied()
-            else {
+        for (((table_id, col_id), setup), column_trace) in
+            setups.columns.iter().zip(col_traces.into_iter())
+        {
+            let identity = column_trace.identity;
+            if identity.table_id != table_id.0 || identity.col_id != col_id.0 {
                 return Err(ProveError::InvalidProofInput {
                     detail: format!(
-                        "column input references table {} col {} without a machine setup",
-                        table_id.0, col_id.0
+                        "column trace order mismatch: trace bundle has ({}, {}) but setup expects ({}, {})",
+                        identity.table_id, identity.col_id, table_id.0, col_id.0
                     ),
                 });
-            };
+            }
+
             inputs.push(InstanceInput {
                 tier: ProofTier::Column {
                     table_id: table_id.0,
                     col_id: col_id.0,
                 },
                 identity: Some(identity),
-                registry,
-                proving_key,
-                trace_map,
-            });
-        }
-
-        if let Some((table_id, col_id)) = identities_by_column.keys().next().copied() {
-            return Err(ProveError::InvalidProofInput {
-                detail: format!(
-                    "unconsumed column identity remains for table {} col {}",
-                    table_id.0, col_id.0,
-                ),
+                registry: &setup.registry,
+                proving_key: &setup.proving_key,
+                trace_map: column_trace.trace_map,
             });
         }
 
@@ -372,4 +293,110 @@ fn extract_external_cumsums(
     all.into_iter()
         .filter(|(bus, _)| external_buses.contains(bus))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
+    use tabula_core::{ColId, TableId};
+    use tabula_stark::trace::TraceMap;
+
+    use super::Prover;
+    use crate::TabulaMachine;
+    use crate::backend::ProofColumn;
+    use crate::proof::types::{ColumnIdentity, ColumnProofTrace, ProveError};
+    use crate::setup::ProofTraces;
+    use crate::testing::TestSsmcProofColumn;
+
+    fn test_machine() -> TabulaMachine {
+        TabulaMachine::new([
+            Arc::new(TestSsmcProofColumn {
+                table_id: TableId(1),
+                col_id: ColId(0),
+                receives_commitment: true,
+            }) as Arc<dyn ProofColumn>,
+            Arc::new(TestSsmcProofColumn {
+                table_id: TableId(1),
+                col_id: ColId(1),
+                receives_commitment: true,
+            }) as Arc<dyn ProofColumn>,
+        ])
+        .expect("machine")
+    }
+
+    fn column_trace(table_id: u32, col_id: u16) -> ColumnProofTrace {
+        ColumnProofTrace {
+            identity: ColumnIdentity {
+                table_id,
+                col_id,
+                com_old: [KoalaBear::ZERO; 8],
+                com_new: [KoalaBear::ZERO; 8],
+            },
+            trace_map: TraceMap::new(),
+        }
+    }
+
+    #[test]
+    fn assemble_instance_inputs_accepts_valid_ordered_column_traces() {
+        let machine = test_machine();
+        let traces = ProofTraces {
+            execution: TraceMap::new(),
+            columns: vec![column_trace(1, 0), column_trace(1, 1)],
+            root: TraceMap::new(),
+        };
+
+        let (inputs, num_cols) =
+            Prover::assemble_instance_inputs(machine.setup().proof_setups(), traces)
+                .expect("ordered inputs");
+
+        assert_eq!(num_cols, 2);
+        assert_eq!(inputs.len(), 4);
+    }
+
+    #[test]
+    fn assemble_instance_inputs_rejects_column_count_mismatch() {
+        let machine = test_machine();
+        let traces = ProofTraces {
+            execution: TraceMap::new(),
+            columns: vec![column_trace(1, 0)],
+            root: TraceMap::new(),
+        };
+
+        let Err(err) = Prover::assemble_instance_inputs(machine.setup().proof_setups(), traces)
+        else {
+            panic!("count mismatch should fail");
+        };
+
+        match err {
+            ProveError::InvalidProofInput { detail } => {
+                assert!(detail.contains("column trace count"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn assemble_instance_inputs_rejects_column_order_mismatch() {
+        let machine = test_machine();
+        let traces = ProofTraces {
+            execution: TraceMap::new(),
+            columns: vec![column_trace(1, 1), column_trace(1, 0)],
+            root: TraceMap::new(),
+        };
+
+        let Err(err) = Prover::assemble_instance_inputs(machine.setup().proof_setups(), traces)
+        else {
+            panic!("order mismatch should fail");
+        };
+
+        match err {
+            ProveError::InvalidProofInput { detail } => {
+                assert!(detail.contains("column trace order mismatch"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
 }

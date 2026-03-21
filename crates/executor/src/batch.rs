@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateSnapshot, StaticTableProvider};
+use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateView, StaticTableProvider};
 use tabula_core::{Batch, BatchResult, TxResult, Value};
 
 use tabula_ir::{ParamDef, Program};
@@ -53,11 +53,11 @@ pub struct BatchEnv<'a> {
     pub property_queries: &'a PropertyQueryRegistry,
 }
 
-/// Execute a batch of transactions against a state snapshot.
+/// Execute a batch of transactions against a state.
 ///
 /// Returns a `BatchResult` containing the read set, write set, and per-tx results
 /// (each carrying its own access trace and emitted events).
-pub fn execute_batch<S: StateSnapshot>(
+pub fn execute_batch<S: StateView>(
     batch: &Batch,
     program: &Program,
     snapshot: &S,
@@ -132,7 +132,7 @@ pub fn execute_batch<S: StateSnapshot>(
         overlay.checkpoint();
 
         // Execute
-        match interpreter::execute(&tx_def.body, &tx.params, &mut overlay, &ctx) {
+        match interpreter::execute(tx_idx as u32, &tx_def.body, &tx.params, &mut overlay, &ctx) {
             Ok(output) => {
                 overlay.discard_checkpoint();
                 let next = env.nonce_policy.next_nonce(&tx.sender, current_nonce);
@@ -141,7 +141,7 @@ pub fn execute_batch<S: StateSnapshot>(
                 txs.push(TxResult::Success {
                     emitted: output.emitted,
                     access_trace,
-                    precompile_ios: output.precompile_ios,
+                    precompile_events: output.precompile_events,
                     property_reads: output.property_reads,
                 });
             }

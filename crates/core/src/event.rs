@@ -62,9 +62,11 @@ pub struct AccessEvent {
     pub effect_ordinal_in_tx: u32,
 }
 
-/// I/O pair recorded during a Precompile instruction execution.
+/// Structured event recorded during a Precompile instruction execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PrecompileIo {
+pub struct PrecompileEvent {
+    /// Zero-based index of the transaction within the batch.
+    pub tx_index: usize,
     /// Zero-based index of the instruction within the tx body.
     pub instruction_index: usize,
     /// Precompile identifier.
@@ -112,9 +114,9 @@ pub enum TxResult {
         emitted: Vec<EmittedEvent>,
         /// State-access events recorded during this transaction.
         access_trace: Vec<AccessEvent>,
-        /// Precompile I/O pairs recorded during this transaction.
+        /// Precompile events recorded during this transaction.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        precompile_ios: Vec<PrecompileIo>,
+        precompile_events: Vec<PrecompileEvent>,
         /// Property read results recorded during this transaction.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         property_reads: Vec<PropertyReadResult>,
@@ -138,7 +140,7 @@ impl TxResult {
         Self::Success {
             emitted,
             access_trace,
-            precompile_ios: vec![],
+            precompile_events: vec![],
             property_reads: vec![],
         }
     }

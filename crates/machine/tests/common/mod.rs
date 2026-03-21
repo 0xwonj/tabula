@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use tabula_core::{ColId, SchemeId, TableId};
-use tabula_machine::{ColumnChipSet, ProofColumn, SetupError};
+use tabula_machine::SetupError;
+use tabula_machine::backend::{ColumnChipSet, ProofColumn};
 use tabula_stark::chips::ChipIdAllocator;
 
 struct DummyProofColumn {

@@ -28,7 +28,7 @@ impl TxOutcomeView for BatchResult {
 
 impl TxOutcomeView for ExecutedBatch {
     fn tx_results(&self) -> &[TxResult] {
-        &self.txs
+        self.txs()
     }
 }
 
@@ -40,7 +40,7 @@ impl WriteSetView for BatchResult {
 
 impl WriteSetView for ExecutedBatch {
     fn write_set_entries(&self) -> &[(CellKey, Option<Value>)] {
-        &self.write_set
+        self.write_set()
     }
 }
 

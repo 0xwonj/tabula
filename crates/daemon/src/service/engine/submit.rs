@@ -7,7 +7,7 @@ use serde_json::json;
 
 #[cfg(not(feature = "stark"))]
 use crate::service::StarkProofSummary;
-use tabula_artifact::{StateSnapshot, TransactionBatch};
+use tabula_artifact::{State, TransactionBatch};
 use tabula_core::mock::Blake3Hasher;
 
 use crate::protocol::error::ErrorCode;
@@ -120,7 +120,7 @@ impl super::LocalEngine {
         let proof_requested = req.prove || req.verify;
         let emitted_count = executed
             .inner
-            .txs
+            .txs()
             .iter()
             .filter_map(|tx| match tx {
                 tabula_core::TxResult::Success { emitted, .. } => Some(emitted.len()),
@@ -130,7 +130,7 @@ impl super::LocalEngine {
         let proof = if proof_requested && !has_stark_proof {
             Some(build_receipt(
                 &statement,
-                executed.inner.txs.len(),
+                executed.inner.txs().len(),
                 emitted_count,
                 &executed.inner.consistency,
             ))
@@ -253,7 +253,7 @@ fn commit_instance(
     instances: &RwLock<BTreeMap<InstanceId, InstanceRecord>>,
     instance_id: &InstanceId,
     version_before: u64,
-    state_after: StateSnapshot,
+    state_after: State,
     state_hash_after: String,
     updated_at_ms: u64,
 ) -> ServiceResult<(u64, String)> {

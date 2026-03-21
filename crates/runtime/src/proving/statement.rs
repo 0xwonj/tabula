@@ -1,21 +1,21 @@
 use p3_field::PrimeField32;
-use tabula_artifact::{ExecutionStatement, StateSnapshot, TransactionBatch};
+use tabula_artifact::{State, Statement, TransactionBatch};
 use tabula_commitment::NativeDigest;
 use tabula_machine::PublicStatement;
 
 use crate::error::RuntimeError;
-use crate::program::RuntimeProgram;
+use crate::program::ResolvedProgram;
 
 /// Build the canonical execution statement from execution artifacts and AIR public values.
 pub fn build_execution_statement(
-    runtime_program: &RuntimeProgram,
-    state: &StateSnapshot,
+    resolved_program: &ResolvedProgram,
+    state: &State,
     batch: &TransactionBatch,
-    state_after: &StateSnapshot,
+    state_after: &State,
     air_statement: &PublicStatement,
-) -> Result<ExecutionStatement, RuntimeError> {
-    Ok(ExecutionStatement {
-        program_hash: runtime_program.binding().program_hash().to_string(),
+) -> Result<Statement, RuntimeError> {
+    Ok(Statement {
+        program_hash: resolved_program.binding().program_hash().to_string(),
         state_hash: state
             .canonical_digest()
             .map_err(|e| RuntimeError::StatementBuild {
@@ -31,7 +31,7 @@ pub fn build_execution_statement(
                 detail: format!("failed to hash post-state artifact: {e}"),
             }
         })?,
-        metadata_hash: runtime_program.binding().metadata_hash().to_string(),
+        metadata_hash: resolved_program.binding().metadata_hash().to_string(),
         old_state_root: digest_to_hex(&air_statement.old_root),
         new_state_root: digest_to_hex(&air_statement.new_root),
     })

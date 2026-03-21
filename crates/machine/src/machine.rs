@@ -10,7 +10,6 @@
 //! let traces = prepared_traces();
 //! let proof = prover.prove(crate::MachineProofInput {
 //!     traces,
-//!     column_identities,
 //!     statement,
 //!     statement_digest: [0u8; 32],
 //! })?;
@@ -71,15 +70,10 @@ impl TabulaMachine {
 
     /// Create a builder for customized machine construction.
     ///
-    /// The builder allows registering extensions, custom root proofs,
-    /// after all scheme instances have already been built.
-    ///
-    /// ```ignore
-    /// let machine = TabulaMachine::builder()
-    ///     .with_columns(columns)
-    ///     .with_extension(MyExtension)
-    ///     .build()?;
-    /// ```
+    /// This is a backend-oriented escape hatch used after all domain-specific
+    /// runtime planning is complete. Stable host integrations should prefer the
+    /// higher-level runtime or SDK surfaces instead of constructing machines
+    /// directly.
     pub fn builder() -> MachineBuilder {
         MachineBuilder::new()
     }

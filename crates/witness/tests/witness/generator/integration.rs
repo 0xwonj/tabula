@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
-use tabula_commitment::{ColumnMeta, ColumnState, MockFieldHasher, proof_column_commitment};
+use tabula_commitment::{ColumnMeta, ColumnState, FieldHasher, compute_state_roots_from_metas};
 use tabula_core::traits::ValueCodec;
 use tabula_core::{BatchResult, ColId, RowKey, TableId, TxResult, Value};
+use tabula_testing::commitment::MockFieldHasher;
 
 use super::*;
 
@@ -10,18 +11,24 @@ fn build_meta(
     table: TableId,
     col: ColId,
     old_state: &ColumnState<MockFieldHasher>,
-    writes: &[(RowKey, Option<Vec<p3_koala_bear::KoalaBear>>)],
+    writes: &[(RowKey, Option<Vec<<MockFieldHasher as FieldHasher>::F>>)],
     is_touched: bool,
 ) -> ColumnMeta {
-    let com_old = proof_column_commitment(table, col, old_state).expect("old commitment");
+    let com_old = old_state
+        .proof_commitment(table, col)
+        .expect("old commitment");
     let tag = old_state.scheme_tag();
     let is_empty_old = old_state.is_empty();
-    let (new_state, _, _) = if is_touched {
-        old_state.apply_writes(&MockFieldHasher, table, col, writes)
+    let (new_state, _) = if is_touched {
+        old_state
+            .apply_writes(&MockFieldHasher, table, col, writes)
+            .expect("apply writes")
     } else {
-        (old_state.clone(), com_old, None)
+        (old_state.clone(), com_old)
     };
-    let com_new = proof_column_commitment(table, col, &new_state).expect("new commitment");
+    let com_new = new_state
+        .proof_commitment(table, col)
+        .expect("new commitment");
 
     ColumnMeta {
         table,
@@ -37,7 +44,6 @@ fn build_meta(
 
 #[test]
 fn state_root_deterministic_for_same_metadata() {
-    let preparer = make_preparer();
     let meta = build_meta(
         t(1),
         c(0),
@@ -46,15 +52,16 @@ fn state_root_deterministic_for_same_metadata() {
         false,
     );
 
-    let roots_1 = preparer.compute_state_roots_from_metas(std::slice::from_ref(&meta));
-    let roots_2 = preparer.compute_state_roots_from_metas(std::slice::from_ref(&meta));
+    let roots_1 = compute_state_roots_from_metas(&MockFieldHasher, std::slice::from_ref(&meta))
+        .expect("compute roots 1");
+    let roots_2 = compute_state_roots_from_metas(&MockFieldHasher, std::slice::from_ref(&meta))
+        .expect("compute roots 2");
 
     assert_eq!(roots_1, roots_2);
 }
 
 #[test]
 fn state_root_changes_when_column_commitment_changes() {
-    let preparer = make_preparer();
     let old_state = column_state_with(1, 0, &[(1, 10)]).1;
     let unchanged = build_meta(t(1), c(0), &old_state, &[], false);
     let changed = build_meta(
@@ -72,15 +79,18 @@ fn state_root_changes_when_column_commitment_changes() {
         true,
     );
 
-    let roots_old = preparer.compute_state_roots_from_metas(std::slice::from_ref(&unchanged));
-    let roots_new = preparer.compute_state_roots_from_metas(std::slice::from_ref(&changed));
+    let roots_old =
+        compute_state_roots_from_metas(&MockFieldHasher, std::slice::from_ref(&unchanged))
+            .expect("compute old roots");
+    let roots_new =
+        compute_state_roots_from_metas(&MockFieldHasher, std::slice::from_ref(&changed))
+            .expect("compute new roots");
 
     assert_ne!(roots_old.1, roots_new.1);
 }
 
 #[test]
 fn state_root_handles_empty_to_non_empty_transition() {
-    let preparer = make_preparer();
     let meta = build_meta(
         t(1),
         c(0),
@@ -96,7 +106,9 @@ fn state_root_handles_empty_to_non_empty_transition() {
         true,
     );
 
-    let (old_root, new_root) = preparer.compute_state_roots_from_metas(std::slice::from_ref(&meta));
+    let (old_root, new_root) =
+        compute_state_roots_from_metas(&MockFieldHasher, std::slice::from_ref(&meta))
+            .expect("compute transition roots");
 
     assert_ne!(old_root, new_root);
 }
@@ -128,9 +140,7 @@ fn prepared_inputs_and_roots_cover_multiple_columns() {
         .prepare_execution_inputs(&result, &schema, [(t(1), c(0)), (t(1), c(1))].iter())
         .expect("prepared execution inputs");
 
-    assert_eq!(prepared.init_rows_by_col.len(), 2);
-    assert_eq!(prepared.access_rows_by_col.len(), 2);
-    assert_eq!(prepared.writes_by_col.len(), 2);
+    assert_eq!(prepared.columns.len(), 2);
 
     let states: BTreeMap<_, _> = [
         column_state_with(1, 0, &[(1, 10)]),
@@ -141,20 +151,36 @@ fn prepared_inputs_and_roots_cover_multiple_columns() {
         .into_iter()
         .map(|((table, col), state)| {
             let writes = prepared
-                .writes_by_col
-                .get(&(table, col))
-                .cloned()
-                .unwrap_or_default();
+                .column(table, col)
+                .expect("prepared column")
+                .writes
+                .iter()
+                .map(|write| {
+                    (
+                        write.row,
+                        write
+                            .value
+                            .as_ref()
+                            .map(|value| tabula_commitment::KoalaBearCodec.encode(value))
+                            .transpose()
+                            .expect("encode writes"),
+                    )
+                })
+                .collect::<Vec<_>>();
             build_meta(
                 table,
                 col,
                 &state,
                 &writes,
-                prepared.written_columns.contains(&(table, col)),
+                prepared
+                    .column(table, col)
+                    .expect("prepared column")
+                    .is_touched(),
             )
         })
         .collect();
-    let (old_root, new_root) = preparer.compute_state_roots_from_metas(&metas);
+    let (old_root, new_root) =
+        compute_state_roots_from_metas(&MockFieldHasher, &metas).expect("compute roots");
 
     assert_ne!(old_root, new_root);
     assert_eq!(metas.len(), 2);

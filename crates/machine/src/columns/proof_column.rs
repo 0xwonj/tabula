@@ -4,7 +4,7 @@ use tabula_core::{ColId, SchemeId, TableId};
 use tabula_stark::chips::ChipIdAllocator;
 use tabula_stark::trace::{BusConsumer, DynChip};
 
-use crate::AnyRap;
+use crate::backend::AnyRap;
 use crate::setup::registry::SetupError;
 
 /// Chips produced by one column scheme for a single column proof tier.

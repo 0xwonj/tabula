@@ -24,6 +24,33 @@ pub struct PublicInputs {
     pub budgets: ProgramBudgets,
 }
 
+/// Canonical binding for one sealed program artifact plus contract metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramBinding {
+    program_hash: String,
+    metadata_hash: String,
+}
+
+impl ProgramBinding {
+    /// Build one binding from canonical artifact and metadata hashes.
+    pub fn new(program_hash: String, metadata_hash: String) -> Self {
+        Self {
+            program_hash,
+            metadata_hash,
+        }
+    }
+
+    /// Canonical digest of the sealed artifact backing this binding.
+    pub fn program_hash(&self) -> &str {
+        &self.program_hash
+    }
+
+    /// Canonical digest of the contract metadata backing this binding.
+    pub fn metadata_hash(&self) -> &str {
+        &self.metadata_hash
+    }
+}
+
 /// Public input fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PublicInputField {

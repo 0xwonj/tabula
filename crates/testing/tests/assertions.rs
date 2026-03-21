@@ -2,13 +2,12 @@
 
 use std::panic::catch_unwind;
 
-use tabula_artifact::{StateEntry, StateSnapshot};
+use tabula_artifact::{State, StateEntry};
 use tabula_core::{ColId, RowKey, TableId, Value};
 use tabula_testing::assertions::{
-    ExpectedStateCell, ExpectedTxOutcome, assert_all_txs_success,
-    assert_program_artifact_semantically_eq, assert_state_cell, assert_state_cells_exact,
-    assert_state_snapshot_semantically_eq, assert_transaction_batch_semantically_eq,
-    assert_tx_outcomes, assert_write_set_cell,
+    ExpectedStateCell, ExpectedTxOutcome, assert_all_txs_success, assert_artifact_semantically_eq,
+    assert_state_cell, assert_state_cells_exact, assert_state_semantically_eq,
+    assert_transaction_batch_semantically_eq, assert_tx_outcomes, assert_write_set_cell,
 };
 use tabula_testing::exec::{
     batch_from_transactions, execute_batch_with_defaults, program_from_source,
@@ -23,7 +22,7 @@ use tabula_testing::runtime::execute_compiled_case;
 #[test]
 fn state_and_artifact_comparators_accept_semantically_equal_values() {
     let case = transfer_example_artifact_case();
-    let reordered = StateSnapshot {
+    let reordered = State {
         cells: vec![
             StateEntry {
                 table: 0,
@@ -52,8 +51,8 @@ fn state_and_artifact_comparators_accept_semantically_equal_values() {
         ],
     };
 
-    assert_program_artifact_semantically_eq(&case.program_artifact, &case.program_artifact);
-    assert_state_snapshot_semantically_eq(&case.state, &reordered);
+    assert_artifact_semantically_eq(&case.artifact, &case.artifact);
+    assert_state_semantically_eq(&case.state, &reordered);
     assert_transaction_batch_semantically_eq(&case.batch, &case.batch);
 }
 
@@ -64,10 +63,7 @@ fn semantic_comparators_panic_on_mismatch() {
 
     assert!(
         catch_unwind(|| {
-            assert_program_artifact_semantically_eq(
-                &transfer.program_artifact,
-                &other.program_artifact,
-            );
+            assert_artifact_semantically_eq(&transfer.artifact, &other.artifact);
         })
         .is_err(),
         "artifact mismatch should panic"
@@ -149,7 +145,7 @@ fn state_and_success_assertions_work_for_runtime_results() {
             },
         ],
     );
-    assert_state_snapshot_semantically_eq(
+    assert_state_semantically_eq(
         &executed.state_after,
         &three_account_balances(750, 600, 350),
     );

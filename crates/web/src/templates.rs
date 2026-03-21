@@ -1,13 +1,13 @@
 use tabula_core::Value as CoreValue;
 
-use crate::models::{StateEntry, StateSnapshot, TransactionBatch, TransactionInput, WorkspaceDoc};
+use crate::models::{State, StateEntry, TransactionBatch, TransactionInput, WorkspaceDoc};
 
 pub struct ScenarioTemplate {
     pub id: &'static str,
     pub title: &'static str,
     pub description: &'static str,
     pub program_source: &'static str,
-    pub state: StateSnapshot,
+    pub state: State,
     pub batch: TransactionBatch,
 }
 
@@ -18,7 +18,7 @@ pub fn built_in_templates() -> Vec<ScenarioTemplate> {
             title: "Token Transfer",
             description: "3개 계정 잔액 이동과 이벤트 emit 흐름",
             program_source: "table balances {\n    balance: u64,\n}\n\ntx transfer(from: u64, to: u64, amount: u64) {\n    let sender_bal = balances[from].balance\n    let recv_bal = balances[to].balance\n    assert sender_bal >= amount\n    balances[from].balance = sender_bal - amount\n    balances[to].balance = recv_bal + amount\n    emit \"transfer\" (from, to, amount)\n}\n",
-            state: StateSnapshot {
+            state: State {
                 cells: vec![
                     StateEntry {
                         table: 0,
@@ -68,7 +68,7 @@ pub fn built_in_templates() -> Vec<ScenarioTemplate> {
             title: "Insufficient Balance Fail",
             description: "첫 tx에서 assert 실패를 유도해 진단/trace 확인",
             program_source: "table balances {\n    balance: u64,\n}\n\ntx spend(account: u64, amount: u64) {\n    let bal = balances[account].balance\n    assert bal >= amount\n    balances[account].balance = bal - amount\n}\n",
-            state: StateSnapshot {
+            state: State {
                 cells: vec![StateEntry {
                     table: 0,
                     row: 0,

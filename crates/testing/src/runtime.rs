@@ -2,8 +2,7 @@
 
 use tabula_core::mock::Blake3Hasher;
 use tabula_runtime::{
-    ExecutedBatch, ProgramVerifier, ProveInput, ProveResult, RuntimeError, TabulaRuntime,
-    VerifiedResult,
+    ExecutedBatch, ProveInput, ProveResult, RuntimeError, TabulaRuntime, VerifiedResult, Verifier,
 };
 
 use crate::exec::compiled_program_from_artifact;
@@ -16,7 +15,7 @@ pub type ProvedExecution = ProveResult;
 pub type VerifiedExecution = VerifiedResult;
 
 /// Build a runtime from one compiled program using only public runtime seams.
-pub fn build_runtime(compiled: tabula_compiler::CompiledProgram) -> TabulaRuntime {
+pub fn build_runtime(compiled: tabula_compiler::SealedProgram) -> TabulaRuntime {
     TabulaRuntime::builder(compiled)
         .build()
         .expect("build runtime")
@@ -31,7 +30,7 @@ pub fn execute_compiled_case(case: &CompiledRuntimeCase) -> ExecutedBatch {
 
 /// Execute one artifact runtime case by first compiling its sealed artifact.
 pub fn execute_artifact_case(case: &ArtifactRuntimeCase) -> ExecutedBatch {
-    build_runtime(compiled_program_from_artifact(&case.program_artifact))
+    build_runtime(compiled_program_from_artifact(&case.artifact))
         .execute(&case.state, &case.batch)
         .expect("execute artifact runtime case")
 }
@@ -53,7 +52,7 @@ pub fn prove_compiled_case(case: &CompiledRuntimeCase) -> ProvedExecution {
 
 /// Prove and verify one artifact runtime case with the canonical runtime harness.
 pub fn prove_and_verify_artifact_case(case: &ArtifactRuntimeCase) -> VerifiedExecution {
-    let runtime = build_runtime(compiled_program_from_artifact(&case.program_artifact));
+    let runtime = build_runtime(compiled_program_from_artifact(&case.artifact));
     let executed = runtime
         .execute(&case.state, &case.batch)
         .expect("execute artifact runtime case");
@@ -71,7 +70,7 @@ pub fn verify_artifact_case(
     case: &ArtifactRuntimeCase,
     proved: &ProvedExecution,
 ) -> Result<(), RuntimeError> {
-    let verifier = ProgramVerifier::builder(case.program_artifact.clone()).build()?;
+    let verifier = Verifier::builder(case.artifact.clone()).build()?;
     verifier.verify(&proved.proof, &proved.statement)
 }
 

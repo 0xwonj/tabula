@@ -1,3 +1,3 @@
 mod precompile;
 
-pub use precompile::PrecompileRegistration;
+pub(crate) use precompile::PrecompileRegistration;

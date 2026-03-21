@@ -51,8 +51,8 @@ fn prove_and_verify_happy_path_works_through_runtime_harness() {
     let proved = prove_compiled_case(&compiled_case);
     let verified = prove_and_verify_artifact_case(&artifact_case);
 
-    assert_statement_matches_artifact(&proved.statement, &artifact_case.program_artifact);
-    assert_statement_matches_artifact(&verified.statement, &artifact_case.program_artifact);
+    assert_statement_matches_artifact(&proved.statement, &artifact_case.artifact);
+    assert_statement_matches_artifact(&verified.statement, &artifact_case.artifact);
     assert!(verified.verified, "prove_and_verify should verify");
     assert!(
         !verified.proof.columns.is_empty(),

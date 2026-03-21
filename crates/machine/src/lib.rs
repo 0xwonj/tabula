@@ -11,31 +11,27 @@
 //! let traces = prepared_traces();
 //! let proof = prover.prove(tabula_machine::MachineProofInput {
 //!     traces,
-//!     column_identities,
 //!     statement,
 //!     statement_digest: [0u8; 32],
 //! })?;
 //! verifier.verify(&proof)?;
 //! ```
 
-mod backend;
+/// Advanced backend-only APIs for execution-tier machine composition.
+pub mod backend;
 mod columns;
 pub mod config;
 mod machine;
-pub mod prelude;
 mod proof;
 mod setup;
 #[cfg(test)]
 mod testing;
 
-pub use backend::extension::{ChipExtension, ExtensionContext};
-pub use backend::rap::AnyRap;
-pub use columns::{ColumnChipSet, ProofColumn};
 pub use config::{EF4, TabulaStarkConfig, default_config, make_config};
 pub use machine::TabulaMachine;
 pub use proof::types::{
-    ChipOpening, ColumnIdentity, ColumnProofEntry, MachineProofInput, ProofTier, ProveError,
-    SubProofEnvelope, TabulaProof, VerificationError,
+    ChipOpening, ColumnIdentity, ColumnProofEntry, ColumnProofTrace, MachineProofInput, ProofTier,
+    ProveError, SubProofEnvelope, TabulaProof, VerificationError,
 };
 pub use proof::{Prover, Verifier};
 pub use setup::builder::MachineBuilder;

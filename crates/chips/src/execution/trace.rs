@@ -123,6 +123,14 @@ pub struct InstructionRecord {
     pub is_empty_col: bool,
     /// For Precompile: the precompile identifier.
     pub precompile_id: Option<u16>,
+    /// For Precompile: instruction index within the tx body.
+    pub instruction_index: Option<u32>,
+    /// For Precompile: number of input values.
+    pub precompile_input_count: Option<u32>,
+    /// For Precompile: number of output values.
+    pub precompile_output_count: Option<u32>,
+    /// For Precompile: canonical event digest.
+    pub precompile_event_digest: Option<[KoalaBear; 8]>,
     /// For PropertyRead: query type discriminant (PropertyQueryKind ordinal).
     pub property_query_type: Option<u8>,
     /// For PropertyRead: first canonical query operand (encoded `U64` limbs).
@@ -160,6 +168,10 @@ impl Default for InstructionRecord {
             hash_perm_output: None,
             is_empty_col: false,
             precompile_id: None,
+            instruction_index: None,
+            precompile_input_count: None,
+            precompile_output_count: None,
+            precompile_event_digest: None,
             property_query_type: None,
             property_query_arg0: vec![],
             property_query_arg1: vec![],
@@ -293,8 +305,8 @@ pub fn generate_execution_trace<const W: usize>(
             populate_cmp_witness(cols, rec, cmp_op);
         }
 
-        // Hash / Precompile permutation columns
-        if matches!(rec.opcode, Opcode::Hash | Opcode::Precompile) {
+        // Hash permutation columns
+        if rec.opcode == Opcode::Hash {
             if let Some(ref input) = rec.hash_perm_input {
                 cols.hash_perm_input = *input;
             }
@@ -308,6 +320,26 @@ pub fn generate_execution_trace<const W: usize>(
             && let Some(id) = rec.precompile_id
         {
             cols.precompile_id = KoalaBear::from_u32(id as u32);
+        }
+        if rec.opcode == Opcode::Precompile
+            && let Some(instruction_index) = rec.instruction_index
+        {
+            cols.instruction_index = KoalaBear::new(instruction_index);
+        }
+        if rec.opcode == Opcode::Precompile
+            && let Some(input_count) = rec.precompile_input_count
+        {
+            cols.precompile_input_count = KoalaBear::new(input_count);
+        }
+        if rec.opcode == Opcode::Precompile
+            && let Some(output_count) = rec.precompile_output_count
+        {
+            cols.precompile_output_count = KoalaBear::new(output_count);
+        }
+        if rec.opcode == Opcode::Precompile
+            && let Some(event_digest) = rec.precompile_event_digest
+        {
+            cols.precompile_event_digest = event_digest;
         }
 
         // PropertyRead columns

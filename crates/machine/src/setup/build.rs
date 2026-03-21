@@ -103,9 +103,10 @@ mod tests {
     use tabula_stark::trace::column_commitment::BusConsumer;
     use tabula_stark::trace::contributor::WitnessStore;
 
+    use crate::SetupError;
+    use crate::backend::{AnyRap, ColumnChipSet, ProofColumn};
     use crate::setup::root::SmtRootProof;
     use crate::testing::TestSsmcProofColumn;
-    use crate::{AnyRap, ColumnChipSet, ProofColumn, SetupError};
 
     use super::{TierSetup, column_tier_setup, execution_tier_setup, root_tier_setup};
 

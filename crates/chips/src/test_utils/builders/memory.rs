@@ -4,7 +4,8 @@
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
-use tabula_commitment::{ColumnMeta, NativeDigest, scheme_tags};
+use tabula_commitment::schemes::tags;
+use tabula_commitment::{ColumnMeta, NativeDigest};
 use tabula_core::{ColId, TableId};
 
 use crate::shards::state::trace::EntrySource;
@@ -254,7 +255,7 @@ pub fn meta_entry(
     ColumnMeta {
         table: TableId(table),
         col: ColId(col),
-        tag: scheme_tags::SSMC,
+        tag: tags::SSMC,
         com_old,
         com_new,
         is_empty_old: false,

@@ -1,6 +1,6 @@
 //! Handler for the `execute` subcommand.
 
-use tabula_artifact::{StateSnapshot, TransactionBatch};
+use tabula_artifact::{State, TransactionBatch};
 use tabula_core::mock::Blake3Hasher;
 use tabula_runtime::{CompiledBatchInput, run_compiled_batch};
 
@@ -18,13 +18,13 @@ pub fn cmd_execute(
     let compiled = tabula_compiler::load_and_register_program(program_path)?;
 
     // 2. Load state + batch
-    let state_snapshot: StateSnapshot = load_json(state_path)?;
+    let state: State = load_json(state_path)?;
     let transaction_batch: TransactionBatch = load_json(batch_path)?;
 
     // 3. Execute via runtime pipeline
     let executed = run_compiled_batch(&CompiledBatchInput {
         compiled_program: &compiled,
-        state: &state_snapshot,
+        state: &state,
         batch: &transaction_batch,
         hasher: &Blake3Hasher,
     })?;
@@ -34,17 +34,17 @@ pub fn cmd_execute(
     }
 
     let read_set: Vec<StateEntry> = executed
-        .read_set
+        .read_set()
         .iter()
         .map(|(k, v)| StateEntry::from_cell_pair(k, v))
         .collect();
     let write_set: Vec<StateEntry> = executed
-        .write_set
+        .write_set()
         .iter()
         .map(|(k, v)| StateEntry::from_cell_pair(k, v))
         .collect();
     let all_events: Vec<_> = executed
-        .txs
+        .txs()
         .iter()
         .flat_map(tabula_core::TxResult::access_trace)
         .cloned()
@@ -56,7 +56,7 @@ pub fn cmd_execute(
     };
 
     let emitted: Vec<_> = executed
-        .txs
+        .txs()
         .iter()
         .filter_map(|tx| match tx {
             tabula_core::TxResult::Success { emitted, .. } => Some(emitted.iter()),
@@ -68,7 +68,7 @@ pub fn cmd_execute(
 
     if json_output {
         let output = ExecutionOutput {
-            tx_results: executed.txs.clone(),
+            tx_results: executed.txs().to_vec(),
             read_set,
             write_set,
             emitted: emitted.clone(),
@@ -81,7 +81,7 @@ pub fn cmd_execute(
 
     println!("=== Execution Results ===\n");
 
-    for (i, tx_result) in executed.txs.iter().enumerate() {
+    for (i, tx_result) in executed.txs().iter().enumerate() {
         match tx_result {
             tabula_core::TxResult::Success { .. } => println!("  tx {i}: SUCCESS"),
             tabula_core::TxResult::Failed {
@@ -130,7 +130,7 @@ pub fn cmd_execute(
 
     if include_trace {
         println!("\n--- Execution Trace ---");
-        for (tx_idx, tx) in executed.txs.iter().enumerate() {
+        for (tx_idx, tx) in executed.txs().iter().enumerate() {
             if let tabula_core::TxResult::Success { access_trace, .. } = tx {
                 for event in access_trace {
                     let op = match event.op {

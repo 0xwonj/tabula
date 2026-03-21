@@ -1,16 +1,18 @@
 //! Canonical compiled-program fixtures and compiled runtime cases.
 
-use tabula_compiler::{CompiledProgram, register_program};
+use tabula_compiler::{SealedProgram, register_program};
 use tabula_core::{ColId, TableId, TxTypeId, Value};
-use tabula_ir::{Instruction, PrecompileId, RowExpr, TxTypeDef, ValueExpr};
+use tabula_ir::{Instruction, RowExpr, TxTypeDef, ValueExpr};
 
+use crate::exec::compiled_program_from_artifact;
 use crate::exec::compiled_property_successor_program;
+use crate::fixtures::artifacts::precompile_requirement_artifact;
 use crate::fixtures::batch::{empty_batch, no_param_batch};
 use crate::fixtures::cases::CompiledRuntimeCase;
 use crate::fixtures::schema::single_u64_column_schema;
 use crate::fixtures::state::{empty_state, single_cell_u64};
 
-pub fn compiled_single_write_program() -> CompiledProgram {
+pub fn compiled_single_write_program() -> SealedProgram {
     let schema = single_u64_column_schema(TableId(1), ColId(0), "accounts", "balance");
     let tx_def = TxTypeDef {
         id: TxTypeId(1),
@@ -28,24 +30,11 @@ pub fn compiled_single_write_program() -> CompiledProgram {
     register_program(&[schema], &[tx_def]).expect("register single-write program")
 }
 
-pub fn compiled_precompile_requirement_program() -> CompiledProgram {
-    register_program(
-        &[],
-        &[TxTypeDef {
-            id: TxTypeId(1),
-            name: "call".to_string(),
-            param_schema: vec![],
-            body: vec![Instruction::Precompile {
-                id: PrecompileId(7),
-                dst_slots: vec![0],
-                inputs: vec![ValueExpr::Literal(Value::U64(1))],
-            }],
-        }],
-    )
-    .expect("register precompile requirement program")
+pub fn compiled_precompile_requirement_program() -> SealedProgram {
+    compiled_program_from_artifact(&precompile_requirement_artifact())
 }
 
-pub fn compiled_property_successor_program_fixture() -> CompiledProgram {
+pub fn compiled_property_successor_program_fixture() -> SealedProgram {
     compiled_property_successor_program()
 }
 

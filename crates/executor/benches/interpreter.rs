@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use criterion::{Criterion, criterion_group, criterion_main};
 
 use tabula_core::error::TabulaError;
-use tabula_core::traits::{Hasher, StateSnapshot, StaticTableProvider};
+use tabula_core::traits::{Hasher, StateView, StaticTableProvider};
 use tabula_core::{CellKey, ColId, RowKey, TableId, TableSchema, Value};
 use tabula_ir::{ArithOp, CmpOp, Instruction, RowExpr, ValueExpr};
 use tabula_testing::fixtures::schema::single_u64_column_schema;
@@ -19,7 +19,7 @@ use tabula_executor::property::PropertyQueryRegistry;
 
 struct BenchSnapshot(BTreeMap<CellKey, Value>);
 
-impl StateSnapshot for BenchSnapshot {
+impl StateView for BenchSnapshot {
     fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
         Ok(self.0.get(key).copied())
     }

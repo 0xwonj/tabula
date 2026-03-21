@@ -1,6 +1,6 @@
 //! Single-program registry.
 
-use tabula_compiler::CompiledProgram;
+use tabula_compiler::SealedProgram;
 
 #[cfg(feature = "stark")]
 use std::sync::Arc;
@@ -16,7 +16,7 @@ pub const SINGLE_PROGRAM_ID: &str = "pgm_default";
 #[derive(Debug, Clone)]
 pub struct CatalogEntry {
     pub record: ProgramRecord,
-    pub compiled_program: CompiledProgram,
+    pub compiled_program: SealedProgram,
     #[cfg(feature = "stark")]
     pub prepared_runtime: Arc<TabulaRuntime>,
 }

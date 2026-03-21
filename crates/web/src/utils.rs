@@ -6,10 +6,10 @@ use serde_json::Value as JsonValue;
 use tabula_core::Value as CoreValue;
 
 use crate::api::ApiClientError;
-use crate::models::{StateSnapshot, TransactionBatch};
+use crate::models::{State, TransactionBatch};
 
-pub(crate) fn parse_state(raw: &str) -> Result<StateSnapshot, String> {
-    serde_json::from_str::<StateSnapshot>(raw).map_err(|e| e.to_string())
+pub(crate) fn parse_state(raw: &str) -> Result<State, String> {
+    serde_json::from_str::<State>(raw).map_err(|e| e.to_string())
 }
 
 pub(crate) fn parse_batch(raw: &str) -> Result<TransactionBatch, String> {

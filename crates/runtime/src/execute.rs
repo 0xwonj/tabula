@@ -6,13 +6,11 @@
 
 use std::collections::BTreeMap;
 
-use tabula_artifact::{
-    StateSnapshot, TransactionBatch, merge_output_state_entries, normalize_state,
-};
-use tabula_compiler::CompiledProgram;
+use tabula_artifact::{State, TransactionBatch, merge_output_state_entries, normalize_state};
+use tabula_compiler::SealedProgram;
 use tabula_core::traits::Hasher;
 use tabula_core::{
-    Batch, CellKey, ExecutionConsistencyStatus, InMemoryState, InMemoryStaticTables,
+    Batch, BatchResult, CellKey, ExecutionConsistencyStatus, InMemoryState, InMemoryStaticTables,
     NoopSigVerifier, SequentialNonce, TxResult, Value,
 };
 use tabula_executor::batch::{BatchEnv, execute_batch};
@@ -28,19 +26,19 @@ pub struct BatchInput<'a> {
     /// The IR program to execute.
     pub program: &'a Program,
     /// Pre-execution state.
-    pub state: &'a StateSnapshot,
+    pub state: &'a State,
     /// Transaction batch.
     pub batch: &'a TransactionBatch,
     /// Hasher implementation (Blake3Hasher for CLI, PoseidonHasher for STARK).
     pub hasher: &'a dyn Hasher,
 }
 
-/// Inputs for batch execution using a compiler-produced program artifact.
+/// Inputs for batch execution using a compiler-produced artifact.
 pub struct CompiledBatchInput<'a> {
     /// Semantic artifact produced by the compiler/registration phase.
-    pub compiled_program: &'a CompiledProgram,
+    pub compiled_program: &'a SealedProgram,
     /// Pre-execution state.
-    pub state: &'a StateSnapshot,
+    pub state: &'a State,
     /// Transaction batch.
     pub batch: &'a TransactionBatch,
     /// Hasher implementation (Blake3Hasher for CLI, PoseidonHasher for STARK).
@@ -59,24 +57,42 @@ pub(crate) struct ExecutionResources<'a> {
 #[derive(Debug, Clone)]
 pub struct ExecutedBatch {
     /// Normalized pre-state.
-    pub state_before: StateSnapshot,
+    pub state_before: State,
     /// Post-execution state.
-    pub state_after: StateSnapshot,
-    /// Per-transaction results (each carries its own access trace and emitted events).
-    pub txs: Vec<TxResult>,
-    /// Read set from base state.
-    pub read_set: Vec<(CellKey, Option<Value>)>,
-    /// Final write set.
-    pub write_set: Vec<(CellKey, Option<Value>)>,
+    pub state_after: State,
+    /// Canonical execution result.
+    batch_result: BatchResult,
     /// Consistency check result.
     pub consistency: ExecutionConsistencyStatus,
+}
+
+impl ExecutedBatch {
+    /// Canonical execution result for this batch.
+    pub fn batch_result(&self) -> &BatchResult {
+        &self.batch_result
+    }
+
+    /// Per-transaction outcomes in execution order.
+    pub fn txs(&self) -> &[TxResult] {
+        &self.batch_result.txs
+    }
+
+    /// Base-state reads observed by the executor.
+    pub fn read_set(&self) -> &[(CellKey, Option<Value>)] {
+        &self.batch_result.read_set_old
+    }
+
+    /// Final coalesced writes after execution.
+    pub fn write_set(&self) -> &[(CellKey, Option<Value>)] {
+        &self.batch_result.write_set_final
+    }
 }
 
 /// Execute a batch through the canonical pipeline.
 ///
 /// Steps:
 /// 1. Normalize state
-/// 2. Build in-memory state snapshot
+/// 2. Build in-memory state
 /// 3. Convert transactions
 /// 4. Execute batch
 /// 5. Check consistency
@@ -98,7 +114,7 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, RuntimeError> 
 
 pub(crate) fn execute_pipeline(
     program: &Program,
-    state: &StateSnapshot,
+    state: &State,
     batch: &TransactionBatch,
     hasher: &dyn Hasher,
     resources: ExecutionResources<'_>,
@@ -106,7 +122,7 @@ pub(crate) fn execute_pipeline(
     // 1. Normalize state.
     let normalized = normalize_state(state).map_err(RuntimeError::InvalidState)?;
 
-    // 2. Build in-memory state snapshot.
+    // 2. Build in-memory state.
     let mut state_store = InMemoryState::new();
     for cell in &normalized.cells {
         let (key, value) = cell.to_cell_pair().map_err(RuntimeError::InvalidState)?;
@@ -145,21 +161,19 @@ pub(crate) fn execute_pipeline(
     let consistency = check_consistency_status(&all_events, &result.read_set_old, &result.txs);
 
     // 6. Merge output state.
-    let state_after = StateSnapshot {
+    let state_after = State {
         cells: merge_output_state_entries(&normalized.cells, &result.write_set_final),
     };
 
     Ok(ExecutedBatch {
         state_before: normalized,
         state_after,
-        txs: result.txs,
-        read_set: result.read_set_old,
-        write_set: result.write_set_final,
+        batch_result: result,
         consistency,
     })
 }
 
-/// Execute a batch using a compiler-produced program artifact.
+/// Execute a batch using a compiler-produced artifact.
 pub fn run_compiled_batch(input: &CompiledBatchInput<'_>) -> Result<ExecutedBatch, RuntimeError> {
     validate_free_execution_requirements(input.compiled_program)?;
     let property_queries = PropertyQueryRegistry::new();
@@ -177,9 +191,9 @@ pub fn run_compiled_batch(input: &CompiledBatchInput<'_>) -> Result<ExecutedBatc
 }
 
 fn validate_free_execution_requirements(
-    compiled_program: &CompiledProgram,
+    compiled_program: &SealedProgram,
 ) -> Result<(), RuntimeError> {
-    if !compiled_program.required_precompile_ids().is_empty() {
+    if !compiled_program.precompile_manifest().is_empty() {
         return Err(RuntimeError::ValidationFailed {
             detail:
                 "program requires precompiles; use TabulaRuntime::builder(...), register the required PrecompileRegistration values, and build before execution"
@@ -233,7 +247,7 @@ mod tests {
     #[test]
     fn run_compiled_batch_rejects_invalid_state() {
         let case = compiled_single_write_case();
-        let invalid_state = tabula_artifact::StateSnapshot {
+        let invalid_state = tabula_artifact::State {
             cells: vec![StateEntry {
                 table: 1,
                 row: 0,
@@ -265,8 +279,8 @@ mod tests {
         })
         .expect("empty batch should succeed");
 
-        assert!(executed.txs.is_empty());
-        assert!(executed.write_set.is_empty());
+        assert!(executed.txs().is_empty());
+        assert!(executed.write_set().is_empty());
         assert_eq!(
             executed.state_after.cells.len(),
             executed.state_before.cells.len()

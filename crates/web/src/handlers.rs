@@ -15,7 +15,7 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 
 use crate::api::ApiClient;
-use crate::models::{StateEntry, StateSnapshot, TransactionBatch, TransactionInput, VerifyReport};
+use crate::models::{State, StateEntry, TransactionBatch, TransactionInput, VerifyReport};
 use crate::state::AppSignals;
 use crate::templates::template_workspace;
 use crate::utils::{
@@ -160,7 +160,7 @@ pub(crate) fn run_deploy(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                             s.set_deployed_instance_version
                                 .set(instance_resp.instance.version);
 
-                            s.set_program_artifact
+                            s.set_artifact
                                 .set(Some(program_resp.program.program.clone()));
 
                             s.set_diagnostics_text.set(format!(
@@ -358,7 +358,7 @@ pub(crate) fn load_template(s: AppSignals) -> impl Fn(&'static str) + Clone + 's
             s.set_deployed_program_id.set(None);
             s.set_deployed_instance_id.set(None);
             s.set_deployed_instance_version.set(0);
-            s.set_program_artifact.set(None);
+            s.set_artifact.set(None);
             s.set_stark_summary.set(None);
             s.clear_verify_gate();
             s.set_status_line.set(format!("Template loaded: {id}"));
@@ -372,8 +372,8 @@ pub(crate) fn load_template(s: AppSignals) -> impl Fn(&'static str) + Clone + 's
 
 pub(crate) fn add_state_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone + 'static {
     move |_| {
-        let artifact = s.program_artifact.get();
-        let mut state = parse_state(&s.state_json.get()).unwrap_or(StateSnapshot { cells: vec![] });
+        let artifact = s.artifact.get();
+        let mut state = parse_state(&s.state_json.get()).unwrap_or(State { cells: vec![] });
 
         if let Some(ref art) = artifact {
             if let Some(schema) = art.table_schemas.first() {
@@ -412,7 +412,7 @@ pub(crate) fn add_state_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clo
 
 pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone + 'static {
     move |_| {
-        let artifact = s.program_artifact.get();
+        let artifact = s.artifact.get();
         let mut batch = parse_batch(&s.batch_json.get()).unwrap_or(TransactionBatch {
             transactions: vec![],
         });

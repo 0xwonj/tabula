@@ -3,14 +3,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::TabulaError;
-use crate::traits::{StateSnapshot, StaticTableProvider};
+use crate::traits::{StateView, StaticTableProvider};
 use crate::{CellKey, ColId, RowKey, TableId, Value};
 
 // ---------------------------------------------------------------------------
 // InMemoryState
 // ---------------------------------------------------------------------------
 
-/// BTreeMap-backed [`StateSnapshot`].
+/// BTreeMap-backed [`StateView`].
 #[derive(Debug, Clone)]
 pub struct InMemoryState {
     data: BTreeMap<CellKey, Value>,
@@ -39,7 +39,7 @@ impl Default for InMemoryState {
     }
 }
 
-impl StateSnapshot for InMemoryState {
+impl StateView for InMemoryState {
     fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
         Ok(self.data.get(key).copied())
     }

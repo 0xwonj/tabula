@@ -1,6 +1,6 @@
 //! Canonical state fixtures for black-box tests.
 
-use tabula_artifact::{StateEntry, StateSnapshot};
+use tabula_artifact::{State, StateEntry};
 use tabula_core::{CellKey, ColId, RowKey, TableId, Value};
 
 pub fn cell_key(table: u32, row: u64, col: u16) -> CellKey {
@@ -11,12 +11,12 @@ pub fn cell_key(table: u32, row: u64, col: u16) -> CellKey {
     }
 }
 
-pub fn empty_state() -> StateSnapshot {
-    StateSnapshot { cells: vec![] }
+pub fn empty_state() -> State {
+    State { cells: vec![] }
 }
 
-pub fn single_cell_u64(table: TableId, col: ColId, row: RowKey, value: u64) -> StateSnapshot {
-    StateSnapshot {
+pub fn single_cell_u64(table: TableId, col: ColId, row: RowKey, value: u64) -> State {
+    State {
         cells: vec![StateEntry {
             table: table.0,
             row: row.0,
@@ -26,8 +26,8 @@ pub fn single_cell_u64(table: TableId, col: ColId, row: RowKey, value: u64) -> S
     }
 }
 
-pub fn two_account_balances(a: u64, b: u64) -> StateSnapshot {
-    StateSnapshot {
+pub fn two_account_balances(a: u64, b: u64) -> State {
+    State {
         cells: vec![
             StateEntry {
                 table: 0,
@@ -45,8 +45,8 @@ pub fn two_account_balances(a: u64, b: u64) -> StateSnapshot {
     }
 }
 
-pub fn three_account_balances(a: u64, b: u64, c: u64) -> StateSnapshot {
-    StateSnapshot {
+pub fn three_account_balances(a: u64, b: u64, c: u64) -> State {
+    State {
         cells: vec![
             StateEntry {
                 table: 0,
@@ -70,8 +70,8 @@ pub fn three_account_balances(a: u64, b: u64, c: u64) -> StateSnapshot {
     }
 }
 
-pub fn liquid_shielded_state(liquid: u64, shielded: u64) -> StateSnapshot {
-    StateSnapshot {
+pub fn liquid_shielded_state(liquid: u64, shielded: u64) -> State {
+    State {
         cells: vec![
             StateEntry {
                 table: 0,

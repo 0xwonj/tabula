@@ -12,13 +12,18 @@ tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-compiler = { workspace = true }
 tabula-core = { workspace = true, features = ["test-utils"] }
 tabula-executor = { workspace = true }
+tabula-ext = { workspace = true, features = ["prove"] }
+tabula-gadgets = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-lang = { workspace = true }
 tabula-machine = { workspace = true }
 tabula-runtime = { workspace = true, features = ["prove"] }
 tabula-stark = { workspace = true }
 tabula-witness = { workspace = true }
+p3-air = { workspace = true }
+p3-field = { workspace = true }
 p3-koala-bear = { workspace = true }
+p3-matrix = { workspace = true }
 tempfile = "3"
 
 [lints]

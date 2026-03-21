@@ -1,6 +1,6 @@
 //! Run verification logic.
 
-use tabula_artifact::ExecutionStatement;
+use tabula_artifact::Statement;
 
 use crate::protocol::error::ErrorCode;
 use crate::service::error::{ServiceError, ServiceResult};
@@ -39,7 +39,7 @@ impl super::LocalEngine {
             ServiceError::unprocessable(ErrorCode::ExecutionError, "run has no proof to verify")
         })?;
 
-        let statement = ExecutionStatement {
+        let statement = Statement {
             program_hash: run.program_hash.clone(),
             state_hash: run.state_hash_before.clone(),
             batch_hash: run.batch_hash.clone(),

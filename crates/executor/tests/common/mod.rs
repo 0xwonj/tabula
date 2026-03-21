@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use tabula_core::error::TabulaError;
-use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateSnapshot, StaticTableProvider};
+use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateView, StaticTableProvider};
 use tabula_core::{CellKey, ColId, RowKey, TableId, TableSchema, Transaction, Value};
 use tabula_ir::{Instruction, RowExpr, ValueExpr};
 use tabula_testing::fixtures::batch::core_tx_with_sender;
@@ -16,12 +16,12 @@ use tabula_executor::interpreter::{ExecContext, InterpreterError, TxExecutionOut
 use tabula_executor::overlay::{Overlay, OverlayResult};
 use tabula_executor::property::PropertyQueryRegistry;
 
-// ── StateSnapshot impls ─────────────────────────────────────────────────
+// ── StateView impls ─────────────────────────────────────────────────
 
 /// Simple BTreeMap-backed snapshot for tests.
 pub struct TestSnapshot(pub BTreeMap<CellKey, Value>);
 
-impl StateSnapshot for TestSnapshot {
+impl StateView for TestSnapshot {
     fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
         Ok(self.0.get(key).copied())
     }
@@ -50,7 +50,7 @@ impl CountingSnapshot {
     }
 }
 
-impl StateSnapshot for CountingSnapshot {
+impl StateView for CountingSnapshot {
     fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
         self.call_count.fetch_add(1, Ordering::Relaxed);
         Ok(self.data.get(key).copied())

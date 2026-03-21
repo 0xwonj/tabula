@@ -4,7 +4,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
-use tabula_commitment::encode_u64_limbs;
+use tabula_commitment::primitives::encode_u64_limbs;
 
 use tabula_stark::air::columns::borrow_cols_mut;
 

@@ -2,70 +2,84 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use p3_koala_bear::KoalaBear;
-
-use tabula_commitment::{
-    ColumnMeta, FieldHasher, KoalaBearCodec, NativeDigest, compute_leaf, compute_table_root,
-};
 use tabula_core::error::TabulaError;
-use tabula_core::traits::ValueCodec;
-use tabula_core::{BatchResult, ColId, OpKind, RowKey, TableId, TableSchema, ValueType};
+use tabula_core::{BatchResult, ColId, OpKind, TableId, TableSchema, ValueType, zero_value};
 
-use crate::witness::encoding::{encode_value, encode_value_with_null_flag};
-use crate::{AccessRow, InitRow};
+use crate::{AccessEvent, ColumnWrite, InitCell};
 
-/// Per-column writes: `(row_key, encoded_value)` pairs. `None` = delete.
-pub type EncodedColumnWrites = Vec<(RowKey, Option<Vec<KoalaBear>>)>;
+type LogicalColumnWritesByColumn = BTreeMap<(TableId, ColId), Vec<ColumnWrite>>;
 
-/// Per-column write-set map keyed by `(table, col)`.
-pub type EncodedColumnWritesByColumn = BTreeMap<(TableId, ColId), EncodedColumnWrites>;
+/// Ordered logical proof inputs for one planned committed column.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreparedExecutionColumn {
+    /// Table identifier.
+    pub table: TableId,
+    /// Column identifier.
+    pub col: ColId,
+    /// Declared value type for the column.
+    pub value_type: ValueType,
+    /// Base-state init cells grouped for this column.
+    pub init_cells: Vec<InitCell>,
+    /// Execution access events for this column.
+    pub access_events: Vec<AccessEvent>,
+    /// Final coalesced writes for this column.
+    pub writes: Vec<ColumnWrite>,
+}
 
-/// Shared execution-derived inputs used by runtime-owned transition backends.
+impl PreparedExecutionColumn {
+    /// Whether the batch contains at least one effective final write.
+    pub fn is_touched(&self) -> bool {
+        !self.writes.is_empty()
+    }
+}
+
+/// Shared execution-derived columns used by runtime-owned proof assembly.
 #[derive(Clone, Debug)]
-pub struct PreparedExecutionInputs {
-    /// Columns with at least one effective final write in this batch.
-    pub written_columns: BTreeSet<(TableId, ColId)>,
-    /// Schema-derived value types for every planned column.
-    pub type_map: BTreeMap<(TableId, ColId), ValueType>,
-    /// Base-state init rows grouped by column.
-    pub init_rows_by_col: BTreeMap<(TableId, ColId), Vec<InitRow>>,
-    /// Access rows grouped by column in execution order.
-    pub access_rows_by_col: BTreeMap<(TableId, ColId), Vec<AccessRow>>,
-    /// Final coalesced writes grouped by column.
-    pub writes_by_col: EncodedColumnWritesByColumn,
+pub struct PreparedExecutionColumns {
+    /// Ordered per-column logical proof inputs in requested column order.
+    pub columns: Vec<PreparedExecutionColumn>,
+}
+
+impl PreparedExecutionColumns {
+    /// Find one prepared column by `(table, col)`.
+    pub fn column(&self, table: TableId, col: ColId) -> Option<&PreparedExecutionColumn> {
+        self.columns
+            .iter()
+            .find(|column| column.table == table && column.col == col)
+    }
 }
 
 /// Minimal public helper for runtime-owned proof-input preparation.
-///
-/// This surface intentionally exposes only the shared execution-row
-/// preparation and state-root helpers used by runtime-owned transition
-/// backends.
-pub struct BatchInputPreparer<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> {
-    hasher: H,
-    codec: KoalaBearCodec,
-}
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ExecutionInputPreparer;
 
-impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> BatchInputPreparer<H> {
-    /// Create a new preparer with the given field hasher.
-    pub fn new(hasher: H) -> Self {
-        Self {
-            hasher,
-            codec: KoalaBearCodec,
-        }
+impl ExecutionInputPreparer {
+    /// Create a new preparer.
+    pub fn new() -> Self {
+        Self
     }
 
-    /// Prepare shared execution-derived inputs for runtime-owned transition backends.
+    /// Prepare shared execution-derived logical inputs for runtime-owned proof assembly.
     pub fn prepare_execution_inputs<'a>(
         &self,
         result: &BatchResult,
         schemas: &BTreeMap<TableId, TableSchema>,
         all_columns: impl IntoIterator<Item = &'a (TableId, ColId)>,
-    ) -> Result<PreparedExecutionInputs, TabulaError> {
-        let all_columns: BTreeSet<(TableId, ColId)> = all_columns.into_iter().copied().collect();
+    ) -> Result<PreparedExecutionColumns, TabulaError> {
+        let all_columns: Vec<(TableId, ColId)> = all_columns.into_iter().copied().collect();
+        let planned_columns: BTreeSet<(TableId, ColId)> = all_columns.iter().copied().collect();
+
+        if planned_columns.len() != all_columns.len() {
+            return Err(TabulaError::ProofError {
+                phase: "witness",
+                detail: "duplicate planned column in execution-input preparation".to_string(),
+            });
+        }
+
         let written_columns = Self::collect_written_columns(result);
 
         for tc in &written_columns {
-            if !all_columns.contains(tc) {
+            if !planned_columns.contains(tc) {
                 return Err(TabulaError::ProofError {
                     phase: "witness",
                     detail: format!(
@@ -77,63 +91,35 @@ impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> BatchInputPreparer<H>
         }
 
         let type_map = Self::build_type_map(schemas, all_columns.iter())?;
-        let init_rows_by_col = self.build_init_rows(result, &type_map)?;
-        let access_rows_by_col = self.build_access_rows(result, &type_map)?;
-        let writes_by_col = self.group_writes(result, &type_map)?;
+        let mut init_cells_by_col = Self::build_init_cells(result, &type_map)?;
+        let mut access_events_by_col = Self::build_access_events(result, &type_map)?;
+        let mut writes_by_col = Self::group_writes(result, &type_map)?;
 
-        Ok(PreparedExecutionInputs {
-            written_columns,
-            type_map,
-            init_rows_by_col,
-            access_rows_by_col,
-            writes_by_col,
-        })
-    }
-
-    /// Compute the old/new state roots from verifier-visible column metadata.
-    pub fn compute_state_roots_from_metas(
-        &self,
-        metas: &[ColumnMeta],
-    ) -> (NativeDigest, NativeDigest) {
-        let mut old_tables: BTreeMap<TableId, BTreeMap<ColId, NativeDigest>> = BTreeMap::new();
-        let mut new_tables: BTreeMap<TableId, BTreeMap<ColId, NativeDigest>> = BTreeMap::new();
-
-        for meta in metas {
-            old_tables.entry(meta.table).or_default().insert(
-                meta.col,
-                compute_leaf(&self.hasher, meta.table, meta.col, meta.tag, &meta.com_old),
-            );
-            new_tables.entry(meta.table).or_default().insert(
-                meta.col,
-                compute_leaf(&self.hasher, meta.table, meta.col, meta.tag, &meta.com_new),
-            );
-        }
-
-        let old_roots: BTreeMap<_, _> = old_tables
-            .iter()
-            .map(|(table, leaves)| (*table, compute_table_root(&self.hasher, leaves)))
-            .collect();
-        let new_roots: BTreeMap<_, _> = new_tables
-            .iter()
-            .map(|(table, leaves)| (*table, compute_table_root(&self.hasher, leaves)))
+        let columns = all_columns
+            .into_iter()
+            .map(|(table, col)| PreparedExecutionColumn {
+                table,
+                col,
+                value_type: type_map[&(table, col)],
+                init_cells: init_cells_by_col.remove(&(table, col)).unwrap_or_default(),
+                access_events: access_events_by_col
+                    .remove(&(table, col))
+                    .unwrap_or_default(),
+                writes: writes_by_col.remove(&(table, col)).unwrap_or_default(),
+            })
             .collect();
 
-        (
-            tabula_commitment::compute_state_root(&self.hasher, &old_roots),
-            tabula_commitment::compute_state_root(&self.hasher, &new_roots),
-        )
+        Ok(PreparedExecutionColumns { columns })
     }
 
-    /// Collect all `(table, col)` pairs with at least one effective final write.
     fn collect_written_columns(result: &BatchResult) -> BTreeSet<(TableId, ColId)> {
-        let mut written = BTreeSet::new();
-        for (key, _) in &result.write_set_final {
-            written.insert((key.table, key.col));
-        }
-        written
+        result
+            .write_set_final
+            .iter()
+            .map(|(key, _)| (key.table, key.col))
+            .collect()
     }
 
-    /// Build a `(table, col) -> ValueType` mapping from schemas.
     fn build_type_map<'a>(
         schemas: &BTreeMap<TableId, TableSchema>,
         all_columns: impl IntoIterator<Item = &'a (TableId, ColId)>,
@@ -155,25 +141,22 @@ impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> BatchInputPreparer<H>
         Ok(type_map)
     }
 
-    /// Build init rows from `read_set_old`, grouped by `(t,c)`, sorted by row key.
-    fn build_init_rows(
-        &self,
+    fn build_init_cells(
         result: &BatchResult,
         type_map: &BTreeMap<(TableId, ColId), ValueType>,
-    ) -> Result<BTreeMap<(TableId, ColId), Vec<InitRow>>, TabulaError> {
-        let mut grouped: BTreeMap<(TableId, ColId), Vec<InitRow>> = BTreeMap::new();
+    ) -> Result<BTreeMap<(TableId, ColId), Vec<InitCell>>, TabulaError> {
+        let mut grouped: BTreeMap<(TableId, ColId), Vec<InitCell>> = BTreeMap::new();
 
         for (key, value) in &result.read_set_old {
             let tc = (key.table, key.col);
             let value_type = *type_map.get(&tc).ok_or_else(|| TabulaError::ProofError {
                 phase: "witness",
-                detail: format!("no type for ({:?}, {:?}) in init row", key.table, key.col),
+                detail: format!("no type for ({:?}, {:?}) in init cell", key.table, key.col),
             })?;
-            let (fes, is_null) = encode_value(&self.codec, value, value_type)?;
-            grouped.entry(tc).or_default().push(InitRow {
+            grouped.entry(tc).or_default().push(InitCell {
                 key: *key,
-                value_fes: fes,
-                val_is_null: is_null,
+                value: (*value).unwrap_or_else(|| zero_value(value_type)),
+                is_null: value.is_none(),
             });
         }
 
@@ -184,37 +167,27 @@ impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> BatchInputPreparer<H>
         Ok(grouped)
     }
 
-    /// Build access rows from successful events, grouped by `(t,c)`, preserving event order.
-    fn build_access_rows(
-        &self,
+    fn build_access_events(
         result: &BatchResult,
         type_map: &BTreeMap<(TableId, ColId), ValueType>,
-    ) -> Result<BTreeMap<(TableId, ColId), Vec<AccessRow>>, TabulaError> {
-        let mut grouped: BTreeMap<(TableId, ColId), Vec<AccessRow>> = BTreeMap::new();
+    ) -> Result<BTreeMap<(TableId, ColId), Vec<AccessEvent>>, TabulaError> {
+        let mut grouped: BTreeMap<(TableId, ColId), Vec<AccessEvent>> = BTreeMap::new();
 
         for (tx_index, event) in result.successful_events_with_tx() {
             let tc = (event.key.table, event.key.col);
-            let value_type = *type_map.get(&tc).ok_or_else(|| TabulaError::ProofError {
+            type_map.get(&tc).ok_or_else(|| TabulaError::ProofError {
                 phase: "witness",
                 detail: format!(
-                    "no type for ({:?}, {:?}) in access row",
+                    "no type for ({:?}, {:?}) in access event",
                     event.key.table, event.key.col
                 ),
             })?;
-
-            let (fes, is_null) = encode_value_with_null_flag(
-                &self.codec,
-                &event.value,
-                event.val_is_null,
-                value_type,
-            )?;
-
-            grouped.entry(tc).or_default().push(AccessRow {
+            grouped.entry(tc).or_default().push(AccessEvent {
                 key: event.key,
                 time: event.time,
                 is_write: event.op == OpKind::Write,
-                value_fes: fes,
-                val_is_null: is_null,
+                value: event.value,
+                is_null: event.val_is_null,
                 tx_index,
                 effect_ordinal_in_tx: event.effect_ordinal_in_tx,
             });
@@ -223,13 +196,11 @@ impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> BatchInputPreparer<H>
         Ok(grouped)
     }
 
-    /// Group writes from `write_set_final` by `(t,c)`, sorted by row key.
     fn group_writes(
-        &self,
         result: &BatchResult,
         type_map: &BTreeMap<(TableId, ColId), ValueType>,
-    ) -> Result<EncodedColumnWritesByColumn, TabulaError> {
-        let mut grouped: EncodedColumnWritesByColumn = BTreeMap::new();
+    ) -> Result<LogicalColumnWritesByColumn, TabulaError> {
+        let mut grouped: LogicalColumnWritesByColumn = BTreeMap::new();
 
         for (key, value) in &result.write_set_final {
             let tc = (key.table, key.col);
@@ -237,17 +208,14 @@ impl<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>> BatchInputPreparer<H>
                 phase: "witness",
                 detail: format!("no type for ({:?}, {:?}) in write set", key.table, key.col),
             })?;
-
-            let encoded = match value {
-                Some(v) => Some(self.codec.encode(v)?),
-                None => None,
-            };
-
-            grouped.entry(tc).or_default().push((key.row, encoded));
+            grouped.entry(tc).or_default().push(ColumnWrite {
+                row: key.row,
+                value: *value,
+            });
         }
 
         for writes in grouped.values_mut() {
-            writes.sort_by_key(|(k, _)| *k);
+            writes.sort_by_key(|write| write.row);
         }
 
         Ok(grouped)

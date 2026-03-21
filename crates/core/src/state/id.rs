@@ -107,7 +107,7 @@ impl ColumnLayoutKind {
 /// Identifies a root-proof compatibility profile in portable artifacts.
 ///
 /// Column commitment schemes bind to one root profile so runtime and verifier
-/// can fail closed when a program artifact and installed root proof disagree.
+/// can fail closed when a artifact and installed root proof disagree.
 #[derive(
     Debug,
     Clone,

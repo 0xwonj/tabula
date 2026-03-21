@@ -1,11 +1,14 @@
 mod binding;
 #[cfg(feature = "prove")]
-mod committed_state;
+mod resolved_program;
 #[cfg(feature = "prove")]
-mod runtime_program;
+mod snapshot_state_view;
 
-pub use binding::ProgramBinding;
+pub use binding::Binding;
+pub(crate) use binding::binding_from_artifact;
 #[cfg(feature = "prove")]
-pub(crate) use committed_state::StateSnapshotCommittedState;
+pub(crate) use binding::binding_from_compiled_program;
 #[cfg(feature = "prove")]
-pub use runtime_program::RuntimeProgram;
+pub use resolved_program::ResolvedProgram;
+#[cfg(feature = "prove")]
+pub(crate) use snapshot_state_view::SnapshotStateView;

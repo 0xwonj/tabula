@@ -1,20 +1,19 @@
 use std::collections::BTreeMap;
 
-use p3_koala_bear::KoalaBear;
-
-use tabula_commitment::{ColumnState, KoalaBearCodec, MockFieldHasher, scheme_tags};
+use tabula_commitment::schemes::tags;
+use tabula_commitment::{ColumnState, KoalaBearCodec};
 use tabula_core::traits::ValueCodec;
 use tabula_core::{
     AccessEvent, CellKey, ColId, ColumnDef, OpKind, RowKey, TableId, TableSchema, Value, ValueType,
 };
+use tabula_testing::commitment::MockFieldHasher;
 
-use tabula_witness::BatchInputPreparer;
+use tabula_witness::ExecutionInputPreparer;
 
 mod generator;
-mod program_info;
 
-pub(super) fn make_preparer() -> BatchInputPreparer<MockFieldHasher> {
-    BatchInputPreparer::new(MockFieldHasher)
+pub(super) fn make_preparer() -> ExecutionInputPreparer {
+    ExecutionInputPreparer::new()
 }
 
 pub(super) fn t(n: u32) -> TableId {
@@ -60,14 +59,8 @@ pub(super) fn empty_column_state(
     table: u32,
     col: u16,
 ) -> ((TableId, ColId), ColumnState<MockFieldHasher>) {
-    let (state, _) = ColumnState::commit(
-        &MockFieldHasher,
-        t(table),
-        c(col),
-        vec![],
-        scheme_tags::SSMC,
-    )
-    .unwrap();
+    let (state, _) =
+        ColumnState::commit(&MockFieldHasher, t(table), c(col), vec![], tags::SSMC).unwrap();
     ((t(table), c(col)), state)
 }
 
@@ -77,12 +70,12 @@ pub(super) fn column_state_with(
     entries: &[(u64, u64)],
 ) -> ((TableId, ColId), ColumnState<MockFieldHasher>) {
     let codec = KoalaBearCodec;
-    let enc: Vec<(RowKey, Vec<KoalaBear>)> = entries
+    let enc: Vec<_> = entries
         .iter()
         .map(|&(k, v)| (r(k), codec.encode(&Value::U64(v)).unwrap()))
         .collect();
     let (state, _) =
-        ColumnState::commit(&MockFieldHasher, t(table), c(col), enc, scheme_tags::SSMC).unwrap();
+        ColumnState::commit(&MockFieldHasher, t(table), c(col), enc, tags::SSMC).unwrap();
     ((t(table), c(col)), state)
 }
 

@@ -11,4 +11,4 @@ mod state;
 pub use codec::ValueCodec;
 pub use crypto::{BatchDigester, DOMAIN_TAG_HASH_IR, Hasher, MembershipScheme, SigVerifier};
 pub use nonce::NoncePolicy;
-pub use state::{StateSnapshot, StaticTableProvider};
+pub use state::{StateView, StaticTableProvider};

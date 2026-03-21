@@ -10,7 +10,7 @@ pub fn cmd_compile(program_path: &Path, output: Option<&Path>) -> anyhow::Result
     let default_output = program_path.with_extension("json");
     let output_path = output.unwrap_or(&default_output);
 
-    write_json(output_path, &compiled.into_program_artifact())?;
+    write_json(output_path, &compiled.into_artifact())?;
 
     println!(
         "Compiled {} → {}",

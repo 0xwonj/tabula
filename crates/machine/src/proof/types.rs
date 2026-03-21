@@ -16,6 +16,7 @@ use p3_koala_bear::KoalaBear;
 use tabula_stark::air::interaction::BusId;
 use tabula_stark::air::statement::PublicStatement;
 use tabula_stark::chips::ChipId;
+use tabula_stark::trace::TraceMap;
 
 use crate::config::{EF4, PcsCommitment, PcsOpeningProof};
 use crate::setup::ProofTraces;
@@ -66,6 +67,15 @@ pub struct ColumnIdentity {
     pub com_old: [KoalaBear; 8],
     /// New commitment digest.
     pub com_new: [KoalaBear; 8],
+}
+
+/// One ordered column-tier trace bundle for machine proving.
+#[derive(Clone)]
+pub struct ColumnProofTrace {
+    /// Column identity and commitments bound to this trace bundle.
+    pub identity: ColumnIdentity,
+    /// Column-tier traces for the configured machine slot.
+    pub trace_map: TraceMap,
 }
 
 // ── Sub-Proof Types ──────────────────────────────────────────────────────────
@@ -126,14 +136,9 @@ pub struct TabulaProof {
 }
 
 /// Canonical input bundle for machine proving.
-///
-/// Column traces and identities are matched by `(table_id, col_id)`, not by
-/// caller-provided ordering. The machine validates coverage before proving.
 pub struct MachineProofInput {
     /// Per-tier traces to prove.
     pub traces: ProofTraces,
-    /// Column identities for all column proofs.
-    pub column_identities: Vec<ColumnIdentity>,
     /// AIR-level public values.
     pub statement: PublicStatement,
     /// Digest of the higher-level execution statement bound into the transcript.
