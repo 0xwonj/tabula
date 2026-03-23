@@ -1,6 +1,6 @@
 //! Column layout for the MetaShard AIR.
 //!
-//! Per-column version of `ColumnMetaCols`. Removes ordering-related columns
+//! Per-column version of `MetaShardCols`. Removes ordering-related columns
 //! (IsZero×2, LexOrderingDirection) since each shard handles a single `(t, c)`.
 //!
 //! The `tag` field is NOT a trace column — it is a constructor parameter on

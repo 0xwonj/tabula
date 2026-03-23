@@ -1,35 +1,52 @@
-use std::sync::Arc;
-
-use tabula_artifact::SchemeDescriptor;
 #[cfg(feature = "prove")]
-use tabula_commitment::ColumnMeta;
+use crate::error::ExtResult;
+#[cfg(feature = "prove")]
+use tabula_commitment::{ColumnRootBinding, NormalizedVerifierDigest};
 pub use tabula_core::SchemeId;
 #[cfg(feature = "prove")]
 use tabula_stark::trace::WitnessStore;
 #[cfg(feature = "prove")]
-use tabula_witness::{CommittedEntry, PreparedExecutionColumn, PropertyReadClaim};
+use tabula_witness::{CommittedEntry, PropertyReadClaim};
 
-use crate::backend::ProofColumn;
-use crate::error::ExtResult;
-use crate::scheme::ResolvedColumnPlan;
+/// Canonical per-column delta handed to the profile-centric proof backend.
+#[cfg(feature = "prove")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreparedColumnDelta {
+    /// Table identifier.
+    pub table: tabula_core::TableId,
+    /// Column identifier.
+    pub col: tabula_core::ColId,
+    /// Base-state init cells grouped for this column.
+    pub init_cells: Vec<tabula_witness::InitCell>,
+    /// Execution access events for this column.
+    pub access_events: Vec<tabula_witness::AccessEvent>,
+    /// Final coalesced writes for this column.
+    pub writes: Vec<tabula_witness::ColumnWrite>,
+    /// Whether the batch contains at least one effective final write.
+    pub is_touched: bool,
+}
 
-/// Backend-neutral per-column proof preparation context.
+/// Canonical backend-neutral proof preparation context.
 #[cfg(feature = "prove")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ColumnProofContext {
-    /// Ordered logical column inputs for this proof slot.
-    pub column: PreparedExecutionColumn,
+    /// Ordered logical delta for this column slot.
+    pub column: PreparedColumnDelta,
     /// Old committed-state entries for the column.
     pub old_entries: Vec<CommittedEntry>,
     /// Structural property-read claims for this column.
     pub property_reads: Vec<PropertyReadClaim>,
 }
 
-/// Prepared backend-aware proof product for one column.
+/// Canonical prepared proof product for one materialized column backend.
 #[cfg(feature = "prove")]
 pub struct PreparedColumnProof {
-    /// Verifier-visible column metadata.
-    pub meta: ColumnMeta,
+    /// Verifier-visible digest before the batch.
+    pub old_digest: NormalizedVerifierDigest,
+    /// Verifier-visible digest after the batch.
+    pub new_digest: NormalizedVerifierDigest,
+    /// Optional canonical root binding for this column.
+    pub root_binding: Option<ColumnRootBinding>,
     /// Backend witness store for this column tier.
     pub store: WitnessStore,
 }
@@ -38,45 +55,20 @@ pub struct PreparedColumnProof {
 impl std::fmt::Debug for PreparedColumnProof {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PreparedColumnProof")
-            .field("meta", &self.meta)
+            .field("root_binding", &self.root_binding)
             .finish_non_exhaustive()
     }
 }
 
-/// Per-column proof preparer.
+/// Canonical profile-centric proof backend for one materialized column slot.
 #[cfg(feature = "prove")]
-pub trait ColumnProofPreparer: Send + Sync {
+pub trait ColumnProofBackend: Send + Sync {
     /// Human-readable scheme name.
     fn name(&self) -> &str;
 
     /// Portable scheme identifier.
     fn scheme_id(&self) -> SchemeId;
 
-    /// Prepare the final per-column proof store and metadata.
+    /// Prepare the final per-column proof store and canonical root binding.
     fn prepare_column(&self, context: ColumnProofContext) -> ExtResult<PreparedColumnProof>;
-}
-
-/// Proof-extension factory for one scheme family.
-pub trait ProofSchemeFactory: Send + Sync {
-    /// Sealed descriptor for this scheme implementation.
-    fn descriptor(&self) -> SchemeDescriptor;
-
-    /// Portable protocol identifier implemented by this factory.
-    fn scheme_id(&self) -> SchemeId {
-        self.descriptor().scheme_id
-    }
-
-    /// Human-readable name.
-    fn name(&self) -> &str;
-
-    /// Build the proof-column setup view for one `(table, col)` pair.
-    #[cfg(feature = "verify")]
-    fn build_proof_column(&self, plan: &ResolvedColumnPlan) -> ExtResult<Arc<dyn ProofColumn>>;
-
-    /// Build the proof preparer for one `(table, col)` pair.
-    #[cfg(feature = "prove")]
-    fn build_proof_preparer(
-        &self,
-        plan: &ResolvedColumnPlan,
-    ) -> ExtResult<Arc<dyn ColumnProofPreparer>>;
 }

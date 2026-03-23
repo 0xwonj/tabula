@@ -1,12 +1,9 @@
 //! Factory functions and builders for memory-layer test data.
 //!
-//! Covers `MemoryShardRow`, `StateShardRow`, `ColumnMeta`, and Poseidon helpers.
+//! Covers `MemoryShardRow`, `StateShardRow`, and Poseidon helpers.
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
-use tabula_commitment::schemes::tags;
-use tabula_commitment::{ColumnMeta, NativeDigest};
-use tabula_core::{ColId, TableId};
 
 use crate::shards::state::trace::EntrySource;
 
@@ -239,28 +236,6 @@ pub fn ss_gap(key: u64) -> StateShardRow {
         write_mult: false,
         prev_old_key: 0,
         next_old_key: 0,
-    }
-}
-
-// ── Column Meta ──
-
-/// Build a `ColumnMeta` entry for testing.
-pub fn meta_entry(
-    table: u32,
-    col: u16,
-    touched: bool,
-    com_old: NativeDigest,
-    com_new: NativeDigest,
-) -> ColumnMeta {
-    ColumnMeta {
-        table: TableId(table),
-        col: ColId(col),
-        tag: tags::SSMC,
-        com_old,
-        com_new,
-        is_empty_old: false,
-        is_empty_new: false,
-        is_touched: touched,
     }
 }
 

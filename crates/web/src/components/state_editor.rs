@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use leptos::prelude::*;
 use serde_json::json;
-use tabula_core::Value as CoreValue;
+use tabula_core::PortableValue as CoreValue;
 
 use crate::models::{Artifact, State, StateEntry};
 use crate::utils::{format_value, parse_state, parse_value_input, pretty_json_value};

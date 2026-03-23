@@ -2,8 +2,7 @@
 
 use tabula_artifact::{Artifact, PrecompileDescriptor};
 use tabula_compiler::{
-    CompilerCatalogs, PrecompileDescriptorCatalog, ProgramDefinition,
-    register_program_definition_with_catalogs,
+    CompilerCatalogs, ProgramDefinition, register_program_definition_with_catalogs,
 };
 use tabula_core::TxTypeId;
 use tabula_ir::{Instruction, PrecompileId, TxTypeDef};
@@ -36,19 +35,14 @@ pub fn precompile_requirement_artifact() -> Artifact {
         tx_types: vec![tx],
         column_schemes: vec![],
     };
-    let mut precompiles = PrecompileDescriptorCatalog::new();
     let descriptor = precompile_requirement_descriptor();
-    precompiles.insert(descriptor.precompile_id, descriptor);
+    let catalogs = CompilerCatalogs::standard()
+        .with_precompile_descriptor(descriptor)
+        .expect("register precompile descriptor");
 
-    register_program_definition_with_catalogs(
-        &definition,
-        &CompilerCatalogs {
-            schemes: Default::default(),
-            precompiles,
-        },
-    )
-    .expect("register precompile requirement artifact")
-    .into_artifact()
+    register_program_definition_with_catalogs(&definition, &catalogs)
+        .expect("register precompile requirement artifact")
+        .into_artifact()
 }
 
 pub fn precompile_requirement_artifact_case() -> ArtifactRuntimeCase {
@@ -80,19 +74,14 @@ pub fn sequence_precompile_artifact() -> Artifact {
         tx_types: vec![tx],
         column_schemes: vec![],
     };
-    let mut precompiles = PrecompileDescriptorCatalog::new();
     let descriptor = sequence_precompile_descriptor_fixture();
-    precompiles.insert(descriptor.precompile_id, descriptor);
+    let catalogs = CompilerCatalogs::standard()
+        .with_precompile_descriptor(descriptor)
+        .expect("register precompile descriptor");
 
-    register_program_definition_with_catalogs(
-        &definition,
-        &CompilerCatalogs {
-            schemes: Default::default(),
-            precompiles,
-        },
-    )
-    .expect("register sequence precompile artifact")
-    .into_artifact()
+    register_program_definition_with_catalogs(&definition, &catalogs)
+        .expect("register sequence precompile artifact")
+        .into_artifact()
 }
 
 pub fn sequence_precompile_artifact_case() -> ArtifactRuntimeCase {

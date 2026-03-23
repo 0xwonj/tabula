@@ -1,17 +1,21 @@
 //! Reference interpreter for the Tabula IR instruction set.
 //!
-//! Walks `&[Instruction]` against an `Overlay`, maintaining a `Vec<Value>` slot
+//! Walks `&[Instruction]` against an `Overlay`, maintaining a `Vec<TypedValue>` slot
 //! environment. Records execution events and emitted events.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, StateView, StaticTableProvider};
 use tabula_core::{
-    CellKey, ColId, EmittedEvent, PrecompileEvent, PropertyReadResult, TableId, TableSchema, Value,
-    ValueType, zero_value,
+    CellKey, ColId, EmittedEvent, PrecompileEvent, PropertyReadResult, TableId, TableSchema, TypeId,
 };
 use tabula_ir::{Instruction, Slot};
+use tabula_profile::ProfileCatalog;
+use tabula_types::{
+    ArithmeticOp, TypeRuntimeRegistry, TypedValue, bool_typed, bytes32_typed, typed_bool, u64_typed,
+};
 
 use crate::overlay::Overlay;
 use crate::precompile::PrecompileRegistry;
@@ -48,8 +52,12 @@ pub struct ExecContext<'a> {
     pub hasher: &'a dyn Hasher,
     /// Static (read-only) table lookups.
     pub static_tables: &'a dyn StaticTableProvider,
+    /// Runtime type registry used for typed execution.
+    pub type_runtimes: &'a TypeRuntimeRegistry,
     /// Table schemas for column type resolution.
     pub schemas: &'a BTreeMap<TableId, TableSchema>,
+    /// Canonical profile catalog for type resolution from sealed column profiles.
+    pub profile_catalog: &'a ProfileCatalog,
     /// Optional precompile handlers for custom instructions.
     pub precompiles: Option<&'a PrecompileRegistry>,
     /// Optional committed state for PropertyRead instructions.
@@ -68,11 +76,11 @@ pub struct ExecContext<'a> {
 pub fn execute<S: StateView>(
     tx_index: u32,
     instructions: &[Instruction],
-    params: &[Value],
+    params: &[TypedValue],
     overlay: &mut Overlay<'_, S>,
     ctx: &ExecContext<'_>,
 ) -> Result<TxExecutionOutput, InterpreterError> {
-    let mut slots: Vec<Value> = Vec::new();
+    let mut slots: Vec<TypedValue> = Vec::new();
     let mut emitted: Vec<EmittedEvent> = Vec::new();
     let mut precompile_events: Vec<PrecompileEvent> = Vec::new();
     let mut property_reads: Vec<PropertyReadResult> = Vec::new();
@@ -87,22 +95,22 @@ pub fn execute<S: StateView>(
                     col,
                     row,
                 } => {
-                    let row_key = resolve_row_expr(row, &slots, params)?;
+                    let row_key = resolve_row_expr(row, &slots, params, ctx.type_runtimes)?;
                     let key = CellKey {
                         table: *table,
                         col: *col,
                         row: row_key,
                     };
-                    let col_type = lookup_col_type(ctx.schemas, *table, *col)?;
+                    let col_type = lookup_col_type(ctx.schemas, ctx.profile_catalog, *table, *col)?;
                     let opt = overlay.read(&key, col_type)?;
                     match opt {
                         Some(v) => {
                             set_slot(&mut slots, *dst_val, v)?;
-                            set_slot(&mut slots, *dst_is_null, Value::Bool(false))?;
+                            set_slot(&mut slots, *dst_is_null, bool_typed(false))?;
                         }
                         None => {
-                            set_slot(&mut slots, *dst_val, zero_value(col_type))?;
-                            set_slot(&mut slots, *dst_is_null, Value::Bool(true))?;
+                            set_slot(&mut slots, *dst_val, ctx.type_runtimes.zero_of(col_type)?)?;
+                            set_slot(&mut slots, *dst_is_null, bool_typed(true))?;
                         }
                     }
                 }
@@ -114,26 +122,22 @@ pub fn execute<S: StateView>(
                     src_val,
                     src_is_null,
                 } => {
-                    let row_key = resolve_row_expr(row, &slots, params)?;
-                    let value = resolve_value_expr(src_val, &slots, params)?;
-                    let is_null = resolve_value_expr(src_is_null, &slots, params)?;
+                    let row_key = resolve_row_expr(row, &slots, params, ctx.type_runtimes)?;
+                    let value = resolve_value_expr(src_val, &slots, params, ctx.type_runtimes)?;
+                    let is_null =
+                        resolve_value_expr(src_is_null, &slots, params, ctx.type_runtimes)?;
                     let key = CellKey {
                         table: *table,
                         col: *col,
                         row: row_key,
                     };
-                    let col_type = lookup_col_type(ctx.schemas, *table, *col)?;
-                    let opt = match is_null {
-                        Value::Bool(true) => None,
-                        Value::Bool(false) => Some(value),
-                        _ => {
-                            return Err(TabulaError::TypeMismatch {
-                                expected: "Bool",
-                                actual: is_null.type_name(),
-                            });
-                        }
+                    let col_type = lookup_col_type(ctx.schemas, ctx.profile_catalog, *table, *col)?;
+                    let opt = if typed_bool(&is_null, ctx.type_runtimes)? {
+                        None
+                    } else {
+                        Some(value)
                     };
-                    overlay.write(&key, opt, col_type);
+                    overlay.write(&key, opt, col_type)?;
                 }
 
                 Instruction::Lookup {
@@ -142,15 +146,27 @@ pub fn execute<S: StateView>(
                     col,
                     row,
                 } => {
-                    let row_key = resolve_row_expr(row, &slots, params)?;
-                    let value = ctx.static_tables.lookup(*static_table, row_key, *col)?;
+                    let row_key = resolve_row_expr(row, &slots, params, ctx.type_runtimes)?;
+                    let value = ctx
+                        .type_runtimes
+                        .decode_portable(&ctx.static_tables.lookup(
+                            *static_table,
+                            row_key,
+                            *col,
+                        )?)?;
                     set_slot(&mut slots, *dst, value)?;
                 }
 
                 Instruction::Arith { dst, op, lhs, rhs } => {
-                    let l = resolve_value_expr(lhs, &slots, params)?;
-                    let r = resolve_value_expr(rhs, &slots, params)?;
-                    set_slot(&mut slots, *dst, op.apply(&l, &r)?)?;
+                    let l = resolve_value_expr(lhs, &slots, params, ctx.type_runtimes)?;
+                    let r = resolve_value_expr(rhs, &slots, params, ctx.type_runtimes)?;
+                    let runtime = ctx.type_runtimes.resolve(l.type_id())?;
+                    let op = match op {
+                        tabula_ir::ArithOp::Add => ArithmeticOp::Add,
+                        tabula_ir::ArithOp::Sub => ArithmeticOp::Sub,
+                        tabula_ir::ArithOp::Mul => ArithmeticOp::Mul,
+                    };
+                    set_slot(&mut slots, *dst, runtime.apply_arithmetic(op, &l, &r)?)?;
                 }
 
                 Instruction::DivMod {
@@ -159,99 +175,82 @@ pub fn execute<S: StateView>(
                     lhs,
                     rhs,
                 } => {
-                    let l = resolve_value_expr(lhs, &slots, params)?;
-                    let r = resolve_value_expr(rhs, &slots, params)?;
-                    let (q, rem) = l.checked_divmod(&r)?;
+                    let l = resolve_value_expr(lhs, &slots, params, ctx.type_runtimes)?;
+                    let r = resolve_value_expr(rhs, &slots, params, ctx.type_runtimes)?;
+                    let runtime = ctx.type_runtimes.resolve(l.type_id())?;
+                    let (q, rem) = runtime.divmod(&l, &r)?;
                     set_slot(&mut slots, *dst_q, q)?;
                     set_slot(&mut slots, *dst_r, rem)?;
                 }
 
                 Instruction::Cmp { dst, op, lhs, rhs } => {
-                    let l = resolve_value_expr(lhs, &slots, params)?;
-                    let r = resolve_value_expr(rhs, &slots, params)?;
-                    set_slot(&mut slots, *dst, op.apply(&l, &r)?)?;
+                    let l = resolve_value_expr(lhs, &slots, params, ctx.type_runtimes)?;
+                    let r = resolve_value_expr(rhs, &slots, params, ctx.type_runtimes)?;
+                    let runtime = ctx.type_runtimes.resolve(l.type_id())?;
+                    let result = match op {
+                        tabula_ir::CmpOp::Eq => runtime.eq_value(&l, &r)?,
+                        tabula_ir::CmpOp::Ne => !runtime.eq_value(&l, &r)?,
+                        tabula_ir::CmpOp::Lt => runtime.cmp_value(&l, &r)? == Ordering::Less,
+                        tabula_ir::CmpOp::Lte => runtime.cmp_value(&l, &r)? != Ordering::Greater,
+                        tabula_ir::CmpOp::Gt => runtime.cmp_value(&l, &r)? == Ordering::Greater,
+                        tabula_ir::CmpOp::Gte => runtime.cmp_value(&l, &r)? != Ordering::Less,
+                    };
+                    set_slot(&mut slots, *dst, bool_typed(result))?;
                 }
 
                 Instruction::Not { dst, src } => {
-                    let v = resolve_value_expr(src, &slots, params)?;
-                    match v {
-                        Value::Bool(b) => set_slot(&mut slots, *dst, Value::Bool(!b))?,
-                        _ => {
-                            return Err(TabulaError::TypeMismatch {
-                                expected: "Bool",
-                                actual: v.type_name(),
-                            });
-                        }
-                    }
+                    let v = resolve_value_expr(src, &slots, params, ctx.type_runtimes)?;
+                    set_slot(
+                        &mut slots,
+                        *dst,
+                        bool_typed(!typed_bool(&v, ctx.type_runtimes)?),
+                    )?;
                 }
 
                 Instruction::And { dst, lhs, rhs } => {
-                    let l = resolve_value_expr(lhs, &slots, params)?;
-                    let r = resolve_value_expr(rhs, &slots, params)?;
-                    match (&l, &r) {
-                        (Value::Bool(a), Value::Bool(b)) => {
-                            set_slot(&mut slots, *dst, Value::Bool(*a && *b))?;
-                        }
-                        (Value::Bool(_), _) => {
-                            return Err(TabulaError::TypeMismatch {
-                                expected: "Bool",
-                                actual: r.type_name(),
-                            });
-                        }
-                        _ => {
-                            return Err(TabulaError::TypeMismatch {
-                                expected: "Bool",
-                                actual: l.type_name(),
-                            });
-                        }
-                    }
+                    let l = resolve_value_expr(lhs, &slots, params, ctx.type_runtimes)?;
+                    let r = resolve_value_expr(rhs, &slots, params, ctx.type_runtimes)?;
+                    set_slot(
+                        &mut slots,
+                        *dst,
+                        bool_typed(
+                            typed_bool(&l, ctx.type_runtimes)?
+                                && typed_bool(&r, ctx.type_runtimes)?,
+                        ),
+                    )?;
                 }
 
                 Instruction::Or { dst, lhs, rhs } => {
-                    let l = resolve_value_expr(lhs, &slots, params)?;
-                    let r = resolve_value_expr(rhs, &slots, params)?;
-                    match (&l, &r) {
-                        (Value::Bool(a), Value::Bool(b)) => {
-                            set_slot(&mut slots, *dst, Value::Bool(*a || *b))?;
-                        }
-                        (Value::Bool(_), _) => {
-                            return Err(TabulaError::TypeMismatch {
-                                expected: "Bool",
-                                actual: r.type_name(),
-                            });
-                        }
-                        _ => {
-                            return Err(TabulaError::TypeMismatch {
-                                expected: "Bool",
-                                actual: l.type_name(),
-                            });
-                        }
-                    }
+                    let l = resolve_value_expr(lhs, &slots, params, ctx.type_runtimes)?;
+                    let r = resolve_value_expr(rhs, &slots, params, ctx.type_runtimes)?;
+                    set_slot(
+                        &mut slots,
+                        *dst,
+                        bool_typed(
+                            typed_bool(&l, ctx.type_runtimes)?
+                                || typed_bool(&r, ctx.type_runtimes)?,
+                        ),
+                    )?;
                 }
 
                 Instruction::Assert { cond } => {
-                    let v = resolve_value_expr(cond, &slots, params)?;
-                    match v {
-                        Value::Bool(true) => {}
-                        Value::Bool(false) => {
-                            return Err(TabulaError::AssertionFailed(format!("{cond:?}")));
-                        }
-                        _ => {
-                            return Err(TabulaError::TypeMismatch {
-                                expected: "Bool",
-                                actual: v.type_name(),
-                            });
-                        }
+                    let v = resolve_value_expr(cond, &slots, params, ctx.type_runtimes)?;
+                    if !typed_bool(&v, ctx.type_runtimes)? {
+                        return Err(TabulaError::AssertionFailed(format!("{cond:?}")));
                     }
                 }
 
                 Instruction::Hash { dst, inputs } => {
-                    let values: Vec<Value> = inputs
+                    let values = inputs
                         .iter()
-                        .map(|input| resolve_value_expr(input, &slots, params))
-                        .collect::<Result<_, _>>()?;
-                    let digest = ctx.hasher.hash_ir(&values);
-                    set_slot(&mut slots, *dst, Value::Bytes32(digest))?;
+                        .map(|input| resolve_value_expr(input, &slots, params, ctx.type_runtimes))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let encoded = values
+                        .iter()
+                        .map(|value| ctx.type_runtimes.encode_typed(value))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let digest = ctx.hasher.hash_ir(&encoded);
+                    set_slot(&mut slots, *dst, bytes32_typed(digest))?;
                 }
 
                 Instruction::Select {
@@ -260,18 +259,13 @@ pub fn execute<S: StateView>(
                     if_true,
                     if_false,
                 } => {
-                    let c = resolve_value_expr(cond, &slots, params)?;
-                    let t = resolve_value_expr(if_true, &slots, params)?;
-                    let f = resolve_value_expr(if_false, &slots, params)?;
-                    let selected = match c {
-                        Value::Bool(true) => t,
-                        Value::Bool(false) => f,
-                        _ => {
-                            return Err(TabulaError::TypeMismatch {
-                                expected: "Bool",
-                                actual: c.type_name(),
-                            });
-                        }
+                    let c = resolve_value_expr(cond, &slots, params, ctx.type_runtimes)?;
+                    let t = resolve_value_expr(if_true, &slots, params, ctx.type_runtimes)?;
+                    let f = resolve_value_expr(if_false, &slots, params, ctx.type_runtimes)?;
+                    let selected = if typed_bool(&c, ctx.type_runtimes)? {
+                        t
+                    } else {
+                        f
                     };
                     set_slot(&mut slots, *dst, selected)?;
                 }
@@ -279,7 +273,8 @@ pub fn execute<S: StateView>(
                 Instruction::Emit { topic, data } => {
                     let mut values = Vec::new();
                     for d in data {
-                        values.push(resolve_value_expr(d, &slots, params)?);
+                        let value = resolve_value_expr(d, &slots, params, ctx.type_runtimes)?;
+                        values.push(ctx.type_runtimes.encode_typed(&value)?);
                     }
                     emitted.push(EmittedEvent {
                         topic: topic.clone(),
@@ -299,27 +294,74 @@ pub fn execute<S: StateView>(
                         )
                     })?;
                     let handler = registry.get(*id)?;
-                    let args: Vec<Value> = inputs
+                    let signature = handler.signature();
+                    let args = inputs
                         .iter()
-                        .map(|inp| resolve_value_expr(inp, &slots, params))
-                        .collect::<Result<_, _>>()?;
+                        .map(|inp| resolve_value_expr(inp, &slots, params, ctx.type_runtimes))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if args.len() != signature.inputs.len() {
+                        return Err(TabulaError::InvalidIr(format!(
+                            "precompile 0x{:04x} expects {} inputs but IR provided {}",
+                            id.0,
+                            signature.inputs.len(),
+                            args.len(),
+                        )));
+                    }
+                    for (idx, (arg, expected)) in args.iter().zip(&signature.inputs).enumerate() {
+                        if arg.type_id() != expected.type_id {
+                            return Err(TabulaError::InvalidIr(format!(
+                                "precompile 0x{:04x} input {} expects type {} but got {}",
+                                id.0,
+                                idx,
+                                expected.type_id.0,
+                                arg.type_id().0,
+                            )));
+                        }
+                    }
                     let results = handler.execute(&args)?;
+                    if results.len() != signature.outputs.len() {
+                        return Err(TabulaError::InvalidIr(format!(
+                            "precompile 0x{:04x} returned {} values but signature declares {} outputs",
+                            id.0,
+                            results.len(),
+                            signature.outputs.len(),
+                        )));
+                    }
                     if results.len() != dst_slots.len() {
                         return Err(TabulaError::InvalidIr(format!(
-                            "precompile 0x{:04x} returned {} values but {} dst_slots declared",
+                            "precompile 0x{:04x} signature declares {} outputs but IR has {} dst_slots",
                             id.0,
                             results.len(),
                             dst_slots.len(),
                         )));
                     }
+                    for (idx, (value, expected)) in
+                        results.iter().zip(&signature.outputs).enumerate()
+                    {
+                        if value.type_id() != expected.type_id {
+                            return Err(TabulaError::InvalidIr(format!(
+                                "precompile 0x{:04x} output {} expects type {} but handler returned {}",
+                                id.0,
+                                idx,
+                                expected.type_id.0,
+                                value.type_id().0,
+                            )));
+                        }
+                    }
                     precompile_events.push(PrecompileEvent {
                         tx_index: tx_index as usize,
                         instruction_index: idx,
                         precompile_id: id.0,
-                        inputs: args,
-                        outputs: results.clone(),
+                        inputs: args
+                            .iter()
+                            .map(|value| ctx.type_runtimes.encode_typed(value))
+                            .collect::<Result<Vec<_>, _>>()?,
+                        outputs: results
+                            .iter()
+                            .map(|value| ctx.type_runtimes.encode_typed(value))
+                            .collect::<Result<Vec<_>, _>>()?,
                     });
-                    for (dst, val) in dst_slots.iter().zip(results) {
+                    for (dst, val) in dst_slots.iter().zip(results.into_iter()) {
                         set_slot(&mut slots, *dst, val)?;
                     }
                 }
@@ -342,7 +384,7 @@ pub fn execute<S: StateView>(
                         .resolve(*table, *col, query, provider)?;
                     property_reads.push(PropertyReadResult {
                         instruction_index: idx,
-                        value: result.value,
+                        value: ctx.type_runtimes.encode_typed(&result.value)?,
                         key: result.key,
                         is_null: result.is_null,
                     });
@@ -350,9 +392,9 @@ pub fn execute<S: StateView>(
                     set_slot(
                         &mut slots,
                         *dst_key,
-                        result.key.map_or(Value::U64(0), |k| Value::U64(k.0)),
+                        u64_typed(result.key.map_or(0, |k| k.0)),
                     )?;
-                    set_slot(&mut slots, *dst_is_null, Value::Bool(result.is_null))?;
+                    set_slot(&mut slots, *dst_is_null, bool_typed(result.is_null))?;
                 }
             }
             Ok(())
@@ -374,7 +416,7 @@ pub fn execute<S: StateView>(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn set_slot(slots: &mut Vec<Value>, idx: Slot, value: Value) -> Result<(), TabulaError> {
+fn set_slot(slots: &mut Vec<TypedValue>, idx: Slot, value: TypedValue) -> Result<(), TabulaError> {
     let i = idx as usize;
     if i < slots.len() {
         slots[i] = value;
@@ -391,9 +433,10 @@ fn set_slot(slots: &mut Vec<Value>, idx: Slot, value: Value) -> Result<(), Tabul
 
 fn lookup_col_type(
     schemas: &BTreeMap<TableId, TableSchema>,
+    profile_catalog: &ProfileCatalog,
     table: TableId,
     col: ColId,
-) -> Result<ValueType, TabulaError> {
+) -> Result<TypeId, TabulaError> {
     let schema = schemas
         .get(&table)
         .ok_or(TabulaError::TableNotFound(table))?;
@@ -401,10 +444,20 @@ fn lookup_col_type(
         .columns
         .iter()
         .find(|c| c.id == col)
-        .map(|c| c.value_type)
         .ok_or_else(|| {
             TabulaError::InvalidIr(format!(
                 "column {col:?} not found in schema for table {table:?}"
             ))
+        })
+        .and_then(|column| {
+            let resolved = profile_catalog
+                .resolve_column_profile(column.column_profile_id)
+                .map_err(|err| {
+                    TabulaError::InvalidIr(format!(
+                        "column profile {} for table {:?} col {:?} is invalid: {err}",
+                        column.column_profile_id.0, table, col
+                    ))
+                })?;
+            Ok(resolved.type_descriptor.type_id)
         })
 }

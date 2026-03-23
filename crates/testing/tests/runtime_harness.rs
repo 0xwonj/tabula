@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use tabula_core::{ColId, RowKey, TableId, Value};
+use tabula_core::{ColId, RowKey, TableId};
 use tabula_runtime::RuntimeError;
 use tabula_testing::assertions::{
     assert_all_txs_success, assert_runtime_consistency_passed, assert_state_after_matches_expected,
@@ -17,6 +17,7 @@ use tabula_testing::runtime::{
     execute_artifact_case, execute_compiled_case, execute_compiled_case_free,
     prove_and_verify_artifact_case, prove_compiled_case, verify_artifact_case,
 };
+use tabula_types::u64_portable;
 
 #[test]
 fn compiled_case_execute_uses_canonical_runtime_harness() {
@@ -30,7 +31,7 @@ fn compiled_case_execute_uses_canonical_runtime_harness() {
         TableId(1),
         ColId(0),
         RowKey(0),
-        Some(Value::U64(7)),
+        Some(&u64_portable(7)),
     );
 }
 

@@ -21,9 +21,9 @@ pub enum TabulaError {
     #[error("type mismatch: expected {expected}, got {actual}")]
     TypeMismatch {
         /// The expected type description.
-        expected: &'static str,
+        expected: String,
         /// The actual type description.
-        actual: &'static str,
+        actual: String,
     },
 
     /// Arithmetic overflow (e.g. u64 addition).

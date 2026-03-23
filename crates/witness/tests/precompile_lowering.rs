@@ -3,11 +3,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_core::{
-    BatchResult, InMemoryStaticTables, PrecompileEvent, TableId, TableSchema, TxResult, Value,
+    BatchResult, InMemoryStaticTables, PrecompileEvent, TableId, TableSchema, TxResult,
 };
 use tabula_testing::exec::{compiled_program_from_artifact, core_batch_from_artifact_batch};
 use tabula_testing::fixtures::artifacts::precompile_requirement_artifact;
 use tabula_testing::fixtures::batch::single_tx_batch;
+use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, u64_portable};
 use tabula_witness::stark::lower_program_batch;
 
 fn batch_result_with_precompile_events(events: Vec<PrecompileEvent>) -> BatchResult {
@@ -29,7 +30,7 @@ fn valid_event() -> PrecompileEvent {
         instruction_index: 0,
         precompile_id: 0x0001,
         inputs: vec![],
-        outputs: vec![Value::U64(1)],
+        outputs: vec![u64_portable(1)],
     }
 }
 
@@ -44,14 +45,18 @@ fn lower_with_events(
         .cloned()
         .map(|schema| (schema.id, schema))
         .collect();
-    lower_program_batch::<3>(
-        sealed.program(),
-        &batch,
-        &batch_result_with_precompile_events(events),
-        &schemas,
-        &InMemoryStaticTables::new(),
-        &BTreeSet::new(),
-    )
+    let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
+    let encoding_runtimes = EncodingRuntimeRegistry::seeded().expect("seeded encoding runtimes");
+    lower_program_batch::<3>(tabula_witness::stark::LowerProgramBatchInput {
+        program: sealed.program(),
+        batch: &batch,
+        result: &batch_result_with_precompile_events(events),
+        schemas: &schemas,
+        type_runtimes: &type_runtimes,
+        encoding_runtimes: &encoding_runtimes,
+        static_tables: &InMemoryStaticTables::new(),
+        empty_columns: &BTreeSet::new(),
+    })
 }
 
 #[test]
@@ -84,7 +89,7 @@ fn precompile_lowering_rejects_wrong_precompile_id() {
 #[test]
 fn precompile_lowering_rejects_wrong_inputs() {
     let mut event = valid_event();
-    event.inputs = vec![Value::U64(7)];
+    event.inputs = vec![u64_portable(7)];
     let err = lower_with_events(vec![event]).expect_err("wrong inputs must fail");
     assert!(err.to_string().contains("do not match stored event"));
 }
@@ -92,7 +97,7 @@ fn precompile_lowering_rejects_wrong_inputs() {
 #[test]
 fn precompile_lowering_rejects_wrong_output_arity() {
     let mut event = valid_event();
-    event.outputs.push(Value::U64(2));
+    event.outputs.push(u64_portable(2));
     let err = lower_with_events(vec![event]).expect_err("wrong output arity must fail");
     assert!(
         err.to_string()

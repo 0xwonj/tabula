@@ -23,15 +23,6 @@ use tabula_stark::air::columns::borrow_cols;
 
 use super::columns::{ExecutionCols, MAX_SLOTS, execution_width};
 
-/// Domain tag for the instruction-level Hash opcode.
-///
-/// Distinct from protocol-level domain tags (0x00=SSMC, 0x01=SMT, 0x10=leaf,
-/// 0x11=tables, 0x12=cols) to prevent cross-protocol hash collisions.
-pub const HASH_INSTRUCTION_DOMAIN_TAG: u32 = 0x20;
-
-/// Number of input values for the Hash instruction (always 2: src1 and src2).
-pub const HASH_INSTRUCTION_INPUT_COUNT: u32 = 2;
-
 /// The ExecutionChip AIR, generic over value width.
 #[derive(Clone, Copy, Debug)]
 pub struct ExecutionChip<const W: usize>;
@@ -96,7 +87,7 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         super::buses::send_write_access(builder, local);
         super::buses::send_empty_col_read(builder, local);
         super::buses::send_range_checks(builder, local);
-        super::buses::send_hash_permutation(builder, local);
+        super::buses::send_hash_relay(builder, local);
         super::buses::send_precompile(builder, local);
         super::buses::send_property_read(builder, local);
         super::buses::send_static_table_lookup(builder, local);

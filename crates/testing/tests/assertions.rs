@@ -3,7 +3,7 @@
 use std::panic::catch_unwind;
 
 use tabula_artifact::{State, StateEntry};
-use tabula_core::{ColId, RowKey, TableId, Value};
+use tabula_core::{ColId, RowKey, TableId};
 use tabula_testing::assertions::{
     ExpectedStateCell, ExpectedTxOutcome, assert_all_txs_success, assert_artifact_semantically_eq,
     assert_state_cell, assert_state_cells_exact, assert_state_semantically_eq,
@@ -18,6 +18,7 @@ use tabula_testing::fixtures::examples::{
 };
 use tabula_testing::fixtures::state::three_account_balances;
 use tabula_testing::runtime::execute_compiled_case;
+use tabula_types::u64_portable;
 
 #[test]
 fn state_and_artifact_comparators_accept_semantically_equal_values() {
@@ -28,25 +29,25 @@ fn state_and_artifact_comparators_accept_semantically_equal_values() {
                 table: 0,
                 row: 2,
                 col: 0,
-                value: Some(Value::U64(200)),
+                value: Some(u64_portable(200)),
             },
             StateEntry {
                 table: 0,
                 row: 0,
                 col: 0,
-                value: Some(Value::U64(1000)),
+                value: Some(u64_portable(1000)),
             },
             StateEntry {
                 table: 0,
                 row: 1,
                 col: 0,
-                value: Some(Value::U64(500)),
+                value: Some(u64_portable(500)),
             },
             StateEntry {
                 table: 0,
                 row: 0,
                 col: 0,
-                value: Some(Value::U64(1000)),
+                value: Some(u64_portable(1000)),
             },
         ],
     };
@@ -98,14 +99,14 @@ fn tx_and_write_set_assertions_work_for_batch_results() {
         TableId(0),
         ColId(0),
         RowKey(0),
-        Some(Value::U64(700)),
+        Some(&u64_portable(700)),
     );
     assert_write_set_cell(
         &result,
         TableId(0),
         ColId(0),
         RowKey(2),
-        Some(Value::U64(300)),
+        Some(&u64_portable(300)),
     );
 }
 
@@ -120,7 +121,7 @@ fn state_and_success_assertions_work_for_runtime_results() {
         TableId(0),
         ColId(0),
         RowKey(0),
-        Some(Value::U64(750)),
+        Some(&u64_portable(750)),
     );
     assert_state_cells_exact(
         &executed.state_after,
@@ -129,19 +130,19 @@ fn state_and_success_assertions_work_for_runtime_results() {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowKey(0),
-                value: Some(Value::U64(750)),
+                value: Some(u64_portable(750)),
             },
             ExpectedStateCell {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowKey(1),
-                value: Some(Value::U64(600)),
+                value: Some(u64_portable(600)),
             },
             ExpectedStateCell {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowKey(2),
-                value: Some(Value::U64(350)),
+                value: Some(u64_portable(350)),
             },
         ],
     );

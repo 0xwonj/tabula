@@ -1,40 +1,32 @@
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
-use tabula_artifact::{PrecompileDescriptor, Statement};
+use tabula_artifact::Statement;
 use tabula_compiler::SealedProgram;
 use tabula_ir::PrecompileId;
 
 use crate::error::RuntimeError;
 
-/// Validate that the compiler-owned proof plan still covers the schema surface.
-pub(crate) fn validate_compiler_owned_proof_plan(
+/// Validate that the compiler-owned profile catalog still covers the schema surface.
+pub(crate) fn validate_compiler_owned_profiles(
     compiled_program: &SealedProgram,
 ) -> Result<(), RuntimeError> {
     compiled_program
-        .validate_column_proof_plan()
+        .validate_column_profiles()
         .map_err(|detail| RuntimeError::ValidationFailed { detail })
 }
 
-/// Validate that every compiler-required precompile ID was registered.
+/// Validate that every compiler-required precompile ID has an installed host backend.
 pub(crate) fn validate_precompile_requirements(
     sealed_program: &SealedProgram,
-    registered: &BTreeMap<PrecompileId, PrecompileDescriptor>,
-    detail_suffix: &str,
+    registered: &BTreeSet<PrecompileId>,
+    subject: &str,
 ) -> Result<(), RuntimeError> {
     for descriptor in sealed_program.precompile_manifest() {
-        let Some(registered_descriptor) = registered.get(&descriptor.precompile_id) else {
+        if !registered.contains(&descriptor.precompile_id) {
             return Err(RuntimeError::ValidationFailed {
                 detail: format!(
-                    "program references precompile 0x{:04x} but no {} is registered",
-                    descriptor.precompile_id.0, detail_suffix,
-                ),
-            });
-        };
-        if registered_descriptor != descriptor {
-            return Err(RuntimeError::ValidationFailed {
-                detail: format!(
-                    "program seals precompile 0x{:04x} with descriptor {:?} but registered {} descriptor is {:?}",
-                    descriptor.precompile_id.0, descriptor, detail_suffix, registered_descriptor,
+                    "program references precompile 0x{:04x} but no installed {} is registered",
+                    descriptor.precompile_id.0, subject,
                 ),
             });
         }

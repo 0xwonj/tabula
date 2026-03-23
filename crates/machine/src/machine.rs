@@ -18,7 +18,7 @@
 
 use std::fmt;
 
-use crate::columns::ProofColumn;
+use crate::backend::ProofColumn;
 use crate::config::TabulaStarkConfig;
 use crate::setup::MachineSetup;
 use crate::setup::builder::MachineBuilder;

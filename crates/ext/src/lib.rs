@@ -6,14 +6,22 @@
 /// Advanced backend-facing support for extension authors.
 pub mod backend;
 mod error;
-/// Semantic precompile authoring contracts and bundle types.
+/// Semantic precompile authoring contracts and backend bundle types.
 pub mod precompile;
 /// Column commitment scheme authoring contracts and bundle types.
 pub mod scheme;
 
+#[cfg(feature = "verify")]
+pub use backend::precompile::PrecompileBackendFactory;
 pub use error::{ExtError, ExtResult};
-pub use precompile::{PrecompileBundle, PrecompileDescriptor, PrecompileId};
-pub use scheme::{
-    ColumnLayoutKind, ColumnSchemeFactory, PropertyQueryKind, ResolvedColumnPlan, RootProfileId,
-    RuntimeColumn, SchemeBundle, SchemeDescriptor, SchemeId, Value, ValueType,
+#[cfg(feature = "verify")]
+pub use precompile::PrecompileBackendFactoryBundle;
+pub use precompile::{
+    PrecompileDescriptor, PrecompileId, PrecompileSignature, PrecompileValueProfile,
 };
+#[cfg(feature = "verify")]
+pub use scheme::{
+    ColumnBackendFactory, ColumnBackendFactoryBundle, ColumnBackendSetup, ColumnVerifierContract,
+    MaterializedColumnBackend, RootBindingContract,
+};
+pub use scheme::{ColumnLayoutKind, PropertyQueryKind, RootProfileId, RuntimeColumn, SchemeId};

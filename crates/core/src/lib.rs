@@ -5,18 +5,20 @@ mod event;
 #[cfg(any(feature = "test-utils", test))]
 pub mod mock;
 mod nonce;
+mod query;
 mod sig;
-mod state;
+pub mod state;
 pub mod traits;
 mod tx;
 
 // ── State model ──
 pub use state::id::{
-    CellKey, ColId, ColumnCommitmentId, ColumnLayoutKind, Digest, RootProfileId, RowKey, SchemeId,
-    StateRoot, TableCommitmentId, TableId, TxTypeId,
+    CellKey, ColId, ColumnCommitmentId, ColumnLayoutKind, ColumnProfileId, Digest,
+    EncodingProfileId, RootProfileId, RootProofFamilyId, RowKey, SchemeId, SchemeProfileId,
+    StateRoot, TableCommitmentId, TableId, TxTypeId, TypeId,
 };
+pub use state::portable::PortableValue;
 pub use state::schema::{ColumnDef, TableSchema};
-pub use state::value::{Value, ValueType, zero_value};
 
 // ── Transaction model ──
 pub use tx::{Batch, ProgramBudgets, Transaction};
@@ -26,6 +28,7 @@ pub use event::{
     AccessEvent, BatchResult, ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, LogicalTime,
     OpKind, PrecompileEvent, PropertyQueryResult, PropertyReadResult, TxResult,
 };
+pub use query::PropertyQueryKind;
 
 // ── Default implementations ──
 pub use nonce::SequentialNonce;

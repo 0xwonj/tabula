@@ -1,48 +1,52 @@
 //! State root computation: two-level SMT (columns -> tables -> global).
 //!
-//! Free functions for computing ColumnMeta leaf digests, per-table column
-//! roots, and the global state root.
+//! Free functions for computing canonical root-binding leaves, per-table
+//! column roots, and the global state root.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId};
 
-use crate::column::ColumnMeta;
+use crate::binding::ColumnRootBinding;
 use crate::primitives::FieldHasher;
 use crate::primitives::{
-    COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_LEAF, DOMAIN_TABLE, NativeDigest, TABLE_STATE_SMT_DEPTH,
+    COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_COLUMN_BINDING, DOMAIN_TABLE, NativeDigest,
+    TABLE_STATE_SMT_DEPTH,
 };
 use crate::schemes::smt::SparseMerkleTree;
 
-/// Compute the ColumnMeta leaf digest.
-///
-/// Single-permutation compress:
-/// `compress([0x10, t, c, tag, 0, 0, 0, 0], com[8])`
-///
-/// The left half carries the domain tag + identity; the right half is the commitment.
-pub fn compute_column_meta_leaf<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
+/// Compute the canonical root-binding prefix digest for one `(table, col, profile)` triple.
+pub fn compute_column_root_binding_prefix_digest<
+    H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
+>(
     hasher: &H,
     table: TableId,
     col: ColId,
-    tag: u16,
-    commitment: &NativeDigest,
+    root_binding_family: tabula_core::RootProfileId,
+    column_profile_hash: &tabula_core::Digest,
 ) -> NativeDigest {
-    let tag_val: u32 = tag as u32;
-    let left = NativeDigest([
-        KoalaBear::new(DOMAIN_LEAF),
-        KoalaBear::new(table.0),
-        KoalaBear::new(col.0 as u32),
-        KoalaBear::new(tag_val),
-        KoalaBear::ZERO,
-        KoalaBear::ZERO,
-        KoalaBear::ZERO,
-        KoalaBear::ZERO,
-    ]);
-    hasher.compress(&left, commitment)
+    let mut input = Vec::with_capacity(35);
+    input.push(KoalaBear::new(root_binding_family.raw() as u32));
+    input.push(KoalaBear::new(table.0));
+    input.push(KoalaBear::new(col.0 as u32));
+    input.extend(
+        column_profile_hash
+            .iter()
+            .map(|byte| KoalaBear::new(*byte as u32)),
+    );
+    hasher.hash_domain(DOMAIN_COLUMN_BINDING, &input)
+}
+
+/// Compute one canonical root-binding leaf digest.
+pub fn compute_column_root_binding_leaf<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
+    hasher: &H,
+    binding: &ColumnRootBinding,
+    digest: &crate::NormalizedVerifierDigest,
+) -> NativeDigest {
+    hasher.compress(&binding.binding_digest, &digest.digest)
 }
 
 /// Build column-level SMT from column leaves.
@@ -83,32 +87,32 @@ pub fn compute_state_root<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
     Ok(tree.root())
 }
 
-/// Compute old/new global state roots from verifier-visible column metadata.
-pub fn compute_state_roots_from_metas<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
+/// Compute old/new global state roots from canonical column root bindings.
+pub fn compute_state_roots_from_bindings<H: FieldHasher<F = KoalaBear, Digest = NativeDigest>>(
     hasher: &H,
-    metas: &[ColumnMeta],
+    bindings: &[ColumnRootBinding],
 ) -> Result<(NativeDigest, NativeDigest), TabulaError> {
     let mut old_tables: BTreeMap<TableId, BTreeMap<ColId, NativeDigest>> = BTreeMap::new();
     let mut new_tables: BTreeMap<TableId, BTreeMap<ColId, NativeDigest>> = BTreeMap::new();
     let mut seen = BTreeSet::new();
 
-    for meta in metas {
-        if !seen.insert((meta.table, meta.col)) {
+    for binding in bindings {
+        if !seen.insert((binding.table, binding.col)) {
             return Err(TabulaError::ProofError {
                 phase: "commitment",
                 detail: format!(
-                    "duplicate ColumnMeta entry for table {} column {}",
-                    meta.table.0, meta.col.0
+                    "duplicate ColumnRootBinding entry for table {} column {}",
+                    binding.table.0, binding.col.0
                 ),
             });
         }
-        old_tables.entry(meta.table).or_default().insert(
-            meta.col,
-            compute_column_meta_leaf(hasher, meta.table, meta.col, meta.tag, &meta.com_old),
+        old_tables.entry(binding.table).or_default().insert(
+            binding.col,
+            compute_column_root_binding_leaf(hasher, binding, &binding.old_digest),
         );
-        new_tables.entry(meta.table).or_default().insert(
-            meta.col,
-            compute_column_meta_leaf(hasher, meta.table, meta.col, meta.tag, &meta.com_new),
+        new_tables.entry(binding.table).or_default().insert(
+            binding.col,
+            compute_column_root_binding_leaf(hasher, binding, &binding.new_digest),
         );
     }
 
@@ -132,19 +136,20 @@ mod tests {
     use super::*;
     use crate::PoseidonHasher;
     use crate::primitives::NativeDigest;
-    use crate::schemes::tags;
 
     fn digest(n: u32) -> NativeDigest {
         NativeDigest([KoalaBear::new(n); 8])
     }
 
-    fn meta(table: u32, col: u16, old: u32, new: u32) -> ColumnMeta {
-        ColumnMeta {
+    fn binding(table: u32, col: u16, old: u32, new: u32) -> ColumnRootBinding {
+        ColumnRootBinding {
             table: TableId(table),
             col: ColId(col),
-            tag: tags::SSMC,
-            com_old: digest(old),
-            com_new: digest(new),
+            root_binding_family: tabula_core::RootProfileId::SMT_V1,
+            column_profile_hash: [7; 32],
+            binding_digest: digest(table + col as u32 + 100),
+            old_digest: crate::NormalizedVerifierDigest::new(digest(old)),
+            new_digest: crate::NormalizedVerifierDigest::new(digest(new)),
             is_empty_old: false,
             is_empty_new: false,
             is_touched: true,
@@ -152,11 +157,11 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_column_metas_are_rejected() {
+    fn duplicate_column_root_bindings_are_rejected() {
         let hasher = PoseidonHasher::new();
-        let metas = vec![meta(1, 0, 10, 11), meta(1, 0, 12, 13)];
+        let bindings = vec![binding(1, 0, 10, 11), binding(1, 0, 12, 13)];
 
-        let result = compute_state_roots_from_metas(&hasher, &metas);
+        let result = compute_state_roots_from_bindings(&hasher, &bindings);
 
         assert!(result.is_err());
     }

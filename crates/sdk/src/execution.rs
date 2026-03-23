@@ -1,7 +1,7 @@
 use tabula_artifact::State;
 #[cfg(feature = "prove")]
 use tabula_artifact::TransactionBatch;
-use tabula_core::{CellKey, ExecutionConsistencyStatus, TxResult, Value};
+use tabula_core::{CellKey, ExecutionConsistencyStatus, PortableValue, TxResult};
 use tabula_runtime::ExecutedBatch;
 
 /// SDK wrapper over one completed execution plus the original inputs used to produce it.
@@ -53,12 +53,12 @@ impl Execution {
     }
 
     /// The observed read-set over committed state.
-    pub fn read_set(&self) -> &[(CellKey, Option<Value>)] {
+    pub fn read_set(&self) -> &[(CellKey, Option<PortableValue>)] {
         self.inner.read_set()
     }
 
     /// The final write-set after execution.
-    pub fn write_set(&self) -> &[(CellKey, Option<Value>)] {
+    pub fn write_set(&self) -> &[(CellKey, Option<PortableValue>)] {
         self.inner.write_set()
     }
 

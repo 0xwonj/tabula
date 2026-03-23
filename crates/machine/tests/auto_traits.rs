@@ -150,14 +150,13 @@ fn core_state_types_are_send_sync() {
     assert_send_sync::<TableSchema>();
 }
 
-// ── Core value types ────────────────────────────────────────────────────────
+// ── Core value carrier types ────────────────────────────────────────────────
 
 #[test]
-fn core_value_types_are_send_sync() {
-    use tabula_core::{Value, ValueType};
+fn core_portable_value_is_send_sync() {
+    use tabula_core::PortableValue;
 
-    assert_send_sync::<Value>();
-    assert_send_sync::<ValueType>();
+    assert_send_sync::<PortableValue>();
 }
 
 // ── Core transaction types ──────────────────────────────────────────────────

@@ -1,84 +1,64 @@
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
-use tabula_commitment::KoalaBearCodec;
 use tabula_core::error::TabulaError;
-use tabula_core::traits::{StaticTableProvider, ValueCodec};
+use tabula_core::traits::StaticTableProvider;
 use tabula_core::{
-    AccessEvent, ColId, PrecompileEvent, PropertyReadResult, RowKey, TableId, Value,
+    AccessEvent, ColId, PortableValue, PrecompileEvent, PropertyReadResult, RowKey, TableId,
 };
-use tabula_ir::{RowExpr, ValueExpr};
+use tabula_ir::{PrecompileId, PrecompileSignature, RowExpr, ValueExpr};
+use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue, typed_row_key};
 
 use tabula_chips::execution::MAX_SLOTS;
 use tabula_chips::execution::trace::{InstructionRecord, Opcode};
+use tabula_chips::ir_hash::IrHashCall;
 use tabula_chips::static_table::trace::StaticTableRow;
 
+use crate::ColumnValueProfile;
+
 /// Mutable lowering context threaded through per-opcode lowering functions.
-///
-/// Holds slot state, accumulated records, and shared immutable references
-/// needed by all opcode lowering handlers.
 pub(super) struct LoweringContext<'a, const W: usize> {
-    // ── Slot state ──────────────────────────────────────────────────────
-    /// Value-level slot contents (for resolution).
-    pub(super) slots: Vec<Option<Value>>,
-    /// Encoded slot contents (KoalaBear FEs for trace).
+    pub(super) slots: Vec<Option<TypedValue>>,
     pub(super) slot_fes: Vec<Vec<KoalaBear>>,
-    /// Slot null flags.
     pub(super) slot_nulls: Vec<bool>,
-    /// Tracks which slots have been explicitly written within this tx.
     pub(super) slot_initialized: Vec<bool>,
-    /// Next available slot (how many are in use).
     pub(super) max_slot: usize,
 
-    // ── Per-instruction tracking ────────────────────────────────────────
-    /// Effect ordinal counter (increments on Read/Write).
     pub(super) effect_ordinal: u32,
-    /// Transaction index.
     pub(super) tx_index: u32,
 
-    // ── Accumulated output ──────────────────────────────────────────────
-    /// Instruction records.
     pub(super) records: Vec<InstructionRecord>,
-    /// Static table rows from Lookup instructions.
     pub(super) static_rows: Vec<StaticTableRow>,
+    pub(super) ir_hash_calls: Vec<IrHashCall>,
 
-    // ── Shared immutable references ─────────────────────────────────────
-    /// Execution events for this tx.
     pub(super) tx_events: &'a [&'a AccessEvent],
-    /// Schema type map: (table, col) -> ValueType.
-    pub(super) type_map: &'a BTreeMap<(TableId, ColId), tabula_core::ValueType>,
-    /// Static table provider.
+    pub(super) profile_map: &'a BTreeMap<(TableId, ColId), ColumnValueProfile>,
+    pub(super) type_runtimes: &'a TypeRuntimeRegistry,
+    pub(super) encoding_runtimes: &'a EncodingRuntimeRegistry,
     pub(super) static_tables: &'a dyn StaticTableProvider,
-    /// Empty columns set.
     pub(super) empty_columns: &'a BTreeSet<(TableId, ColId)>,
-    /// Transaction parameters.
-    pub(super) params: &'a [Value],
-    /// Value codec.
-    pub(super) codec: &'a KoalaBearCodec,
-    /// Stored precompile I/O pairs from execution (consumed sequentially).
+    pub(super) params: &'a [PortableValue],
+    pub(super) precompile_signatures: &'a BTreeMap<PrecompileId, PrecompileSignature>,
     pub(super) precompile_events_by_instruction: BTreeMap<usize, &'a PrecompileEvent>,
-    /// Matched precompile call-site instruction indices.
     pub(super) matched_precompile_instructions: BTreeSet<usize>,
-    /// Stored property read results from execution (consumed sequentially).
     pub(super) property_reads_stored: &'a [PropertyReadResult],
-    /// Index into `property_reads_stored` for the next PropertyRead instruction.
     pub(super) property_read_idx: usize,
 }
 
 impl<'a, const W: usize> LoweringContext<'a, W> {
-    /// Create a new context with zeroed slot state.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         tx_index: u32,
         tx_events: &'a [&'a AccessEvent],
-        type_map: &'a BTreeMap<(TableId, ColId), tabula_core::ValueType>,
+        profile_map: &'a BTreeMap<(TableId, ColId), ColumnValueProfile>,
+        type_runtimes: &'a TypeRuntimeRegistry,
+        encoding_runtimes: &'a EncodingRuntimeRegistry,
         static_tables: &'a dyn StaticTableProvider,
         empty_columns: &'a BTreeSet<(TableId, ColId)>,
-        params: &'a [Value],
-        codec: &'a KoalaBearCodec,
+        params: &'a [PortableValue],
+        precompile_signatures: &'a BTreeMap<PrecompileId, PrecompileSignature>,
         num_instructions: usize,
         precompile_events: &'a [PrecompileEvent],
         property_reads_stored: &'a [PropertyReadResult],
@@ -93,12 +73,15 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
             tx_index,
             records: Vec::with_capacity(num_instructions),
             static_rows: Vec::new(),
+            ir_hash_calls: Vec::new(),
             tx_events,
-            type_map,
+            profile_map,
+            type_runtimes,
+            encoding_runtimes,
             static_tables,
             empty_columns,
             params,
-            codec,
+            precompile_signatures,
             precompile_events_by_instruction: build_precompile_event_map(
                 tx_index,
                 precompile_events,
@@ -109,74 +92,105 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         })
     }
 
-    /// Resolve a `RowExpr` to a concrete `RowKey`.
+    pub(super) fn column_profile(
+        &self,
+        table: TableId,
+        col: ColId,
+    ) -> Result<&ColumnValueProfile, TabulaError> {
+        self.profile_map
+            .get(&(table, col))
+            .ok_or_else(|| TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!("missing sealed column profile for ({table:?}, {col:?})"),
+            })
+    }
+
+    pub(super) fn zero_for_column(
+        &self,
+        table: TableId,
+        col: ColId,
+    ) -> Result<TypedValue, TabulaError> {
+        let profile = self.column_profile(table, col)?;
+        self.type_runtimes.zero_of(profile.type_id)
+    }
+
+    pub(super) fn decode_column_portable(
+        &self,
+        table: TableId,
+        col: ColId,
+        value: &PortableValue,
+    ) -> Result<TypedValue, TabulaError> {
+        let profile = self.column_profile(table, col)?;
+        if value.type_id() != profile.type_id {
+            return Err(TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!(
+                    "portable value type {} does not match sealed column type {} for ({}, {})",
+                    value.type_id().0,
+                    profile.type_id.0,
+                    table.0,
+                    col.0,
+                ),
+            });
+        }
+        self.type_runtimes.decode_portable(value)
+    }
+
     pub(super) fn resolve_row(&self, expr: &RowExpr) -> Result<RowKey, TabulaError> {
         match expr {
             RowExpr::Literal(rk) => Ok(*rk),
             RowExpr::Slot(s) => {
-                let v = self
+                let value = self
                     .slots
                     .get(*s as usize)
                     .and_then(|o| o.as_ref())
+                    .cloned()
                     .ok_or_else(|| TabulaError::SlotOutOfBounds {
                         index: *s,
                         max: self.slots.len().saturating_sub(1) as u16,
                     })?;
-                match v {
-                    Value::U64(n) => Ok(RowKey(*n)),
-                    _ => Err(TabulaError::TypeMismatch {
-                        expected: "U64",
-                        actual: v.type_name(),
-                    }),
-                }
+                typed_row_key(&value, self.type_runtimes)
             }
             RowExpr::Param(p) => {
-                let v = self
+                let value = self
                     .params
                     .get(*p as usize)
                     .ok_or(TabulaError::ParamOutOfBounds {
                         index: *p,
                         max: self.params.len().saturating_sub(1) as u16,
                     })?;
-                match v {
-                    Value::U64(n) => Ok(RowKey(*n)),
-                    _ => Err(TabulaError::TypeMismatch {
-                        expected: "U64",
-                        actual: v.type_name(),
-                    }),
-                }
+                typed_row_key(
+                    &self.type_runtimes.decode_portable(value)?,
+                    self.type_runtimes,
+                )
             }
         }
     }
 
-    /// Resolve a `ValueExpr` to a concrete `Value`.
-    pub(super) fn resolve_val(&self, expr: &ValueExpr) -> Result<Value, TabulaError> {
+    pub(super) fn resolve_val(&self, expr: &ValueExpr) -> Result<TypedValue, TabulaError> {
         match expr {
-            ValueExpr::Literal(v) => Ok(*v),
-            ValueExpr::Slot(s) => {
-                self.slots
-                    .get(*s as usize)
-                    .and_then(|o| *o)
-                    .ok_or(TabulaError::SlotOutOfBounds {
-                        index: *s,
-                        max: self.slots.len().saturating_sub(1) as u16,
-                    })
-            }
-            ValueExpr::Param(p) => {
-                self.params
-                    .get(*p as usize)
-                    .copied()
-                    .ok_or(TabulaError::ParamOutOfBounds {
-                        index: *p,
-                        max: self.params.len().saturating_sub(1) as u16,
-                    })
-            }
+            ValueExpr::Literal(v) => self.type_runtimes.decode_portable(v),
+            ValueExpr::Slot(s) => self
+                .slots
+                .get(*s as usize)
+                .and_then(|o| o.as_ref())
+                .cloned()
+                .ok_or(TabulaError::SlotOutOfBounds {
+                    index: *s,
+                    max: self.slots.len().saturating_sub(1) as u16,
+                }),
+            ValueExpr::Param(p) => self
+                .params
+                .get(*p as usize)
+                .map(|value| self.type_runtimes.decode_portable(value))
+                .transpose()?
+                .ok_or(TabulaError::ParamOutOfBounds {
+                    index: *p,
+                    max: self.params.len().saturating_sub(1) as u16,
+                }),
         }
     }
 
-    /// Get slot index from a `ValueExpr`, searching existing slots for a matching value.
-    ///
-    /// `exclude_slots` prevents matching a slot that the current instruction writes to.
     pub(super) fn resolve_slot_idx(
         &self,
         expr: &ValueExpr,
@@ -196,19 +210,16 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
                 }
                 Err(TabulaError::ProofError {
                     phase: "trace_lowering",
-                    detail: "no slot contains the required operand value (param/literal); \
-                     the current AIR requires all operands to come from slots"
-                        .to_string(),
+                    detail: "no slot contains the required operand value (param/literal); the current AIR requires all operands to come from slots".to_string(),
                 })
             }
         }
     }
 
-    /// Update a slot with a new value.
     pub(super) fn update_slot(
         &mut self,
         slot: usize,
-        value: Value,
+        value: TypedValue,
         encoded: Vec<KoalaBear>,
         is_null: bool,
     ) -> Result<(), TabulaError> {
@@ -228,14 +239,35 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         Ok(())
     }
 
-    /// Encode a `Value` and pad to exactly `W` field elements.
-    pub(super) fn encode_padded(&self, value: &Value) -> Result<Vec<KoalaBear>, TabulaError> {
-        let mut fes = self.codec.encode(value)?;
+    pub(super) fn encode_padded(&self, value: &TypedValue) -> Result<Vec<KoalaBear>, TabulaError> {
+        let encoding = self.encoding_runtimes.resolve_for_type(value.type_id())?;
+        Self::encode_with_runtime_padded(encoding.as_ref(), value)
+    }
+
+    pub(super) fn encode_with_runtime_padded(
+        encoding: &dyn tabula_types::EncodingRuntime,
+        value: &TypedValue,
+    ) -> Result<Vec<KoalaBear>, TabulaError> {
+        let mut fes = encoding.encode_field_elements(value)?;
+        if fes.len() > W {
+            return Err(TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!(
+                    "value encoded width {} exceeds trace width {} for type {}",
+                    fes.len(),
+                    W,
+                    value.type_id().0
+                ),
+            });
+        }
         fes.resize(W, KoalaBear::ZERO);
         Ok(fes)
     }
 
-    /// Default InstructionRecord with zero/empty fields.
+    pub(super) fn encode_u64_padded(&self, value: u64) -> Result<Vec<KoalaBear>, TabulaError> {
+        self.encode_padded(&tabula_types::u64_typed(value))
+    }
+
     pub(super) fn empty_record(&self, opcode: Opcode) -> InstructionRecord {
         InstructionRecord {
             opcode,
@@ -254,8 +286,7 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
             access_val: None,
             access_is_null: None,
             writes: vec![],
-            hash_perm_input: None,
-            hash_perm_output: None,
+            hash_digest: None,
             is_empty_col: false,
             precompile_id: None,
             instruction_index: None,
@@ -271,10 +302,6 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         }
     }
 
-    /// Find the event matching the current effect ordinal.
-    ///
-    /// `tx_events` is already scoped to the current transaction, so we only
-    /// need to match on `effect_ordinal_in_tx`.
     pub(super) fn find_event(&self, instr_idx: usize) -> Result<&'a AccessEvent, TabulaError> {
         let tx_index = self.tx_index;
         let effect_ordinal = self.effect_ordinal;
@@ -290,12 +317,10 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
             })
     }
 
-    /// Append a record.
     pub(super) fn push_record(&mut self, rec: InstructionRecord) {
         self.records.push(rec);
     }
 
-    /// Resolve the unique stored precompile event for one instruction index.
     pub(super) fn precompile_event(
         &mut self,
         instruction_index: usize,
@@ -316,7 +341,21 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         Ok(event)
     }
 
-    /// Ensure every stored precompile event was matched to exactly one IR call site.
+    pub(super) fn precompile_signature(
+        &self,
+        precompile_id: PrecompileId,
+    ) -> Result<&PrecompileSignature, TabulaError> {
+        self.precompile_signatures
+            .get(&precompile_id)
+            .ok_or_else(|| TabulaError::ProofError {
+                phase: "trace_lowering",
+                detail: format!(
+                    "missing sealed precompile signature for 0x{:04x}",
+                    precompile_id.0,
+                ),
+            })
+    }
+
     pub(super) fn validate_precompile_events_consumed(&self) -> Result<(), TabulaError> {
         if self.matched_precompile_instructions.len() != self.precompile_events_by_instruction.len()
         {
@@ -341,14 +380,18 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         Ok(())
     }
 
-    /// Append a static table row.
     pub(super) fn push_static_row(&mut self, row: StaticTableRow) {
         self.static_rows.push(row);
     }
 
-    /// Consume this context and return accumulated output.
-    pub(super) fn into_output(self) -> (Vec<InstructionRecord>, Vec<StaticTableRow>) {
-        (self.records, self.static_rows)
+    pub(super) fn push_ir_hash_call(&mut self, call: IrHashCall) {
+        self.ir_hash_calls.push(call);
+    }
+
+    pub(super) fn into_output(
+        self,
+    ) -> (Vec<InstructionRecord>, Vec<StaticTableRow>, Vec<IrHashCall>) {
+        (self.records, self.static_rows, self.ir_hash_calls)
     }
 }
 

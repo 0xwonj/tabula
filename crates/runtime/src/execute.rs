@@ -11,13 +11,14 @@ use tabula_compiler::SealedProgram;
 use tabula_core::traits::Hasher;
 use tabula_core::{
     Batch, BatchResult, CellKey, ExecutionConsistencyStatus, InMemoryState, InMemoryStaticTables,
-    NoopSigVerifier, SequentialNonce, TxResult, Value,
+    NoopSigVerifier, PortableValue, SequentialNonce, TxResult,
 };
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::consistency::check_consistency_status;
 use tabula_executor::precompile::PrecompileRegistry;
 use tabula_executor::property::{CommittedStateProvider, PropertyQueryRegistry};
 use tabula_ir::Program;
+use tabula_types::TypeRuntimeRegistry;
 
 use crate::error::RuntimeError;
 
@@ -31,6 +32,8 @@ pub struct BatchInput<'a> {
     pub batch: &'a TransactionBatch,
     /// Hasher implementation (Blake3Hasher for CLI, PoseidonHasher for STARK).
     pub hasher: &'a dyn Hasher,
+    /// Runtime type registry used to decode portable artifact values.
+    pub type_runtimes: &'a TypeRuntimeRegistry,
 }
 
 /// Inputs for batch execution using a compiler-produced artifact.
@@ -43,6 +46,8 @@ pub struct CompiledBatchInput<'a> {
     pub batch: &'a TransactionBatch,
     /// Hasher implementation (Blake3Hasher for CLI, PoseidonHasher for STARK).
     pub hasher: &'a dyn Hasher,
+    /// Runtime type registry used to decode portable artifact values.
+    pub type_runtimes: &'a TypeRuntimeRegistry,
 }
 
 /// Optional runtime-owned resources used during execution.
@@ -78,12 +83,12 @@ impl ExecutedBatch {
     }
 
     /// Base-state reads observed by the executor.
-    pub fn read_set(&self) -> &[(CellKey, Option<Value>)] {
+    pub fn read_set(&self) -> &[(CellKey, Option<PortableValue>)] {
         &self.batch_result.read_set_old
     }
 
     /// Final coalesced writes after execution.
-    pub fn write_set(&self) -> &[(CellKey, Option<Value>)] {
+    pub fn write_set(&self) -> &[(CellKey, Option<PortableValue>)] {
         &self.batch_result.write_set_final
     }
 }
@@ -104,6 +109,7 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, RuntimeError> 
         input.state,
         input.batch,
         input.hasher,
+        input.type_runtimes,
         ExecutionResources {
             precompiles: None,
             committed_state: None,
@@ -117,6 +123,7 @@ pub(crate) fn execute_pipeline(
     state: &State,
     batch: &TransactionBatch,
     hasher: &dyn Hasher,
+    type_runtimes: &TypeRuntimeRegistry,
     resources: ExecutionResources<'_>,
 ) -> Result<ExecutedBatch, RuntimeError> {
     // 1. Normalize state.
@@ -125,7 +132,9 @@ pub(crate) fn execute_pipeline(
     // 2. Build in-memory state.
     let mut state_store = InMemoryState::new();
     for cell in &normalized.cells {
-        let (key, value) = cell.to_cell_pair().map_err(RuntimeError::InvalidState)?;
+        let (key, value) = cell
+            .to_cell_pair(type_runtimes)
+            .map_err(RuntimeError::InvalidState)?;
         state_store.set(key, value);
     }
 
@@ -133,7 +142,10 @@ pub(crate) fn execute_pipeline(
     let transactions: Vec<_> = batch
         .transactions
         .iter()
-        .map(|t| t.to_transaction().map_err(RuntimeError::InvalidBatch))
+        .map(|t| {
+            t.to_transaction(type_runtimes)
+                .map_err(RuntimeError::InvalidBatch)
+        })
         .collect::<Result<_, _>>()?;
     let batch_core = Batch { transactions };
 
@@ -141,6 +153,7 @@ pub(crate) fn execute_pipeline(
     let st = InMemoryStaticTables::new();
     let env = BatchEnv {
         hasher,
+        type_runtimes,
         sig_verifier: &NoopSigVerifier,
         nonce_policy: &SequentialNonce,
         static_tables: &st,
@@ -182,6 +195,7 @@ pub fn run_compiled_batch(input: &CompiledBatchInput<'_>) -> Result<ExecutedBatc
         input.state,
         input.batch,
         input.hasher,
+        input.type_runtimes,
         ExecutionResources {
             precompiles: None,
             committed_state: None,
@@ -196,14 +210,14 @@ fn validate_free_execution_requirements(
     if !compiled_program.precompile_manifest().is_empty() {
         return Err(RuntimeError::ValidationFailed {
             detail:
-                "program requires precompiles; use TabulaRuntime::builder(...), register the required PrecompileRegistration values, and build before execution"
+                "program requires precompiles; build a TabulaRuntime with a HostEnvironment that installs the required precompile backends before execution"
                     .to_string(),
         });
     }
     if !compiled_program.required_property_requirements().is_empty() {
         return Err(RuntimeError::ValidationFailed {
             detail:
-                "program requires scheme-backed property queries; use TabulaRuntime::builder(...), install any required custom scheme factories, and build before execution"
+                "program requires scheme-backed property queries; build a TabulaRuntime with a HostEnvironment that installs any required scheme backends before execution"
                     .to_string(),
         });
     }
@@ -213,25 +227,27 @@ fn validate_free_execution_requirements(
 #[cfg(test)]
 mod tests {
     use tabula_artifact::StateEntry;
-    use tabula_core::Value;
     use tabula_core::mock::Blake3Hasher;
     use tabula_testing::fixtures::compiled::{
         compiled_empty_batch_case, compiled_precompile_requirement_case,
         compiled_property_successor_case, compiled_single_write_case,
     };
     use tabula_testing::fixtures::state::empty_state;
+    use tabula_types::{TypeRuntimeRegistry, u64_portable};
 
     use super::{CompiledBatchInput, RuntimeError, run_compiled_batch};
 
     #[test]
     fn run_compiled_batch_applies_writes() {
         let case = compiled_single_write_case();
+        let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
 
         let executed = run_compiled_batch(&CompiledBatchInput {
             compiled_program: &case.compiled_program,
             state: &case.state,
             batch: &case.batch,
             hasher: &Blake3Hasher,
+            type_runtimes: &type_runtimes,
         })
         .expect("execute compiled batch");
 
@@ -240,13 +256,14 @@ mod tests {
             .cells
             .iter()
             .find(|cell| cell.table == 1 && cell.row == 0 && cell.col == 0)
-            .and_then(|cell| cell.value);
-        assert_eq!(updated, Some(Value::U64(7)));
+            .and_then(|cell| cell.value.clone());
+        assert_eq!(updated, Some(u64_portable(7)));
     }
 
     #[test]
     fn run_compiled_batch_rejects_invalid_state() {
         let case = compiled_single_write_case();
+        let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
         let invalid_state = tabula_artifact::State {
             cells: vec![StateEntry {
                 table: 1,
@@ -261,6 +278,7 @@ mod tests {
             state: &invalid_state,
             batch: &case.batch,
             hasher: &Blake3Hasher,
+            type_runtimes: &type_runtimes,
         })
         .expect_err("invalid state must fail");
 
@@ -270,12 +288,14 @@ mod tests {
     #[test]
     fn run_compiled_batch_handles_empty_batch() {
         let case = compiled_empty_batch_case();
+        let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
 
         let executed = run_compiled_batch(&CompiledBatchInput {
             compiled_program: &case.compiled_program,
             state: &case.state,
             batch: &case.batch,
             hasher: &Blake3Hasher,
+            type_runtimes: &type_runtimes,
         })
         .expect("empty batch should succeed");
 
@@ -290,11 +310,13 @@ mod tests {
     #[test]
     fn run_compiled_batch_rejects_required_precompiles() {
         let case = compiled_precompile_requirement_case();
+        let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
         let err = run_compiled_batch(&CompiledBatchInput {
             compiled_program: &case.compiled_program,
             state: &empty_state(),
             batch: &case.batch,
             hasher: &Blake3Hasher,
+            type_runtimes: &type_runtimes,
         })
         .expect_err("free execute should reject required precompiles");
 
@@ -309,11 +331,13 @@ mod tests {
     #[test]
     fn run_compiled_batch_rejects_required_property_requirements() {
         let case = compiled_property_successor_case();
+        let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
         let err = run_compiled_batch(&CompiledBatchInput {
             compiled_program: &case.compiled_program,
             state: &empty_state(),
             batch: &case.batch,
             hasher: &Blake3Hasher,
+            type_runtimes: &type_runtimes,
         })
         .expect_err("free execute should reject required property requirements");
 

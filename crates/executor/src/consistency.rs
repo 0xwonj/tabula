@@ -7,7 +7,9 @@
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::{AccessEvent, CellKey, ExecutionConsistencyStatus, OpKind, TxResult, Value};
+use tabula_core::{
+    AccessEvent, CellKey, ExecutionConsistencyStatus, OpKind, PortableValue, TxResult,
+};
 
 /// Check that the execution trace is consistent with last-write semantics.
 ///
@@ -18,13 +20,13 @@ use tabula_core::{AccessEvent, CellKey, ExecutionConsistencyStatus, OpKind, TxRe
 /// read returns a value inconsistent with the most recent write.
 pub fn check_consistency(
     events: &[AccessEvent],
-    read_set_old: &[(CellKey, Option<Value>)],
+    read_set_old: &[(CellKey, Option<PortableValue>)],
     txs: &[TxResult],
 ) -> Result<(), TabulaError> {
     check_etrace_identity(txs)?;
 
     // Build initial value map from read_set_old
-    let initial: BTreeMap<CellKey, Option<Value>> = read_set_old.iter().copied().collect();
+    let initial: BTreeMap<CellKey, Option<PortableValue>> = read_set_old.iter().cloned().collect();
 
     // Group events by cell key, preserving time order
     let mut by_key: BTreeMap<CellKey, Vec<&AccessEvent>> = BTreeMap::new();
@@ -32,12 +34,12 @@ pub fn check_consistency(
         by_key.entry(event.key).or_default().push(event);
     }
 
-    // Convert an event's (value, val_is_null) pair to Option<Value>.
-    fn event_to_opt(event: &AccessEvent) -> Option<Value> {
+    // Convert an event's (value, val_is_null) pair to Option<PortableValue>.
+    fn event_to_opt(event: &AccessEvent) -> Option<PortableValue> {
         if event.val_is_null {
             None
         } else {
-            Some(event.value)
+            Some(event.value.clone())
         }
     }
 
@@ -51,7 +53,7 @@ pub fn check_consistency(
         );
 
         // Current value for this key: starts at the initial/snapshot value
-        let mut current_opt = initial.get(key).copied().unwrap_or(None);
+        let mut current_opt = initial.get(key).cloned().unwrap_or(None);
 
         for event in key_events {
             match event.op {
@@ -98,7 +100,7 @@ pub fn check_etrace_identity(txs: &[TxResult]) -> Result<(), TabulaError> {
 /// Check consistency and return a typed status.
 pub fn check_consistency_status(
     events: &[AccessEvent],
-    read_set_old: &[(CellKey, Option<Value>)],
+    read_set_old: &[(CellKey, Option<PortableValue>)],
     txs: &[TxResult],
 ) -> ExecutionConsistencyStatus {
     match check_consistency(events, read_set_old, txs) {

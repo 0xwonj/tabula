@@ -12,8 +12,10 @@ use tabula_core::error::TabulaError;
 pub const DOMAIN_SSMC: u32 = 0x00;
 /// SMT internal node domain tag.
 pub const DOMAIN_SMT: u32 = 0x01;
-/// SMT leaf (ColumnMeta) domain tag.
+/// Canonical per-column SMT leaf domain tag.
 pub const DOMAIN_LEAF: u32 = 0x10;
+/// Column root-binding prefix domain tag.
+pub const DOMAIN_COLUMN_BINDING: u32 = 0x13;
 /// SMT_tables node domain tag.
 pub const DOMAIN_TABLE: u32 = 0x11;
 /// SMT_cols node domain tag.
@@ -212,6 +214,7 @@ mod tests {
             DOMAIN_SMT,
             DOMAIN_HASH_IR,
             DOMAIN_LEAF,
+            DOMAIN_COLUMN_BINDING,
             DOMAIN_TABLE,
             DOMAIN_COL,
         ];

@@ -1,7 +1,12 @@
 #![allow(missing_docs)]
 use tabula_core::{
-    AccessEvent, BatchResult, CellKey, ColId, OpKind, RowKey, TableId, TxResult, Value,
+    AccessEvent, BatchResult, CellKey, ColId, OpKind, PortableValue, RowKey, TableId, TxResult,
+    TypeId,
 };
+
+fn portable_u64(value: u64) -> PortableValue {
+    PortableValue::new(TypeId(0), borsh::to_vec(&value).expect("portable u64"))
+}
 
 #[test]
 fn test_execution_event_borsh_round_trip() {
@@ -12,7 +17,7 @@ fn test_execution_event_borsh_round_trip() {
             row: RowKey(0),
         },
         op: OpKind::Read,
-        value: Value::U64(100),
+        value: portable_u64(100),
         val_is_null: false,
         time: 1,
         effect_ordinal_in_tx: 0,
@@ -42,7 +47,7 @@ fn test_batch_result_successful_events() {
             row: RowKey(0),
         },
         op: OpKind::Read,
-        value: Value::U64(42),
+        value: portable_u64(42),
         val_is_null: false,
         time: 1,
         effect_ordinal_in_tx: 0,
@@ -61,5 +66,5 @@ fn test_batch_result_successful_events() {
     };
     let events: Vec<_> = result.successful_events().collect();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].value, Value::U64(42));
+    assert_eq!(events[0].value, portable_u64(42));
 }

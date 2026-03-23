@@ -6,8 +6,9 @@ use tabula_executor::precompile::{PrecompileHandler, PrecompileRegistry};
 use tabula_executor::property::{
     CommittedStateProvider, PropertyQueryHandler, PropertyQueryRegistry,
 };
+use tabula_ext::{MaterializedColumnBackend, RuntimeColumn};
+use tabula_types::TypedPropertyQueryResult;
 
-use crate::columns::{ResolvedColumnPlan, RuntimeColumn};
 use crate::error::RuntimeError;
 
 pub(crate) fn build_precompile_registry(
@@ -26,11 +27,11 @@ pub(crate) fn build_precompile_registry(
 
 pub(crate) fn build_property_query_registry(
     runtime_columns: &BTreeMap<(TableId, ColId), Arc<dyn RuntimeColumn>>,
-    column_plans: &BTreeMap<(TableId, ColId), ResolvedColumnPlan>,
+    column_backends: &BTreeMap<(TableId, ColId), MaterializedColumnBackend>,
 ) -> Result<PropertyQueryRegistry, RuntimeError> {
     let mut registry = PropertyQueryRegistry::new();
-    for (&(table_id, col_id), plan) in column_plans {
-        if !plan.requires_property_support() {
+    for (&(table_id, col_id), backend) in column_backends {
+        if backend.required_property_query_kinds.is_empty() {
             continue;
         }
         let Some(column) = runtime_columns.get(&(table_id, col_id)).cloned() else {
@@ -71,7 +72,7 @@ impl PropertyQueryHandler for ColumnPropertyHandler {
         &self,
         query: &tabula_ir::PropertyQuery,
         provider: &dyn CommittedStateProvider,
-    ) -> Result<tabula_core::PropertyQueryResult, tabula_core::error::TabulaError> {
+    ) -> Result<TypedPropertyQueryResult, tabula_core::error::TabulaError> {
         let rows = provider.get_column(self.table_id, self.col_id)?;
         self.column.resolve_property(query, &rows)
     }

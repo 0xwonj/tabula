@@ -1,41 +1,22 @@
+#[cfg(feature = "verify")]
 use std::collections::BTreeSet;
+#[cfg(feature = "verify")]
 use std::sync::Arc;
-
-pub use tabula_artifact::SchemeDescriptor;
-pub use tabula_core::{
-    ColId, ColumnLayoutKind, RootProfileId, RowKey, SchemeId, TableId, Value, ValueType,
-};
-use tabula_core::{PropertyQueryResult, error::TabulaError};
+use tabula_core::error::TabulaError;
+pub use tabula_core::{ColId, ColumnLayoutKind, Digest, RootProfileId, SchemeId, TableId};
 pub use tabula_ir::{PropertyQuery, PropertyQueryKind};
+#[cfg(feature = "verify")]
+use tabula_profile::{ResolvedColumnProfileRef, VerifierDigestFormat};
+#[cfg(feature = "verify")]
+use tabula_types::{EncodingRuntime, TypeRuntime};
+use tabula_types::{TypedColumnEntry, TypedPropertyQueryResult};
 
-use crate::backend::scheme::ProofSchemeFactory;
-use crate::error::{ExtError, ExtResult};
-
-/// Compiler/runtime-owned plan for one committed column.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedColumnPlan {
-    /// Table identifier.
-    pub table_id: TableId,
-    /// Column identifier.
-    pub col_id: ColId,
-    /// Portable scheme identifier selected by the compiler.
-    pub scheme_id: SchemeId,
-    /// Sealed scheme descriptor selected by the compiler.
-    pub scheme_descriptor: SchemeDescriptor,
-    /// Column value type from the sealed schema surface.
-    pub value_type: ValueType,
-    /// Whether this column participates in the root commitment.
-    pub receives_commitment: bool,
-    /// Exact structural property kinds required for this column by the program.
-    pub required_property_query_kinds: BTreeSet<PropertyQueryKind>,
-}
-
-impl ResolvedColumnPlan {
-    /// Whether this column needs any scheme-backed property support.
-    pub fn requires_property_support(&self) -> bool {
-        !self.required_property_query_kinds.is_empty()
-    }
-}
+#[cfg(feature = "verify")]
+use crate::backend::ProofColumn;
+#[cfg(feature = "prove")]
+use crate::backend::scheme::ColumnProofBackend;
+#[cfg(feature = "verify")]
+use crate::error::ExtResult;
 
 /// Execution-facing per-column view.
 pub trait RuntimeColumn: Send + Sync {
@@ -51,8 +32,8 @@ pub trait RuntimeColumn: Send + Sync {
     fn resolve_property(
         &self,
         query: &PropertyQuery,
-        state: &[(RowKey, Value, bool)],
-    ) -> Result<PropertyQueryResult, TabulaError> {
+        state: &[TypedColumnEntry],
+    ) -> Result<TypedPropertyQueryResult, TabulaError> {
         let _ = state;
         Err(TabulaError::InvalidIr(format!(
             "column scheme '{}' does not support property query {:?}",
@@ -62,100 +43,117 @@ pub trait RuntimeColumn: Send + Sync {
     }
 }
 
-/// Registry-facing factory for a column commitment scheme family.
-pub trait ColumnSchemeFactory: Send + Sync {
-    /// Sealed descriptor for this scheme implementation.
-    fn descriptor(&self) -> SchemeDescriptor;
+/// Setup-time canonical input for one materialized column backend.
+#[cfg(feature = "verify")]
+#[derive(Clone)]
+pub struct ColumnBackendSetup<'a> {
+    /// Table identifier for the concrete column slot.
+    pub table_id: TableId,
+    /// Column identifier for the concrete column slot.
+    pub col_id: ColId,
+    /// Canonical resolved per-column profile.
+    pub profile: ResolvedColumnProfileRef<'a>,
+    /// Resolved runtime type behavior for this column.
+    pub type_runtime: Arc<dyn TypeRuntime>,
+    /// Resolved runtime encoding behavior for this column.
+    pub encoding_runtime: Arc<dyn EncodingRuntime>,
+    /// Exact structural property kinds required by the program for this slot.
+    pub required_property_query_kinds: &'a BTreeSet<PropertyQueryKind>,
+}
 
-    /// Portable protocol identifier implemented by this factory.
-    fn scheme_id(&self) -> SchemeId {
-        self.descriptor().scheme_id
-    }
+/// Verifier-visible contract exported by one materialized column backend.
+#[cfg(feature = "verify")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnVerifierContract {
+    /// Portable scheme family id implemented by this backend.
+    pub scheme_id: SchemeId,
+    /// Proof layout family expected by verifier and machine setup.
+    pub proof_layout_family: ColumnLayoutKind,
+    /// Canonical verifier-visible digest format.
+    pub verifier_digest_format: VerifierDigestFormat,
+}
 
-    /// Human-readable name.
+/// Root-binding contract exported by one materialized column backend.
+#[cfg(feature = "verify")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootBindingContract {
+    /// Root binding family this backend serializes against.
+    pub root_binding_family: RootProfileId,
+    /// Sealed column profile hash bound into the leaf prefix.
+    pub column_profile_hash: Digest,
+    /// Precomputed binding prefix digest for this `(table, col, profile)` slot.
+    pub binding_digest: tabula_commitment::NativeDigest,
+    /// Whether this column participates in the root commitment.
+    pub receives_commitment: bool,
+}
+
+/// Canonical materialized backend for one concrete column slot.
+#[cfg(feature = "verify")]
+#[derive(Clone)]
+pub struct MaterializedColumnBackend {
+    /// Table identifier for this slot.
+    pub table_id: TableId,
+    /// Column identifier for this slot.
+    pub col_id: ColId,
+    /// Exact structural property kinds required for this slot.
+    pub required_property_query_kinds: BTreeSet<PropertyQueryKind>,
+    /// Execution-facing runtime view.
+    pub runtime_column: Arc<dyn RuntimeColumn>,
+    /// Verifier/machine-facing proof column.
+    pub proof_column: Arc<dyn ProofColumn>,
+    /// Prover-facing proof backend.
+    #[cfg(feature = "prove")]
+    pub proof_backend: Arc<dyn ColumnProofBackend>,
+    /// Sealed verifier-visible contract.
+    pub verifier_contract: ColumnVerifierContract,
+    /// Sealed root-binding contract.
+    pub root_binding_contract: RootBindingContract,
+}
+
+/// Canonical setup-time materializer for one scheme family.
+#[cfg(feature = "verify")]
+pub trait ColumnBackendFactory: Send + Sync {
+    /// Portable scheme family identifier.
+    fn scheme_id(&self) -> SchemeId;
+
+    /// Human-readable scheme name.
     fn name(&self) -> &str;
 
-    /// Build the execution-facing runtime view for one `(table, col)` pair.
-    fn build_runtime_column(&self, plan: &ResolvedColumnPlan) -> ExtResult<Arc<dyn RuntimeColumn>>;
+    /// Materialize one concrete column backend from the resolved profile contract.
+    fn materialize_backend(
+        &self,
+        setup: ColumnBackendSetup<'_>,
+    ) -> ExtResult<MaterializedColumnBackend>;
 }
 
-/// Canonical bundle for one custom column-scheme family.
+/// Canonical registration bundle for one column-backend family.
+#[cfg(feature = "verify")]
 #[derive(Clone)]
-pub struct SchemeBundle {
-    descriptor: SchemeDescriptor,
-    runtime_factory: Arc<dyn ColumnSchemeFactory>,
-    proof_factory: Arc<dyn ProofSchemeFactory>,
+pub struct ColumnBackendFactoryBundle {
+    factory: Arc<dyn ColumnBackendFactory>,
 }
 
-impl SchemeBundle {
-    /// Build a bundle from matching runtime and proof factories.
-    pub fn new(
-        runtime_factory: impl ColumnSchemeFactory + 'static,
-        proof_factory: impl ProofSchemeFactory + 'static,
-    ) -> ExtResult<Self> {
-        let runtime_factory: Arc<dyn ColumnSchemeFactory> = Arc::new(runtime_factory);
-        let proof_factory: Arc<dyn ProofSchemeFactory> = Arc::new(proof_factory);
-        let runtime_descriptor = runtime_factory.descriptor();
-        let proof_descriptor = proof_factory.descriptor();
-
-        if runtime_descriptor.scheme_id != proof_descriptor.scheme_id {
-            return Err(ExtError::validation(format!(
-                "scheme bundle requires identical scheme ids, got runtime={} proof={}",
-                runtime_descriptor.scheme_id.0, proof_descriptor.scheme_id.0
-            )));
+#[cfg(feature = "verify")]
+impl ColumnBackendFactoryBundle {
+    /// Build a canonical backend bundle from one materializer.
+    pub fn new(factory: impl ColumnBackendFactory + 'static) -> Self {
+        Self {
+            factory: Arc::new(factory),
         }
-        if runtime_descriptor != proof_descriptor {
-            return Err(ExtError::validation(format!(
-                "scheme bundle requires identical descriptors for id {}",
-                runtime_descriptor.scheme_id.0
-            )));
-        }
-
-        Ok(Self {
-            descriptor: runtime_descriptor,
-            runtime_factory,
-            proof_factory,
-        })
     }
 
-    /// The compiler-visible scheme descriptor carried by this bundle.
-    pub fn descriptor(&self) -> &SchemeDescriptor {
-        &self.descriptor
-    }
-
-    /// Portable scheme identifier carried by this bundle.
+    /// Portable scheme family identifier carried by this bundle.
     pub fn scheme_id(&self) -> SchemeId {
-        self.descriptor.scheme_id
+        self.factory.scheme_id()
     }
 
-    /// Clone the runtime-facing factory.
-    pub fn runtime_factory(&self) -> Arc<dyn ColumnSchemeFactory> {
-        Arc::clone(&self.runtime_factory)
+    /// Clone the materializer.
+    pub fn factory(&self) -> Arc<dyn ColumnBackendFactory> {
+        Arc::clone(&self.factory)
     }
 
-    /// Consume the bundle and return the runtime-facing factory.
-    pub fn into_runtime_factory(self) -> Arc<dyn ColumnSchemeFactory> {
-        self.runtime_factory
-    }
-
-    /// Clone the proof-facing factory.
-    pub fn proof_factory(&self) -> Arc<dyn ProofSchemeFactory> {
-        Arc::clone(&self.proof_factory)
-    }
-
-    /// Consume the bundle and return the proof-facing factory.
-    pub fn into_proof_factory(self) -> Arc<dyn ProofSchemeFactory> {
-        self.proof_factory
-    }
-
-    /// Consume the bundle and return all owned parts.
-    pub fn into_parts(
-        self,
-    ) -> (
-        SchemeDescriptor,
-        Arc<dyn ColumnSchemeFactory>,
-        Arc<dyn ProofSchemeFactory>,
-    ) {
-        (self.descriptor, self.runtime_factory, self.proof_factory)
+    /// Consume the bundle and return the materializer.
+    pub fn into_factory(self) -> Arc<dyn ColumnBackendFactory> {
+        self.factory
     }
 }

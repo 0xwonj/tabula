@@ -1,11 +1,10 @@
 //! Canonical in-memory program produced by the compiler.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use tabula_artifact::{Artifact, ColumnProofPlan, PrecompileDescriptor};
+use tabula_artifact::{Artifact, PrecompileDescriptor};
 use tabula_contract::{ContractCompatibilityPolicy, ContractMetadataEnvelope};
-use tabula_core::{ColId, TableId, TableSchema};
+use tabula_core::{ColId, ColumnProfileId, TableId, TableSchema};
 use tabula_ir::{Program, PropertyRequirement, TxTypeDef};
+use tabula_profile::{ProfileCatalog, ResolvedColumnProfileRef};
 
 /// In-memory semantic artifact produced by the compiler/registration phase.
 #[derive(Debug, Clone)]
@@ -16,12 +15,12 @@ pub struct SealedProgram {
     table_schemas: Vec<TableSchema>,
     /// Canonical transaction definitions consumed during registration.
     tx_types: Vec<TxTypeDef>,
+    /// Canonical semantic profile catalog sealed for this program.
+    profile_catalog: ProfileCatalog,
     /// Capability manifest: precompiles required by the program.
     precompile_manifest: Vec<PrecompileDescriptor>,
     /// Capability manifest: exact structural property requirements required by the program.
     required_property_requirements: Vec<PropertyRequirement>,
-    /// Compiler-owned proof plan for all committed columns.
-    column_proof_plan: Vec<ColumnProofPlan>,
     /// Canonical metadata envelope for proof compatibility checks.
     metadata_envelope: ContractMetadataEnvelope,
 }
@@ -32,22 +31,22 @@ impl SealedProgram {
         program: Program,
         table_schemas: Vec<TableSchema>,
         tx_types: Vec<TxTypeDef>,
+        profile_catalog: ProfileCatalog,
         precompile_manifest: Vec<PrecompileDescriptor>,
         required_property_requirements: Vec<PropertyRequirement>,
-        column_proof_plan: Vec<ColumnProofPlan>,
         metadata_envelope: ContractMetadataEnvelope,
     ) -> Result<Self, String> {
         let compiled = Self {
             program,
             table_schemas,
             tx_types,
+            profile_catalog,
             precompile_manifest,
             required_property_requirements,
-            column_proof_plan,
             metadata_envelope,
         };
         compiled.validate_precompile_manifest()?;
-        compiled.validate_column_proof_plan()?;
+        compiled.validate_column_profiles()?;
         Ok(compiled)
     }
 
@@ -66,6 +65,11 @@ impl SealedProgram {
         &self.tx_types
     }
 
+    /// Canonical semantic profile catalog sealed for this program.
+    pub fn profile_catalog(&self) -> &ProfileCatalog {
+        &self.profile_catalog
+    }
+
     /// Capability manifest: precompiles required by the program.
     pub fn precompile_manifest(&self) -> &[PrecompileDescriptor] {
         &self.precompile_manifest
@@ -74,11 +78,6 @@ impl SealedProgram {
     /// Capability manifest: exact structural property requirements required by the program.
     pub fn required_property_requirements(&self) -> &[PropertyRequirement] {
         &self.required_property_requirements
-    }
-
-    /// Compiler-owned proof plan for all committed columns.
-    pub fn column_proof_plan(&self) -> &[ColumnProofPlan] {
-        &self.column_proof_plan
     }
 
     /// Canonical metadata envelope for proof compatibility checks.
@@ -129,79 +128,55 @@ impl SealedProgram {
         Ok(())
     }
 
-    /// Validate that the proof plan covers each schema column exactly once.
-    pub fn validate_column_proof_plan(&self) -> Result<(), String> {
-        let expected: BTreeSet<(TableId, ColId)> = self
-            .table_schemas
-            .iter()
-            .flat_map(|schema| {
-                schema
-                    .columns
-                    .iter()
-                    .map(move |column| (schema.id, column.id))
-            })
-            .collect();
-
-        let mut actual = BTreeSet::new();
-        for plan in &self.column_proof_plan {
-            if plan.scheme_descriptor.scheme_id != plan.scheme_id {
-                return Err(format!(
-                    "column proof plan descriptor mismatch for table {} col {}: scheme_id={} descriptor.scheme_id={}",
-                    plan.table_id.0,
-                    plan.col_id.0,
-                    plan.scheme_id.0,
-                    plan.scheme_descriptor.scheme_id.0,
-                ));
-            }
-            let key = (plan.table_id, plan.col_id);
-            if !actual.insert(key) {
-                return Err(format!(
-                    "column proof plan contains duplicate entry for table {} col {}",
-                    plan.table_id.0, plan.col_id.0,
-                ));
+    /// Validate that every sealed column resolves through the canonical profile catalog.
+    pub fn validate_column_profiles(&self) -> Result<(), String> {
+        for schema in &self.table_schemas {
+            for column in &schema.columns {
+                self.resolve_column_profile(schema.id, column.id)?;
             }
         }
-
-        let missing: Vec<_> = expected.difference(&actual).copied().collect();
-        if let Some((table_id, col_id)) = missing.first().copied() {
-            return Err(format!(
-                "column proof plan is missing table {} col {}",
-                table_id.0, col_id.0,
-            ));
-        }
-
-        let extra: Vec<_> = actual.difference(&expected).copied().collect();
-        if let Some((table_id, col_id)) = extra.first().copied() {
-            return Err(format!(
-                "column proof plan references unknown table {} col {}",
-                table_id.0, col_id.0,
-            ));
-        }
-
         Ok(())
     }
 
-    /// Index the proof plan by `(table_id, col_id)` for runtime lookup.
-    pub fn column_proof_plan_by_id(
+    /// Resolve one sealed column `(table_id, col_id)` into its canonical profile-backed view.
+    pub fn resolve_column_profile(
         &self,
-    ) -> Result<BTreeMap<(TableId, ColId), ColumnProofPlan>, String> {
-        self.validate_column_proof_plan()?;
-        Ok(self
-            .column_proof_plan
+        table_id: TableId,
+        col_id: ColId,
+    ) -> Result<ResolvedColumnProfileRef<'_>, String> {
+        let column_profile_id = self
+            .table_schemas
             .iter()
-            .cloned()
-            .map(|plan| ((plan.table_id, plan.col_id), plan))
-            .collect())
+            .find(|schema| schema.id == table_id)
+            .and_then(|schema| schema.columns.iter().find(|column| column.id == col_id))
+            .map(|column| column.column_profile_id)
+            .ok_or_else(|| {
+                format!(
+                    "table {} col {} is missing from sealed schema",
+                    table_id.0, col_id.0
+                )
+            })?;
+        self.resolve_column_profile_by_id(column_profile_id)
+    }
+
+    /// Resolve one sealed column profile id into its canonical profile-backed view.
+    pub fn resolve_column_profile_by_id(
+        &self,
+        column_profile_id: ColumnProfileId,
+    ) -> Result<ResolvedColumnProfileRef<'_>, String> {
+        self.profile_catalog
+            .resolve_column_profile(column_profile_id)
+            .map_err(|err| err.to_string())
     }
 
     /// Clone into a sealed portable artifact.
     pub fn as_artifact(&self) -> Artifact {
         Artifact {
             table_schemas: self.table_schemas.clone(),
+            profile_catalog: self.profile_catalog.clone(),
             tx_types: self.tx_types.clone(),
             precompile_manifest: self.precompile_manifest.clone(),
             required_property_requirements: self.required_property_requirements.clone(),
-            column_proof_plan: self.column_proof_plan.clone(),
             contract_metadata: self.metadata_envelope.clone(),
         }
     }
@@ -210,10 +185,10 @@ impl SealedProgram {
     pub fn into_artifact(self) -> Artifact {
         Artifact {
             table_schemas: self.table_schemas,
+            profile_catalog: self.profile_catalog,
             tx_types: self.tx_types,
             precompile_manifest: self.precompile_manifest,
             required_property_requirements: self.required_property_requirements,
-            column_proof_plan: self.column_proof_plan,
             contract_metadata: self.metadata_envelope,
         }
     }

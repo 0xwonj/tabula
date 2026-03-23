@@ -5,6 +5,10 @@ use crate::assertions::state::{ExpectedStateCell, assert_state_cells_exact};
 /// Assert that two sealed artifacts are semantically identical.
 pub fn assert_artifact_semantically_eq(lhs: &Artifact, rhs: &Artifact) {
     assert_eq!(lhs.table_schemas, rhs.table_schemas, "table schemas differ");
+    assert_eq!(
+        lhs.profile_catalog, rhs.profile_catalog,
+        "profile catalogs differ"
+    );
     assert_eq!(lhs.tx_types, rhs.tx_types, "transaction types differ");
     assert_eq!(
         lhs.precompile_manifest, rhs.precompile_manifest,
@@ -13,10 +17,6 @@ pub fn assert_artifact_semantically_eq(lhs: &Artifact, rhs: &Artifact) {
     assert_eq!(
         lhs.required_property_requirements, rhs.required_property_requirements,
         "required property requirements differ"
-    );
-    assert_eq!(
-        lhs.column_proof_plan, rhs.column_proof_plan,
-        "column proof plans differ"
     );
     assert_eq!(
         lhs.contract_metadata, rhs.contract_metadata,
@@ -34,7 +34,7 @@ pub fn assert_state_semantically_eq(lhs: &State, rhs: &State) {
             table: tabula_core::TableId(cell.table),
             col: tabula_core::ColId(cell.col),
             row: tabula_core::RowKey(cell.row),
-            value: cell.value,
+            value: cell.value.clone(),
         })
         .collect();
     assert_state_cells_exact(lhs, &expected);

@@ -1,7 +1,7 @@
 //! Tests for the SsmcCommitment bundled ColumnCommitment impl.
 
 use p3_matrix::Matrix;
-use tabula_core::{ColId, TableId};
+use tabula_core::{ColId, Digest, RootProfileId, TableId};
 
 use tabula_chips::shards::ChipIdAllocator;
 use tabula_chips::shards::ssmc::{
@@ -17,6 +17,8 @@ fn plan(table: u32, col: u16) -> ColumnPlan {
     ColumnPlan {
         table: TableId(table),
         col: ColId(col),
+        root_binding_family: RootProfileId::SMT_V1,
+        column_profile_hash: Digest::from([0x33; 32]),
         encoding_width: EncodingWidth::STANDARD,
         scheme_name: "ssmc".to_string(),
     }
@@ -75,6 +77,8 @@ fn chip_ids_skips_non_ssmc() {
         ColumnPlan {
             table: TableId(0),
             col: ColId(1),
+            root_binding_family: RootProfileId::SMT_V1,
+            column_profile_hash: Digest::from([0x44; 32]),
             encoding_width: EncodingWidth::STANDARD,
             scheme_name: "smt".to_string(), // not SSMC
         },

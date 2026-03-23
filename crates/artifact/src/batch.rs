@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use tabula_core::{Transaction, TxTypeId, Value};
+use tabula_core::{PortableValue, Transaction, TxTypeId};
+use tabula_types::TypeRuntimeRegistry;
 
 use crate::ArtifactError;
 use crate::canonical::{bytes_to_hex, canonical_json_bytes, canonical_json_digest};
@@ -22,7 +23,7 @@ pub struct TransactionInput {
     /// Transaction type id.
     pub tx_type: u32,
     /// Typed transaction params.
-    pub params: Vec<Value>,
+    pub params: Vec<PortableValue>,
     /// Sender as hex-encoded 32-byte key.
     pub sender: String,
     /// Replay nonce.
@@ -48,8 +49,18 @@ impl TransactionBatch {
 
 impl TransactionInput {
     /// Convert to core transaction form.
-    pub fn to_transaction(&self) -> Result<Transaction, ArtifactError> {
+    pub fn to_transaction(
+        &self,
+        type_runtimes: &TypeRuntimeRegistry,
+    ) -> Result<Transaction, ArtifactError> {
         let sender = parse_hex_32(&self.sender)?;
+        for param in &self.params {
+            type_runtimes.decode_portable(param).map_err(|err| {
+                ArtifactError::InvalidPortableValue {
+                    detail: err.to_string(),
+                }
+            })?;
+        }
         Ok(Transaction {
             tx_type: TxTypeId(self.tx_type),
             params: self.params.clone(),
@@ -92,13 +103,14 @@ pub fn parse_hex_32(s: &str) -> Result<[u8; 32], ArtifactError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tabula_types::{TypeRuntimeRegistry, bool_portable, u64_portable};
 
     #[test]
     fn batch_file_serde_roundtrip() {
         let batch = TransactionBatch {
             transactions: vec![TransactionInput {
                 tx_type: 0,
-                params: vec![Value::U64(100)],
+                params: vec![u64_portable(100)],
                 sender: "01".repeat(32),
                 nonce: 0,
             }],
@@ -107,19 +119,20 @@ mod tests {
         let json = serde_json::to_string(&batch).expect("serialize");
         let back: TransactionBatch = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.transactions.len(), 1);
-        assert_eq!(back.transactions[0].params[0], Value::U64(100));
+        assert_eq!(back.transactions[0].params[0], u64_portable(100));
     }
 
     #[test]
     fn tx_input_to_transaction_roundtrip() {
         let tx = TransactionInput {
             tx_type: 1,
-            params: vec![Value::U64(42), Value::Bool(true)],
+            params: vec![u64_portable(42), bool_portable(true)],
             sender: "ab".repeat(32),
             nonce: 7,
         };
 
-        let core_tx = tx.to_transaction().expect("convert");
+        let runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
+        let core_tx = tx.to_transaction(&runtimes).expect("convert");
         assert_eq!(core_tx.tx_type, TxTypeId(1));
         assert_eq!(core_tx.params.len(), 2);
         assert_eq!(core_tx.nonce, 7);
@@ -160,7 +173,7 @@ mod tests {
         let batch = TransactionBatch {
             transactions: vec![TransactionInput {
                 tx_type: 0,
-                params: vec![Value::U64(1)],
+                params: vec![u64_portable(1)],
                 sender: "01".repeat(32),
                 nonce: 7,
             }],

@@ -50,9 +50,9 @@ impl std::fmt::Display for BusId {
 pub mod core_buses {
     use super::BusId;
 
-    /// StateColumn/ColumnMeta hash chains ↔ PoseidonChip (permutation verification).
+    /// State shard / meta shard hash chains ↔ PoseidonChip (permutation verification).
     pub const POSEIDON_PERM: BusId = BusId(5);
-    /// StateColumn segment hashes ↔ ColumnMeta (commitment verification).
+    /// State shard segment hashes ↔ meta shard (commitment verification).
     pub const COMMITMENT_VERIF: BusId = BusId(6);
     /// All chips → RangeCheckChip (u16 range proofs).
     pub const RANGE_CHECK: BusId = BusId(8);
@@ -62,13 +62,13 @@ pub mod core_buses {
     pub const READ_ACCESS: BusId = BusId(10);
     /// Execution → InterTxOrder (write access tuple with `tx_index` anchor).
     pub const WRITE_ACCESS: BusId = BusId(11);
-    /// Execution → ColumnMeta (read from empty column).
+    /// Execution → meta shard (read from empty column).
     pub const EMPTY_COL_READ: BusId = BusId(12);
     /// InterTxOrder → StateColumn (base state entries from init rows).
     pub const BASE_STATE_ENTRY: BusId = BusId(13);
     /// InterTxOrder → StateColumn (coalesced writes from last-for-key rows).
     pub const COALESCED_WRITE: BusId = BusId(14);
-    /// ColumnMeta → SmtColPathChip (leaf digests for SMT column paths).
+    /// Meta shard → SmtColPathChip (leaf digests for SMT column paths).
     pub const SMT_LEAF_DIGEST: BusId = BusId(15);
     /// SmtColPathChip → SmtTablePathChip (per-table SMT roots).
     pub const SMT_TABLE_ROOT: BusId = BusId(16);

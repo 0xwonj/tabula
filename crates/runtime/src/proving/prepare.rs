@@ -9,11 +9,12 @@ use tabula_artifact::{State, TransactionBatch};
 use tabula_chips::precompile_transcript::{
     PRECOMPILE_TRANSCRIPT_WITNESS_LABEL, PrecompileTranscriptCall, compute_precompile_call_header,
 };
-use tabula_commitment::{PoseidonHasher, compute_state_roots_from_metas};
-use tabula_core::{Batch, BatchResult, ColId, InMemoryStaticTables, TableId, TxResult, zero_value};
+use tabula_commitment::{PoseidonHasher, compute_state_roots_from_bindings};
+use tabula_core::{Batch, BatchResult, ColId, InMemoryStaticTables, TableId, TxResult};
 use tabula_ir::Instruction;
 use tabula_machine::{ColumnIdentity, PublicStatement};
 use tabula_stark::trace::WitnessStore;
+use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedPropertyQueryResult};
 use tabula_witness::stark::{SharedStoreBuilder, SharedStoreContext};
 use tabula_witness::{
     CommittedEntry, ExecutionInputPreparer, PreparedExecutionColumns, PropertyReadClaim,
@@ -21,18 +22,18 @@ use tabula_witness::{
 
 use crate::error::RuntimeError;
 use crate::execute::ExecutedBatch;
-use crate::precompile_proofs::{
+use crate::program::ResolvedProgram;
+use crate::setup::materialize::ColumnProofRecipe;
+use tabula_ext::backend::precompile::{
     PrecompileProofContext, PrecompileProofPreparer, ResolvedPrecompileCall,
 };
-use crate::program::ResolvedProgram;
-use crate::proof_extensions::{ColumnProofContext, ColumnProofPreparer};
-use crate::setup::materialize::ColumnProofRecipe;
+use tabula_ext::backend::scheme::{ColumnProofBackend, ColumnProofContext, PreparedColumnDelta};
 
 struct PlannedColumnProofInput {
     table: TableId,
     col: ColId,
     context: ColumnProofContext,
-    preparer: Arc<dyn ColumnProofPreparer>,
+    proof_backend: Arc<dyn ColumnProofBackend>,
 }
 
 pub(crate) struct ColumnTraceInput {
@@ -61,7 +62,7 @@ pub(crate) fn prepare_proof_batch(
     batch_file: &TransactionBatch,
     executed: &ExecutedBatch,
 ) -> Result<PreparedProofBatch, RuntimeError> {
-    let batch = convert_batch(batch_file)?;
+    let batch = convert_batch(batch_file, resolved_program.type_runtimes())?;
     prepare_proof_batch_from_parts(
         resolved_program,
         proof_recipes,
@@ -87,12 +88,16 @@ fn prepare_proof_batch_from_parts(
         .collect();
 
     let lowering = tabula_witness::stark::lower_program_batch::<3>(
-        resolved_program.program(),
-        batch,
-        batch_result,
-        resolved_program.schemas_by_id(),
-        &InMemoryStaticTables::new(),
-        &empty_columns,
+        tabula_witness::stark::LowerProgramBatchInput {
+            program: resolved_program.program(),
+            batch,
+            result: batch_result,
+            schemas: resolved_program.schemas_by_id(),
+            type_runtimes: resolved_program.type_runtimes(),
+            encoding_runtimes: resolved_program.encoding_runtimes(),
+            static_tables: &InMemoryStaticTables::new(),
+            empty_columns: &empty_columns,
+        },
     )
     .map_err(RuntimeError::TraceBuild)?;
     let property_reads = extract_property_read_claims(resolved_program, batch, batch_result)?;
@@ -106,6 +111,9 @@ fn prepare_proof_batch_from_parts(
         .prepare_execution_inputs(
             batch_result,
             resolved_program.schemas_by_id(),
+            resolved_program.program().profile_catalog(),
+            resolved_program.type_runtimes(),
+            resolved_program.encoding_runtimes(),
             planned_columns.iter(),
         )
         .map_err(|e| RuntimeError::WitnessGeneration {
@@ -120,16 +128,16 @@ fn prepare_proof_batch_from_parts(
         .map(|planned| {
             let table = planned.table;
             let col = planned.col;
-            let preparer_name = planned.preparer.name().to_string();
-            let preparer = planned.preparer;
-            let proof = preparer
+            let backend_name = planned.proof_backend.name().to_string();
+            let proof_backend = planned.proof_backend;
+            let proof = proof_backend
                 .prepare_column(planned.context)
                 .map_err(RuntimeError::from_extension_proof)
                 .map_err(|e| match e {
                     RuntimeError::WitnessGeneration { detail } => RuntimeError::WitnessGeneration {
                         detail: format!(
-                            "column ({}, {}) proof preparer '{}': {detail}",
-                            table.0, col.0, preparer_name,
+                            "column ({}, {}) proof backend '{}': {detail}",
+                            table.0, col.0, backend_name,
                         ),
                     },
                     other => other,
@@ -140,10 +148,15 @@ fn prepare_proof_batch_from_parts(
     let prepared_precompiles = precompile_recipes
         .iter()
         .map(|recipe| {
-            let calls = collect_precompile_calls(batch_result, recipe.descriptor.precompile_id)
-                .map_err(|e| RuntimeError::WitnessGeneration {
-                    detail: e.to_string(),
-                })?;
+            let calls = collect_precompile_calls(
+                batch_result,
+                &recipe.descriptor,
+                resolved_program.type_runtimes(),
+                resolved_program.encoding_runtimes(),
+            )
+            .map_err(|e| RuntimeError::WitnessGeneration {
+                detail: e.to_string(),
+            })?;
             let context = PrecompileProofContext {
                 descriptor: recipe.descriptor.clone(),
                 calls,
@@ -166,29 +179,34 @@ fn prepare_proof_batch_from_parts(
         })
         .collect::<Result<Vec<_>, RuntimeError>>()?;
 
-    let metas: Vec<_> = prepared_columns
+    let root_bindings: Vec<_> = prepared_columns
         .iter()
-        .map(|(_, _, proof)| proof.meta.clone())
+        .filter_map(|(_, _, proof)| proof.root_binding.clone())
         .collect();
     let hasher = PoseidonHasher::new();
     let (old_state_root, new_state_root) =
-        compute_state_roots_from_metas(&hasher, &metas).map_err(RuntimeError::TraceBuild)?;
+        compute_state_roots_from_bindings(&hasher, &root_bindings)
+            .map_err(RuntimeError::TraceBuild)?;
     let air_statement = PublicStatement {
         old_root: old_state_root,
         new_root: new_state_root,
     };
 
     let mut shared_store = SharedStoreBuilder::<PoseidonHasher, 3>::new(SharedStoreContext {
-        column_metas: &metas,
+        column_root_bindings: &root_bindings,
         old_state_root: &air_statement.old_root,
         new_state_root: &air_statement.new_root,
     })
     .prepare_witness_store(&lowering, PoseidonHasher::new())
     .map_err(RuntimeError::TraceBuild)?;
-    let transcript_calls = collect_all_precompile_transcript_calls(batch_result).map_err(|e| {
-        RuntimeError::WitnessGeneration {
-            detail: e.to_string(),
-        }
+    let transcript_calls = collect_all_precompile_transcript_calls(
+        batch_result,
+        precompile_recipes,
+        resolved_program.type_runtimes(),
+        resolved_program.encoding_runtimes(),
+    )
+    .map_err(|e| RuntimeError::WitnessGeneration {
+        detail: e.to_string(),
     })?;
     if !transcript_calls.is_empty() {
         let mut transcript_store = WitnessStore::new();
@@ -209,8 +227,8 @@ fn prepare_proof_batch_from_parts(
             identity: ColumnIdentity {
                 table_id: table.0,
                 col_id: col.0,
-                com_old: proof.meta.com_old.0,
-                com_new: proof.meta.com_new.0,
+                com_old: proof.old_digest.digest.0,
+                com_new: proof.new_digest.digest.0,
             },
             store: proof.store,
         })
@@ -253,14 +271,6 @@ fn build_planned_column_inputs(
                     ),
                 });
             }
-            if column.value_type != slot.value_type {
-                return Err(RuntimeError::ValidationFailed {
-                    detail: format!(
-                        "prepared execution column ({}, {}) has value type {:?} but proof slot expects {:?}",
-                        table.0, col.0, column.value_type, slot.value_type
-                    ),
-                });
-            }
             let old_entries = old_entries_by_col.remove(&(table, col)).ok_or_else(|| {
                 RuntimeError::ValidationFailed {
                     detail: format!(
@@ -273,14 +283,24 @@ fn build_planned_column_inputs(
                 table,
                 col,
                 context: ColumnProofContext {
-                    column,
+                    column: {
+                        let is_touched = column.is_touched();
+                        PreparedColumnDelta {
+                            table: column.table,
+                            col: column.col,
+                            init_cells: column.init_cells,
+                            access_events: column.access_events,
+                            writes: column.writes,
+                            is_touched,
+                        }
+                    },
                     old_entries,
                     property_reads: property_reads
                         .get(&(table, col))
                         .cloned()
                         .unwrap_or_default(),
                 },
-                preparer: Arc::clone(&slot.preparer),
+                proof_backend: Arc::clone(&slot.proof_backend),
             })
         })
         .collect()
@@ -324,8 +344,14 @@ fn extract_property_read_claims(
                 .or_default()
                 .push(PropertyReadClaim {
                     query: query.clone(),
-                    result: tabula_core::PropertyQueryResult {
-                        value: stored.value,
+                    result: TypedPropertyQueryResult {
+                        value: decode_column_portable(
+                            resolved_program,
+                            *table,
+                            *col,
+                            &stored.value,
+                            "property-read result",
+                        )?,
                         key: stored.key,
                         is_null: stored.is_null,
                     },
@@ -343,19 +369,56 @@ fn collect_old_entries_by_column(
     let mut entries_by_col: BTreeMap<(TableId, ColId), Vec<CommittedEntry>> = BTreeMap::new();
     for cell in &state_file.cells {
         let key = (TableId(cell.table), ColId(cell.col));
-        let value_type = resolved_program
-            .column_plans()
-            .get(&key)
-            .map(|plan| plan.value_type)
+        let schema = resolved_program
+            .schemas_by_id()
+            .get(&key.0)
+            .ok_or_else(|| RuntimeError::ValidationFailed {
+                detail: format!("missing schema for table {}", cell.table),
+            })?;
+        let column = schema
+            .columns
+            .iter()
+            .find(|column| column.id == key.1)
             .ok_or_else(|| RuntimeError::ValidationFailed {
                 detail: format!(
-                    "missing column plan for table {} col {}",
+                    "missing column schema for table {} col {}",
                     cell.table, cell.col
                 ),
             })?;
+        let resolved = resolved_program
+            .program()
+            .profile_catalog()
+            .resolve_column_profile(column.column_profile_id)
+            .map_err(|err| RuntimeError::ValidationFailed {
+                detail: format!(
+                    "failed to resolve column profile {} for table {} col {}: {err}",
+                    column.column_profile_id.0, cell.table, cell.col
+                ),
+            })?;
+        let value = if let Some(portable) = &cell.value {
+            decode_column_portable(
+                resolved_program,
+                key.0,
+                key.1,
+                portable,
+                "committed-state entry",
+            )?
+        } else {
+            resolved_program
+                .type_runtimes()
+                .zero_of(resolved.type_descriptor.type_id)
+                .map_err(|err| RuntimeError::ValidationFailed {
+                    detail: format!(
+                        "missing canonical zero value for type {} while collecting committed entries for table {} col {}: {err}",
+                        resolved.type_descriptor.type_id.0,
+                        cell.table,
+                        cell.col,
+                    ),
+                })?
+        };
         entries_by_col.entry(key).or_default().push(CommittedEntry {
             row: tabula_core::RowKey(cell.row),
-            value: cell.value.unwrap_or_else(|| zero_value(value_type)),
+            value,
             is_null: cell.value.is_none(),
         });
     }
@@ -363,12 +426,12 @@ fn collect_old_entries_by_column(
     for schema in resolved_program.schemas_by_id().values() {
         for col_def in &schema.columns {
             if !resolved_program
-                .column_plans()
+                .column_backends()
                 .contains_key(&(schema.id, col_def.id))
             {
                 return Err(RuntimeError::ValidationFailed {
                     detail: format!(
-                        "missing column plan for table {} col {}",
+                        "missing materialized backend for table {} col {}",
                         schema.id.0, col_def.id.0
                     ),
                 });
@@ -383,9 +446,63 @@ fn collect_old_entries_by_column(
     Ok(entries_by_col)
 }
 
+fn decode_column_portable(
+    resolved_program: &ResolvedProgram,
+    table: TableId,
+    col: ColId,
+    portable: &tabula_core::PortableValue,
+    label: &str,
+) -> Result<tabula_types::TypedValue, RuntimeError> {
+    let schema = resolved_program
+        .schemas_by_id()
+        .get(&table)
+        .ok_or_else(|| RuntimeError::ValidationFailed {
+            detail: format!("missing schema for table {}", table.0),
+        })?;
+    let column = schema
+        .columns
+        .iter()
+        .find(|column| column.id == col)
+        .ok_or_else(|| RuntimeError::ValidationFailed {
+            detail: format!("missing column schema for table {} col {}", table.0, col.0),
+        })?;
+    let resolved = resolved_program
+        .program()
+        .profile_catalog()
+        .resolve_column_profile(column.column_profile_id)
+        .map_err(|err| RuntimeError::ValidationFailed {
+            detail: format!(
+                "failed to resolve column profile {} for table {} col {}: {err}",
+                column.column_profile_id.0, table.0, col.0
+            ),
+        })?;
+    if portable.type_id() != resolved.type_descriptor.type_id {
+        return Err(RuntimeError::ValidationFailed {
+            detail: format!(
+                "{label} type {} does not match sealed column type {} for table {} col {}",
+                portable.type_id().0,
+                resolved.type_descriptor.type_id.0,
+                table.0,
+                col.0,
+            ),
+        });
+    }
+    resolved_program
+        .type_runtimes()
+        .decode_portable(portable)
+        .map_err(|err| RuntimeError::ValidationFailed {
+            detail: format!(
+                "failed to decode {label} for table {} col {}: {err}",
+                table.0, col.0,
+            ),
+        })
+}
+
 fn collect_precompile_calls(
     batch_result: &BatchResult,
-    precompile_id: tabula_ir::PrecompileId,
+    descriptor: &tabula_artifact::PrecompileDescriptor,
+    type_runtimes: &TypeRuntimeRegistry,
+    encoding_runtimes: &EncodingRuntimeRegistry,
 ) -> Result<Vec<ResolvedPrecompileCall>, tabula_core::error::TabulaError> {
     batch_result
         .txs
@@ -397,11 +514,18 @@ fn collect_precompile_calls(
             TxResult::Failed { .. } => None,
         })
         .flatten()
-        .filter(|event| event.precompile_id == precompile_id.0)
+        .filter(|event| event.precompile_id == descriptor.precompile_id.0)
         .map(|event| {
             Ok(ResolvedPrecompileCall {
                 event: event.clone(),
-                header: compute_precompile_call_header(event).map(|header| {
+                header: compute_precompile_call_header(
+                    event,
+                    descriptor.precompile_id.0,
+                    &descriptor.signature,
+                    type_runtimes,
+                    encoding_runtimes,
+                )
+                .map(|header| {
                     tabula_ext::backend::precompile::PrecompileCallHeader {
                         tx_index: header.tx_index,
                         instruction_index: header.instruction_index,
@@ -418,7 +542,14 @@ fn collect_precompile_calls(
 
 fn collect_all_precompile_transcript_calls(
     batch_result: &BatchResult,
+    precompile_recipes: &[PrecompileProofRecipe],
+    type_runtimes: &TypeRuntimeRegistry,
+    encoding_runtimes: &EncodingRuntimeRegistry,
 ) -> Result<Vec<PrecompileTranscriptCall>, tabula_core::error::TabulaError> {
+    let descriptors_by_id: BTreeMap<_, _> = precompile_recipes
+        .iter()
+        .map(|recipe| (recipe.descriptor.precompile_id, &recipe.descriptor))
+        .collect();
     let mut calls = batch_result
         .txs
         .iter()
@@ -429,18 +560,42 @@ fn collect_all_precompile_transcript_calls(
             TxResult::Failed { .. } => None,
         })
         .flatten()
-        .map(PrecompileTranscriptCall::from_event)
+        .map(|event| {
+            let precompile_id = tabula_ir::PrecompileId(event.precompile_id);
+            let Some(descriptor) = descriptors_by_id.get(&precompile_id) else {
+                return Err(tabula_core::error::TabulaError::ProofError {
+                    phase: "precompile_transcript",
+                    detail: format!(
+                        "missing sealed descriptor for precompile 0x{:04x}",
+                        event.precompile_id,
+                    ),
+                });
+            };
+            PrecompileTranscriptCall::from_event(
+                event,
+                descriptor.precompile_id.0,
+                &descriptor.signature,
+                type_runtimes,
+                encoding_runtimes,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     calls.sort_by_key(|call| (call.header.tx_index, call.header.instruction_index));
     Ok(calls)
 }
 
 /// Convert a `TransactionBatch` into a `Batch`.
-pub(crate) fn convert_batch(batch_file: &TransactionBatch) -> Result<Batch, RuntimeError> {
+pub(crate) fn convert_batch(
+    batch_file: &TransactionBatch,
+    type_runtimes: &TypeRuntimeRegistry,
+) -> Result<Batch, RuntimeError> {
     let transactions = batch_file
         .transactions
         .iter()
-        .map(|t| t.to_transaction().map_err(RuntimeError::InvalidBatch))
+        .map(|t| {
+            t.to_transaction(type_runtimes)
+                .map_err(RuntimeError::InvalidBatch)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Batch { transactions })
 }

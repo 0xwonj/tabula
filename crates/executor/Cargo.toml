@@ -6,7 +6,9 @@ license.workspace = true
 
 [dependencies]
 tabula-core = { workspace = true }
+tabula-types = { workspace = true }
 tabula-ir = { workspace = true }
+tabula-profile = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

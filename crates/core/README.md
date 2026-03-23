@@ -17,7 +17,7 @@ traits live here.
 
 ## Owns
 
-- shared identifiers, schemas, values, and transaction model types
+- shared identifiers, schemas, portable boundary values, and transaction model types
 - execution result and event vocabulary
 - core error types used across the workspace
 - low-level traits for hashing, codecs, state access, signatures, and nonce policy
@@ -60,7 +60,7 @@ traits live here.
 - Add new shared concepts here only when multiple layers genuinely need the
   same meaning.
 - Prefer traits over concrete policy when introducing new low-level capabilities.
-- Treat changes to `Value`, `ValueType`, state keys, or execution events as
+- Treat changes to `PortableValue`, state keys, or execution events as
   cross-stack changes that require coordinated updates.
 - Avoid turning this crate into a dumping ground for utilities that are not
   truly part of the kernel vocabulary.
@@ -75,7 +75,7 @@ Preserve the behaviors that prove this crate still owns the kernel boundary:
 
 - shared types remain deterministic and serializable
 - trait-based abstractions remain usable without higher-level policy crates
-- value and absence semantics remain unambiguous
+- portable value and absence semantics remain unambiguous
 
 ## Related Crates
 

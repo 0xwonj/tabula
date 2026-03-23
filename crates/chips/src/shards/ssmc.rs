@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use tabula_commitment::schemes::tags;
+use tabula_commitment::{PoseidonHasher, compute_column_root_binding_prefix_digest};
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId};
 
@@ -125,6 +125,7 @@ impl<const W: usize> ColumnCommitment for SsmcCommitment<W> {
     ) -> Result<Vec<(ChipId, TraceEntry)>, TabulaError> {
         let witness = store.get::<SsmcWitness>(SSMC_WITNESS_LABEL)?;
         let mut entries = Vec::new();
+        let hasher = PoseidonHasher::new();
 
         for col in cols {
             let chips = self
@@ -162,8 +163,18 @@ impl<const W: usize> ColumnCommitment for SsmcCommitment<W> {
                 &col_data.state_rows,
                 &property_anchor_mults,
             );
-            let meta_trace =
-                generate_meta_shard_trace(t, c, tags::SSMC, col_data.meta_row.as_ref());
+            let meta_trace = generate_meta_shard_trace(
+                t,
+                c,
+                compute_column_root_binding_prefix_digest(
+                    &hasher,
+                    col.table,
+                    col.col,
+                    col.root_binding_family,
+                    &col.column_profile_hash,
+                ),
+                col_data.meta_row.as_ref(),
+            );
 
             entries.push((chips.memory, TraceEntry::main_only(mem_trace)));
             entries.push((chips.state, TraceEntry::main_only(state_trace)));

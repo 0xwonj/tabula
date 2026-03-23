@@ -3,7 +3,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::{ColId, TableId, ValueType};
+use crate::{ColId, ColumnProfileId, TableId};
 
 /// A column definition within a table schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -12,8 +12,8 @@ pub struct ColumnDef {
     pub id: ColId,
     /// Human-readable name.
     pub name: String,
-    /// The value type for this column.
-    pub value_type: ValueType,
+    /// Sealed per-column profile selected during compiler registration.
+    pub column_profile_id: ColumnProfileId,
 }
 
 /// Schema definition for a table.

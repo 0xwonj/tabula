@@ -2,11 +2,12 @@
 
 use std::sync::Arc;
 
+use sha2::{Digest as _, Sha256};
 use tabula_core::error::TabulaError;
 use tabula_ext::backend::WitnessStore;
 use tabula_ext::backend::precompile::{
-    PrecompileProofContext, PrecompileProofFactory, PrecompileProofPreparer, PrecompileProofSystem,
-    PreparedPrecompileProof, ResolvedPrecompile, ResolvedPrecompileCall,
+    PrecompileBackendFactory, PrecompileProofContext, PrecompileProofPreparer,
+    PrecompileProofSystem, PreparedPrecompileProof, ResolvedPrecompile, ResolvedPrecompileCall,
 };
 use tabula_ext::backend::prelude::{
     Air, AirInteraction, AnyRap, BaseAir, BusConsumer, ChipId, DynChip, InteractionAirBuilder,
@@ -14,7 +15,11 @@ use tabula_ext::backend::prelude::{
     WindowAccess, borrow_cols, borrow_cols_mut, core_buses, expr_from_u32,
 };
 use tabula_ext::precompile::PrecompileHandler;
-use tabula_ext::{ExtError, PrecompileDescriptor, PrecompileId, Value};
+use tabula_ext::{
+    ExtError, PrecompileDescriptor, PrecompileId, PrecompileSignature, PrecompileValueProfile,
+};
+use tabula_profile::{ENCODING_U64_ID, TYPE_U64_ID};
+use tabula_types::{TypedValue, u64_portable, u64_typed};
 
 /// Default precompile id used by the testing fixtures.
 pub const CONSTANT_ONE_PRECOMPILE_ID: PrecompileId = PrecompileId(0x0001);
@@ -27,36 +32,55 @@ const SEQUENCE_WITNESS_LABEL: &str = "testing_sequence_precompile_calls";
 const CONSTANT_ONE_CHIP_ID_BASE: u16 = 400;
 const CONSTANT_ONE_WIDTH: usize = 14;
 
+fn semantic_hash(label: &str) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"tabula.testing.precompile.semantic.v1");
+    hasher.update(label.as_bytes());
+    hasher.finalize().into()
+}
+
+fn u64_profile() -> PrecompileValueProfile {
+    PrecompileValueProfile {
+        type_id: TYPE_U64_ID,
+        encoding_profile_id: ENCODING_U64_ID,
+    }
+}
+
 /// Canonical descriptor for the "constant one" testing precompile family.
 pub fn constant_one_precompile_descriptor(id: PrecompileId) -> PrecompileDescriptor {
-    PrecompileDescriptor::from_labels(
+    PrecompileDescriptor::new(
         id,
         CONSTANT_ONE_PRECOMPILE_VERSION,
-        "testing.constant_one.params",
-        "testing.constant_one.semantic",
+        PrecompileSignature::new(vec![], vec![u64_profile()]),
+        semantic_hash("testing.constant_one.semantic"),
     )
 }
 
 /// Canonical descriptor for the multi-output "sequence" testing precompile family.
 pub fn sequence_precompile_descriptor(id: PrecompileId) -> PrecompileDescriptor {
-    PrecompileDescriptor::from_labels(
+    PrecompileDescriptor::new(
         id,
         CONSTANT_ONE_PRECOMPILE_VERSION,
-        "testing.sequence.params",
-        "testing.sequence.semantic",
+        PrecompileSignature::new(
+            vec![],
+            vec![u64_profile(), u64_profile(), u64_profile(), u64_profile()],
+        ),
+        semantic_hash("testing.sequence.semantic"),
     )
 }
 
 /// Deterministic test precompile: no inputs, always returns `U64(1)`.
 #[derive(Clone, Debug)]
 pub struct ConstantOnePrecompileHandler {
-    id: PrecompileId,
+    descriptor: PrecompileDescriptor,
 }
 
 impl ConstantOnePrecompileHandler {
     /// Create a handler for one precompile id.
     pub fn new(id: PrecompileId) -> Self {
-        Self { id }
+        Self {
+            descriptor: constant_one_precompile_descriptor(id),
+        }
     }
 }
 
@@ -68,24 +92,30 @@ impl Default for ConstantOnePrecompileHandler {
 
 impl PrecompileHandler for ConstantOnePrecompileHandler {
     fn id(&self) -> PrecompileId {
-        self.id
+        self.descriptor.precompile_id
     }
 
-    fn execute(&self, _inputs: &[Value]) -> Result<Vec<Value>, TabulaError> {
-        Ok(vec![Value::U64(1)])
+    fn signature(&self) -> &PrecompileSignature {
+        &self.descriptor.signature
+    }
+
+    fn execute(&self, _inputs: &[TypedValue]) -> Result<Vec<TypedValue>, TabulaError> {
+        Ok(vec![u64_typed(1)])
     }
 }
 
 /// Deterministic test precompile: no inputs, returns a fixed sequence.
 #[derive(Clone, Debug)]
 pub struct SequencePrecompileHandler {
-    id: PrecompileId,
+    descriptor: PrecompileDescriptor,
 }
 
 impl SequencePrecompileHandler {
     /// Create a handler for one precompile id.
     pub fn new(id: PrecompileId) -> Self {
-        Self { id }
+        Self {
+            descriptor: sequence_precompile_descriptor(id),
+        }
     }
 }
 
@@ -97,34 +127,38 @@ impl Default for SequencePrecompileHandler {
 
 impl PrecompileHandler for SequencePrecompileHandler {
     fn id(&self) -> PrecompileId {
-        self.id
+        self.descriptor.precompile_id
     }
 
-    fn execute(&self, _inputs: &[Value]) -> Result<Vec<Value>, TabulaError> {
-        Ok(sequence_outputs())
+    fn signature(&self) -> &PrecompileSignature {
+        &self.descriptor.signature
+    }
+
+    fn execute(&self, _inputs: &[TypedValue]) -> Result<Vec<TypedValue>, TabulaError> {
+        Ok(sequence_outputs_typed())
     }
 }
 
-/// Proof factory for the "constant one" testing precompile family.
+/// Backend factory for the "constant one" testing precompile family.
 #[derive(Clone, Debug)]
-pub struct ConstantOnePrecompileProofFactory {
+pub struct ConstantOnePrecompileBackendFactory {
     descriptor: PrecompileDescriptor,
 }
 
-impl ConstantOnePrecompileProofFactory {
-    /// Create a proof factory for one descriptor.
+impl ConstantOnePrecompileBackendFactory {
+    /// Create a backend factory for one descriptor.
     pub fn new(descriptor: PrecompileDescriptor) -> Self {
         Self { descriptor }
     }
 }
 
-impl PrecompileProofFactory for ConstantOnePrecompileProofFactory {
-    fn descriptor(&self) -> PrecompileDescriptor {
-        self.descriptor.clone()
-    }
-
+impl PrecompileBackendFactory for ConstantOnePrecompileBackendFactory {
     fn name(&self) -> &str {
         "constant_one_precompile"
+    }
+
+    fn descriptor(&self) -> &PrecompileDescriptor {
+        &self.descriptor
     }
 
     fn build_system(
@@ -144,28 +178,37 @@ impl PrecompileProofFactory for ConstantOnePrecompileProofFactory {
             resolved.descriptor.clone(),
         )))
     }
+
+    fn build_handler(
+        &self,
+        resolved: &ResolvedPrecompile,
+    ) -> Result<Arc<dyn tabula_ext::precompile::PrecompileHandler>, ExtError> {
+        Ok(Arc::new(ConstantOnePrecompileHandler::new(
+            resolved.descriptor.precompile_id,
+        )))
+    }
 }
 
-/// Proof factory for the multi-output testing precompile family.
+/// Backend factory for the multi-output testing precompile family.
 #[derive(Clone, Debug)]
-pub struct SequencePrecompileProofFactory {
+pub struct SequencePrecompileBackendFactory {
     descriptor: PrecompileDescriptor,
 }
 
-impl SequencePrecompileProofFactory {
-    /// Create a proof factory for one descriptor.
+impl SequencePrecompileBackendFactory {
+    /// Create a backend factory for one descriptor.
     pub fn new(descriptor: PrecompileDescriptor) -> Self {
         Self { descriptor }
     }
 }
 
-impl PrecompileProofFactory for SequencePrecompileProofFactory {
-    fn descriptor(&self) -> PrecompileDescriptor {
-        self.descriptor.clone()
-    }
-
+impl PrecompileBackendFactory for SequencePrecompileBackendFactory {
     fn name(&self) -> &str {
         "sequence_precompile"
+    }
+
+    fn descriptor(&self) -> &PrecompileDescriptor {
+        &self.descriptor
     }
 
     fn build_system(
@@ -188,6 +231,15 @@ impl PrecompileProofFactory for SequencePrecompileProofFactory {
             resolved.descriptor.clone(),
             "sequence_precompile",
             SEQUENCE_WITNESS_LABEL,
+        )))
+    }
+
+    fn build_handler(
+        &self,
+        resolved: &ResolvedPrecompile,
+    ) -> Result<Arc<dyn tabula_ext::precompile::PrecompileHandler>, ExtError> {
+        Ok(Arc::new(SequencePrecompileHandler::new(
+            resolved.descriptor.precompile_id,
         )))
     }
 }
@@ -213,14 +265,14 @@ struct FixedOutputsPrecompileCols<T> {
 struct FixedOutputsPrecompileChip {
     descriptor: PrecompileDescriptor,
     chip_id: ChipId,
-    expected_outputs: Vec<Value>,
+    expected_outputs: Vec<tabula_core::PortableValue>,
     witness_label: &'static str,
 }
 
 impl FixedOutputsPrecompileChip {
     fn new(
         descriptor: PrecompileDescriptor,
-        expected_outputs: Vec<Value>,
+        expected_outputs: Vec<tabula_core::PortableValue>,
         witness_label: &'static str,
     ) -> Self {
         Self {
@@ -353,7 +405,7 @@ impl TraceContributor for FixedOutputsPrecompileChip {
 struct FixedOutputsPrecompileProofSystem {
     descriptor: PrecompileDescriptor,
     name: &'static str,
-    expected_outputs: Vec<Value>,
+    expected_outputs: Vec<tabula_core::PortableValue>,
     witness_label: &'static str,
 }
 
@@ -361,7 +413,7 @@ impl FixedOutputsPrecompileProofSystem {
     fn new(
         descriptor: PrecompileDescriptor,
         name: &'static str,
-        expected_outputs: Vec<Value>,
+        expected_outputs: Vec<tabula_core::PortableValue>,
         witness_label: &'static str,
     ) -> Self {
         Self {
@@ -429,8 +481,8 @@ impl PrecompileProofPreparer for FixedOutputsPrecompileProofPreparer {
         self.name
     }
 
-    fn precompile_id(&self) -> PrecompileId {
-        self.descriptor.precompile_id
+    fn descriptor(&self) -> &PrecompileDescriptor {
+        &self.descriptor
     }
 
     fn prepare_precompile(
@@ -465,7 +517,7 @@ impl ConstantOnePrecompileProofSystem {
         Self(FixedOutputsPrecompileProofSystem::new(
             descriptor,
             "constant_one_precompile",
-            vec![Value::U64(1)],
+            vec![u64_portable(1)],
             CONSTANT_ONE_WITNESS_LABEL,
         ))
     }
@@ -511,8 +563,8 @@ impl PrecompileProofPreparer for ConstantOnePrecompileProofPreparer {
         self.0.name()
     }
 
-    fn precompile_id(&self) -> PrecompileId {
-        self.0.precompile_id()
+    fn descriptor(&self) -> &PrecompileDescriptor {
+        self.0.descriptor()
     }
 
     fn prepare_precompile(
@@ -523,6 +575,15 @@ impl PrecompileProofPreparer for ConstantOnePrecompileProofPreparer {
     }
 }
 
-fn sequence_outputs() -> Vec<Value> {
-    vec![Value::U64(1), Value::U64(2), Value::U64(3), Value::U64(4)]
+fn sequence_outputs_typed() -> Vec<TypedValue> {
+    vec![u64_typed(1), u64_typed(2), u64_typed(3), u64_typed(4)]
+}
+
+fn sequence_outputs() -> Vec<tabula_core::PortableValue> {
+    vec![
+        u64_portable(1),
+        u64_portable(2),
+        u64_portable(3),
+        u64_portable(4),
+    ]
 }

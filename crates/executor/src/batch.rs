@@ -5,9 +5,10 @@ use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateView, StaticTableProvider};
-use tabula_core::{Batch, BatchResult, TxResult, Value};
+use tabula_core::{Batch, BatchResult, PortableValue, TxResult};
 
 use tabula_ir::{ParamDef, Program};
+use tabula_types::{TypeRuntimeRegistry, TypedValue};
 
 use crate::interpreter;
 use crate::overlay::Overlay;
@@ -15,7 +16,11 @@ use crate::precompile::PrecompileRegistry;
 use crate::property::{CommittedStateProvider, PropertyQueryRegistry};
 
 /// Validate transaction parameters against the schema definition.
-fn validate_params(params: &[Value], schema: &[ParamDef]) -> Result<(), TabulaError> {
+fn validate_params(
+    params: &[PortableValue],
+    schema: &[ParamDef],
+    type_runtimes: &TypeRuntimeRegistry,
+) -> Result<Vec<TypedValue>, TabulaError> {
     if params.len() != schema.len() {
         return Err(TabulaError::ParamSchemaMismatch(format!(
             "expected {} params, got {}",
@@ -23,16 +28,18 @@ fn validate_params(params: &[Value], schema: &[ParamDef]) -> Result<(), TabulaEr
             params.len()
         )));
     }
+    let mut decoded = Vec::with_capacity(params.len());
     for (i, (param, def)) in params.iter().zip(schema.iter()).enumerate() {
-        if !param.matches_type(def.value_type) {
+        if param.type_id() != def.type_id {
             return Err(TabulaError::ParamSchemaMismatch(format!(
-                "param {i}: expected {}, got {}",
-                def.value_type,
-                param.type_name()
+                "param {i}: expected type_id {}, got {}",
+                def.type_id.0,
+                param.type_id().0,
             )));
         }
+        decoded.push(type_runtimes.decode_portable(param)?);
     }
-    Ok(())
+    Ok(decoded)
 }
 
 /// Pluggable trait implementations needed by the batch executor.
@@ -45,6 +52,8 @@ pub struct BatchEnv<'a> {
     pub nonce_policy: &'a dyn NoncePolicy,
     /// Static (read-only) table lookups.
     pub static_tables: &'a dyn StaticTableProvider,
+    /// Runtime type registry used for portable/typed boundary decoding.
+    pub type_runtimes: &'a TypeRuntimeRegistry,
     /// Optional precompile handlers for custom instructions.
     pub precompiles: Option<&'a PrecompileRegistry>,
     /// Optional committed state for PropertyRead instructions.
@@ -64,14 +73,16 @@ pub fn execute_batch<S: StateView>(
     env: &BatchEnv<'_>,
     initial_nonces: &BTreeMap<[u8; 32], u64>,
 ) -> Result<BatchResult, TabulaError> {
-    let mut overlay = Overlay::new(snapshot);
+    let mut overlay = Overlay::new(snapshot, env.type_runtimes);
     let mut txs: Vec<TxResult> = Vec::new();
     let mut nonces: BTreeMap<[u8; 32], u64> = initial_nonces.clone();
 
     let ctx = interpreter::ExecContext {
         hasher: env.hasher,
         static_tables: env.static_tables,
+        type_runtimes: env.type_runtimes,
         schemas: program.schemas(),
+        profile_catalog: program.profile_catalog(),
         precompiles: env.precompiles,
         committed_state: env.committed_state,
         property_queries: env.property_queries,
@@ -93,14 +104,18 @@ pub fn execute_batch<S: StateView>(
         };
 
         // Validate param count and types against schema
-        if let Err(e) = validate_params(&tx.params, &tx_def.param_schema) {
-            txs.push(TxResult::Failed {
-                reason: e.to_string(),
-                partial_events: vec![],
-                failed_instruction: None,
-            });
-            continue;
-        }
+        let decoded_params =
+            match validate_params(&tx.params, &tx_def.param_schema, env.type_runtimes) {
+                Ok(decoded) => decoded,
+                Err(e) => {
+                    txs.push(TxResult::Failed {
+                        reason: e.to_string(),
+                        partial_events: vec![],
+                        failed_instruction: None,
+                    });
+                    continue;
+                }
+            };
 
         // Verify signature (message excludes the signature field itself)
         let msg = tx.signable_bytes()?;
@@ -132,7 +147,13 @@ pub fn execute_batch<S: StateView>(
         overlay.checkpoint();
 
         // Execute
-        match interpreter::execute(tx_idx as u32, &tx_def.body, &tx.params, &mut overlay, &ctx) {
+        match interpreter::execute(
+            tx_idx as u32,
+            &tx_def.body,
+            &decoded_params,
+            &mut overlay,
+            &ctx,
+        ) {
             Ok(output) => {
                 overlay.discard_checkpoint();
                 let next = env.nonce_policy.next_nonce(&tx.sender, current_nonce);
@@ -157,7 +178,7 @@ pub fn execute_batch<S: StateView>(
         }
     }
 
-    let result = overlay.into_result();
+    let result = overlay.into_result()?;
     Ok(BatchResult {
         read_set_old: result.read_set_old,
         write_set_final: result.write_set_final,

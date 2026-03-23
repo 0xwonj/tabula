@@ -9,87 +9,98 @@ use tabula_chips::shards::property::trace::PROPERTY_READ_WITNESS_LABEL;
 use tabula_chips::shards::property::trace::PropertyReadRecord;
 use tabula_chips::shards::shared::{SHARED_COLUMN_WITNESS_LABEL, SharedColumnWitness};
 use tabula_chips::shards::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
-use tabula_commitment::schemes::tags;
-use tabula_commitment::{ColumnMeta, ColumnState, KoalaBearCodec, PoseidonHasher};
+use tabula_commitment::schemes::ssmc::SsmcList;
+use tabula_commitment::{ColumnRootBinding, NormalizedVerifierDigest, PoseidonHasher};
 use tabula_core::error::TabulaError;
-use tabula_core::traits::ValueCodec;
-use tabula_core::{CellKey, ColId, RowKey, TableId, Value, ValueType};
+use tabula_core::{CellKey, ColId, Digest, RootProfileId, RowKey, TableId};
 use tabula_stark::trace::WitnessStore;
+use tabula_types::{EncodingRuntime, TypeRuntime, encode_structural_u64};
 
 use super::super::memory::{SsmcColumnWitnessParts, prepare_ssmc_column_witness_from_parts};
 use crate::{AccessEvent, ColumnWrite, CommittedEntry, InitCell, PropertyReadClaim};
 
 /// Input bundle for preparing one SSMC column proof store.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone)]
 pub struct SsmcProofInput<'a> {
-    /// Table identifier.
+    /// Column table identifier.
     pub table: TableId,
-    /// Column identifier.
+    /// Column identifier within the table.
     pub col: ColId,
-    /// Column value type.
-    pub value_type: ValueType,
-    /// Old committed-state entries for the column.
+    /// Installed runtime behavior for the column type.
+    pub type_runtime: &'a dyn TypeRuntime,
+    /// Installed runtime encoding behavior for the column encoding.
+    pub encoding_runtime: &'a dyn EncodingRuntime,
+    /// Previously committed non-null entries.
     pub old_entries: &'a [CommittedEntry],
-    /// Base-state init cells grouped for this column.
+    /// Initial cell values materialized for execution.
     pub init_cells: &'a [InitCell],
-    /// Execution access events for this column.
+    /// Logical access events observed during execution.
     pub access_events: &'a [AccessEvent],
-    /// Final coalesced writes for this column.
+    /// Final writes produced by execution.
     pub writes: &'a [ColumnWrite],
-    /// Whether the batch contains at least one effective final write.
+    /// Whether the column was touched in this batch.
     pub is_touched: bool,
-    /// Property-read claims for this column.
+    /// Prepared property reads for the column.
     pub property_reads: &'a [PropertyReadClaim],
+    /// Root-binding family selected by the sealed profile.
+    pub root_binding_family: RootProfileId,
+    /// Sealed column profile hash.
+    pub column_profile_hash: Digest,
+    /// Canonical binding digest for the column.
+    pub binding_digest: tabula_commitment::NativeDigest,
 }
 
 type EncodedWrites = Vec<(RowKey, Option<Vec<KoalaBear>>)>;
 
-/// Prepared STARK proof product for one SSMC column.
+/// Prepared native witness artifacts for one SSMC-backed column proof.
 pub struct PreparedSsmcProof {
-    /// Verifier-visible column metadata.
-    pub meta: ColumnMeta,
-    /// Column-tier witness store for the current backend.
+    /// Canonical root-binding statement for the column.
+    pub root_binding: ColumnRootBinding,
+    /// Witness-store payload consumed by downstream chips.
     pub store: WitnessStore,
 }
 
 impl std::fmt::Debug for PreparedSsmcProof {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PreparedSsmcProof")
-            .field("meta", &self.meta)
+            .field("root_binding", &self.root_binding)
             .finish_non_exhaustive()
     }
 }
 
-/// Build the full SSMC per-column proof product from logical inputs.
+/// Prepare one SSMC proof input bundle into native witness artifacts.
 pub fn prepare_ssmc_proof<const W: usize>(
-    input: SsmcProofInput<'_>,
+    input: &SsmcProofInput<'_>,
 ) -> Result<PreparedSsmcProof, TabulaError> {
     let hasher = PoseidonHasher::new();
-    let (old_state, _) = ColumnState::commit(
-        &hasher,
+    let old_state = SsmcList::from_sorted(
         input.table,
         input.col,
-        encode_committed_entries(input.old_entries)?,
-        tags::SSMC,
+        encode_committed_entries(input.encoding_runtime, input.old_entries)?
+            .into_iter()
+            .map(|(key, value)| tabula_commitment::schemes::ssmc::SsmcEntry { key, value })
+            .collect(),
     )?;
-    let com_old = old_state.proof_commitment(input.table, input.col)?;
+    let com_old = old_state.proof_commitment()?;
     let is_empty_old = old_state.is_empty();
-    let (new_state, _runtime_com_new) = if input.is_touched {
-        old_state.apply_writes(
-            &hasher,
-            input.table,
-            input.col,
-            &encode_writes(input.writes)?,
-        )?
+    let new_state = if input.is_touched {
+        old_state
+            .apply_writes(
+                &encode_writes(input.encoding_runtime, input.writes)?,
+                &hasher,
+            )
+            .0
     } else {
-        (old_state.clone(), com_old)
+        old_state.clone()
     };
-    let meta = ColumnMeta {
+    let root_binding = ColumnRootBinding {
         table: input.table,
         col: input.col,
-        tag: tags::SSMC,
-        com_old,
-        com_new: new_state.proof_commitment(input.table, input.col)?,
+        root_binding_family: input.root_binding_family,
+        column_profile_hash: input.column_profile_hash,
+        binding_digest: input.binding_digest,
+        old_digest: NormalizedVerifierDigest::new(com_old),
+        new_digest: NormalizedVerifierDigest::new(new_state.proof_commitment()?),
         is_empty_old,
         is_empty_new: new_state.is_empty(),
         is_touched: input.is_touched,
@@ -98,24 +109,31 @@ pub fn prepare_ssmc_proof<const W: usize>(
     let property_reads = input
         .property_reads
         .iter()
-        .map(encode_property_record::<W>)
+        .map(|claim| encode_property_record::<W>(input.encoding_runtime, claim))
         .collect::<Result<Vec<_>, _>>()?;
     let init_cells = if property_reads.is_empty() {
         input.init_cells.to_vec()
     } else {
-        synthesize_old_init_cells(input.table, input.col, &old_state, input.value_type)?
+        synthesize_old_init_cells(
+            input.table,
+            input.col,
+            &old_state,
+            input.type_runtime,
+            input.encoding_runtime,
+        )?
     };
 
     let old_entries = ssmc_entries(&old_state)?;
     let new_entries = ssmc_entries(&new_state)?;
     let column_witness = prepare_ssmc_column_witness_from_parts::<W>(&SsmcColumnWitnessParts {
         column: (input.table, input.col),
-        value_type: input.value_type,
+        type_runtime: input.type_runtime,
+        encoding_runtime: input.encoding_runtime,
         init_cells: &init_cells,
         access_events: input.access_events,
         old_entries: &old_entries,
         new_entries: &new_entries,
-        meta: &meta,
+        root_binding: &root_binding,
         has_commitment_proof: true,
     })?;
 
@@ -134,26 +152,34 @@ pub fn prepare_ssmc_proof<const W: usize>(
         store.put(PROPERTY_READ_WITNESS_LABEL, property_reads);
     }
 
-    Ok(PreparedSsmcProof { meta, store })
+    Ok(PreparedSsmcProof {
+        root_binding,
+        store,
+    })
 }
 
 fn encode_committed_entries(
+    encoding_runtime: &dyn EncodingRuntime,
     entries: &[CommittedEntry],
 ) -> Result<Vec<(RowKey, Vec<KoalaBear>)>, TabulaError> {
-    let codec = KoalaBearCodec;
     let mut encoded = Vec::new();
     for entry in entries {
         if entry.is_null {
             continue;
         }
-        encoded.push((entry.row, codec.encode(&entry.value)?));
+        encoded.push((
+            entry.row,
+            encoding_runtime.encode_field_elements(&entry.value)?,
+        ));
     }
     encoded.sort_by_key(|(row, _)| *row);
     Ok(encoded)
 }
 
-fn encode_writes(writes: &[ColumnWrite]) -> Result<EncodedWrites, TabulaError> {
-    let codec = KoalaBearCodec;
+fn encode_writes(
+    encoding_runtime: &dyn EncodingRuntime,
+    writes: &[ColumnWrite],
+) -> Result<EncodedWrites, TabulaError> {
     writes
         .iter()
         .map(|write| {
@@ -162,7 +188,7 @@ fn encode_writes(writes: &[ColumnWrite]) -> Result<EncodedWrites, TabulaError> {
                 write
                     .value
                     .as_ref()
-                    .map(|value| codec.encode(value))
+                    .map(|value| encoding_runtime.encode_field_elements(value))
                     .transpose()?,
             ))
         })
@@ -172,16 +198,18 @@ fn encode_writes(writes: &[ColumnWrite]) -> Result<EncodedWrites, TabulaError> {
 fn synthesize_old_init_cells(
     table: TableId,
     col: ColId,
-    state: &ColumnState<PoseidonHasher>,
-    value_type: ValueType,
+    state: &SsmcList,
+    type_runtime: &dyn TypeRuntime,
+    encoding_runtime: &dyn EncodingRuntime,
 ) -> Result<Vec<InitCell>, TabulaError> {
-    let codec = KoalaBearCodec;
     ssmc_entries(state)?
         .into_iter()
         .map(|(row, value_fes)| {
+            let value = encoding_runtime.decode_field_elements(&value_fes)?;
+            type_runtime.validate(&value)?;
             Ok(InitCell {
                 key: CellKey { table, col, row },
-                value: codec.decode(&value_fes, value_type)?,
+                value,
                 is_null: false,
             })
         })
@@ -189,28 +217,25 @@ fn synthesize_old_init_cells(
 }
 
 fn encode_property_record<const W: usize>(
+    encoding_runtime: &dyn EncodingRuntime,
     claim: &PropertyReadClaim,
 ) -> Result<PropertyReadRecord, TabulaError> {
-    let codec = KoalaBearCodec;
     let (arg0, arg1) = claim.query.encoded_args();
     Ok(PropertyReadRecord {
         query_type: claim.query.kind_ordinal(),
-        query_arg0: encode_padded::<W>(&codec, &Value::U64(arg0))?,
-        query_arg1: encode_padded::<W>(&codec, &Value::U64(arg1))?,
-        result_val: encode_padded::<W>(&codec, &claim.result.value)?,
-        result_key: encode_padded::<W>(
-            &codec,
-            &Value::U64(claim.result.key.unwrap_or(RowKey(0)).0),
-        )?,
+        query_arg0: encode_structural_u64::<W>(arg0)?,
+        query_arg1: encode_structural_u64::<W>(arg1)?,
+        result_val: encode_padded_with_encoding::<W>(encoding_runtime, &claim.result.value)?,
+        result_key: encode_structural_u64::<W>(claim.result.key.unwrap_or(RowKey(0)).0)?,
         is_null: claim.result.is_null,
     })
 }
 
-fn encode_padded<const W: usize>(
-    codec: &KoalaBearCodec,
-    value: &Value,
+fn encode_padded_with_encoding<const W: usize>(
+    encoding_runtime: &dyn EncodingRuntime,
+    value: &tabula_types::TypedValue,
 ) -> Result<Vec<KoalaBear>, TabulaError> {
-    let mut encoded = codec.encode(value)?;
+    let mut encoded = encoding_runtime.encode_field_elements(value)?;
     if encoded.len() > W {
         return Err(TabulaError::ProofError {
             phase: "ssmc_proof",
@@ -225,18 +250,10 @@ fn encode_padded<const W: usize>(
     Ok(encoded)
 }
 
-fn ssmc_entries(
-    state: &ColumnState<PoseidonHasher>,
-) -> Result<BTreeMap<RowKey, Vec<KoalaBear>>, TabulaError> {
-    match state {
-        ColumnState::Ssmc(list) => Ok(list
-            .entries()
-            .iter()
-            .map(|entry| (entry.key, entry.value.clone()))
-            .collect()),
-        ColumnState::Smt(_) => Err(TabulaError::ProofError {
-            phase: "ssmc_proof",
-            detail: "only SSMC-backed columns are supported".to_string(),
-        }),
-    }
+fn ssmc_entries(state: &SsmcList) -> Result<BTreeMap<RowKey, Vec<KoalaBear>>, TabulaError> {
+    Ok(state
+        .entries()
+        .iter()
+        .map(|entry| (entry.key, entry.value.clone()))
+        .collect())
 }

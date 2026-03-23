@@ -21,38 +21,6 @@ fn divmod_carry_with_remainder_overflow() {
         .expect("divmod carry with remainder overflow should pass");
 }
 
-/// Regression: Hash domain tag must be 0x20 (not arbitrary).
-#[test]
-fn hash_wrong_domain_tag_fails() {
-    let mut records = vec![
-        make_read(0, 0, 0, 100, 42, false),
-        make_read(1, 0, 0, 200, 99, false),
-        make_hash(2, 0, 1, 0x20, 2, [42, 0, 0], [99, 0, 0]),
-    ];
-    // Corrupt domain tag in perm_input
-    if let Some(ref mut input) = records[2].hash_perm_input {
-        input[0] = KoalaBear::new(0x10); // wrong domain tag
-    }
-    let trace = generate_execution_trace::<W>(&records);
-    debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong domain tag should fail");
-}
-
-/// Regression: Hash input count must be 2.
-#[test]
-fn hash_wrong_input_count_fails() {
-    let mut records = vec![
-        make_read(0, 0, 0, 100, 42, false),
-        make_read(1, 0, 0, 200, 99, false),
-        make_hash(2, 0, 1, 0x20, 2, [42, 0, 0], [99, 0, 0]),
-    ];
-    // Corrupt input count in perm_input
-    if let Some(ref mut input) = records[2].hash_perm_input {
-        input[1] = KoalaBear::new(1); // wrong count
-    }
-    let trace = generate_execution_trace::<W>(&records);
-    debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong input count should fail");
-}
-
 /// Slot written count: extra slot_written flag should fail.
 #[test]
 fn slot_written_count_extra_write_fails() {
@@ -268,5 +236,5 @@ fn lookup_forged_null_dst_fails() {
 
 #[test]
 fn standard_width() {
-    assert_eq!(EXECUTION_STANDARD_WIDTH, 317);
+    assert_eq!(EXECUTION_STANDARD_WIDTH, 312);
 }

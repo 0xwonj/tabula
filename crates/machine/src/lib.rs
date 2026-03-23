@@ -19,7 +19,6 @@
 
 /// Advanced backend-only APIs for execution-tier machine composition.
 pub mod backend;
-mod columns;
 pub mod config;
 mod machine;
 mod proof;

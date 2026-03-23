@@ -4,14 +4,11 @@
 //! implementations (no external deps), see the crate root re-exports.
 
 use crate::error::TabulaError;
-use crate::traits::{BatchDigester, Hasher, MembershipScheme, ValueCodec};
-use crate::{Batch, Digest, Value, ValueType};
+use crate::traits::{BatchDigester, Hasher, MembershipScheme};
+use crate::{Batch, Digest};
 
-// Re-export default implementations so existing `use tabula_core::mock::*` keeps working.
+// Re-export commonly used test utilities from the crate root.
 pub use crate::{InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce};
-
-/// Backward-compatible alias. Prefer [`NoopSigVerifier`].
-pub type MockSigVerifier = NoopSigVerifier;
 
 // ---------------------------------------------------------------------------
 // Blake3Hasher
@@ -23,9 +20,6 @@ pub type MockSigVerifier = NoopSigVerifier;
 /// uses `PoseidonHasher` from `tabula-commitment`.
 #[derive(Debug, Clone, Copy)]
 pub struct Blake3Hasher;
-
-/// Backward-compatible alias. Prefer [`Blake3Hasher`].
-pub type MockHasher = Blake3Hasher;
 
 impl Hasher for Blake3Hasher {
     fn hash(&self, data: &[u8]) -> Digest {
@@ -45,42 +39,6 @@ impl Hasher for Blake3Hasher {
             hasher.update(item);
         }
         *hasher.finalize().as_bytes()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// MockValueCodec
-// ---------------------------------------------------------------------------
-
-/// Value codec that uses borsh bytes as the "field representation".
-#[derive(Debug, Clone)]
-pub struct MockValueCodec;
-
-impl ValueCodec for MockValueCodec {
-    type FieldRepr = Vec<u8>;
-
-    fn encode(&self, value: &Value) -> Result<Vec<Self::FieldRepr>, TabulaError> {
-        let bytes =
-            borsh::to_vec(value).map_err(|e| TabulaError::BorshEncodingError(e.to_string()))?;
-        Ok(vec![bytes])
-    }
-
-    fn decode(
-        &self,
-        field_elements: &[Self::FieldRepr],
-        _target_type: ValueType,
-    ) -> Result<Value, TabulaError> {
-        if field_elements.is_empty() {
-            return Err(TabulaError::BorshEncodingError(
-                "empty field elements".into(),
-            ));
-        }
-        borsh::from_slice(&field_elements[0])
-            .map_err(|e| TabulaError::BorshEncodingError(e.to_string()))
-    }
-
-    fn field_elements_per(&self, _value_type: ValueType) -> usize {
-        1
     }
 }
 
@@ -151,7 +109,11 @@ impl BatchDigester for SimpleBatchDigester {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Transaction, TxTypeId};
+    use crate::{PortableValue, Transaction, TxTypeId, TypeId};
+
+    fn portable_u64(value: u64) -> PortableValue {
+        PortableValue::new(TypeId(0), borsh::to_vec(&value).expect("portable u64"))
+    }
 
     #[test]
     fn blake3_hasher_deterministic() {
@@ -174,11 +136,10 @@ mod tests {
     }
 
     #[test]
-    fn mock_value_codec_round_trip() {
-        let codec = MockValueCodec;
-        let v = Value::U64(42);
-        let encoded = codec.encode(&v).unwrap();
-        let decoded = codec.decode(&encoded, ValueType::U64).unwrap();
+    fn mock_portable_value_round_trip() {
+        let v = portable_u64(42);
+        let encoded = borsh::to_vec(&v).unwrap();
+        let decoded: PortableValue = borsh::from_slice(&encoded).unwrap();
         assert_eq!(v, decoded);
     }
 
@@ -199,7 +160,7 @@ mod tests {
         let batch = Batch {
             transactions: vec![Transaction {
                 tx_type: TxTypeId(1),
-                params: vec![Value::U64(42)],
+                params: vec![portable_u64(42)],
                 sender: [1u8; 32],
                 nonce: 0,
                 signature: vec![],

@@ -2,15 +2,28 @@
 //! Shared test doubles and helpers for executor integration tests.
 
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateView, StaticTableProvider};
-use tabula_core::{CellKey, ColId, RowKey, TableId, TableSchema, Transaction, Value};
+use tabula_core::{
+    CellKey, ColId, ColumnDef, ColumnProfileId, PortableValue, RowKey, TableId, TableSchema,
+    Transaction,
+};
 use tabula_ir::{Instruction, RowExpr, ValueExpr};
+use tabula_profile::{
+    ColumnProfile, CommitmentRole, ENCODING_U64_ID, ProfileCatalog, SCHEME_PROFILE_SSMC_ID,
+    TYPE_U64_ID, builtin_catalog,
+};
 use tabula_testing::fixtures::batch::core_tx_with_sender;
-use tabula_testing::fixtures::schema::single_u64_column_schema;
 use tabula_testing::fixtures::state::cell_key;
+use tabula_types::{TypeRuntimeRegistry, TypedValue};
+#[allow(unused_imports)]
+pub use tabula_types::{
+    bool_portable, bool_typed, bytes32_portable, bytes32_typed, i64_portable, i64_typed,
+    u64_portable, u64_typed,
+};
 
 use tabula_executor::interpreter::{ExecContext, InterpreterError, TxExecutionOutput};
 use tabula_executor::overlay::{Overlay, OverlayResult};
@@ -19,11 +32,11 @@ use tabula_executor::property::PropertyQueryRegistry;
 // ── StateView impls ─────────────────────────────────────────────────
 
 /// Simple BTreeMap-backed snapshot for tests.
-pub struct TestSnapshot(pub BTreeMap<CellKey, Value>);
+pub struct TestSnapshot(pub BTreeMap<CellKey, PortableValue>);
 
 impl StateView for TestSnapshot {
-    fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
-        Ok(self.0.get(key).copied())
+    fn read(&self, key: &CellKey) -> Result<Option<PortableValue>, TabulaError> {
+        Ok(self.0.get(key).cloned())
     }
 
     fn table_exists(&self, _: TableId) -> bool {
@@ -33,12 +46,12 @@ impl StateView for TestSnapshot {
 
 /// Snapshot that tracks how many times `read()` is called.
 pub struct CountingSnapshot {
-    pub data: BTreeMap<CellKey, Value>,
+    pub data: BTreeMap<CellKey, PortableValue>,
     pub call_count: AtomicU32,
 }
 
 impl CountingSnapshot {
-    pub fn new(data: BTreeMap<CellKey, Value>) -> Self {
+    pub fn new(data: BTreeMap<CellKey, PortableValue>) -> Self {
         Self {
             data,
             call_count: AtomicU32::new(0),
@@ -51,9 +64,9 @@ impl CountingSnapshot {
 }
 
 impl StateView for CountingSnapshot {
-    fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
+    fn read(&self, key: &CellKey) -> Result<Option<PortableValue>, TabulaError> {
         self.call_count.fetch_add(1, Ordering::Relaxed);
-        Ok(self.data.get(key).copied())
+        Ok(self.data.get(key).cloned())
     }
 
     fn table_exists(&self, _: TableId) -> bool {
@@ -128,12 +141,12 @@ impl NoncePolicy for SeqNonce {
 
 // ── StaticTableProvider impls ───────────────────────────────────────────
 
-/// Static table that returns `Value::U64(row_key)` for any lookup.
+/// Static table that returns `u64_portable(row_key)` for any lookup.
 pub struct TestStaticTables;
 
 impl StaticTableProvider for TestStaticTables {
-    fn lookup(&self, _: TableId, key: RowKey, _: ColId) -> Result<Value, TabulaError> {
-        Ok(Value::U64(key.0))
+    fn lookup(&self, _: TableId, key: RowKey, _: ColId) -> Result<PortableValue, TabulaError> {
+        Ok(u64_portable(key.0))
     }
 
     fn contains(&self, _: TableId, _: RowKey) -> Result<bool, TabulaError> {
@@ -145,7 +158,7 @@ impl StaticTableProvider for TestStaticTables {
 pub struct EmptyStaticTables;
 
 impl StaticTableProvider for EmptyStaticTables {
-    fn lookup(&self, t: TableId, _: RowKey, _: ColId) -> Result<Value, TabulaError> {
+    fn lookup(&self, t: TableId, _: RowKey, _: ColId) -> Result<PortableValue, TabulaError> {
         Err(TabulaError::TableNotFound(t))
     }
 
@@ -161,8 +174,40 @@ pub fn cell(t: u32, r: u64, c: u16) -> CellKey {
     cell_key(t, r, c)
 }
 
+pub fn portable(value: PortableValue) -> PortableValue {
+    value
+}
+
+pub fn typed(value: PortableValue) -> TypedValue {
+    let type_id = value.type_id();
+    let payload = value.into_payload();
+    type_runtimes()
+        .resolve(type_id)
+        .expect("typed runtime")
+        .decode_portable(&PortableValue::new(type_id, payload))
+        .expect("typed test value")
+}
+
+pub fn lit(value: PortableValue) -> ValueExpr {
+    ValueExpr::Literal(portable(value))
+}
+
+pub fn opt(value: PortableValue) -> Option<PortableValue> {
+    Some(portable(value))
+}
+
+pub fn type_runtimes() -> &'static TypeRuntimeRegistry {
+    static TYPE_RUNTIMES: OnceLock<TypeRuntimeRegistry> = OnceLock::new();
+    TYPE_RUNTIMES.get_or_init(|| TypeRuntimeRegistry::seeded().expect("seeded type runtimes"))
+}
+
 /// Build a `Transaction` with an empty signature.
-pub fn make_tx(tx_type: u32, params: Vec<Value>, sender: [u8; 32], nonce: u64) -> Transaction {
+pub fn make_tx(
+    tx_type: u32,
+    params: Vec<PortableValue>,
+    sender: [u8; 32],
+    nonce: u64,
+) -> Transaction {
     core_tx_with_sender(tx_type, params, sender, nonce)
 }
 
@@ -177,23 +222,63 @@ pub fn test_env() -> tabula_executor::batch::BatchEnv<'static> {
         precompiles: None,
         committed_state: None,
         property_queries,
+        type_runtimes: type_runtimes(),
     }
 }
 
 // ── Interpreter helpers ─────────────────────────────────────────────────
 
-/// Standard single-table schema for interpreter tests.
-pub fn test_schemas() -> BTreeMap<TableId, TableSchema> {
+/// Standard single-table schema bundle for interpreter tests.
+pub fn test_schema_bundle() -> (BTreeMap<TableId, TableSchema>, ProfileCatalog) {
+    let mut catalog = builtin_catalog().expect("built-in catalog");
+    let type_descriptor = catalog
+        .type_descriptor(TYPE_U64_ID)
+        .cloned()
+        .expect("u64 type descriptor");
+    let encoding_profile = catalog
+        .encoding_profile(ENCODING_U64_ID)
+        .cloned()
+        .expect("u64 encoding");
+    let scheme_profile = catalog
+        .scheme_profile(SCHEME_PROFILE_SSMC_ID)
+        .cloned()
+        .expect("ssmc scheme");
+    let column_profile = ColumnProfile::new(
+        ColumnProfileId(0),
+        "test.val",
+        None,
+        &type_descriptor,
+        &encoding_profile,
+        &scheme_profile,
+        CommitmentRole::IncludedInRoot,
+    )
+    .expect("column profile");
+    let column_profile_id = column_profile.column_profile_id;
+    catalog
+        .register_column(column_profile)
+        .expect("register column");
     let mut m = BTreeMap::new();
     m.insert(
         TableId(1),
-        single_u64_column_schema(TableId(1), ColId(0), "test", "val"),
+        TableSchema {
+            id: TableId(1),
+            name: "test".into(),
+            columns: vec![ColumnDef {
+                id: ColId(0),
+                name: "val".into(),
+                column_profile_id,
+            }],
+        },
     );
-    m
+    (m, catalog)
 }
 
-fn make_snapshot(entries: Vec<(CellKey, Value)>) -> TestSnapshot {
+fn make_snapshot(entries: Vec<(CellKey, PortableValue)>) -> TestSnapshot {
     TestSnapshot(entries.into_iter().collect())
+}
+
+pub fn snapshot(data: BTreeMap<CellKey, PortableValue>) -> TestSnapshot {
+    TestSnapshot(data)
 }
 
 /// Execute instructions with empty params and empty snapshot.
@@ -205,23 +290,27 @@ pub fn run(instrs: Vec<Instruction>) -> (TxExecutionOutput, OverlayResult) {
 #[allow(clippy::needless_pass_by_value)]
 pub fn run_with(
     instrs: Vec<Instruction>,
-    params: &[Value],
-    entries: Vec<(CellKey, Value)>,
+    params: &[PortableValue],
+    entries: Vec<(CellKey, PortableValue)>,
 ) -> (TxExecutionOutput, OverlayResult) {
     let snap = make_snapshot(entries);
-    let mut ov = Overlay::new(&snap);
-    let schemas = test_schemas();
+    let mut ov = Overlay::new(&snap, type_runtimes());
+    let (schemas, profile_catalog) = test_schema_bundle();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
+        type_runtimes: type_runtimes(),
         schemas: &schemas,
+        profile_catalog: &profile_catalog,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,
     };
-    let out = tabula_executor::interpreter::execute(&instrs, params, &mut ov, &ctx).unwrap();
-    (out, ov.into_result())
+    let typed_params: Vec<_> = params.iter().cloned().map(typed).collect();
+    let out =
+        tabula_executor::interpreter::execute(0, &instrs, &typed_params, &mut ov, &ctx).unwrap();
+    (out, ov.into_result().unwrap())
 }
 
 /// Execute instructions expecting failure. Returns the error.
@@ -233,22 +322,25 @@ pub fn run_err(instrs: Vec<Instruction>) -> InterpreterError {
 #[allow(clippy::needless_pass_by_value)]
 pub fn run_err_with(
     instrs: Vec<Instruction>,
-    params: &[Value],
-    entries: Vec<(CellKey, Value)>,
+    params: &[PortableValue],
+    entries: Vec<(CellKey, PortableValue)>,
 ) -> InterpreterError {
     let snap = make_snapshot(entries);
-    let mut ov = Overlay::new(&snap);
-    let schemas = test_schemas();
+    let mut ov = Overlay::new(&snap, type_runtimes());
+    let (schemas, profile_catalog) = test_schema_bundle();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
+        type_runtimes: type_runtimes(),
         schemas: &schemas,
+        profile_catalog: &profile_catalog,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,
     };
-    tabula_executor::interpreter::execute(&instrs, params, &mut ov, &ctx).unwrap_err()
+    let typed_params: Vec<_> = params.iter().cloned().map(typed).collect();
+    tabula_executor::interpreter::execute(0, &instrs, &typed_params, &mut ov, &ctx).unwrap_err()
 }
 
 /// Write slot 0 to cell(1,0,0) — append to capture a computed value.
@@ -258,6 +350,6 @@ pub fn write_slot0() -> Instruction {
         row: RowExpr::Literal(RowKey(0)),
         col: ColId(0),
         src_val: ValueExpr::Slot(0),
-        src_is_null: ValueExpr::Literal(Value::Bool(false)),
+        src_is_null: ValueExpr::Literal(bool_portable(false)),
     }
 }

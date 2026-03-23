@@ -2,52 +2,52 @@
 
 mod common;
 
-use tabula_core::{AccessEvent, CellKey, OpKind, TxResult, Value};
+use tabula_core::{AccessEvent, CellKey, OpKind, PortableValue, TxResult};
 
 use tabula_executor::consistency::check_consistency;
 
-use common::cell;
+use common::{bool_portable, bytes32_portable, cell, i64_portable, opt, portable, u64_portable};
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-fn read_event(key: CellKey, value: Value, time: u64) -> AccessEvent {
+fn read_event(key: CellKey, value: PortableValue, time: u64) -> AccessEvent {
     AccessEvent {
         key,
         op: OpKind::Read,
-        value,
+        value: portable(value),
         val_is_null: false,
         time,
         effect_ordinal_in_tx: time as u32,
     }
 }
 
-fn write_event(key: CellKey, value: Value, time: u64) -> AccessEvent {
+fn write_event(key: CellKey, value: PortableValue, time: u64) -> AccessEvent {
     AccessEvent {
         key,
         op: OpKind::Write,
-        value,
+        value: portable(value),
         val_is_null: false,
         time,
         effect_ordinal_in_tx: time as u32,
     }
 }
 
-fn null_write_event(key: CellKey, zero: Value, time: u64) -> AccessEvent {
+fn null_write_event(key: CellKey, zero: PortableValue, time: u64) -> AccessEvent {
     AccessEvent {
         key,
         op: OpKind::Write,
-        value: zero,
+        value: portable(zero),
         val_is_null: true,
         time,
         effect_ordinal_in_tx: time as u32,
     }
 }
 
-fn null_read_event(key: CellKey, zero: Value, time: u64) -> AccessEvent {
+fn null_read_event(key: CellKey, zero: PortableValue, time: u64) -> AccessEvent {
     AccessEvent {
         key,
         op: OpKind::Read,
-        value: zero,
+        value: portable(zero),
         val_is_null: true,
         time,
         effect_ordinal_in_tx: time as u32,
@@ -65,11 +65,11 @@ fn single_tx(events: &[AccessEvent]) -> Vec<TxResult> {
 fn valid_trace() {
     let k = cell(1, 0, 0);
     let events = vec![
-        read_event(k, Value::U64(100), 0),
-        write_event(k, Value::U64(80), 1),
-        read_event(k, Value::U64(80), 2),
+        read_event(k, u64_portable(100), 0),
+        write_event(k, u64_portable(80), 1),
+        read_event(k, u64_portable(80), 2),
     ];
-    let read_set_old = vec![(k, Some(Value::U64(100)))];
+    let read_set_old = vec![(k, opt(u64_portable(100)))];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
@@ -77,10 +77,10 @@ fn valid_trace() {
 fn stale_read_fails() {
     let k = cell(1, 0, 0);
     let events = vec![
-        write_event(k, Value::U64(50), 0),
-        read_event(k, Value::U64(100), 1),
+        write_event(k, u64_portable(50), 0),
+        read_event(k, u64_portable(100), 1),
     ];
-    let read_set_old = vec![(k, Some(Value::U64(100)))];
+    let read_set_old = vec![(k, opt(u64_portable(100)))];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_err());
 }
 
@@ -88,8 +88,8 @@ fn stale_read_fails() {
 fn write_only_key() {
     let k = cell(1, 0, 0);
     let events = vec![
-        write_event(k, Value::U64(42), 0),
-        write_event(k, Value::U64(99), 1),
+        write_event(k, u64_portable(42), 0),
+        write_event(k, u64_portable(99), 1),
     ];
     assert!(check_consistency(&events, &[], &single_tx(&events)).is_ok());
 }
@@ -99,14 +99,14 @@ fn multiple_interleaved_keys() {
     let k1 = cell(1, 0, 0);
     let k2 = cell(1, 1, 0);
     let events = vec![
-        read_event(k1, Value::U64(10), 0),
-        read_event(k2, Value::U64(20), 1),
-        write_event(k1, Value::U64(5), 2),
-        read_event(k1, Value::U64(5), 3),
-        write_event(k2, Value::U64(25), 4),
-        read_event(k2, Value::U64(25), 5),
+        read_event(k1, u64_portable(10), 0),
+        read_event(k2, u64_portable(20), 1),
+        write_event(k1, u64_portable(5), 2),
+        read_event(k1, u64_portable(5), 3),
+        write_event(k2, u64_portable(25), 4),
+        read_event(k2, u64_portable(25), 5),
     ];
-    let read_set_old = vec![(k1, Some(Value::U64(10))), (k2, Some(Value::U64(20)))];
+    let read_set_old = vec![(k1, opt(u64_portable(10))), (k2, opt(u64_portable(20)))];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
@@ -122,7 +122,7 @@ fn invalid_etrace_identity_fails() {
         AccessEvent {
             key: k,
             op: OpKind::Read,
-            value: Value::U64(10),
+            value: portable(u64_portable(10)),
             val_is_null: false,
             time: 0,
             effect_ordinal_in_tx: 0,
@@ -130,13 +130,13 @@ fn invalid_etrace_identity_fails() {
         AccessEvent {
             key: k,
             op: OpKind::Write,
-            value: Value::U64(11),
+            value: portable(u64_portable(11)),
             val_is_null: false,
             time: 1,
             effect_ordinal_in_tx: 2, // skipped 1
         },
     ];
-    let read_set_old = vec![(k, Some(Value::U64(10)))];
+    let read_set_old = vec![(k, opt(u64_portable(10)))];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_err());
 }
 
@@ -144,11 +144,11 @@ fn invalid_etrace_identity_fails() {
 fn null_write_then_null_read() {
     let k = cell(1, 0, 0);
     let events = vec![
-        read_event(k, Value::U64(100), 0),
-        null_write_event(k, Value::U64(0), 1),
-        null_read_event(k, Value::U64(0), 2),
+        read_event(k, u64_portable(100), 0),
+        null_write_event(k, u64_portable(0), 1),
+        null_read_event(k, u64_portable(0), 2),
     ];
-    let read_set_old = vec![(k, Some(Value::U64(100)))];
+    let read_set_old = vec![(k, opt(u64_portable(100)))];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
@@ -156,10 +156,10 @@ fn null_write_then_null_read() {
 fn null_write_then_present_read_fails() {
     let k = cell(1, 0, 0);
     let events = vec![
-        null_write_event(k, Value::U64(0), 0),
-        read_event(k, Value::U64(42), 1),
+        null_write_event(k, u64_portable(0), 0),
+        read_event(k, u64_portable(42), 1),
     ];
-    let read_set_old = vec![(k, Some(Value::U64(100)))];
+    let read_set_old = vec![(k, opt(u64_portable(100)))];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_err());
 }
 
@@ -167,9 +167,9 @@ fn null_write_then_present_read_fails() {
 fn initially_absent_then_write_then_read() {
     let k = cell(1, 0, 0);
     let events = vec![
-        null_read_event(k, Value::U64(0), 0),
-        write_event(k, Value::U64(42), 1),
-        read_event(k, Value::U64(42), 2),
+        null_read_event(k, u64_portable(0), 0),
+        write_event(k, u64_portable(42), 1),
+        read_event(k, u64_portable(42), 2),
     ];
     let read_set_old = vec![(k, None)];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
@@ -181,11 +181,11 @@ fn initially_absent_then_write_then_read() {
 fn bool_value_consistency() {
     let k = cell(1, 0, 0);
     let events = vec![
-        read_event(k, Value::Bool(true), 0),
-        write_event(k, Value::Bool(false), 1),
-        read_event(k, Value::Bool(false), 2),
+        read_event(k, bool_portable(true), 0),
+        write_event(k, bool_portable(false), 1),
+        read_event(k, bool_portable(false), 2),
     ];
-    let read_set_old = vec![(k, Some(Value::Bool(true)))];
+    let read_set_old = vec![(k, opt(bool_portable(true)))];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
@@ -193,25 +193,25 @@ fn bool_value_consistency() {
 fn i64_value_consistency() {
     let k = cell(1, 0, 0);
     let events = vec![
-        read_event(k, Value::I64(-100), 0),
-        write_event(k, Value::I64(50), 1),
-        read_event(k, Value::I64(50), 2),
+        read_event(k, i64_portable(-100), 0),
+        write_event(k, i64_portable(50), 1),
+        read_event(k, i64_portable(50), 2),
     ];
-    let read_set_old = vec![(k, Some(Value::I64(-100)))];
+    let read_set_old = vec![(k, opt(i64_portable(-100)))];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
 #[test]
 fn bytes32_value_consistency() {
     let k = cell(1, 0, 0);
-    let v1 = Value::Bytes32([0xaa; 32]);
-    let v2 = Value::Bytes32([0xbb; 32]);
+    let v1 = bytes32_portable([0xaa; 32]);
+    let v2 = bytes32_portable([0xbb; 32]);
     let events = vec![
-        read_event(k, v1, 0),
-        write_event(k, v2, 1),
+        read_event(k, v1.clone(), 0),
+        write_event(k, v2.clone(), 1),
         read_event(k, v2, 2),
     ];
-    let read_set_old = vec![(k, Some(v1))];
+    let read_set_old = vec![(k, opt(v1))];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
@@ -219,13 +219,13 @@ fn bytes32_value_consistency() {
 fn null_write_value_null_read_value_sequence() {
     let k = cell(1, 0, 0);
     let events = vec![
-        read_event(k, Value::U64(100), 0),
-        null_write_event(k, Value::U64(0), 1),
-        null_read_event(k, Value::U64(0), 2),
-        write_event(k, Value::U64(200), 3),
-        read_event(k, Value::U64(200), 4),
+        read_event(k, u64_portable(100), 0),
+        null_write_event(k, u64_portable(0), 1),
+        null_read_event(k, u64_portable(0), 2),
+        write_event(k, u64_portable(200), 3),
+        read_event(k, u64_portable(200), 4),
     ];
-    let read_set_old = vec![(k, Some(Value::U64(100)))];
+    let read_set_old = vec![(k, opt(u64_portable(100)))];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_ok());
 }
 
@@ -233,9 +233,9 @@ fn null_write_value_null_read_value_sequence() {
 fn stale_read_i64_fails() {
     let k = cell(1, 0, 0);
     let events = vec![
-        write_event(k, Value::I64(50), 0),
-        read_event(k, Value::I64(-50), 1),
+        write_event(k, i64_portable(50), 0),
+        read_event(k, i64_portable(-50), 1),
     ];
-    let read_set_old = vec![(k, Some(Value::I64(0)))];
+    let read_set_old = vec![(k, opt(i64_portable(0)))];
     assert!(check_consistency(&events, &read_set_old, &single_tx(&events)).is_err());
 }

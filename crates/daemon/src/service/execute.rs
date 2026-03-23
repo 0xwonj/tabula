@@ -4,6 +4,7 @@ use tabula_artifact::{State, StateEntry, TransactionBatch};
 use tabula_compiler::SealedProgram;
 use tabula_core::traits::Hasher;
 use tabula_runtime::{CompiledBatchInput, RuntimeError, run_compiled_batch};
+use tabula_types::TypeRuntimeRegistry;
 
 use super::ExecutionSummary;
 use super::error::{ServiceError, ServiceResult};
@@ -73,11 +74,14 @@ pub fn execute_compiled_batch(
     transaction_batch: TransactionBatch,
     hasher: &dyn Hasher,
 ) -> ServiceResult<ExecutedBatch> {
+    let type_runtimes = TypeRuntimeRegistry::seeded()
+        .map_err(|err| ServiceError::internal(ErrorCode::InternalError, err.to_string()))?;
     let inner = run_compiled_batch(&CompiledBatchInput {
         compiled_program: &compiled_program,
-        state: state,
+        state,
         batch: &transaction_batch,
         hasher,
+        type_runtimes: &type_runtimes,
     })
     .map_err(|e| map_runtime_execution_error(&e))?;
 

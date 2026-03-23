@@ -6,10 +6,9 @@ use p3_symmetric::{
     CryptographicHasher, PaddingFreeSponge, PseudoCompressionFunction, TruncatedPermutation,
 };
 
-use tabula_core::traits::{Hasher, ValueCodec};
-use tabula_core::{Digest, Value};
+use tabula_core::traits::Hasher;
+use tabula_core::{Digest, PortableValue};
 
-use super::codec::KoalaBearCodec;
 use super::field::{DOMAIN_HASH_IR, NativeDigest};
 use super::hasher::FieldHasher;
 
@@ -91,23 +90,21 @@ impl Hasher for PoseidonHasher {
 
     /// Override: uses native FE encoding per semantics-spec §1.5.5.
     ///
-    /// `Poseidon(0x02 || n || ComEnc(v_0) || ... || ComEnc(v_{n-1}))`
+    /// `Poseidon(0x02 || n || encode(v_0) || ... || encode(v_{n-1}))`
     ///
     /// # Panics
     ///
-    /// Panics if any `Value` in `inputs` fails field-element encoding via
-    /// `KoalaBearCodec::encode` (e.g., `Bytes32` with a non-canonical chunk).
-    fn hash_ir(&self, inputs: &[Value]) -> Digest {
-        let codec = KoalaBearCodec;
-        let mut fes = Vec::new();
-        fes.push(KoalaBear::new(DOMAIN_HASH_IR));
-        fes.push(KoalaBear::new(inputs.len() as u32));
-        for v in inputs {
-            let encoded = codec.encode(v).expect("hash_ir: encoding failed");
-            fes.extend(encoded);
+    /// Panics if any encoded byte is not representable as a canonical field element.
+    fn hash_ir(&self, inputs: &[PortableValue]) -> Digest {
+        let mut bytes = Vec::new();
+        bytes.push(DOMAIN_HASH_IR as u8);
+        bytes.extend_from_slice(&(inputs.len() as u32).to_le_bytes());
+        for value in inputs {
+            bytes.extend_from_slice(&value.type_id().0.to_le_bytes());
+            bytes.extend_from_slice(&(value.payload().len() as u32).to_le_bytes());
+            bytes.extend_from_slice(value.payload());
         }
-        let result: NativeDigest = FieldHasher::hash(self, &fes);
-        result.to_bytes()
+        Hasher::hash(self, &bytes)
     }
 }
 
@@ -115,6 +112,7 @@ impl Hasher for PoseidonHasher {
 mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
+    use tabula_types::{bool_portable, bytes32_portable, i64_portable, u64_portable};
 
     #[test]
     fn poseidon_hash_deterministic() {
@@ -178,22 +176,22 @@ mod tests {
     #[test]
     fn poseidon_hash_ir_u64() {
         let h = PoseidonHasher::new();
-        let result = h.hash_ir(&[Value::U64(42)]);
+        let result = h.hash_ir(&[u64_portable(42)]);
         assert_ne!(result, [0u8; 32]);
         // Deterministic.
-        assert_eq!(result, h.hash_ir(&[Value::U64(42)]));
+        assert_eq!(result, h.hash_ir(&[u64_portable(42)]));
         // Different value → different hash.
-        assert_ne!(result, h.hash_ir(&[Value::U64(43)]));
+        assert_ne!(result, h.hash_ir(&[u64_portable(43)]));
     }
 
     #[test]
     fn poseidon_hash_ir_all_types() {
         let h = PoseidonHasher::new();
         let inputs = [
-            Value::U64(100),
-            Value::I64(-50),
-            Value::Bool(true),
-            Value::Bytes32([0; 32]),
+            u64_portable(100),
+            i64_portable(-50),
+            bool_portable(true),
+            bytes32_portable([0; 32]),
         ];
         let result = h.hash_ir(&inputs);
         assert_ne!(result, [0u8; 32]);

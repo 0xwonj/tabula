@@ -2,8 +2,11 @@
 //!
 //! Pure helpers for JSON formatting, value parsing, and API error display.
 
+use std::sync::OnceLock;
+
 use serde_json::Value as JsonValue;
-use tabula_core::Value as CoreValue;
+use tabula_core::PortableValue as CoreValue;
+use tabula_types::{TypeRuntimeRegistry, bool_portable, i64_portable, u64_portable};
 
 use crate::api::ApiClientError;
 use crate::models::{State, TransactionBatch};
@@ -48,12 +51,19 @@ pub(crate) fn opt_token(token: String) -> Option<String> {
     }
 }
 
+fn type_runtimes() -> &'static TypeRuntimeRegistry {
+    static TYPE_RUNTIMES: OnceLock<TypeRuntimeRegistry> = OnceLock::new();
+    TYPE_RUNTIMES.get_or_init(|| TypeRuntimeRegistry::seeded().expect("seeded type runtimes"))
+}
+
 pub(crate) fn format_value(v: &CoreValue) -> String {
-    match v {
-        CoreValue::U64(n) => n.to_string(),
-        CoreValue::I64(n) => n.to_string(),
-        CoreValue::Bool(b) => b.to_string(),
-        CoreValue::Bytes32(d) => format!("0x{}", hex::encode(d)),
+    if let Ok(runtime) = type_runtimes().resolve(v.type_id())
+        && let Ok(typed) = runtime.decode_portable(v)
+        && let Ok(display) = runtime.debug_display(&typed)
+    {
+        display
+    } else {
+        serde_json::to_string(v).unwrap_or_else(|_| "<invalid portable value>".to_string())
     }
 }
 
@@ -70,16 +80,16 @@ pub(crate) fn parse_value_input(raw: &str) -> Option<CoreValue> {
 
     // Try bare integer.
     if let Ok(n) = trimmed.parse::<u64>() {
-        return Some(CoreValue::U64(n));
+        return Some(u64_portable(n));
     }
     if let Ok(n) = trimmed.parse::<i64>() {
-        return Some(CoreValue::I64(n));
+        return Some(i64_portable(n));
     }
 
     // Try boolean.
     match trimmed {
-        "true" => return Some(CoreValue::Bool(true)),
-        "false" => return Some(CoreValue::Bool(false)),
+        "true" => return Some(bool_portable(true)),
+        "false" => return Some(bool_portable(false)),
         _ => {}
     }
 
@@ -88,9 +98,9 @@ pub(crate) fn parse_value_input(raw: &str) -> Option<CoreValue> {
 
 pub(crate) fn default_value_for_type(type_name: &str) -> CoreValue {
     match type_name {
-        "U64" => CoreValue::U64(0),
-        "I64" => CoreValue::I64(0),
-        "Bool" => CoreValue::Bool(false),
-        _ => CoreValue::U64(0),
+        "U64" => u64_portable(0),
+        "I64" => i64_portable(0),
+        "Bool" => bool_portable(false),
+        _ => u64_portable(0),
     }
 }

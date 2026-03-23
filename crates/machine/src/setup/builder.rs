@@ -6,14 +6,12 @@
 
 use std::sync::Arc;
 
-use tabula_chips::poseidon::PoseidonChip;
 use tabula_chips::range_check::RangeCheckChip;
 use tabula_stark::trace::DynChip;
 use tabula_stark::trace::column_commitment::BusConsumer;
 
-use crate::backend::AnyRap;
 use crate::backend::extension::ExecutionTierExtension;
-use crate::columns::ProofColumn;
+use crate::backend::{AnyRap, ProofColumn};
 use crate::config::{TabulaStarkConfig, default_config};
 use crate::setup::build::{column_tier_setup, execution_tier_setup, root_tier_setup};
 use crate::setup::execution::execution_dyn_chips;
@@ -125,18 +123,16 @@ impl MachineBuilder {
             registry.register_boxed(airs);
         }
 
-        registry.register_bus_consumers();
+        registry.register(RangeCheckChip);
         registry.validate()?;
 
         let mut dyn_chips: Vec<Box<dyn DynChip>> = execution_dyn_chips();
         for ext in &self.extensions {
             dyn_chips.extend(ext.dyn_chips());
         }
-        dyn_chips.push(Box::new(PoseidonChip));
         dyn_chips.push(Box::new(RangeCheckChip));
 
-        let mut bus_consumers: Vec<Box<dyn BusConsumer>> =
-            vec![Box::new(PoseidonChip), Box::new(RangeCheckChip)];
+        let mut bus_consumers: Vec<Box<dyn BusConsumer>> = vec![Box::new(RangeCheckChip)];
         for ext in &self.extensions {
             bus_consumers.extend(ext.bus_consumers());
         }

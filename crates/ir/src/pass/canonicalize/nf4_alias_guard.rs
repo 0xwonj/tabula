@@ -154,8 +154,22 @@ fn pair_key(r: &RowExpr) -> (u8, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tabula_core::RowKey;
-    use tabula_core::Value;
+    use tabula_core::{PortableValue, RowKey};
+    use tabula_profile::{TYPE_BOOL_ID, TYPE_U64_ID};
+
+    fn lit_u64(value: u64) -> ValueExpr {
+        ValueExpr::Literal(PortableValue::new(
+            TYPE_U64_ID,
+            borsh::to_vec(&value).expect("u64 literal"),
+        ))
+    }
+
+    fn lit_bool(value: bool) -> ValueExpr {
+        ValueExpr::Literal(PortableValue::new(
+            TYPE_BOOL_ID,
+            borsh::to_vec(&value).expect("bool literal"),
+        ))
+    }
 
     #[test]
     fn test_no_guards_for_read_read() {
@@ -186,15 +200,15 @@ mod tests {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowExpr::Param(0),
-                src_val: ValueExpr::Literal(Value::U64(1)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(1),
+                src_is_null: lit_bool(false),
             },
             Instruction::Write {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowExpr::Param(1),
-                src_val: ValueExpr::Literal(Value::U64(2)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(2),
+                src_is_null: lit_bool(false),
             },
         ];
         let result = insert_alias_guards(body);
@@ -217,8 +231,8 @@ mod tests {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowExpr::Param(1),
-                src_val: ValueExpr::Literal(Value::U64(1)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(1),
+                src_is_null: lit_bool(false),
             },
         ];
         let result = insert_alias_guards(body);
@@ -232,15 +246,15 @@ mod tests {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowExpr::Literal(RowKey(0)),
-                src_val: ValueExpr::Literal(Value::U64(1)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(1),
+                src_is_null: lit_bool(false),
             },
             Instruction::Write {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowExpr::Literal(RowKey(1)),
-                src_val: ValueExpr::Literal(Value::U64(2)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(2),
+                src_is_null: lit_bool(false),
             },
         ];
         let result = insert_alias_guards(body);
@@ -256,29 +270,29 @@ mod tests {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowExpr::Param(0),
-                src_val: ValueExpr::Literal(Value::U64(1)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(1),
+                src_is_null: lit_bool(false),
             },
             Instruction::Write {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowExpr::Param(1),
-                src_val: ValueExpr::Literal(Value::U64(2)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(2),
+                src_is_null: lit_bool(false),
             },
             Instruction::Write {
                 table: TableId(0),
                 col: ColId(1),
                 row: RowExpr::Param(0),
-                src_val: ValueExpr::Literal(Value::U64(3)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(3),
+                src_is_null: lit_bool(false),
             },
             Instruction::Write {
                 table: TableId(0),
                 col: ColId(1),
                 row: RowExpr::Param(1),
-                src_val: ValueExpr::Literal(Value::U64(4)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(4),
+                src_is_null: lit_bool(false),
             },
         ];
         let result = insert_alias_guards(body);
@@ -293,21 +307,21 @@ mod tests {
                 dst: 0,
                 op: crate::ArithOp::Add,
                 lhs: ValueExpr::Param(0),
-                rhs: ValueExpr::Literal(Value::U64(1)),
+                rhs: lit_u64(1),
             },
             Instruction::Write {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowExpr::Slot(0), // depends on slot 0
-                src_val: ValueExpr::Literal(Value::U64(1)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(1),
+                src_is_null: lit_bool(false),
             },
             Instruction::Write {
                 table: TableId(0),
                 col: ColId(0),
                 row: RowExpr::Param(1),
-                src_val: ValueExpr::Literal(Value::U64(2)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(2),
+                src_is_null: lit_bool(false),
             },
         ];
         let result = insert_alias_guards(body);

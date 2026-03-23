@@ -1,5 +1,6 @@
 use tabula_core::error::TabulaError;
 use tabula_ir::ValueExpr;
+use tabula_types::ArithmeticOp;
 
 use tabula_chips::execution::trace::Opcode;
 
@@ -14,7 +15,16 @@ pub(super) fn lower_arith<const W: usize>(
 ) -> Result<(), TabulaError> {
     let lhs_val = ctx.resolve_val(lhs)?;
     let rhs_val = ctx.resolve_val(rhs)?;
-    let result = op.apply(&lhs_val, &rhs_val)?;
+    let runtime = ctx.type_runtimes.resolve(lhs_val.type_id())?;
+    let result = runtime.apply_arithmetic(
+        match op {
+            tabula_ir::ArithOp::Add => ArithmeticOp::Add,
+            tabula_ir::ArithOp::Sub => ArithmeticOp::Sub,
+            tabula_ir::ArithOp::Mul => ArithmeticOp::Mul,
+        },
+        &lhs_val,
+        &rhs_val,
+    )?;
 
     let lhs_enc = ctx.encode_padded(&lhs_val)?;
     let rhs_enc = ctx.encode_padded(&rhs_val)?;

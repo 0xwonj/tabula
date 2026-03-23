@@ -1,7 +1,8 @@
 use tabula_chips::shards::memory::MemoryShardChip;
 use tabula_chips::shards::meta::MetaShardChip;
 use tabula_chips::shards::state::StateShardChip;
-use tabula_core::{ColId, SchemeId, TableId};
+use tabula_commitment::{PoseidonHasher, compute_column_root_binding_prefix_digest};
+use tabula_core::{ColId, RootProfileId, SchemeId, TableId};
 use tabula_stark::chips::ChipIdAllocator;
 use tabula_stark::trace::DynChip;
 
@@ -46,7 +47,13 @@ impl ProofColumn for TestSsmcProofColumn {
             meta_id,
             t,
             c,
-            self.scheme_id().raw(),
+            compute_column_root_binding_prefix_digest(
+                &PoseidonHasher::new(),
+                self.table_id,
+                self.col_id,
+                RootProfileId::SMT_V1,
+                &[self.scheme_id().raw() as u8; 32],
+            ),
             self.receives_commitment,
         );
 

@@ -42,8 +42,8 @@ fn machine_new_creates_valid_machine() {
     let machine = TabulaMachine::new(columns.clone()).expect("machine creation");
     let setups = machine.setup().proof_setups();
 
-    // Execution tier: 4 chips
-    assert_eq!(setups.execution.registry.chip_ids().len(), 4);
+    // Execution tier: Execution + StaticTable + RangeCheck
+    assert_eq!(setups.execution.registry.chip_ids().len(), 3);
     // One column tier: backend-added Poseidon + RangeCheck only.
     assert_eq!(setups.columns.len(), 1);
     assert_eq!(setups.columns[0].1.registry.chip_ids().len(), 2);
@@ -68,7 +68,7 @@ fn with_config_uses_custom_config() {
             .registry
             .chip_ids()
             .len(),
-        4
+        3
     );
 }
 

@@ -34,40 +34,50 @@ fn root_surface_stays_native_only() {
     }
 
     assert!(
-        lib.contains(
-            "pub use primitives::{FieldHasher, KoalaBearCodec, NativeDigest, PoseidonHasher};"
-        ),
-        "commitment root should still export the native KoalaBear codec"
+        lib.contains("pub use primitives::{FieldHasher, NativeDigest, PoseidonHasher};"),
+        "commitment root should export only native hash/field primitives"
     );
     assert!(
-        lib.contains("pub use roots::compute_state_roots_from_metas;"),
-        "commitment root should keep the high-level state-root entrypoint"
+        lib.contains("pub use binding::{ColumnRootBinding, NormalizedVerifierDigest};"),
+        "commitment root should export only canonical root-binding contracts"
+    );
+    assert!(
+        !lib.contains("compat"),
+        "commitment root must not expose a compat namespace"
     );
 }
 
 #[test]
-fn column_state_public_apply_writes_is_trace_free() {
-    let column = fs::read_to_string(crate_root().join("src/column.rs")).expect("read column.rs");
+fn deleted_old_commitment_files_stay_deleted() {
+    assert!(
+        !crate_root().join("src/column.rs").exists(),
+        "legacy column.rs surface should remain deleted"
+    );
+    assert!(
+        !crate_root().join("src/compat.rs").exists(),
+        "compat.rs should remain deleted"
+    );
+}
+
+#[test]
+fn binding_surface_stays_canonical_only() {
+    let binding = fs::read_to_string(crate_root().join("src/binding.rs")).expect("read binding.rs");
 
     assert!(
-        column.contains("pub fn apply_writes("),
-        "ColumnState must keep a public apply_writes API"
+        binding.contains("pub struct ColumnRootBinding"),
+        "binding surface must define ColumnRootBinding"
     );
     assert!(
-        column.contains(") -> Result<(Self, NativeDigest), TabulaError> {"),
-        "public apply_writes must return only the new state and commitment, wrapped in Result"
+        binding.contains("pub struct NormalizedVerifierDigest"),
+        "binding surface must define NormalizedVerifierDigest"
     );
     assert!(
-        !column.contains("apply_writes_with_trace"),
-        "internal trace-specific apply_writes helper should be removed when unused"
+        !binding.contains(&["Column", "State"].concat()),
+        "binding surface must not mention removed state wrapper terminology"
     );
     assert!(
-        column.contains("pub fn proof_commitment("),
-        "ColumnState should own the proof-visible commitment bridge as a method"
-    );
-    assert!(
-        !column.contains("pub fn proof_column_commitment("),
-        "legacy free-function proof_column_commitment should be removed"
+        !binding.contains(&["Column", "Meta"].concat()),
+        "binding surface must not mention removed meta-leaf terminology"
     );
 }
 

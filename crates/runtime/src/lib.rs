@@ -13,6 +13,8 @@
 //! Stable runtime APIs remain backend-neutral. Extension authoring lives in
 //! `tabula-ext`, while the runtime consumes those contracts and prepares
 //! prove/verify resources internally before handing traces to the machine.
+//! Compiler-owned descriptor catalogs are sealed before this layer; concrete
+//! scheme and precompile backends are installed through [`HostEnvironment`].
 //!
 //! ```text
 //! compiler (compile/load/register) -> runtime (execute/prove) -> machine (STARK)
@@ -28,22 +30,19 @@
 
 #[cfg(feature = "prove")]
 mod builder;
-#[cfg(feature = "prove")]
-mod capabilities;
-#[cfg(any(feature = "prove", feature = "verify"))]
-mod columns;
 mod error;
 mod execute;
+mod host;
 #[cfg(any(feature = "prove", feature = "verify"))]
-mod precompile_proofs;
+mod machine_config;
 #[cfg(any(feature = "prove", feature = "verify"))]
 mod program;
-#[cfg(any(feature = "prove", feature = "verify"))]
-mod proof_extensions;
 #[cfg(feature = "prove")]
 mod proving;
 #[cfg(feature = "prove")]
 mod runtime;
+#[cfg(any(feature = "prove", feature = "verify"))]
+mod schemes;
 #[cfg(any(feature = "prove", feature = "verify"))]
 mod setup;
 #[cfg(test)]
@@ -56,8 +55,9 @@ pub use execute::{BatchInput, CompiledBatchInput, ExecutedBatch, run_batch, run_
 
 #[cfg(feature = "prove")]
 pub use builder::RuntimeBuilder;
+pub use host::{HostEnvironment, HostTypeRuntimes, InstalledPrecompiles, InstalledSchemes};
 #[cfg(any(feature = "prove", feature = "verify"))]
-pub use columns::{SmtScheme, SsmcScheme};
+pub use machine_config::MachineConfig;
 #[cfg(any(feature = "prove", feature = "verify"))]
 pub use program::Binding;
 #[cfg(feature = "prove")]
@@ -67,5 +67,7 @@ pub use proving::{ProofSummary, ProveInput, ProveResult, VerifiedResult, digest_
 #[cfg(feature = "prove")]
 /// Runtime built once per [`tabula_compiler::SealedProgram`].
 pub use runtime::TabulaRuntime;
+#[cfg(any(feature = "prove", feature = "verify"))]
+pub use schemes::{SmtScheme, SsmcScheme};
 #[cfg(feature = "verify")]
 pub use verifier::{Verifier, VerifierBuilder};

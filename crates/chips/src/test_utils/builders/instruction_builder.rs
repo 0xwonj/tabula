@@ -115,10 +115,9 @@ impl InstructionBuilder {
         self
     }
 
-    /// Set hash permutation input/output.
-    pub fn hash_perm(mut self, input: [KoalaBear; 16], output: [KoalaBear; 8]) -> Self {
-        self.inner.hash_perm_input = Some(input);
-        self.inner.hash_perm_output = Some(output);
+    /// Set hash digest relay.
+    pub fn hash_digest(mut self, digest: [KoalaBear; 8]) -> Self {
+        self.inner.hash_digest = Some(digest);
         self
     }
 

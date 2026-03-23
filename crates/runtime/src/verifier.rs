@@ -1,32 +1,32 @@
 //! Verifier-only runtime surface.
 //!
-//! A [`Verifier`] is built against one program binding plus any
-//! required proving-side extensions. It does not own execution-only resources
-//! such as precompile handlers or property resolvers.
+//! A [`Verifier`] is built against one program binding plus the host-installed
+//! capabilities needed to materialize the sealed artifact's proof surface. It
+//! does not own execution-only registries such as property query handlers.
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use tabula_artifact::{Artifact, PrecompileDescriptor, Statement};
+use tabula_artifact::{Artifact, Statement};
+use tabula_chips::ir_hash::IrHashChip;
+use tabula_chips::poseidon::PoseidonChip;
 use tabula_chips::precompile_transcript::PrecompileTranscriptChip;
 use tabula_compiler::register_artifact;
-use tabula_ext::{PrecompileBundle, SchemeBundle};
-use tabula_ir::PrecompileId;
+use tabula_ext::backend::precompile::PrecompileProofSystem;
+use tabula_ir::Instruction;
 use tabula_machine::backend::AnyRap;
 use tabula_machine::backend::extension::ExecutionTierExtension;
 use tabula_machine::{TabulaMachine, TabulaProof};
 
 use crate::error::RuntimeError;
-use crate::precompile_proofs::{PrecompileProofFactory, PrecompileProofSystem};
+use crate::host::HostEnvironment;
+use crate::machine_config::MachineConfig;
 use crate::program::{Binding, binding_from_artifact};
-use crate::setup::builder_state::{MachineConfigBase, ProofRegistryBase};
 use crate::setup::materialize::{
-    materialize_precompile_proofs_with_factories, materialize_proof_slots_with_factories,
+    materialize_column_backends, materialize_precompile_verifier_systems,
 };
-use crate::setup::planning::derive_column_plans;
 use crate::setup::validation::{
-    validate_compiler_owned_proof_plan, validate_precompile_requirements,
-    validate_statement_binding,
+    validate_compiler_owned_profiles, validate_precompile_requirements, validate_statement_binding,
 };
 
 /// Verify a proof against an expected program binding and low-level machine verifier.
@@ -56,14 +56,10 @@ pub struct Verifier {
 }
 
 /// Fluent builder for [`Verifier`].
-///
-/// Collects verifier-side extensions and machine configuration, then prepares
-/// the proving backend for repeated verification against one sealed program.
 pub struct VerifierBuilder {
     artifact: Artifact,
-    machine_base: MachineConfigBase,
-    proof_registry: ProofRegistryBase,
-    precompile_factories: BTreeMap<PrecompileId, Arc<dyn PrecompileProofFactory>>,
+    host_environment: HostEnvironment,
+    machine_config: MachineConfig,
 }
 
 impl Verifier {
@@ -92,59 +88,20 @@ impl VerifierBuilder {
     fn new(artifact: Artifact) -> Self {
         Self {
             artifact,
-            machine_base: MachineConfigBase::new(),
-            proof_registry: ProofRegistryBase::seeded(),
-            precompile_factories: BTreeMap::new(),
+            host_environment: HostEnvironment::standard(),
+            machine_config: MachineConfig::standard(),
         }
     }
 
-    /// Register a verifier-side precompile extension.
-    pub fn with_precompile(mut self, bundle: PrecompileBundle) -> Result<Self, RuntimeError> {
-        let id = bundle.id();
-        let proof_factory = bundle.into_proof_factory();
-        if self
-            .precompile_factories
-            .insert(id, proof_factory)
-            .is_some()
-        {
-            return Err(RuntimeError::ValidationFailed {
-                detail: format!(
-                    "duplicate verifier precompile registration for id 0x{:04x}",
-                    id.0
-                ),
-            });
-        }
-        Ok(self)
-    }
-
-    /// Register one canonical custom scheme bundle.
-    pub fn with_scheme_bundle(mut self, bundle: SchemeBundle) -> Result<Self, RuntimeError> {
-        let scheme_id = bundle.scheme_id();
-        let proof_factory = bundle.into_proof_factory();
-        if self.proof_registry.contains(scheme_id) {
-            return Err(RuntimeError::ValidationFailed {
-                detail: format!("duplicate proof scheme registration for id {}", scheme_id.0),
-            });
-        }
-        self.proof_registry.insert_arc(proof_factory)?;
-        Ok(self)
-    }
-
-    /// Clear all preloaded standard proof schemes.
-    pub fn without_default_schemes(mut self) -> Self {
-        self.proof_registry = ProofRegistryBase::empty();
+    /// Replace the host-installed runtime capabilities used for verification.
+    pub fn with_host_environment(mut self, host_environment: HostEnvironment) -> Self {
+        self.host_environment = host_environment;
         self
     }
 
-    /// Override the root proof scheme (default: two-level SMT).
-    pub fn with_root_proof(mut self, root: impl tabula_machine::RootProof + 'static) -> Self {
-        self.machine_base = self.machine_base.with_root_proof(root);
-        self
-    }
-
-    /// Override the STARK configuration.
-    pub fn with_config(mut self, config: tabula_machine::TabulaStarkConfig) -> Self {
-        self.machine_base = self.machine_base.with_config(config);
+    /// Replace the machine-side verification configuration.
+    pub fn with_machine_config(mut self, machine_config: MachineConfig) -> Self {
+        self.machine_config = machine_config;
         self
     }
 
@@ -156,17 +113,22 @@ impl VerifierBuilder {
 
         self.validate(&compiled_program)?;
 
-        let column_plans = derive_column_plans(&compiled_program)?;
-        let columns = materialize_proof_slots_with_factories(
-            &column_plans,
-            self.proof_registry.factories(),
-            self.machine_base.root_profile_id(),
+        let resolved_columns = materialize_column_backends(
+            &compiled_program,
+            self.host_environment.schemes().factories(),
+            self.host_environment.type_runtimes().type_runtimes(),
+            self.host_environment.type_runtimes().encoding_runtimes(),
+            self.machine_config.supported_root_binding_families(),
         )?;
-        let precompile_systems = materialize_precompile_proofs_with_factories(
+        let precompile_systems = materialize_precompile_verifier_systems(
             &self.artifact.precompile_manifest,
-            &self.precompile_factories,
+            self.host_environment.precompiles().factories(),
         )?;
-        let mut machine_builder = self.machine_base.into_machine_builder();
+        let mut machine_builder = self.machine_config.build_machine_builder();
+        if program_uses_ir_hash(compiled_program.program()) {
+            machine_builder = machine_builder
+                .with_backend_execution_extension_boxed(Box::new(InternalIrHashExtension));
+        }
         if !self.artifact.precompile_manifest.is_empty() {
             machine_builder = machine_builder.with_backend_execution_extension_boxed(Box::new(
                 InternalPrecompileTranscriptExtension,
@@ -180,7 +142,12 @@ impl VerifierBuilder {
             ));
         }
         let machine = machine_builder
-            .with_columns(columns.into_iter().map(|slot| slot.proof_column))
+            .with_columns(
+                resolved_columns
+                    .column_backends
+                    .into_values()
+                    .map(|backend| backend.proof_column),
+            )
             .build()
             .map_err(RuntimeError::MachineSetup)?;
 
@@ -191,16 +158,15 @@ impl VerifierBuilder {
         &self,
         sealed_program: &tabula_compiler::SealedProgram,
     ) -> Result<(), RuntimeError> {
-        validate_compiler_owned_proof_plan(sealed_program)?;
-        let registered = self
-            .precompile_factories
-            .values()
-            .map(|factory| {
-                let descriptor = factory.descriptor();
-                (descriptor.precompile_id, descriptor)
-            })
-            .collect::<BTreeMap<PrecompileId, PrecompileDescriptor>>();
-        validate_precompile_requirements(sealed_program, &registered, "proof factory")?;
+        validate_compiler_owned_profiles(sealed_program)?;
+        let installed = self
+            .host_environment
+            .precompiles()
+            .factories()
+            .keys()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        validate_precompile_requirements(sealed_program, &installed, "precompile backend")?;
         Ok(())
     }
 }
@@ -208,6 +174,8 @@ impl VerifierBuilder {
 struct InternalPrecompileExtension {
     system: Arc<dyn PrecompileProofSystem>,
 }
+
+struct InternalIrHashExtension;
 
 struct InternalPrecompileTranscriptExtension;
 
@@ -229,18 +197,44 @@ impl ExecutionTierExtension for InternalPrecompileExtension {
     }
 }
 
+impl ExecutionTierExtension for InternalIrHashExtension {
+    fn name(&self) -> &str {
+        "ir_hash"
+    }
+
+    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
+        vec![Box::new(IrHashChip)]
+    }
+
+    fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
+        vec![Box::new(IrHashChip)]
+    }
+}
+
 impl ExecutionTierExtension for InternalPrecompileTranscriptExtension {
     fn name(&self) -> &str {
         "precompile_transcript"
     }
 
     fn airs(&self) -> Vec<Box<dyn AnyRap>> {
-        vec![Box::new(PrecompileTranscriptChip)]
+        vec![Box::new(PrecompileTranscriptChip), Box::new(PoseidonChip)]
     }
 
     fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
-        vec![Box::new(PrecompileTranscriptChip)]
+        vec![Box::new(PrecompileTranscriptChip), Box::new(PoseidonChip)]
     }
+
+    fn bus_consumers(&self) -> Vec<Box<dyn tabula_stark::trace::column_commitment::BusConsumer>> {
+        vec![Box::new(PoseidonChip)]
+    }
+}
+
+fn program_uses_ir_hash(program: &tabula_ir::Program) -> bool {
+    program
+        .all_types()
+        .iter()
+        .flat_map(|tx| tx.body.iter())
+        .any(|instruction| matches!(instruction, Instruction::Hash { .. }))
 }
 
 impl std::fmt::Debug for Verifier {
@@ -256,15 +250,15 @@ impl std::fmt::Debug for Verifier {
 mod tests {
     use crate::RuntimeError;
     #[cfg(feature = "verify")]
-    use tabula_compiler::register_program;
-    #[cfg(feature = "verify")]
-    use tabula_core::{ColId, SchemeId, TableId, TableSchema, TxTypeId, ValueType};
-    #[cfg(feature = "verify")]
-    use tabula_ext::SchemeBundle;
+    use tabula_core::{ColId, SchemeId, TableId, TxTypeId};
     #[cfg(feature = "prove")]
     use tabula_testing::assertions::assert_statement_matches_artifact;
     #[cfg(feature = "verify")]
+    use tabula_testing::exec::compiled_program_from_definition;
+    #[cfg(feature = "verify")]
     use tabula_testing::fixtures::artifacts::precompile_requirement_artifact;
+    #[cfg(feature = "verify")]
+    use tabula_testing::fixtures::schema::single_u64_column_schema;
 
     #[cfg(feature = "verify")]
     use tabula_ir::TxTypeDef;
@@ -277,9 +271,25 @@ mod tests {
 
     use super::Verifier;
     #[cfg(feature = "verify")]
-    use crate::testing::prove::{
-        EmptySchemeFactory, custom_descriptor, set_artifact_column_scheme,
+    use crate::host::{HostEnvironment, HostTypeRuntimes};
+    #[cfg(feature = "verify")]
+    use crate::testing::schemes::{
+        EmptySchemeFactory, custom_scheme_profile, set_artifact_column_scheme,
     };
+    #[cfg(feature = "verify")]
+    use tabula_ext::ColumnBackendFactoryBundle;
+
+    #[cfg(feature = "verify")]
+    fn compiled_single_column_noop_program() -> tabula_compiler::SealedProgram {
+        let schema = single_u64_column_schema(TableId(1), ColId(0), "accounts", "balance");
+        let tx = TxTypeDef {
+            id: TxTypeId(1),
+            name: "noop".to_string(),
+            param_schema: vec![],
+            body: vec![],
+        };
+        compiled_program_from_definition(vec![schema], vec![tx])
+    }
 
     #[cfg(feature = "verify")]
     #[test]
@@ -290,7 +300,7 @@ mod tests {
 
         match err {
             RuntimeError::ValidationFailed { detail } => {
-                assert!(detail.contains("precompile"));
+                assert!(detail.contains("precompile backend"));
             }
             other => panic!("unexpected error: {other}"),
         }
@@ -298,32 +308,16 @@ mod tests {
 
     #[cfg(feature = "verify")]
     #[test]
-    fn program_verifier_supports_custom_only_proof_registry() {
-        let schema = TableSchema {
-            id: TableId(1),
-            name: "accounts".to_string(),
-            columns: vec![tabula_core::ColumnDef {
-                id: ColId(0),
-                name: "balance".to_string(),
-                value_type: ValueType::U64,
-            }],
-        };
-        let tx = TxTypeDef {
-            id: TxTypeId(1),
-            name: "noop".to_string(),
-            param_schema: vec![],
-            body: vec![],
-        };
-        let compiled = register_program(&[schema], &[tx]).expect("register program");
+    fn program_verifier_supports_custom_only_host_environment() {
+        let compiled = compiled_single_column_noop_program();
         let mut artifact = compiled.into_artifact();
-        set_artifact_column_scheme(&mut artifact, 0, custom_descriptor(SchemeId(0x1000)));
+        set_artifact_column_scheme(&mut artifact, 0, custom_scheme_profile(SchemeId(0x1000)));
+        let host_environment = HostEnvironment::empty()
+            .with_type_runtimes(HostTypeRuntimes::standard())
+            .with_column_backend_bundle(ColumnBackendFactoryBundle::new(EmptySchemeFactory))
+            .expect("register custom backend bundle");
         let verifier = Verifier::builder(artifact)
-            .without_default_schemes()
-            .with_scheme_bundle(
-                SchemeBundle::new(EmptySchemeFactory, EmptySchemeFactory)
-                    .expect("empty scheme bundle"),
-            )
-            .expect("register custom proof bundle")
+            .with_host_environment(host_environment)
             .build()
             .expect("custom-only verifier");
 

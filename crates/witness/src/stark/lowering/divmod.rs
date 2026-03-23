@@ -14,7 +14,8 @@ pub(super) fn lower_divmod<const W: usize>(
 ) -> Result<(), TabulaError> {
     let lhs_val = ctx.resolve_val(lhs)?;
     let rhs_val = ctx.resolve_val(rhs)?;
-    let (q, r) = lhs_val.checked_divmod(&rhs_val)?;
+    let runtime = ctx.type_runtimes.resolve(lhs_val.type_id())?;
+    let (q, r) = runtime.divmod(&lhs_val, &rhs_val)?;
 
     let lhs_enc = ctx.encode_padded(&lhs_val)?;
     let rhs_enc = ctx.encode_padded(&rhs_val)?;

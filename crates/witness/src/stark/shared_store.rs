@@ -2,10 +2,11 @@
 
 use p3_koala_bear::KoalaBear;
 
-use tabula_commitment::{ColumnMeta, FieldHasher, NativeDigest};
+use tabula_commitment::{ColumnRootBinding, FieldHasher, NativeDigest};
 use tabula_core::error::TabulaError;
 
 use tabula_chips::execution::trace::InstructionRecord;
+use tabula_chips::ir_hash::{IR_HASH_WITNESS_LABEL, IrHashCall};
 use tabula_chips::smt_path::trace::{SmtPathWitness, SmtTablePathWitness};
 use tabula_chips::static_table::trace::StaticTableRow;
 use tabula_stark::trace::{WitnessStore, witness_labels};
@@ -20,6 +21,8 @@ struct AllTraceInputs<'a> {
     pub execution_records: &'a [InstructionRecord],
     /// Static table rows.
     pub static_table_rows: &'a [StaticTableRow],
+    /// Canonical IR hash calls.
+    pub ir_hash_calls: &'a [IrHashCall],
     /// SMT column path witnesses.
     pub smt_col_paths: &'a [SmtPathWitness],
     /// SMT table path witnesses.
@@ -40,7 +43,7 @@ where
 #[derive(Clone, Copy)]
 pub struct SharedStoreContext<'a> {
     /// Column metadata for all planned columns.
-    pub column_metas: &'a [ColumnMeta],
+    pub column_root_bindings: &'a [ColumnRootBinding],
     /// State root before the batch.
     pub old_state_root: &'a NativeDigest,
     /// State root after the batch.
@@ -70,7 +73,7 @@ where
         H: Clone,
     {
         let (smt_col_paths, smt_table_paths) = build_smt_paths(
-            self.context.column_metas,
+            self.context.column_root_bindings,
             self.context.old_state_root,
             self.context.new_state_root,
             hasher,
@@ -79,6 +82,7 @@ where
         let inputs = AllTraceInputs {
             execution_records: &lowering.instruction_records,
             static_table_rows: &lowering.static_table_rows,
+            ir_hash_calls: &lowering.ir_hash_calls,
             smt_col_paths: &smt_col_paths,
             smt_table_paths: &smt_table_paths,
         };
@@ -108,6 +112,7 @@ where
             witness_labels::STATIC_TABLE_ROWS,
             inputs.static_table_rows.to_vec(),
         );
+        store.put(IR_HASH_WITNESS_LABEL, inputs.ir_hash_calls.to_vec());
         store.put(witness_labels::SMT_COL_PATHS, inputs.smt_col_paths.to_vec());
         store.put(
             witness_labels::SMT_TABLE_PATHS,

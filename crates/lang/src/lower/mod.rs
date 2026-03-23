@@ -6,10 +6,16 @@
 mod expr;
 mod resolve;
 mod stmt;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
-use tabula_core::{ColId, SchemeId, TableId, TableSchema, TxTypeId, Value, ValueType};
-use tabula_ir::{Instruction, ParamDef, Slot, TxTypeDef, ValueExpr};
+use tabula_core::{ColId, PortableValue, SchemeId, TableId, TxTypeId, TypeId};
+use tabula_ir::{
+    Instruction, ParamDef, PrecompileId, PrecompileSignature, Slot, TxTypeDef, ValueExpr,
+};
+use tabula_profile::{
+    HostValueFamily, NullSemantics, SemanticRegistry, TYPE_BOOL_ID, TYPE_BYTES32_ID, TYPE_U64_ID,
+    ZeroValueSpec, builtin_semantic_registry,
+};
 
 use crate::ast::{self, ColumnSchemeDecl, TypeName};
 use crate::error::{CompileError, ErrorKind};
@@ -18,20 +24,35 @@ use crate::span::Span;
 /// Lowering output: table schemas + tx type definitions.
 #[derive(Debug, Clone)]
 pub struct LoweredProgram {
-    /// Table schemas (ordered by declaration order).
-    pub schemas: Vec<TableSchema>,
+    /// Source-side table schemas (ordered by declaration order).
+    pub schemas: Vec<SourceTableSchema>,
     /// Transaction type definitions (ordered by declaration order).
     pub tx_types: Vec<TxTypeDef>,
     /// Non-default column commitment scheme selections from source.
     pub column_schemes: Vec<ColumnSchemeSelection>,
 }
 
-/// Backward-compatible alias for older call sites.
-pub type SealedProgram = LoweredProgram;
-
 /// Lower an AST program to IR.
 pub fn lower(program: &ast::Program) -> Result<LoweredProgram, Vec<CompileError>> {
-    let mut ctx = LowerCtx::new();
+    let registry = builtin_semantic_registry().expect("built-in semantic registry must stay valid");
+    lower_with_registry_and_precompiles(program, &registry, &BTreeMap::new())
+}
+
+/// Lower an AST program to IR using one explicit semantic registry.
+pub fn lower_with_registry(
+    program: &ast::Program,
+    registry: &SemanticRegistry,
+) -> Result<LoweredProgram, Vec<CompileError>> {
+    lower_with_registry_and_precompiles(program, registry, &BTreeMap::new())
+}
+
+/// Lower an AST program to IR using one explicit semantic registry and precompile signatures.
+pub fn lower_with_registry_and_precompiles(
+    program: &ast::Program,
+    registry: &SemanticRegistry,
+    precompiles: &BTreeMap<PrecompileId, PrecompileSignature>,
+) -> Result<LoweredProgram, Vec<CompileError>> {
+    let mut ctx = LowerCtx::new(registry, precompiles);
     ctx.collect_schemas(program);
     if !ctx.errors.is_empty() {
         return Err(ctx.errors);
@@ -48,6 +69,28 @@ pub fn lower(program: &ast::Program) -> Result<LoweredProgram, Vec<CompileError>
     }
 }
 
+/// Source-side column definition before compiler sealing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceColumnDef {
+    /// Column identifier.
+    pub id: ColId,
+    /// Human-readable name.
+    pub name: String,
+    /// Source-resolved semantic type selection.
+    pub type_id: TypeId,
+}
+
+/// Source-side table schema before compiler sealing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceTableSchema {
+    /// Table identifier.
+    pub id: TableId,
+    /// Human-readable name.
+    pub name: String,
+    /// Ordered column definitions.
+    pub columns: Vec<SourceColumnDef>,
+}
+
 // ---------------------------------------------------------------------------
 // Table & column info
 // ---------------------------------------------------------------------------
@@ -61,7 +104,7 @@ pub(super) struct TableInfo {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ColumnInfo {
     pub(super) id: ColId,
-    pub(super) ty: ValueType,
+    pub(super) type_id: TypeId,
 }
 
 // ---------------------------------------------------------------------------
@@ -69,10 +112,12 @@ pub(super) struct ColumnInfo {
 // ---------------------------------------------------------------------------
 
 struct LowerCtx {
+    registry: SemanticRegistry,
+    precompiles: BTreeMap<PrecompileId, PrecompileSignature>,
     /// table name → info
     tables: HashMap<String, TableInfo>,
     /// Compiled schemas (output).
-    schemas: Vec<TableSchema>,
+    schemas: Vec<SourceTableSchema>,
     /// Compiled tx type defs (output).
     tx_types: Vec<TxTypeDef>,
     /// Non-default column scheme selections (output).
@@ -81,8 +126,13 @@ struct LowerCtx {
 }
 
 impl LowerCtx {
-    fn new() -> Self {
+    fn new(
+        registry: &SemanticRegistry,
+        precompiles: &BTreeMap<PrecompileId, PrecompileSignature>,
+    ) -> Self {
         Self {
+            registry: registry.clone(),
+            precompiles: precompiles.clone(),
             tables: HashMap::new(),
             schemas: Vec::new(),
             tx_types: Vec::new(),
@@ -124,15 +174,25 @@ impl LowerCtx {
                 seen_cols.insert(col.name.clone(), col.span);
 
                 let col_id = ColId(j as u16);
-                let vt = ast_type_to_value_type(col.ty);
-                columns.insert(col.name.clone(), ColumnInfo { id: col_id, ty: vt });
-                col_defs.push(tabula_core::ColumnDef {
+                let Some(type_id) = self.resolve_type_name(col.ty, col.span) else {
+                    continue;
+                };
+                columns.insert(
+                    col.name.clone(),
+                    ColumnInfo {
+                        id: col_id,
+                        type_id,
+                    },
+                );
+                col_defs.push(SourceColumnDef {
                     id: col_id,
                     name: col.name.clone(),
-                    value_type: vt,
+                    type_id,
                 });
                 if let Some(scheme) = col.scheme {
-                    let scheme_id = ast_scheme_to_scheme_id(scheme);
+                    let Some(scheme_id) = self.resolve_scheme_decl(scheme, col.span) else {
+                        continue;
+                    };
                     if scheme_id != SchemeId::SSMC {
                         self.column_schemes.push(ColumnSchemeSelection {
                             table_id,
@@ -150,7 +210,7 @@ impl LowerCtx {
                     columns,
                 },
             );
-            self.schemas.push(TableSchema {
+            self.schemas.push(SourceTableSchema {
                 id: table_id,
                 name: table.name.clone(),
                 columns: col_defs,
@@ -177,9 +237,51 @@ impl LowerCtx {
             seen_tx.insert(tx.name.clone(), tx.span);
 
             let tx_id = TxTypeId(i as u32);
-            match TxLower::new(&self.tables, tx).lower(tx_id) {
+            match TxLower::new(&self.tables, &self.registry, &self.precompiles, tx).lower(tx_id) {
                 Ok(def) => self.tx_types.push(def),
                 Err(errs) => self.errors.extend(errs),
+            }
+        }
+    }
+
+    fn resolve_type_name(&mut self, ty: TypeName, span: Span) -> Option<TypeId> {
+        let name = match ty {
+            TypeName::U64 => "u64",
+            TypeName::I64 => "i64",
+            TypeName::Bool => "bool",
+            TypeName::Bytes32 => "bytes32",
+        };
+        match self.registry.resolve_type_name(name) {
+            Ok(type_id) => Some(type_id),
+            Err(err) => {
+                self.errors.push(CompileError::new(
+                    ErrorKind::TypeMismatch,
+                    span,
+                    err.to_string(),
+                ));
+                None
+            }
+        }
+    }
+
+    fn resolve_scheme_decl(&mut self, scheme: ColumnSchemeDecl, span: Span) -> Option<SchemeId> {
+        let name = match scheme {
+            ColumnSchemeDecl::Ssmc => Some("ssmc"),
+            ColumnSchemeDecl::Smt => Some("smt"),
+            ColumnSchemeDecl::Numeric(id) => return Some(SchemeId(id)),
+        };
+        match self
+            .registry
+            .resolve_scheme_name(name.expect("named built-in scheme"))
+        {
+            Ok(scheme_id) => Some(scheme_id),
+            Err(err) => {
+                self.errors.push(CompileError::new(
+                    ErrorKind::TypeMismatch,
+                    span,
+                    err.to_string(),
+                ));
+                None
             }
         }
     }
@@ -196,14 +298,6 @@ pub struct ColumnSchemeSelection {
     pub scheme_id: SchemeId,
 }
 
-fn ast_scheme_to_scheme_id(scheme: ColumnSchemeDecl) -> SchemeId {
-    match scheme {
-        ColumnSchemeDecl::Ssmc => SchemeId::SSMC,
-        ColumnSchemeDecl::Smt => SchemeId::SMT,
-        ColumnSchemeDecl::Numeric(id) => SchemeId(id),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Per-transaction lowering
 // ---------------------------------------------------------------------------
@@ -212,19 +306,19 @@ fn ast_scheme_to_scheme_id(scheme: ColumnSchemeDecl) -> SchemeId {
 #[derive(Debug, Clone)]
 pub(super) enum Binding {
     /// Occupies a physical IR slot.
-    Slot(Slot, ValueType),
+    Slot(Slot, TypeId),
     /// Alias — resolved to a ValueExpr without emitting instructions.
-    Alias(ValueExpr, ValueType),
+    Alias(ValueExpr, TypeId),
     /// 2-slot cell read result: (val_slot, is_null_slot, column type).
     ReadSlot {
         val: Slot,
         is_null: Slot,
-        ty: ValueType,
+        ty: TypeId,
     },
 }
 
 impl Binding {
-    pub(super) fn ty(&self) -> ValueType {
+    pub(super) fn ty(&self) -> TypeId {
         match self {
             Binding::Slot(_, ty) | Binding::Alias(_, ty) | Binding::ReadSlot { ty, .. } => *ty,
         }
@@ -248,9 +342,11 @@ impl Binding {
 
 pub(super) struct TxLower<'a> {
     pub(super) tables: &'a HashMap<String, TableInfo>,
+    pub(super) registry: &'a SemanticRegistry,
+    pub(super) precompiles: &'a BTreeMap<PrecompileId, PrecompileSignature>,
     pub(super) tx: &'a ast::TxDecl,
-    /// param name → (index, type)
-    pub(super) params: HashMap<String, (u16, ValueType)>,
+    /// param name → (index, type_id)
+    pub(super) params: HashMap<String, (u16, TypeId)>,
     /// local variable name → binding
     pub(super) locals: HashMap<String, Binding>,
     /// Next available slot.
@@ -261,9 +357,16 @@ pub(super) struct TxLower<'a> {
 }
 
 impl<'a> TxLower<'a> {
-    fn new(tables: &'a HashMap<String, TableInfo>, tx: &'a ast::TxDecl) -> Self {
+    fn new(
+        tables: &'a HashMap<String, TableInfo>,
+        registry: &'a SemanticRegistry,
+        precompiles: &'a BTreeMap<PrecompileId, PrecompileSignature>,
+        tx: &'a ast::TxDecl,
+    ) -> Self {
         Self {
             tables,
+            registry,
+            precompiles,
             tx,
             params: HashMap::new(),
             locals: HashMap::new(),
@@ -297,11 +400,13 @@ impl<'a> TxLower<'a> {
             }
             seen_params.insert(p.name.clone(), p.span);
 
-            let vt = ast_type_to_value_type(p.ty);
-            self.params.insert(p.name.clone(), (i as u16, vt));
+            let Some(type_id) = self.resolve_param_type_name(p.ty, p.span) else {
+                continue;
+            };
+            self.params.insert(p.name.clone(), (i as u16, type_id));
             param_schema.push(ParamDef {
                 name: p.name.clone(),
-                value_type: vt,
+                type_id,
             });
         }
 
@@ -321,6 +426,26 @@ impl<'a> TxLower<'a> {
             Err(self.errors)
         }
     }
+
+    fn resolve_param_type_name(&mut self, ty: TypeName, span: Span) -> Option<TypeId> {
+        let name = match ty {
+            TypeName::U64 => "u64",
+            TypeName::I64 => "i64",
+            TypeName::Bool => "bool",
+            TypeName::Bytes32 => "bytes32",
+        };
+        match self.registry.resolve_type_name(name) {
+            Ok(type_id) => Some(type_id),
+            Err(err) => {
+                self.errors.push(CompileError::new(
+                    ErrorKind::TypeMismatch,
+                    span,
+                    err.to_string(),
+                ));
+                None
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -329,16 +454,78 @@ impl<'a> TxLower<'a> {
 
 pub(super) enum LoweredExpr {
     Slot(Slot),
-    ValueExpr(ValueExpr, ValueType),
+    ValueExpr(ValueExpr, TypeId),
 }
 
-pub(super) fn ast_type_to_value_type(ty: TypeName) -> ValueType {
-    match ty {
-        TypeName::U64 => ValueType::U64,
-        TypeName::I64 => ValueType::I64,
-        TypeName::Bool => ValueType::Bool,
-        TypeName::Bytes32 => ValueType::Bytes32,
+pub(super) fn synthesize_canonical_zero(
+    registry: &SemanticRegistry,
+    type_id: TypeId,
+    require_nullable: bool,
+) -> Result<PortableValue, String> {
+    let descriptor = registry
+        .catalog()
+        .type_descriptor(type_id)
+        .map_err(|err| format!("type id {} is not registered: {err}", type_id.0))?;
+    if require_nullable && descriptor.null_semantics != NullSemantics::NullableWithCanonicalZero {
+        return Err(format!(
+            "null assignment requires NullableWithCanonicalZero semantics, but type id {} is {}",
+            type_id.0,
+            match descriptor.null_semantics {
+                NullSemantics::NullableWithCanonicalZero => "nullable with canonical zero",
+                NullSemantics::NonNullable => "non-nullable",
+            },
+        ));
     }
+
+    match (&descriptor.zero_value_spec, &descriptor.host_value_family) {
+        (ZeroValueSpec::IntegerZero, HostValueFamily::UnsignedInt { bits: 64 }) => {
+            Ok(PortableValue::new(type_id, 0u64.to_le_bytes().to_vec()))
+        }
+        (ZeroValueSpec::IntegerZero, HostValueFamily::SignedInt { bits: 64 }) => {
+            Ok(PortableValue::new(type_id, 0i64.to_le_bytes().to_vec()))
+        }
+        (ZeroValueSpec::BoolFalse, HostValueFamily::Bool) => {
+            Ok(PortableValue::new(type_id, vec![0u8]))
+        }
+        (ZeroValueSpec::ZeroBytes { len: zero_len }, HostValueFamily::Bytes { len: host_len })
+            if zero_len == host_len =>
+        {
+            Ok(PortableValue::new(
+                type_id,
+                vec![0u8; usize::from(*zero_len)],
+            ))
+        }
+        (ZeroValueSpec::ZeroBytes { len: zero_len }, HostValueFamily::Bytes { len: host_len }) => {
+            Err(format!(
+                "type id {} declares zero bytes length {} but host bytes length {}",
+                type_id.0, zero_len, host_len
+            ))
+        }
+        (ZeroValueSpec::Opaque { .. }, _) => Err(format!(
+            "type id {} uses an opaque zero-value rule that source lowering cannot synthesize",
+            type_id.0
+        )),
+        (_, HostValueFamily::Opaque { .. }) => Err(format!(
+            "type id {} uses an opaque host value family that source lowering cannot synthesize",
+            type_id.0
+        )),
+        (zero, host) => Err(format!(
+            "type id {} has incompatible zero-value rule {:?} for host family {:?}",
+            type_id.0, zero, host
+        )),
+    }
+}
+
+pub(super) fn builtin_u64_literal(value: u64) -> PortableValue {
+    PortableValue::new(TYPE_U64_ID, value.to_le_bytes().to_vec())
+}
+
+pub(super) fn builtin_bool_literal(value: bool) -> PortableValue {
+    PortableValue::new(TYPE_BOOL_ID, vec![u8::from(value)])
+}
+
+pub(super) fn builtin_bytes32_literal(value: [u8; 32]) -> PortableValue {
+    PortableValue::new(TYPE_BYTES32_ID, value.to_vec())
 }
 
 pub(super) fn is_arithmetic(op: crate::ast::BinOp) -> bool {

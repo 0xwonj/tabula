@@ -4,8 +4,10 @@ pub use tabula_contract::ProgramBinding;
 use tabula_stark::trace::{BusConsumer, DynChip};
 
 use crate::backend::AnyRap;
-use crate::error::ExtResult;
+use crate::error::{ExtError, ExtResult};
 use crate::precompile::{PrecompileDescriptor, PrecompileId};
+#[cfg(feature = "prove")]
+use tabula_executor::precompile::PrecompileHandler;
 
 /// Bus-visible header for one precompile call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,8 +96,8 @@ pub trait PrecompileProofPreparer: Send + Sync {
     /// Human-readable precompile name.
     fn name(&self) -> &str;
 
-    /// Portable precompile identifier.
-    fn precompile_id(&self) -> PrecompileId;
+    /// Exact sealed descriptor handled by this preparer.
+    fn descriptor(&self) -> &PrecompileDescriptor;
 
     /// Prepare witness data for this precompile family.
     fn prepare_precompile(
@@ -104,18 +106,31 @@ pub trait PrecompileProofPreparer: Send + Sync {
     ) -> ExtResult<PreparedPrecompileProof>;
 }
 
-/// Proof factory for one precompile capability family.
-pub trait PrecompileProofFactory: Send + Sync {
-    /// Sealed descriptor for this precompile family.
-    fn descriptor(&self) -> PrecompileDescriptor;
+/// Backend factory for one installed precompile family.
+pub trait PrecompileBackendFactory: Send + Sync {
+    /// Exact sealed descriptor implemented by this backend family.
+    fn descriptor(&self) -> &PrecompileDescriptor;
 
-    /// Portable precompile identifier implemented by this factory.
+    /// Portable precompile identifier implemented by this backend family.
     fn precompile_id(&self) -> PrecompileId {
         self.descriptor().precompile_id
     }
 
     /// Human-readable name.
     fn name(&self) -> &str;
+
+    /// Validate that one sealed descriptor belongs to this backend family.
+    fn validate_descriptor(&self, descriptor: &PrecompileDescriptor) -> ExtResult<()> {
+        if descriptor != self.descriptor() {
+            return Err(ExtError::validation(format!(
+                "precompile backend '{}' expects descriptor {:?} but received {:?}",
+                self.name(),
+                self.descriptor(),
+                descriptor,
+            )));
+        }
+        Ok(())
+    }
 
     /// Build the execution-tier proof system for this precompile family.
     #[cfg(feature = "verify")]
@@ -130,4 +145,9 @@ pub trait PrecompileProofFactory: Send + Sync {
         &self,
         resolved: &ResolvedPrecompile,
     ) -> ExtResult<Arc<dyn PrecompileProofPreparer>>;
+
+    /// Build the executor-visible handler for this precompile family.
+    #[cfg(feature = "prove")]
+    fn build_handler(&self, resolved: &ResolvedPrecompile)
+    -> ExtResult<Arc<dyn PrecompileHandler>>;
 }

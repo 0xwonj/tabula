@@ -1,6 +1,8 @@
 //! Compiler error types.
 
 use serde::{Deserialize, Serialize};
+use tabula_ir::PrecompileId;
+use tabula_profile::ProfileError;
 use thiserror::Error;
 
 /// Compiler result type.
@@ -62,4 +64,24 @@ pub enum CompilerError {
     /// Compiled artifact metadata mismatched current semantic policy.
     #[error("contract metadata mismatch: {0}")]
     ContractMetadataMismatch(#[source] tabula_contract::ContractValidationError),
+}
+
+/// Errors returned while mutating compiler-owned sealing catalogs.
+#[derive(Debug, Error)]
+pub enum CompilerCatalogError {
+    /// Semantic registry failed validation.
+    #[error("invalid semantic registry: {0}")]
+    InvalidSemanticRegistry(#[source] ProfileError),
+    /// Duplicate precompile descriptors are not allowed.
+    #[error("duplicate precompile descriptor registration for id {precompile_id:?}")]
+    DuplicatePrecompileDescriptor {
+        /// Conflicting portable precompile identifier.
+        precompile_id: PrecompileId,
+    },
+    /// Precompile descriptor contract is invalid for the active semantic registry.
+    #[error("invalid precompile descriptor registration: {detail}")]
+    InvalidPrecompileDescriptor {
+        /// Human-readable validation detail.
+        detail: String,
+    },
 }

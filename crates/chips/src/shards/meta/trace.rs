@@ -8,7 +8,6 @@ use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_commitment::NativeDigest;
-use tabula_commitment::primitives::DOMAIN_LEAF;
 use tabula_gadgets::bool_fe;
 use tabula_stark::air::columns::borrow_cols_mut;
 
@@ -18,8 +17,8 @@ use super::columns::{META_SHARD_WIDTH, MetaShardCols};
 
 /// A single row of MetaShard input data.
 ///
-/// Does not include `table_id`/`col_id` (the chip carries those) or
-/// `scheme_tag` (passed separately to trace generation).
+/// Does not include `table_id`/`col_id` (the chip carries those) or the
+/// precomputed root-binding digest prefix (passed separately to trace generation).
 #[derive(Debug, Clone)]
 pub struct MetaShardRow {
     /// Commitment before the batch (8 FE).
@@ -41,12 +40,13 @@ pub struct MetaShardRow {
 /// Generate a MetaShard trace from an optional row.
 ///
 /// `table_id` and `col_id` are baked into every real row as constant identity.
-/// `scheme_tag` is used for leaf digest domain separation.
+/// `binding_digest` is the precomputed root-binding digest prefix for this
+/// `(table, col, profile)` slot.
 /// If `row` is `None`, the trace contains only padding (all zeros).
 pub fn generate_meta_shard_trace(
     table_id: u32,
     col_id: u16,
-    scheme_tag: u16,
+    binding_digest: NativeDigest,
     row: Option<&MetaShardRow>,
 ) -> RowMajorMatrix<KoalaBear> {
     let width = META_SHARD_WIDTH;
@@ -83,25 +83,17 @@ pub fn generate_meta_shard_trace(
 
         // Leaf digest
         {
-            let tag_fe = KoalaBear::new(scheme_tag as u32);
-
-            // Old leaf: [0x10, t, c, tag, 0,0,0,0, com_old[8]]
+            // Old leaf: compress(binding_digest, com_old)
             let mut leaf_input_old = [KoalaBear::ZERO; 16];
-            leaf_input_old[0] = KoalaBear::new(DOMAIN_LEAF);
-            leaf_input_old[1] = KoalaBear::new(table_id);
-            leaf_input_old[2] = KoalaBear::new(col_id as u32);
-            leaf_input_old[3] = tag_fe;
+            leaf_input_old[..8].copy_from_slice(&binding_digest.0);
             leaf_input_old[8..16].copy_from_slice(&r.com_old.0);
             cols.leaf_perm_input_old = leaf_input_old;
             let (_rounds, perm_out_old) = poseidon2_permutation(leaf_input_old);
             cols.leaf_digest_old = core::array::from_fn(|j| perm_out_old[j]);
 
-            // New leaf: [0x10, t, c, tag, 0,0,0,0, com_new[8]]
+            // New leaf: compress(binding_digest, com_new)
             let mut leaf_input_new = [KoalaBear::ZERO; 16];
-            leaf_input_new[0] = KoalaBear::new(DOMAIN_LEAF);
-            leaf_input_new[1] = KoalaBear::new(table_id);
-            leaf_input_new[2] = KoalaBear::new(col_id as u32);
-            leaf_input_new[3] = tag_fe;
+            leaf_input_new[..8].copy_from_slice(&binding_digest.0);
             leaf_input_new[8..16].copy_from_slice(&r.com_new.0);
             cols.leaf_perm_input_new = leaf_input_new;
             let (_rounds, perm_out_new) = poseidon2_permutation(leaf_input_new);
@@ -123,7 +115,7 @@ impl TraceGenerator for super::air::MetaShardChip {
         generate_meta_shard_trace(
             self.table_id(),
             self.col_id(),
-            self.scheme_tag(),
+            self.binding_digest(),
             input.as_ref(),
         )
     }
@@ -148,7 +140,7 @@ impl TraceContributor for super::air::MetaShardChip {
         let trace = generate_meta_shard_trace(
             self.table_id(),
             self.col_id(),
-            self.scheme_tag(),
+            self.binding_digest(),
             witness.meta_row.as_ref(),
         );
         map.insert(self.chip_id(), trace);

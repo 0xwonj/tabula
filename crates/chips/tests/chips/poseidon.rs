@@ -17,7 +17,7 @@ use tabula_stark::debug::{debug_check, debug_check_with_preprocessed};
 
 use tabula_chips::test_utils::builders::poseidon_test_input;
 
-// ── Valid traces (backward-compatible, no preprocessed) ──
+// ── Valid traces (no preprocessed rows) ──
 
 #[test]
 fn valid_single_permutation() {

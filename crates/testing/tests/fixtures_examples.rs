@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use tabula_artifact::{Artifact, State, TransactionBatch, load_json};
-use tabula_core::{ColId, RowKey, TableId, Value};
+use tabula_core::{ColId, RowKey, TableId};
 use tabula_executor::consistency::check_consistency;
 use tabula_ir::PropertyQueryKind;
 use tabula_testing::assertions::{
@@ -20,6 +20,7 @@ use tabula_testing::fixtures::examples::{
     transfer_example_artifact_case, transfer_example_compiled_case, transfer_example_trace_case,
 };
 use tabula_testing::fs::{tempdir, write_artifact_json, write_batch_json, write_state_json};
+use tabula_types::u64_portable;
 
 #[test]
 fn transfer_example_adapters_are_consistent() {
@@ -55,7 +56,7 @@ fn compiled_single_write_case_executes_via_public_executor_seam() {
         TableId(1),
         ColId(0),
         RowKey(0),
-        Some(Value::U64(7)),
+        Some(&u64_portable(7)),
     );
 }
 

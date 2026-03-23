@@ -3,7 +3,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::{TxTypeId, Value};
+use crate::{PortableValue, TxTypeId};
 
 /// A concrete transaction in a batch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -11,7 +11,7 @@ pub struct Transaction {
     /// Which transaction type to execute.
     pub tx_type: TxTypeId,
     /// Concrete parameter values.
-    pub params: Vec<Value>,
+    pub params: Vec<PortableValue>,
     /// Sender's public key.
     pub sender: [u8; 32],
     /// Replay-protection nonce.

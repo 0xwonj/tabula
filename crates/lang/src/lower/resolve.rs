@@ -1,9 +1,11 @@
 //! Name resolution and type inference helpers for TxLower.
 
 use super::{
-    ColumnInfo, CompileError, ErrorKind, Instruction, Span, TableId, TxLower, Value, ValueExpr,
-    ValueType, is_arithmetic,
+    ColumnInfo, CompileError, ErrorKind, Instruction, Span, TableId, TxLower, ValueExpr,
+    builtin_bool_literal, is_arithmetic,
 };
+use tabula_core::TypeId;
+use tabula_profile::{TYPE_BOOL_ID, TYPE_BYTES32_ID, TYPE_U64_ID};
 
 use crate::ast::{Expr, ExprKind, UnaryOp};
 
@@ -42,7 +44,7 @@ impl<'a> TxLower<'a> {
                 dst,
                 op: tabula_ir::CmpOp::Eq,
                 lhs: ValueExpr::Slot(is_null_slot),
-                rhs: ValueExpr::Literal(Value::Bool(is_eq)),
+                rhs: ValueExpr::Literal(builtin_bool_literal(is_eq)),
             });
             return Some(ValueExpr::Slot(dst));
         }
@@ -80,17 +82,17 @@ impl<'a> TxLower<'a> {
     }
 
     /// Infer the type of an expression (best-effort).
-    pub(super) fn expr_type(&self, expr: &Expr) -> Option<ValueType> {
+    pub(super) fn expr_type(&self, expr: &Expr) -> Option<TypeId> {
         match &expr.kind {
-            ExprKind::IntLit(_) => Some(ValueType::U64),
-            ExprKind::BoolLit(_) => Some(ValueType::Bool),
-            ExprKind::HexLit(_) => Some(ValueType::Bytes32),
+            ExprKind::IntLit(_) => Some(TYPE_U64_ID),
+            ExprKind::BoolLit(_) => Some(TYPE_BOOL_ID),
+            ExprKind::HexLit(_) => Some(TYPE_BYTES32_ID),
             ExprKind::Null => None,
             ExprKind::Ident(name) => {
                 if let Some(binding) = self.locals.get(name) {
                     Some(binding.ty())
-                } else if let Some((_, ty)) = self.params.get(name) {
-                    Some(*ty)
+                } else if let Some((_, type_id)) = self.params.get(name) {
+                    Some(*type_id)
                 } else {
                     None
                 }
@@ -99,13 +101,13 @@ impl<'a> TxLower<'a> {
                 .tables
                 .get(table)
                 .and_then(|t| t.columns.get(col))
-                .map(|c| c.ty),
+                .map(|c| c.type_id),
             ExprKind::StaticRead { table, col, .. } => self
                 .tables
                 .get(table)
                 .and_then(|t| t.columns.get(col))
-                .map(|c| c.ty),
-            ExprKind::Hash(_) => Some(ValueType::Bytes32),
+                .map(|c| c.type_id),
+            ExprKind::Hash(_) => Some(TYPE_BYTES32_ID),
             ExprKind::BinOp { op, lhs, rhs, .. } if is_arithmetic(*op) => {
                 self.expr_type(lhs).or_else(|| self.expr_type(rhs))
             }
@@ -115,7 +117,7 @@ impl<'a> TxLower<'a> {
             } => self.expr_type(operand),
             ExprKind::UnaryOp {
                 op: UnaryOp::Not, ..
-            } => Some(ValueType::Bool),
+            } => Some(TYPE_BOOL_ID),
             ExprKind::Divmod { lhs, rhs } => self.expr_type(lhs).or_else(|| self.expr_type(rhs)),
             ExprKind::Select {
                 if_true, if_false, ..

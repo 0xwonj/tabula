@@ -220,6 +220,7 @@ pub fn poseidon2_permutation(
 }
 
 /// Per-round intermediate data for trace generation.
+#[derive(Clone, Debug)]
 pub struct PoseidonRoundData {
     /// State at the beginning of this round (before add_rc + sbox).
     pub state_before: [KoalaBear; WIDTH],

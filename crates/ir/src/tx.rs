@@ -3,7 +3,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use tabula_core::{TxTypeId, ValueType};
+use tabula_core::{TxTypeId, TypeId};
 
 use crate::Instruction;
 
@@ -25,6 +25,6 @@ pub struct TxTypeDef {
 pub struct ParamDef {
     /// Parameter name.
     pub name: String,
-    /// Expected value type.
-    pub value_type: ValueType,
+    /// Sealed semantic type identifier used by generic IR and compiler logic.
+    pub type_id: TypeId,
 }

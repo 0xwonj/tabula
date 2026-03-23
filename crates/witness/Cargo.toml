@@ -5,11 +5,14 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+borsh = { workspace = true }
 tabula-core = { workspace = true }
+tabula-types = { workspace = true }
 tabula-chips = { workspace = true }
 tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-gadgets = { workspace = true }
 tabula-ir = { workspace = true }
+tabula-profile = { workspace = true }
 tabula-stark = { workspace = true }
 p3-air = { workspace = true }
 p3-field = { workspace = true }

@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use tabula_core::{CellKey, ColId, RowKey, TableId, Value};
+use tabula_core::{CellKey, ColId, PortableValue, RowKey, TableId};
+use tabula_types::TypeRuntimeRegistry;
 
 use crate::ArtifactError;
 use crate::canonical::{bytes_to_hex, canonical_json_bytes, canonical_json_digest};
@@ -28,7 +29,7 @@ pub struct StateEntry {
     /// Column id.
     pub col: u16,
     /// Optional value (`null` means delete/absence).
-    pub value: Option<Value>,
+    pub value: Option<PortableValue>,
 }
 
 impl State {
@@ -51,30 +52,38 @@ impl State {
 }
 
 impl StateEntry {
-    /// Convert to a typed `(CellKey, Value)` pair.
-    pub fn to_cell_pair(&self) -> Result<(CellKey, Value), ArtifactError> {
+    /// Convert to a portable `(CellKey, PortableValue)` pair.
+    pub fn to_cell_pair(
+        &self,
+        type_runtimes: &TypeRuntimeRegistry,
+    ) -> Result<(CellKey, PortableValue), ArtifactError> {
         let key = CellKey {
             table: TableId(self.table),
             col: ColId(self.col),
             row: RowKey(self.row),
         };
-        let Some(value) = self.value else {
+        let Some(value) = &self.value else {
             return Err(ArtifactError::MissingStateValue {
                 table: self.table,
                 row: self.row,
                 col: self.col,
             });
         };
-        Ok((key, value))
+        type_runtimes.decode_portable(value).map_err(|err| {
+            ArtifactError::InvalidPortableValue {
+                detail: err.to_string(),
+            }
+        })?;
+        Ok((key, value.clone()))
     }
 
-    /// Build a JSON state cell from typed key/value.
-    pub fn from_cell_pair(key: &CellKey, value: &Option<Value>) -> Self {
+    /// Build a JSON state cell from portable key/value.
+    pub fn from_cell_pair(key: &CellKey, value: &Option<PortableValue>) -> Self {
         Self {
             table: key.table.0,
             row: key.row.0,
             col: key.col.0,
-            value: *value,
+            value: value.clone(),
         }
     }
 }
@@ -82,13 +91,13 @@ impl StateEntry {
 /// Merge a write-set over initial state cells with last-write-wins semantics.
 pub fn merge_output_state_entries(
     initial_cells: &[StateEntry],
-    write_set_final: &[(CellKey, Option<Value>)],
+    write_set_final: &[(CellKey, Option<PortableValue>)],
 ) -> Vec<StateEntry> {
-    let mut merged: BTreeMap<(u32, u64, u16), Value> = BTreeMap::new();
+    let mut merged: BTreeMap<(u32, u64, u16), PortableValue> = BTreeMap::new();
 
     for cell in initial_cells {
-        if let Some(value) = cell.value {
-            merged.insert((cell.table, cell.row, cell.col), value);
+        if let Some(value) = &cell.value {
+            merged.insert((cell.table, cell.row, cell.col), value.clone());
         }
     }
 
@@ -96,7 +105,7 @@ pub fn merge_output_state_entries(
         let tuple_key = (key.table.0, key.row.0, key.col.0);
         match value {
             Some(v) => {
-                merged.insert(tuple_key, *v);
+                merged.insert(tuple_key, v.clone());
             }
             None => {
                 merged.remove(&tuple_key);
@@ -122,8 +131,14 @@ pub fn merge_output_state_entries(
 pub fn normalize_state(input: &State) -> Result<State, ArtifactError> {
     let mut merged = BTreeMap::new();
     for cell in &input.cells {
-        let (key, value) = cell.to_cell_pair()?;
-        merged.insert((key.table.0, key.row.0, key.col.0), value);
+        let Some(value) = &cell.value else {
+            return Err(ArtifactError::MissingStateValue {
+                table: cell.table,
+                row: cell.row,
+                col: cell.col,
+            });
+        };
+        merged.insert((cell.table, cell.row, cell.col), value.clone());
     }
 
     Ok(State {
@@ -142,6 +157,7 @@ pub fn normalize_state(input: &State) -> Result<State, ArtifactError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tabula_types::{TypeRuntimeRegistry, bool_portable, i64_portable, u64_portable};
 
     #[test]
     fn state_file_serde_roundtrip() {
@@ -151,13 +167,13 @@ mod tests {
                     table: 0,
                     row: 0,
                     col: 0,
-                    value: Some(Value::U64(42)),
+                    value: Some(u64_portable(42)),
                 },
                 StateEntry {
                     table: 1,
                     row: 5,
                     col: 2,
-                    value: Some(Value::Bool(true)),
+                    value: Some(bool_portable(true)),
                 },
             ],
         };
@@ -165,8 +181,8 @@ mod tests {
         let json = serde_json::to_string(&state).expect("serialize");
         let back: State = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.cells.len(), 2);
-        assert_eq!(back.cells[0].value, Some(Value::U64(42)));
-        assert_eq!(back.cells[1].value, Some(Value::Bool(true)));
+        assert_eq!(back.cells[0].value, Some(u64_portable(42)));
+        assert_eq!(back.cells[1].value, Some(bool_portable(true)));
     }
 
     #[test]
@@ -176,19 +192,19 @@ mod tests {
                 table: 0,
                 row: 1,
                 col: 2,
-                value: Some(Value::U64(10)),
+                value: Some(u64_portable(10)),
             },
             StateEntry {
                 table: 0,
                 row: 1,
                 col: 2,
-                value: Some(Value::U64(20)),
+                value: Some(u64_portable(20)),
             },
         ];
 
         let merged = merge_output_state_entries(&initial, &[]);
         assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].value, Some(Value::U64(20)));
+        assert_eq!(merged[0].value, Some(u64_portable(20)));
     }
 
     #[test]
@@ -197,7 +213,7 @@ mod tests {
             table: 0,
             row: 0,
             col: 0,
-            value: Some(Value::U64(100)),
+            value: Some(u64_portable(100)),
         }];
         let write_set = vec![(
             CellKey {
@@ -205,12 +221,12 @@ mod tests {
                 col: ColId(0),
                 row: RowKey(0),
             },
-            Some(Value::U64(200)),
+            Some(u64_portable(200)),
         )];
 
         let merged = merge_output_state_entries(&initial, &write_set);
         assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].value, Some(Value::U64(200)));
+        assert_eq!(merged[0].value, Some(u64_portable(200)));
     }
 
     #[test]
@@ -219,7 +235,7 @@ mod tests {
             table: 0,
             row: 0,
             col: 0,
-            value: Some(Value::U64(100)),
+            value: Some(u64_portable(100)),
         }];
         let write_set = vec![(
             CellKey {
@@ -242,19 +258,19 @@ mod tests {
                     table: 0,
                     row: 1,
                     col: 0,
-                    value: Some(Value::U64(10)),
+                    value: Some(u64_portable(10)),
                 },
                 StateEntry {
                     table: 0,
                     row: 0,
                     col: 0,
-                    value: Some(Value::U64(20)),
+                    value: Some(u64_portable(20)),
                 },
                 StateEntry {
                     table: 0,
                     row: 1,
                     col: 0,
-                    value: Some(Value::U64(30)),
+                    value: Some(u64_portable(30)),
                 },
             ],
         };
@@ -262,9 +278,9 @@ mod tests {
         let normalized = normalize_state(&state).expect("normalize");
         assert_eq!(normalized.cells.len(), 2);
         assert_eq!(normalized.cells[0].row, 0);
-        assert_eq!(normalized.cells[0].value, Some(Value::U64(20)));
+        assert_eq!(normalized.cells[0].value, Some(u64_portable(20)));
         assert_eq!(normalized.cells[1].row, 1);
-        assert_eq!(normalized.cells[1].value, Some(Value::U64(30)));
+        assert_eq!(normalized.cells[1].value, Some(u64_portable(30)));
     }
 
     #[test]
@@ -289,16 +305,17 @@ mod tests {
             col: ColId(2),
             row: RowKey(3),
         };
-        let value = Some(Value::I64(-42));
+        let value = Some(i64_portable(-42));
         let cell = StateEntry::from_cell_pair(&key, &value);
         assert_eq!(cell.table, 1);
         assert_eq!(cell.row, 3);
         assert_eq!(cell.col, 2);
-        assert_eq!(cell.value, Some(Value::I64(-42)));
+        assert_eq!(cell.value, Some(i64_portable(-42)));
 
-        let (back_key, back_val) = cell.to_cell_pair().expect("back");
+        let runtimes = TypeRuntimeRegistry::seeded().expect("seeded runtimes");
+        let (back_key, back_val) = cell.to_cell_pair(&runtimes).expect("back");
         assert_eq!(back_key, key);
-        assert_eq!(back_val, Value::I64(-42));
+        assert_eq!(back_val, i64_portable(-42));
     }
 
     #[test]
@@ -309,13 +326,13 @@ mod tests {
                     table: 1,
                     row: 0,
                     col: 0,
-                    value: Some(Value::U64(1)),
+                    value: Some(u64_portable(1)),
                 },
                 StateEntry {
                     table: 1,
                     row: 0,
                     col: 0,
-                    value: Some(Value::U64(2)),
+                    value: Some(u64_portable(2)),
                 },
             ],
         };
@@ -324,7 +341,7 @@ mod tests {
                 table: 1,
                 row: 0,
                 col: 0,
-                value: Some(Value::U64(2)),
+                value: Some(u64_portable(2)),
             }],
         };
 

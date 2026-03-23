@@ -2,24 +2,23 @@
 #![cfg(all(feature = "verify", not(feature = "prove")))]
 
 use tabula_sdk::Sdk;
-use tabula_sdk::ext::PrecompileBundle;
-use tabula_testing::extensions::precompile::ConstantOnePrecompileProofFactory;
+use tabula_sdk::ext::PrecompileBackendFactoryBundle;
+use tabula_testing::extensions::precompile::ConstantOnePrecompileBackendFactory;
 use tabula_testing::fixtures::artifacts::{
     precompile_requirement_artifact, precompile_requirement_descriptor,
 };
 
 #[test]
-fn verification_only_precompile_bundle_builds_verifier_without_handler() {
+fn verification_only_precompile_backend_builds_verifier() {
     let descriptor = precompile_requirement_descriptor();
     let sdk = Sdk::builder()
-        .with_precompile(
-            PrecompileBundle::verification(
-                descriptor.clone(),
-                ConstantOnePrecompileProofFactory::new(descriptor),
-            )
-            .expect("verification bundle"),
+        .with_precompile_support(
+            descriptor.clone(),
+            PrecompileBackendFactoryBundle::new(ConstantOnePrecompileBackendFactory::new(
+                descriptor,
+            )),
         )
-        .expect("register verification-only precompile")
+        .expect("register verification precompile support")
         .build();
 
     let artifact = precompile_requirement_artifact();

@@ -4,11 +4,9 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use tabula_core::{
-    Batch, CellKey, ColId, ColumnDef, RowKey, TableId, TableSchema, TxResult, TxTypeId, Value,
-    ValueType,
-};
+use tabula_core::{Batch, CellKey, ColId, RowKey, TableId, TxResult, TxTypeId, TypeId};
 use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
+use tabula_profile::TYPE_U64_ID;
 use tabula_testing::assertions::{ExpectedTxOutcome, assert_tx_outcomes, assert_write_set_cell};
 
 use tabula_executor::batch::execute_batch;
@@ -17,15 +15,17 @@ use common::*;
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-fn test_schema() -> TableSchema {
-    TableSchema {
-        id: TableId(1),
-        name: "test".into(),
-        columns: vec![ColumnDef {
-            id: ColId(0),
-            name: "val".into(),
-            value_type: ValueType::U64,
-        }],
+fn test_program() -> tabula_ir::Program {
+    let (schemas, profile_catalog) = test_schema_bundle();
+    let mut program = tabula_ir::Program::with_profile_catalog(profile_catalog);
+    program.add_schema(schemas.get(&TableId(1)).expect("test schema").clone());
+    program
+}
+
+fn param(name: &str, type_id: TypeId) -> ParamDef {
+    ParamDef {
+        name: name.into(),
+        type_id,
     }
 }
 
@@ -33,22 +33,13 @@ fn write_tx_def() -> TxTypeDef {
     TxTypeDef {
         id: TxTypeId(1),
         name: "write_cell".into(),
-        param_schema: vec![
-            ParamDef {
-                name: "row".into(),
-                value_type: ValueType::U64,
-            },
-            ParamDef {
-                name: "value".into(),
-                value_type: ValueType::U64,
-            },
-        ],
+        param_schema: vec![param("row", TYPE_U64_ID), param("value", TYPE_U64_ID)],
         body: vec![Instruction::Write {
             table: TableId(1),
             row: RowExpr::Param(0),
             col: ColId(0),
             src_val: ValueExpr::Param(1),
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_is_null: lit(bool_portable(false)),
         }],
     }
 }
@@ -57,10 +48,7 @@ fn transfer_tx_def() -> TxTypeDef {
     TxTypeDef {
         id: TxTypeId(2),
         name: "transfer".into(),
-        param_schema: vec![ParamDef {
-            name: "amount".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("amount", TYPE_U64_ID)],
         body: vec![
             Instruction::Read {
                 dst_val: 0,
@@ -102,14 +90,14 @@ fn transfer_tx_def() -> TxTypeDef {
                 row: RowExpr::Literal(RowKey(0)),
                 col: ColId(0),
                 src_val: ValueExpr::Slot(5),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_is_null: lit(bool_portable(false)),
             },
             Instruction::Write {
                 table: TableId(1),
                 row: RowExpr::Literal(RowKey(1)),
                 col: ColId(0),
                 src_val: ValueExpr::Slot(6),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_is_null: lit(bool_portable(false)),
             },
         ],
     }
@@ -122,10 +110,14 @@ fn single_successful_tx() {
     let snap = TestSnapshot(BTreeMap::new());
     let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(1, vec![Value::U64(0), Value::U64(42)], sender, 0)],
+        transactions: vec![make_tx(
+            1,
+            vec![u64_portable(0), u64_portable(42)],
+            sender,
+            0,
+        )],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -136,7 +128,7 @@ fn single_successful_tx() {
         TableId(1),
         ColId(0),
         RowKey(0),
-        Some(Value::U64(42)),
+        Some(&u64_portable(42)),
     );
 }
 
@@ -146,12 +138,11 @@ fn inter_tx_read_your_writes() {
     let sender = [1u8; 32];
     let batch = Batch {
         transactions: vec![
-            make_tx(1, vec![Value::U64(0), Value::U64(100)], sender, 0),
+            make_tx(1, vec![u64_portable(0), u64_portable(100)], sender, 0),
             make_tx(3, vec![], sender, 1),
         ],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
     prog.register(TxTypeDef {
         id: TxTypeId(3),
@@ -170,7 +161,7 @@ fn inter_tx_read_your_writes() {
                 row: RowExpr::Literal(RowKey(1)),
                 col: ColId(0),
                 src_val: ValueExpr::Slot(0),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_is_null: lit(bool_portable(false)),
             },
         ],
     })
@@ -187,27 +178,26 @@ fn inter_tx_read_your_writes() {
         TableId(1),
         ColId(0),
         RowKey(1),
-        Some(Value::U64(100)),
+        Some(&u64_portable(100)),
     );
 }
 
 #[test]
 fn failed_tx_rollback() {
     let mut data = BTreeMap::new();
-    data.insert(cell(1, 0, 0), Value::U64(50));
-    data.insert(cell(1, 1, 0), Value::U64(50));
-    let snap = TestSnapshot(data);
+    data.insert(cell(1, 0, 0), u64_portable(50));
+    data.insert(cell(1, 1, 0), u64_portable(50));
+    let snap = snapshot(data);
     let sender = [1u8; 32];
 
     let batch = Batch {
         transactions: vec![
-            make_tx(2, vec![Value::U64(30)], sender, 0),
-            make_tx(2, vec![Value::U64(100)], sender, 1),
-            make_tx(2, vec![Value::U64(10)], sender, 1),
+            make_tx(2, vec![u64_portable(30)], sender, 0),
+            make_tx(2, vec![u64_portable(100)], sender, 1),
+            make_tx(2, vec![u64_portable(10)], sender, 1),
         ],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(transfer_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -224,14 +214,14 @@ fn failed_tx_rollback() {
         TableId(1),
         ColId(0),
         RowKey(0),
-        Some(Value::U64(10)),
+        Some(&u64_portable(10)),
     );
     assert_write_set_cell(
         &result,
         TableId(1),
         ColId(0),
         RowKey(1),
-        Some(Value::U64(90)),
+        Some(&u64_portable(90)),
     );
 }
 
@@ -239,10 +229,14 @@ fn failed_tx_rollback() {
 fn invalid_signature() {
     let snap = TestSnapshot(BTreeMap::new());
     let batch = Batch {
-        transactions: vec![make_tx(1, vec![Value::U64(0), Value::U64(1)], [1u8; 32], 0)],
+        transactions: vec![make_tx(
+            1,
+            vec![u64_portable(0), u64_portable(1)],
+            [1u8; 32],
+            0,
+        )],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let env = tabula_executor::batch::BatchEnv {
@@ -259,13 +253,12 @@ fn invalid_nonce() {
     let batch = Batch {
         transactions: vec![make_tx(
             1,
-            vec![Value::U64(0), Value::U64(1)],
+            vec![u64_portable(0), u64_portable(1)],
             [1u8; 32],
             999,
         )],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -292,13 +285,12 @@ fn tx_outcomes_len_matches_batch() {
     let sender = [1u8; 32];
     let batch = Batch {
         transactions: vec![
-            make_tx(1, vec![Value::U64(0), Value::U64(1)], sender, 0),
-            make_tx(1, vec![Value::U64(1), Value::U64(2)], sender, 1),
-            make_tx(1, vec![Value::U64(2), Value::U64(3)], sender, 2),
+            make_tx(1, vec![u64_portable(0), u64_portable(1)], sender, 0),
+            make_tx(1, vec![u64_portable(1), u64_portable(2)], sender, 1),
+            make_tx(1, vec![u64_portable(2), u64_portable(3)], sender, 2),
         ],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -310,10 +302,9 @@ fn param_count_mismatch_fails() {
     let snap = TestSnapshot(BTreeMap::new());
     let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(1, vec![Value::U64(0)], sender, 0)],
+        transactions: vec![make_tx(1, vec![u64_portable(0)], sender, 0)],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -329,13 +320,12 @@ fn param_type_mismatch_fails() {
     let batch = Batch {
         transactions: vec![make_tx(
             1,
-            vec![Value::U64(0), Value::Bool(true)],
+            vec![u64_portable(0), bool_portable(true)],
             sender,
             0,
         )],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -350,13 +340,12 @@ fn events_carry_correct_tx_index() {
     let sender = [1u8; 32];
     let batch = Batch {
         transactions: vec![
-            make_tx(1, vec![Value::U64(0), Value::U64(10)], sender, 0),
-            make_tx(1, vec![Value::U64(1), Value::U64(20)], sender, 1),
-            make_tx(1, vec![Value::U64(2), Value::U64(30)], sender, 2),
+            make_tx(1, vec![u64_portable(0), u64_portable(10)], sender, 0),
+            make_tx(1, vec![u64_portable(1), u64_portable(20)], sender, 1),
+            make_tx(1, vec![u64_portable(2), u64_portable(30)], sender, 2),
         ],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -370,16 +359,15 @@ fn events_carry_correct_tx_index() {
 #[test]
 fn failed_tx_partial_events() {
     let mut data = BTreeMap::new();
-    data.insert(cell(1, 0, 0), Value::U64(10));
-    data.insert(cell(1, 1, 0), Value::U64(50));
-    let snap = TestSnapshot(data);
+    data.insert(cell(1, 0, 0), u64_portable(10));
+    data.insert(cell(1, 1, 0), u64_portable(50));
+    let snap = snapshot(data);
     let sender = [1u8; 32];
 
     let batch = Batch {
-        transactions: vec![make_tx(2, vec![Value::U64(100)], sender, 0)],
+        transactions: vec![make_tx(2, vec![u64_portable(100)], sender, 0)],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(transfer_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -401,10 +389,9 @@ fn precheck_failure_empty_partial() {
     let snap = TestSnapshot(BTreeMap::new());
     let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(1, vec![Value::U64(0)], sender, 0)],
+        transactions: vec![make_tx(1, vec![u64_portable(0)], sender, 0)],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -428,14 +415,13 @@ fn multi_sender_independent_nonces() {
     let sender_b = [2u8; 32];
     let batch = Batch {
         transactions: vec![
-            make_tx(1, vec![Value::U64(0), Value::U64(10)], sender_a, 0),
-            make_tx(1, vec![Value::U64(1), Value::U64(20)], sender_b, 0),
-            make_tx(1, vec![Value::U64(2), Value::U64(30)], sender_a, 1),
-            make_tx(1, vec![Value::U64(3), Value::U64(40)], sender_b, 1),
+            make_tx(1, vec![u64_portable(0), u64_portable(10)], sender_a, 0),
+            make_tx(1, vec![u64_portable(1), u64_portable(20)], sender_b, 0),
+            make_tx(1, vec![u64_portable(2), u64_portable(30)], sender_a, 1),
+            make_tx(1, vec![u64_portable(3), u64_portable(40)], sender_b, 1),
         ],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -446,19 +432,18 @@ fn multi_sender_independent_nonces() {
 #[test]
 fn failed_tx_reads_not_in_read_set() {
     let mut data = BTreeMap::new();
-    data.insert(cell(1, 0, 0), Value::U64(50));
-    data.insert(cell(1, 1, 0), Value::U64(50));
-    let snap = TestSnapshot(data);
+    data.insert(cell(1, 0, 0), u64_portable(50));
+    data.insert(cell(1, 1, 0), u64_portable(50));
+    let snap = snapshot(data);
     let sender = [1u8; 32];
 
     let batch = Batch {
         transactions: vec![
-            make_tx(2, vec![Value::U64(10)], sender, 0),
-            make_tx(2, vec![Value::U64(999)], sender, 1),
+            make_tx(2, vec![u64_portable(10)], sender, 0),
+            make_tx(2, vec![u64_portable(999)], sender, 1),
         ],
     };
-    let mut prog = tabula_ir::Program::new();
-    prog.add_schema(test_schema());
+    let mut prog = test_program();
     prog.register(transfer_tx_def()).unwrap();
 
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
@@ -484,10 +469,7 @@ fn emitted_events_accumulate_across_txs() {
     let emit_def = TxTypeDef {
         id: TxTypeId(10),
         name: "emit_test".into(),
-        param_schema: vec![ParamDef {
-            name: "val".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("val", TYPE_U64_ID)],
         body: vec![Instruction::Emit {
             topic: b"event".to_vec(),
             data: vec![ValueExpr::Param(0)],
@@ -496,9 +478,9 @@ fn emitted_events_accumulate_across_txs() {
 
     let batch = Batch {
         transactions: vec![
-            make_tx(10, vec![Value::U64(1)], sender, 0),
-            make_tx(10, vec![Value::U64(2)], sender, 1),
-            make_tx(10, vec![Value::U64(3)], sender, 2),
+            make_tx(10, vec![u64_portable(1)], sender, 0),
+            make_tx(10, vec![u64_portable(2)], sender, 1),
+            make_tx(10, vec![u64_portable(3)], sender, 2),
         ],
     };
     let mut prog = tabula_ir::Program::new();
@@ -507,9 +489,9 @@ fn emitted_events_accumulate_across_txs() {
     let result = execute_batch(&batch, &prog, &snap, &test_env(), &BTreeMap::new()).unwrap();
     let emitted: Vec<_> = result.successful_emitted().collect();
     assert_eq!(emitted.len(), 3);
-    assert_eq!(emitted[0].data, vec![Value::U64(1)]);
-    assert_eq!(emitted[1].data, vec![Value::U64(2)]);
-    assert_eq!(emitted[2].data, vec![Value::U64(3)]);
+    assert_eq!(emitted[0].data, vec![portable(u64_portable(1))]);
+    assert_eq!(emitted[1].data, vec![portable(u64_portable(2))]);
+    assert_eq!(emitted[2].data, vec![portable(u64_portable(3))]);
 }
 
 #[test]

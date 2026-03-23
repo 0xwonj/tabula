@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-use tabula_core::{ColId, ColumnDef, TableId, TableSchema, ValueType};
+use tabula_core::{ColId, ColumnDef, ColumnProfileId, TableId, TableSchema};
 
 #[test]
 fn test_table_schema_construction() {
@@ -9,11 +9,11 @@ fn test_table_schema_construction() {
         columns: vec![ColumnDef {
             id: ColId(0),
             name: "balance".into(),
-            value_type: ValueType::U64,
+            column_profile_id: ColumnProfileId(0),
         }],
     };
     assert_eq!(schema.columns.len(), 1);
-    assert_eq!(schema.columns[0].value_type, ValueType::U64);
+    assert_eq!(schema.columns[0].column_profile_id, ColumnProfileId(0));
 }
 
 #[test]
@@ -25,12 +25,12 @@ fn borsh_round_trip_table_schema() {
             ColumnDef {
                 id: ColId(0),
                 name: "balance".into(),
-                value_type: ValueType::U64,
+                column_profile_id: ColumnProfileId(0),
             },
             ColumnDef {
                 id: ColId(1),
                 name: "active".into(),
-                value_type: ValueType::Bool,
+                column_profile_id: ColumnProfileId(1),
             },
         ],
     };

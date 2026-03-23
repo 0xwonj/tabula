@@ -4,9 +4,9 @@
 //! setup time. The executor resolves them by [`PrecompileId`] during batch
 //! execution, without any ZK dependencies.
 
-use tabula_core::Value;
 use tabula_core::error::TabulaError;
-use tabula_ir::PrecompileId;
+use tabula_ir::{PrecompileId, PrecompileSignature};
+use tabula_types::TypedValue;
 
 /// Application-defined handler for a single precompile instruction.
 ///
@@ -20,9 +20,9 @@ use tabula_ir::PrecompileId;
 /// struct Sha256Handler;
 /// impl PrecompileHandler for Sha256Handler {
 ///     fn id(&self) -> PrecompileId { PrecompileId(0x0004) }
-///     fn execute(&self, inputs: &[Value]) -> Result<Vec<Value>, TabulaError> {
-///         let data = inputs[0].as_bytes32()?;
-///         Ok(vec![Value::Bytes32(sha256::digest(data))])
+///     fn execute(&self, inputs: &[TypedValue]) -> Result<Vec<TypedValue>, TabulaError> {
+///         let _ = inputs;
+///         todo!()
 ///     }
 /// }
 /// ```
@@ -30,10 +30,13 @@ pub trait PrecompileHandler: Send + Sync {
     /// Unique identifier for this precompile.
     fn id(&self) -> PrecompileId;
 
+    /// Exact typed I/O contract implemented by this handler.
+    fn signature(&self) -> &PrecompileSignature;
+
     /// Execute the precompile on concrete values.
     ///
     /// Must be deterministic and side-effect-free.
-    fn execute(&self, inputs: &[Value]) -> Result<Vec<Value>, TabulaError>;
+    fn execute(&self, inputs: &[TypedValue]) -> Result<Vec<TypedValue>, TabulaError>;
 }
 
 /// Registry of precompile handlers, keyed by [`PrecompileId`].

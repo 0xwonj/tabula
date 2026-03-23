@@ -1,6 +1,6 @@
-use tabula_core::Value;
 use tabula_core::error::TabulaError;
 use tabula_ir::ValueExpr;
+use tabula_types::{bool_typed, typed_bool};
 
 use tabula_chips::execution::trace::Opcode;
 
@@ -12,15 +12,7 @@ pub(super) fn lower_not<const W: usize>(
     src: &ValueExpr,
 ) -> Result<(), TabulaError> {
     let src_val = ctx.resolve_val(src)?;
-    let result = match src_val {
-        Value::Bool(b) => Value::Bool(!b),
-        _ => {
-            return Err(TabulaError::TypeMismatch {
-                expected: "Bool",
-                actual: src_val.type_name(),
-            });
-        }
-    };
+    let result = bool_typed(!typed_bool(&src_val, ctx.type_runtimes)?);
 
     let src_enc = ctx.encode_padded(&src_val)?;
     let dst_enc = ctx.encode_padded(&result)?;
@@ -68,15 +60,10 @@ fn lower_bool_binop<const W: usize>(
 ) -> Result<(), TabulaError> {
     let lhs_val = ctx.resolve_val(lhs)?;
     let rhs_val = ctx.resolve_val(rhs)?;
-    let result = match (lhs_val, rhs_val) {
-        (Value::Bool(a), Value::Bool(b)) => Value::Bool(op(a, b)),
-        _ => {
-            return Err(TabulaError::TypeMismatch {
-                expected: "Bool",
-                actual: lhs_val.type_name(),
-            });
-        }
-    };
+    let result = bool_typed(op(
+        typed_bool(&lhs_val, ctx.type_runtimes)?,
+        typed_bool(&rhs_val, ctx.type_runtimes)?,
+    ));
 
     let lhs_enc = ctx.encode_padded(&lhs_val)?;
     let rhs_enc = ctx.encode_padded(&rhs_val)?;

@@ -47,9 +47,9 @@ pub enum RuntimeError {
 
     /// Column state construction failed.
     #[cfg(feature = "prove")]
-    #[error("column state: {detail}")]
-    ColumnState {
-        /// Description of the column state failure.
+    #[error("commitment state: {detail}")]
+    CommitmentState {
+        /// Description of the commitment state failure.
         detail: String,
     },
 
@@ -102,6 +102,7 @@ impl RuntimeError {
     pub(crate) fn from_extension_proof(error: tabula_ext::ExtError) -> Self {
         match error {
             tabula_ext::ExtError::Validation { detail } => Self::WitnessGeneration { detail },
+            #[cfg(feature = "verify")]
             tabula_ext::ExtError::Setup(source) => Self::MachineSetup(source),
             tabula_ext::ExtError::RuntimeHook(source)
             | tabula_ext::ExtError::ProofPreparation(source) => Self::WitnessGeneration {

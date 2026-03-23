@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 
 use leptos::prelude::*;
 use serde_json::json;
-use tabula_core::Value as CoreValue;
 
 use crate::models::{Artifact, TransactionBatch};
 use crate::utils::{

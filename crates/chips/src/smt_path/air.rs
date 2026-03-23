@@ -29,7 +29,7 @@ use super::columns::{
 
 /// SmtColPathChip — column-level SMT path verification.
 ///
-/// Receives leaf digests from ColumnMeta (C15), sends table roots (C16).
+/// Receives leaf digests from the meta shard (C15), sends table roots (C16).
 #[derive(Clone, Copy, Debug)]
 pub struct SmtColPathChip;
 

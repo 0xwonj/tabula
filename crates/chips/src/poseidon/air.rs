@@ -71,7 +71,7 @@ impl<AB: InteractionAirBuilder> Air<AB> for PoseidonChip {
 // ── Private constraint helpers ──────────────────────────────────────────────
 
 /// 1. Boolean constraints.
-fn constrain_booleans<AB: AirBuilder>(builder: &mut AB, local: &PoseidonCols<AB::Var>) {
+pub(crate) fn constrain_booleans<AB: AirBuilder>(builder: &mut AB, local: &PoseidonCols<AB::Var>) {
     builder.assert_bool(local.is_full_round);
     builder.assert_bool(local.is_first_round);
     builder.assert_bool(local.is_last_round);
@@ -82,7 +82,7 @@ fn constrain_booleans<AB: AirBuilder>(builder: &mut AB, local: &PoseidonCols<AB:
 /// y = state[0] + rc[0]
 /// sbox_y2[0] = y^2
 /// sbox_y3[0] = y * sbox_y2[0]
-fn constrain_sbox_element0<AB: AirBuilder>(
+pub(crate) fn constrain_sbox_element0<AB: AirBuilder>(
     builder: &mut AB,
     local: &PoseidonCols<AB::Var>,
     is_real: AB::Expr,
@@ -101,7 +101,7 @@ fn constrain_sbox_element0<AB: AirBuilder>(
 }
 
 /// 3b. S-box decomposition for elements 1..15 (gated by is_full_round).
-fn constrain_sbox_full_round<AB: AirBuilder>(
+pub(crate) fn constrain_sbox_full_round<AB: AirBuilder>(
     builder: &mut AB,
     local: &PoseidonCols<AB::Var>,
     is_real: AB::Expr,
@@ -131,7 +131,7 @@ fn constrain_sbox_full_round<AB: AirBuilder>(
 ///
 /// `gate` = `is_real * is_full * (1 - is_last_round)`.
 #[allow(clippy::needless_pass_by_value)]
-fn constrain_linear_layer_full<AB: AirBuilder>(
+pub(crate) fn constrain_linear_layer_full<AB: AirBuilder>(
     builder: &mut AB,
     local: &PoseidonCols<AB::Var>,
     next: &PoseidonCols<AB::Var>,
@@ -158,7 +158,7 @@ fn constrain_linear_layer_full<AB: AirBuilder>(
 ///
 /// `gate` = `is_real * (1 - is_full) * (1 - is_last_round)`.
 #[allow(clippy::needless_pass_by_value)]
-fn constrain_linear_layer_partial<AB: AirBuilder>(
+pub(crate) fn constrain_linear_layer_partial<AB: AirBuilder>(
     builder: &mut AB,
     local: &PoseidonCols<AB::Var>,
     next: &PoseidonCols<AB::Var>,
@@ -185,7 +185,7 @@ fn constrain_linear_layer_partial<AB: AirBuilder>(
 }
 
 /// 5. Round control constraints.
-fn constrain_round_control<AB: AirBuilder>(
+pub(crate) fn constrain_round_control<AB: AirBuilder>(
     builder: &mut AB,
     local: &PoseidonCols<AB::Var>,
     next: &PoseidonCols<AB::Var>,
@@ -236,7 +236,7 @@ fn apply_mat4_exprs<AB: AirBuilder>(x: [AB::Expr; 4]) -> [AB::Expr; 4] {
 /// External linear layer (MDS) in expression form.
 ///
 /// Applies M_4 to each block of 4, then column mixing.
-fn external_linear_exprs<AB: AirBuilder>(input: [AB::Expr; WIDTH]) -> [AB::Expr; WIDTH] {
+pub(crate) fn external_linear_exprs<AB: AirBuilder>(input: [AB::Expr; WIDTH]) -> [AB::Expr; WIDTH] {
     // Apply M_4 to each block of 4
     let mut result = input;
     for chunk in 0..4 {
@@ -273,7 +273,7 @@ fn external_linear_exprs<AB: AirBuilder>(input: [AB::Expr; WIDTH]) -> [AB::Expr;
 ///
 /// V = [-2, 1, 2, 1/2, 3, 4, -1/2, -3, -4, 1/2^8, 1/8, 1/2^24, -1/2^8, -1/8, -1/16, -1/2^24].
 /// Uses only `PrimeCharacteristicRing` methods (no `Field::inverse`).
-fn internal_diag_exprs<AB: AirBuilder>() -> [AB::F; WIDTH] {
+pub(crate) fn internal_diag_exprs<AB: AirBuilder>() -> [AB::F; WIDTH] {
     let one = AB::F::ONE;
     let two = AB::F::TWO;
     let neg_one = AB::F::NEG_ONE;
@@ -302,7 +302,7 @@ fn internal_diag_exprs<AB: AirBuilder>() -> [AB::F; WIDTH] {
 ///
 /// Computes `out[i] = input[i] * diag[i] + sum(input)`.
 #[allow(clippy::needless_pass_by_value)]
-fn internal_linear_exprs<AB: AirBuilder>(
+pub(crate) fn internal_linear_exprs<AB: AirBuilder>(
     input: [AB::Expr; WIDTH],
     diag: &[AB::F; WIDTH],
 ) -> [AB::Expr; WIDTH] {
@@ -321,7 +321,7 @@ fn internal_linear_exprs<AB: AirBuilder>(
 /// **perm_output** (first 8 elements of permutation output):
 /// 3. Carry: constant within a permutation.
 /// 4. Last-round verification: `perm_output = external_linear_layer(sbox_out)[0..8]`.
-fn constrain_perm_output<AB: AirBuilder>(
+pub(crate) fn constrain_perm_output<AB: AirBuilder>(
     builder: &mut AB,
     local: &PoseidonCols<AB::Var>,
     next: &PoseidonCols<AB::Var>,
@@ -376,7 +376,7 @@ fn constrain_perm_output<AB: AirBuilder>(
 ///
 /// When no preprocessed trace is provided (zero-width), round constant
 /// constraints are skipped — only chips with preprocessed data enforce them.
-fn constrain_round_constants<AB: InteractionAirBuilder>(
+pub(crate) fn constrain_round_constants<AB: InteractionAirBuilder>(
     builder: &mut AB,
     local: &PoseidonCols<AB::Var>,
     is_real: AB::Expr,

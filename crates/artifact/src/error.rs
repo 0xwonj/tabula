@@ -53,4 +53,16 @@ pub enum ArtifactError {
     /// JSON serialization error.
     #[error("failed to encode JSON: {0}")]
     EncodeJson(#[from] serde_json::Error),
+    /// A profile-backed compatibility projection failed.
+    #[error("failed to project legacy artifact compatibility shape: {detail}")]
+    InvalidProfileProjection {
+        /// Human-readable projection failure detail.
+        detail: String,
+    },
+    /// Invalid portable value at an artifact/runtime boundary.
+    #[error("invalid portable value: {detail}")]
+    InvalidPortableValue {
+        /// Human-readable decode or validation failure detail.
+        detail: String,
+    },
 }

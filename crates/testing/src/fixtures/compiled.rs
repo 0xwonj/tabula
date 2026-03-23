@@ -1,11 +1,14 @@
 //! Canonical compiled-program fixtures and compiled runtime cases.
 
-use tabula_compiler::{SealedProgram, register_program};
-use tabula_core::{ColId, TableId, TxTypeId, Value};
+use tabula_compiler::SealedProgram;
+use tabula_core::{ColId, TableId, TxTypeId};
 use tabula_ir::{Instruction, RowExpr, TxTypeDef, ValueExpr};
+use tabula_types::{bool_portable, u64_portable};
 
-use crate::exec::compiled_program_from_artifact;
-use crate::exec::compiled_property_successor_program;
+use crate::exec::{
+    compiled_program_from_artifact, compiled_program_from_definition,
+    compiled_property_successor_program,
+};
 use crate::fixtures::artifacts::precompile_requirement_artifact;
 use crate::fixtures::batch::{empty_batch, no_param_batch};
 use crate::fixtures::cases::CompiledRuntimeCase;
@@ -22,12 +25,12 @@ pub fn compiled_single_write_program() -> SealedProgram {
             table: TableId(1),
             row: RowExpr::Literal(tabula_core::RowKey(0)),
             col: ColId(0),
-            src_val: ValueExpr::Literal(Value::U64(7)),
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_val: ValueExpr::Literal(u64_portable(7)),
+            src_is_null: ValueExpr::Literal(bool_portable(false)),
         }],
     };
 
-    register_program(&[schema], &[tx_def]).expect("register single-write program")
+    compiled_program_from_definition(vec![schema], vec![tx_def])
 }
 
 pub fn compiled_precompile_requirement_program() -> SealedProgram {

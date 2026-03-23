@@ -7,6 +7,7 @@
 pub mod test_utils;
 
 pub mod execution;
+pub mod ir_hash;
 pub mod poseidon;
 pub mod precompile_transcript;
 pub mod range_check;

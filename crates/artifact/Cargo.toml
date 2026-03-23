@@ -12,6 +12,8 @@ thiserror = { workspace = true }
 tabula-contract = { workspace = true }
 tabula-core = { workspace = true }
 tabula-ir = { workspace = true }
+tabula-profile = { workspace = true }
+tabula-types = { workspace = true }
 
 [lints]
 workspace = true

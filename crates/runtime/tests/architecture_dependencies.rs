@@ -59,6 +59,39 @@ fn read_workspace_file(rel: &str) -> String {
     fs::read_to_string(workspace_root().join(rel)).expect("read workspace file")
 }
 
+fn rust_sources_under(rel: &str) -> Vec<String> {
+    fn walk(dir: &Path, files: &mut Vec<String>) {
+        for entry in fs::read_dir(dir).expect("read dir") {
+            let entry = entry.expect("dir entry");
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, files);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                files.push(path.to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    walk(&workspace_root().join(rel), &mut files);
+    files.sort();
+    files
+}
+
+fn assert_source_omits(rel: &str, forbidden: &[&str]) {
+    let source = read_workspace_file(rel);
+    for needle in forbidden {
+        assert!(
+            !source.contains(needle),
+            "{rel} must not contain legacy execution-carrier pattern '{needle}'"
+        );
+    }
+}
+
+fn joined(parts: &[&str]) -> String {
+    parts.concat()
+}
+
 #[test]
 fn proof_crate_dependencies_respect_boundary_contract() {
     let metadata = cargo_metadata();
@@ -96,6 +129,7 @@ fn proof_crate_dependencies_respect_boundary_contract() {
     );
     assert_forbidden(&metadata, "tabula-runtime", &["tabula-witness-stark"]);
     assert_forbidden(&metadata, "tabula-testing", &["tabula-witness-stark"]);
+    assert_forbidden(&metadata, "tabula-profile", &["tabula-artifact"]);
     assert_forbidden(
         &metadata,
         "tabula-machine",
@@ -126,7 +160,7 @@ fn stark_root_does_not_export_public_gadgets_module() {
 }
 
 #[test]
-fn shared_prove_path_does_not_depend_on_legacy_witness_or_layout_dispatch() {
+fn shared_prove_path_does_not_depend_on_old_witness_or_layout_dispatch() {
     let prepare_rs = read_workspace_file("crates/runtime/src/proving/prepare.rs");
     let traces_rs = read_workspace_file("crates/runtime/src/proving/traces.rs");
     let materialize_rs = read_workspace_file("crates/runtime/src/setup/materialize.rs");
@@ -142,24 +176,24 @@ fn shared_prove_path_does_not_depend_on_legacy_witness_or_layout_dispatch() {
             !source.contains("tabula_witness::legacy::ColumnWitness")
                 && !source.contains("use tabula_witness::legacy::ColumnWitness")
                 && !source.contains("pub type ColumnWitness"),
-            "{name} must not depend on legacy ColumnWitness"
+            "{name} must not depend on removed witness column shape"
         );
         assert!(
             !source.contains("tabula_witness::legacy::BatchWitness")
                 && !source.contains("use tabula_witness::legacy::BatchWitness")
                 && !source.contains("pub type BatchWitness"),
-            "{name} must not depend on legacy BatchWitness"
+            "{name} must not depend on removed witness batch shape"
         );
         assert!(
             !source.contains("ProofInputBuilder"),
             "{name} must not reference removed ProofInputBuilder"
         );
         assert!(
-            !source.contains("ColumnStateBackend"),
-            "{name} must not reference removed ColumnStateBackend"
+            !source.contains(&joined(&["Column", "State", "Backend"])),
+            "{name} must not reference removed plan-backed commitment backend"
         );
         assert!(
-            !source.contains("PlanColumnStateBackend"),
+            !source.contains(&joined(&["Plan", "Column", "State", "Backend"])),
             "{name} must not reference removed plan-based backend"
         );
         assert!(
@@ -212,11 +246,320 @@ fn runtime_root_does_not_own_extension_authoring_contracts() {
     assert!(
         !lib_rs.contains("pub use proof_extensions::")
             && !lib_rs.contains("pub use precompile_proofs::")
-            && !lib_rs.contains("pub use columns::{ColumnSchemeFactory")
-            && !lib_rs.contains("pub use columns::{ResolvedColumnPlan")
-            && !lib_rs.contains("pub use columns::{RuntimeColumn"),
+            && !lib_rs.contains("pub use schemes::{ColumnSchemeFactory")
+            && !lib_rs.contains("pub use schemes::{ResolvedColumnPlan")
+            && !lib_rs.contains("pub use schemes::{RuntimeColumn"),
         "runtime root must not own extension authoring contracts"
     );
+}
+
+#[test]
+fn execution_carrier_cutover_keeps_migrated_paths_old_carrier_free() {
+    let migrated_surface = [
+        "crates/core/src/tx.rs",
+        "crates/core/src/event.rs",
+        "crates/core/src/traits/state.rs",
+        "crates/core/src/state/in_memory.rs",
+        "crates/artifact/src/batch.rs",
+        "crates/artifact/src/state.rs",
+        "crates/executor/src/batch.rs",
+        "crates/executor/src/execution_state.rs",
+        "crates/executor/src/interpreter.rs",
+        "crates/executor/src/precompile.rs",
+        "crates/executor/src/property.rs",
+        "crates/executor/src/resolve.rs",
+        "crates/executor/src/trace_recorder.rs",
+        "crates/runtime/src/program/snapshot_state_view.rs",
+        "crates/ext/src/scheme.rs",
+        "crates/ir/src/instruction.rs",
+    ];
+
+    for rel in migrated_surface {
+        assert_source_omits(
+            rel,
+            &[
+                "Vec<Value>",
+                "Option<Value>",
+                "&[Value]",
+                "Result<Value",
+                "ValueType",
+                &joined(&["zero", "_typed("]),
+                &joined(&["lega", "cy_", "runtime_value_type("]),
+            ],
+        );
+    }
+}
+
+#[test]
+fn phase_two_proof_paths_stay_old_carrier_free() {
+    assert!(
+        !workspace_root()
+            .join("crates/runtime/src/proving/legacy.rs")
+            .exists(),
+        "runtime proving legacy helper module must be deleted"
+    );
+    assert!(
+        !workspace_root()
+            .join("crates/witness/src/legacy.rs")
+            .exists(),
+        "witness legacy helper module must be deleted"
+    );
+
+    let production_paths = [
+        "crates/runtime/src/proving",
+        "crates/runtime/src/schemes",
+        "crates/witness/src",
+    ];
+    let forbidden = [
+        joined(&["use tabula_core::state::", "va", "lue::", "Va", "lue"]),
+        joined(&["use tabula_core::state::", "va", "lue::{", "Va", "lue"]),
+        joined(&["use tabula_core::state::", "va", "lue::", "Value", "Type"]),
+        joined(&["use tabula_core::state::", "va", "lue::{", "Value", "Type"]),
+        joined(&["use tabula_core::state::", "va", "lue::", "zero", "_typed"]),
+        joined(&["use tabula_core::state::", "va", "lue::{", "zero", "_typed"]),
+        joined(&["use tabula_core::", "Va", "lue"]),
+        joined(&["use tabula_core::", "Value", "Type"]),
+        joined(&["lega", "cy_", "runtime_value_type("]),
+        joined(&["mod ", "lega", "cy;"]),
+        joined(&["lega", "cy::"]),
+    ];
+
+    for rel_dir in production_paths {
+        for path in rust_sources_under(rel_dir) {
+            let source = fs::read_to_string(&path).expect("read phase two source");
+            for needle in &forbidden {
+                assert!(
+                    !source.contains(needle),
+                    "{path} must not contain phase-two legacy proof-path pattern '{needle}'",
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn phase_one_contract_freeze_keeps_root_surfaces_quarantined() {
+    let core_lib = read_workspace_file("crates/core/src/lib.rs");
+    let types_lib = read_workspace_file("crates/types/src/lib.rs");
+    let sdk_rs = read_workspace_file("crates/sdk/src/sdk.rs");
+
+    assert!(
+        core_lib.contains("pub use state::portable::PortableValue;")
+            && !core_lib.contains("pub use state::value::{PortableValue, Value")
+            && !core_lib.contains("pub use state::value::{PortableValue, ValueType")
+            && !core_lib
+                .contains("pub use state::value::{PortableValue, Value, ValueType, zero_typed}")
+            && !core_lib.contains("pub use state::value::{Value")
+            && !core_lib.contains("pub use state::value::{ValueType")
+            && !core_lib.contains("pub use state::value::{zero_typed"),
+        "tabula-core root must not re-export legacy value carriers"
+    );
+
+    let root_forbidden = [
+        "PortableValueExt".to_string(),
+        joined(&["lega", "cy_", "value_from_typed"]),
+        joined(&["lega", "cy_", "value_from_portable"]),
+        joined(&["portable_from_", "lega", "cy_", "value"]),
+        joined(&["typed_from_", "lega", "cy_", "value"]),
+        joined(&["builtin_type_id_for_", "lega", "cy_", "value_type"]),
+        joined(&["builtin_encode_field_elements_for_", "lega", "cy_", "value"]),
+        joined(&["builtin_decode_field_elements_to_", "lega", "cy_", "value"]),
+    ];
+    for forbidden in &root_forbidden {
+        assert!(
+            !types_lib.contains(forbidden),
+            "tabula-types root must not export legacy helper '{forbidden}'"
+        );
+    }
+
+    assert!(
+        sdk_rs.contains("host_environment: HostEnvironment"),
+        "SdkBuilder must keep HostEnvironment as its bootstrap owner"
+    );
+    assert!(
+        !sdk_rs.contains("type_runtimes: TypeRuntimeRegistry")
+            && !sdk_rs.contains("encoding_runtimes: EncodingRuntimeRegistry"),
+        "SdkBuilder must not keep parallel runtime registry ownership"
+    );
+}
+
+#[test]
+fn phase_one_non_proof_paths_do_not_import_old_helper_surface() {
+    let frozen_paths = [
+        "crates/compiler/src/example.rs",
+        "crates/core/src/lib.rs",
+        "crates/executor/src/batch.rs",
+        "crates/executor/src/execution_state.rs",
+        "crates/executor/src/interpreter.rs",
+        "crates/executor/src/precompile.rs",
+        "crates/executor/src/property.rs",
+        "crates/executor/src/resolve.rs",
+        "crates/executor/src/trace_recorder.rs",
+        "crates/runtime/src/host.rs",
+        "crates/runtime/src/builder.rs",
+        "crates/runtime/src/verifier.rs",
+        "crates/sdk/src/sdk.rs",
+        "crates/types/src/lib.rs",
+    ];
+
+    let frozen_needles = [
+        joined(&["portable_from_", "lega", "cy_", "value"]),
+        joined(&["typed_from_", "lega", "cy_", "value"]),
+        joined(&["lega", "cy_", "value_from_typed"]),
+        joined(&["lega", "cy_", "value_from_portable"]),
+        joined(&["builtin_type_id_for_", "lega", "cy_", "value_type"]),
+        "PortableValueExt".to_string(),
+    ];
+    for rel in &frozen_paths {
+        let source = read_workspace_file(rel);
+        for needle in &frozen_needles {
+            assert!(
+                !source.contains(needle),
+                "{rel} must not contain removed helper surface '{needle}'"
+            );
+        }
+    }
+}
+
+#[test]
+fn phase_three_precompile_contract_is_explicit_and_signature_driven() {
+    let artifact_program = read_workspace_file("crates/artifact/src/program.rs");
+    let compiler_register = read_workspace_file("crates/compiler/src/register.rs");
+    let ext_backend_precompile = read_workspace_file("crates/ext/src/backend/precompile.rs");
+    let lang_lower_expr = read_workspace_file("crates/lang/src/lower/expr.rs");
+    let lang_lower_mod = read_workspace_file("crates/lang/src/lower/mod.rs");
+    let lang_lower_stmt = read_workspace_file("crates/lang/src/lower/stmt.rs");
+    let runtime_prepare = read_workspace_file("crates/runtime/src/proving/prepare.rs");
+    let witness_lower_precompile =
+        read_workspace_file("crates/witness/src/stark/lowering/precompile.rs");
+    let transcript_chip = read_workspace_file("crates/chips/src/precompile_transcript.rs");
+    let executor_interpreter = read_workspace_file("crates/executor/src/interpreter.rs");
+
+    assert!(
+        artifact_program.contains("pub signature: PrecompileSignature")
+            && !artifact_program.contains("params_hash"),
+        "sealed artifact precompile descriptors must carry explicit signatures and no params_hash",
+    );
+    assert!(
+        ext_backend_precompile.contains("if descriptor != self.descriptor()"),
+        "precompile backend validation must default to exact descriptor equality",
+    );
+    assert!(
+        compiler_register.contains("validate_precompile_descriptor(")
+            && compiler_register.contains("GENERIC_EXECUTION_VALUE_WIDTH"),
+        "compiler precompile descriptor registration must validate encoding/type compatibility and execution width",
+    );
+    for (name, source) in [
+        ("runtime proving prep", runtime_prepare.as_str()),
+        (
+            "witness precompile lowering",
+            witness_lower_precompile.as_str(),
+        ),
+        ("precompile transcript chip", transcript_chip.as_str()),
+    ] {
+        for forbidden in [
+            "builtin_encoding_profile_id_for_type",
+            "builtin_encode_field_elements_for_portable",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{name} must not use built-in-only precompile transcript helpers ({forbidden})",
+            );
+        }
+    }
+    for source in [&lang_lower_mod, &lang_lower_expr, &lang_lower_stmt] {
+        assert!(
+            !source.contains(&joined(&["builtin_", "zero", "_typed("])),
+            "source lowering must not use built-in-only zero synthesis",
+        );
+    }
+    for forbidden in [
+        "KoalaBear::new(profile.type_id.0)",
+        "KoalaBear::new(profile.encoding_profile_id.0)",
+        "payload.push(KoalaBear::new(u32::try_from(atoms.len())",
+    ] {
+        assert!(
+            !transcript_chip.contains(forbidden),
+            "precompile transcript prefixes must encode ids and atom counts bytewise LE32 ({forbidden})",
+        );
+    }
+    assert!(
+        executor_interpreter.contains("let signature = handler.signature();"),
+        "executor precompile dispatch must validate against handler signatures",
+    );
+}
+
+#[test]
+fn phase_three_production_code_does_not_use_label_only_precompile_descriptors() {
+    for rel in [
+        "crates/artifact/src/program.rs",
+        "crates/ext/src/backend/precompile.rs",
+        "crates/runtime/src/setup/materialize.rs",
+        "crates/runtime/src/proving/prepare.rs",
+        "crates/witness/src/stark/lowering/precompile.rs",
+        "crates/sdk/src/sdk.rs",
+    ] {
+        assert_source_omits(rel, &["PrecompileDescriptor::from_labels("]);
+    }
+}
+
+#[test]
+fn phase_four_deleted_files_and_modules_stay_deleted() {
+    for rel in [
+        "crates/core/src/state/value.rs",
+        "crates/testing/src/legacy.rs",
+    ] {
+        assert!(
+            !workspace_root().join(rel).exists(),
+            "{rel} must remain deleted after phase-four cleanup",
+        );
+    }
+
+    let compat_dirs: Vec<_> = fs::read_dir(workspace_root().join("crates/commitment/src"))
+        .expect("read commitment src")
+        .filter_map(|entry| {
+            let entry = entry.expect("dir entry");
+            let path = entry.path();
+            path.is_dir().then_some(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_string(),
+            )
+        })
+        .filter(|name| name == "compat")
+        .collect();
+    assert!(
+        compat_dirs.is_empty(),
+        "commitment compat module must stay deleted: {compat_dirs:?}"
+    );
+}
+
+#[test]
+fn phase_four_workspace_source_denylist_stays_clean() {
+    let forbidden = [
+        joined(&["tabula_core::state::", "va", "lue::", "Va", "lue"]),
+        joined(&["tabula_core::state::", "va", "lue::", "Value", "Type"]),
+        joined(&["tabula_core::", "Va", "lue"]),
+        joined(&["tabula_core::", "Value", "Type"]),
+        joined(&["lega", "cy_"]),
+        joined(&["commitment::", "compat"]),
+        joined(&["Column", "Meta"]),
+        joined(&["Column", "State"]),
+        joined(&["compute_", "lega", "cy_", "column_meta_binding_digest"]),
+        joined(&["compute_state_roots_from_", "metas"]),
+        joined(&["Unsupported", "Legacy", "Type"]),
+    ];
+
+    for path in rust_sources_under("crates") {
+        let source = fs::read_to_string(&path).expect("read rust source");
+        for needle in &forbidden {
+            assert!(
+                !source.contains(needle),
+                "{path} must not contain final deleted legacy symbol '{needle}'",
+            );
+        }
+    }
 }
 
 #[test]
@@ -292,6 +635,10 @@ fn raw_backend_extension_surface_stays_backend_only() {
             "tabula-ext root must not flatten backend symbol '{forbidden}'"
         );
     }
+    assert!(
+        ext_lib.contains("pub use backend::precompile::PrecompileBackendFactory;"),
+        "tabula-ext root must expose the curated precompile backend factory trait"
+    );
     for required in [
         "pub use tabula_machine::backend::{AnyRap, ColumnChipSet, ProofColumn};",
         "pub use tabula_stark::trace::{BusConsumer, DynChip, WitnessStore};",
@@ -322,7 +669,7 @@ fn raw_backend_extension_surface_stays_backend_only() {
 }
 
 #[test]
-fn precompile_redesign_removes_legacy_id_only_and_digest_slot_paths() {
+fn precompile_redesign_removes_old_id_only_and_digest_slot_paths() {
     for rel in [
         "crates/compiler/src/register.rs",
         "crates/compiler/src/program.rs",
@@ -354,18 +701,38 @@ fn precompile_redesign_removes_legacy_id_only_and_digest_slot_paths() {
 }
 
 #[test]
-fn stable_scheme_surface_fixture_uses_bundle_only_public_registration() {
+fn stable_scheme_surface_fixture_uses_canonical_backend_only_registration() {
     let stable_fixture = read_workspace_file("crates/runtime/tests/stable_scheme_surface.rs");
 
     assert!(
-        stable_fixture.contains(".with_scheme_bundle("),
-        "stable scheme surface fixture must register custom schemes through bundles"
+        stable_fixture.contains(".with_column_backend_bundle("),
+        "stable scheme surface fixture must register custom schemes through canonical backend bundles"
+    );
+    assert!(
+        stable_fixture.contains(".with_host_environment(")
+            && stable_fixture.contains("HostEnvironment::empty()"),
+        "stable scheme surface fixture must install custom schemes through HostEnvironment"
     );
     assert!(
         !stable_fixture.contains(".with_scheme(")
+            && !stable_fixture.contains(".with_scheme_bundle(")
             && !stable_fixture.contains(".with_proof_scheme("),
-        "stable scheme surface fixture must not use removed split registration APIs"
+        "stable scheme surface fixture must not use removed legacy registration APIs"
     );
+}
+
+#[test]
+fn old_runtime_installation_modules_are_removed() {
+    for rel in [
+        "crates/runtime/src/extension_contracts.rs",
+        "crates/runtime/src/setup/environment.rs",
+        "crates/runtime/src/setup/precompile.rs",
+    ] {
+        assert!(
+            !workspace_root().join(rel).exists(),
+            "{rel} must be removed after the host/machine refactor"
+        );
+    }
 }
 
 #[test]
@@ -406,7 +773,6 @@ fn renamed_internal_symbols_do_not_reappear() {
     for rel in [
         "crates/core/src/traits/state.rs",
         "crates/runtime/src/program/resolved_program.rs",
-        "crates/runtime/src/columns/resolved_plan.rs",
         "crates/witness/src/prepare.rs",
         "crates/runtime/src/setup/materialize.rs",
         "crates/runtime/src/proving/prepare.rs",
@@ -467,6 +833,43 @@ fn root_crates_do_not_export_removed_compat_aliases() {
 }
 
 #[test]
+fn sealed_profile_surface_stays_old_surface_free() {
+    let artifact_program = read_workspace_file("crates/artifact/src/program.rs");
+    let core_schema = read_workspace_file("crates/core/src/state/schema.rs");
+    let ir_tx = read_workspace_file("crates/ir/src/tx.rs");
+    let compiler_lib = read_workspace_file("crates/compiler/src/lib.rs");
+    let profile_lib = read_workspace_file("crates/profile/src/lib.rs");
+    let runtime_planning = read_workspace_file("crates/runtime/src/setup/planning.rs");
+
+    assert!(
+        !artifact_program.contains("pub column_proof_plan:"),
+        "sealed artifact surface must not store legacy column_proof_plan fields"
+    );
+    assert!(
+        !core_schema.contains("pub value_type:"),
+        "sealed column schema must not store legacy value_type"
+    );
+    assert!(
+        !ir_tx.contains("pub value_type:"),
+        "sealed IR param definitions must not store legacy value_type"
+    );
+    assert!(
+        !compiler_lib.contains(" register_program,")
+            && !compiler_lib.contains("pub fn register_program("),
+        "compiler root must not re-export the removed register_program API"
+    );
+    assert!(
+        !profile_lib.contains("pub use compat::"),
+        "profile root must not re-export compat helpers as canonical surface"
+    );
+    assert!(
+        !runtime_planning.contains("projected_column_proof_plan")
+            && !runtime_planning.contains("column_proof_plan"),
+        "runtime planning must derive compat plans from resolved profiles, not artifact-stored proof plans"
+    );
+}
+
+#[test]
 fn program_binding_is_canonicalized_in_contract_crate() {
     let contract_binding = read_workspace_file("crates/contract/src/binding.rs");
     let runtime_binding = read_workspace_file("crates/runtime/src/program/binding.rs");
@@ -513,7 +916,7 @@ fn workspace_uses_tabula_ext_and_not_backend_ext() {
 fn runtime_code_avoids_stale_artifact_builder_and_replacement_wording() {
     for rel in [
         "crates/runtime/src/builder.rs",
-        "crates/runtime/src/testing/prove.rs",
+        "crates/runtime/src/testing/schemes.rs",
     ] {
         let source = read_workspace_file(rel);
         for forbidden in ["artifact builder", "artifact-builder", "replacement"] {
@@ -550,12 +953,20 @@ fn witness_root_surface_stays_minimal_and_namespaced() {
         ),
         "witness root must expose the minimal preparation seam"
     );
-    assert!(
-        lib_rs.contains(
-            "pub use types::{AccessEvent, ColumnWrite, CommittedEntry, InitCell, PropertyReadClaim};"
-        ),
-        "witness root must expose logical preparation row types"
-    );
+    for required in [
+        "pub use types::{",
+        "AccessEvent",
+        "ColumnValueProfile",
+        "ColumnWrite",
+        "CommittedEntry",
+        "InitCell",
+        "PropertyReadClaim",
+    ] {
+        assert!(
+            lib_rs.contains(required),
+            "witness root must expose logical preparation row type '{required}'"
+        );
+    }
     assert!(
         lib_rs.contains("pub mod stark;"),
         "witness crate must expose its STARK-specific helpers under a namespaced module"
@@ -565,8 +976,8 @@ fn witness_root_surface_stays_minimal_and_namespaced() {
 #[test]
 fn runtime_builtin_schemes_do_not_own_low_level_stark_witness_assembly() {
     for rel in [
-        "crates/runtime/src/columns/builtins/ssmc.rs",
-        "crates/runtime/src/columns/builtins/smt.rs",
+        "crates/runtime/src/schemes/ssmc.rs",
+        "crates/runtime/src/schemes/smt.rs",
     ] {
         let source = read_workspace_file(rel);
         for forbidden in [

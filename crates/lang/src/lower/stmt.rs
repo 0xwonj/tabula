@@ -3,9 +3,10 @@
 use tabula_ir::PrecompileId;
 
 use super::{
-    Binding, CompileError, ErrorKind, Instruction, LoweredExpr, Span, TxLower, Value, ValueExpr,
-    ValueType, ast,
+    Binding, CompileError, ErrorKind, Instruction, LoweredExpr, Span, TxLower, ValueExpr, ast,
+    builtin_bool_literal, synthesize_canonical_zero,
 };
+use tabula_profile::{TYPE_BYTES32_ID, TYPE_U64_ID};
 
 use crate::ast::{Expr, ExprKind, StmtKind};
 
@@ -69,7 +70,7 @@ impl<'a> TxLower<'a> {
                     Binding::ReadSlot {
                         val: dst_val,
                         is_null: dst_is_null,
-                        ty: col_info.ty,
+                        ty: col_info.type_id,
                     },
                 );
             }
@@ -90,7 +91,7 @@ impl<'a> TxLower<'a> {
                     row: key_expr,
                 });
                 self.locals
-                    .insert(name.to_string(), Binding::Slot(dst, col_info.ty));
+                    .insert(name.to_string(), Binding::Slot(dst, col_info.type_id));
             }
             // Hash call → Hash instruction.
             ExprKind::Hash(args) => {
@@ -104,7 +105,7 @@ impl<'a> TxLower<'a> {
                 let dst = self.alloc_slot();
                 self.instructions.push(Instruction::Hash { dst, inputs });
                 self.locals
-                    .insert(name.to_string(), Binding::Slot(dst, ValueType::Bytes32));
+                    .insert(name.to_string(), Binding::Slot(dst, TYPE_BYTES32_ID));
             }
             // Select call → Select instruction.
             ExprKind::Select {
@@ -124,7 +125,7 @@ impl<'a> TxLower<'a> {
                 let ty = self
                     .expr_type(if_true)
                     .or_else(|| self.expr_type(if_false))
-                    .unwrap_or(ValueType::U64);
+                    .unwrap_or(TYPE_U64_ID);
                 let dst = self.alloc_slot();
                 self.instructions.push(Instruction::Select {
                     dst,
@@ -188,7 +189,7 @@ impl<'a> TxLower<'a> {
 
         let lhs_ty = self.expr_type(lhs);
         let rhs_ty = self.expr_type(rhs);
-        let ty = lhs_ty.or(rhs_ty).unwrap_or(ValueType::U64);
+        let ty = lhs_ty.or(rhs_ty).unwrap_or(TYPE_U64_ID);
 
         let dst_q = self.alloc_slot();
         let dst_r = self.alloc_slot();
@@ -213,12 +214,25 @@ impl<'a> TxLower<'a> {
         };
         // Special case: `table[row].col = null` → write with is_null=true
         if matches!(&value.kind, ExprKind::Null) {
+            let zero = match synthesize_canonical_zero(self.registry, col_info.type_id, true) {
+                Ok(zero) => zero,
+                Err(detail) => {
+                    self.errors.push(CompileError::new(
+                        ErrorKind::TypeMismatch,
+                        span,
+                        format!(
+                            "null assignment requires a descriptor-synthesizable zero: {detail}"
+                        ),
+                    ));
+                    return;
+                }
+            };
             self.instructions.push(Instruction::Write {
                 table: table_id,
                 row: row_expr,
                 col: col_info.id,
-                src_val: ValueExpr::Literal(tabula_core::zero_value(col_info.ty)),
-                src_is_null: ValueExpr::Literal(Value::Bool(true)),
+                src_val: ValueExpr::Literal(zero),
+                src_is_null: ValueExpr::Literal(builtin_bool_literal(true)),
             });
             return;
         }
@@ -230,7 +244,7 @@ impl<'a> TxLower<'a> {
             row: row_expr,
             col: col_info.id,
             src_val: src,
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_is_null: ValueExpr::Literal(builtin_bool_literal(false)),
         });
     }
 
@@ -256,6 +270,16 @@ impl<'a> TxLower<'a> {
     }
 
     fn lower_precompile(&mut self, id: u16, dst_names: &[String], inputs: &[Expr], span: Span) {
+        let precompile_id = PrecompileId(id);
+        let Some(signature) = self.precompiles.get(&precompile_id).cloned() else {
+            self.errors.push(CompileError::new(
+                ErrorKind::UndefinedPrecompile,
+                span,
+                format!("undefined precompile 0x{id:04x}"),
+            ));
+            return;
+        };
+
         // Check for duplicate bindings.
         for name in dst_names {
             if self.locals.contains_key(name) || self.params.contains_key(name) {
@@ -266,6 +290,31 @@ impl<'a> TxLower<'a> {
                 ));
                 return;
             }
+        }
+
+        if inputs.len() != signature.inputs.len() {
+            self.errors.push(CompileError::new(
+                ErrorKind::TypeMismatch,
+                span,
+                format!(
+                    "precompile 0x{id:04x} expects {} inputs but {} were provided",
+                    signature.inputs.len(),
+                    inputs.len(),
+                ),
+            ));
+            return;
+        }
+        if dst_names.len() != signature.outputs.len() {
+            self.errors.push(CompileError::new(
+                ErrorKind::TypeMismatch,
+                span,
+                format!(
+                    "precompile 0x{id:04x} expects {} outputs but {} bindings were provided",
+                    signature.outputs.len(),
+                    dst_names.len(),
+                ),
+            ));
+            return;
         }
 
         // Allocate slots for each destination.
@@ -279,18 +328,32 @@ impl<'a> TxLower<'a> {
         if input_ves.len() != inputs.len() {
             return;
         }
+        for (expr, expected) in inputs.iter().zip(&signature.inputs) {
+            let actual = self.expr_type(expr);
+            if actual != Some(expected.type_id) {
+                self.errors.push(CompileError::new(
+                    ErrorKind::TypeMismatch,
+                    expr.span,
+                    format!(
+                        "precompile 0x{id:04x} input expects type id {} but got {}",
+                        expected.type_id.0,
+                        actual.map_or("unknown".to_string(), |ty| ty.0.to_string()),
+                    ),
+                ));
+                return;
+            }
+        }
 
         self.instructions.push(Instruction::Precompile {
-            id: PrecompileId(id),
+            id: precompile_id,
             dst_slots: dst_slots.clone(),
             inputs: input_ves,
         });
 
         // Bind destination names to their slots.
-        // Precompile output type is opaque (Bytes32 for the I/O commitment).
-        for (name, slot) in dst_names.iter().zip(dst_slots) {
+        for ((name, slot), output) in dst_names.iter().zip(dst_slots).zip(signature.outputs) {
             self.locals
-                .insert(name.clone(), Binding::Slot(slot, ValueType::Bytes32));
+                .insert(name.clone(), Binding::Slot(slot, output.type_id));
         }
     }
 }

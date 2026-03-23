@@ -249,7 +249,7 @@ pub enum InputRef<T> {
 #[serde(untagged)]
 pub enum ProgramInline {
     Source { source: String },
-    Program(Artifact),
+    Program(Box<Artifact>),
 }
 
 pub type ProgramInputRef = InputRef<ProgramInline>;
@@ -282,7 +282,7 @@ impl ProgramInline {
     }
 
     pub fn program(program: Artifact) -> Self {
-        Self::Program(program)
+        Self::Program(Box::new(program))
     }
 }
 

@@ -7,8 +7,9 @@
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, PropertyQueryResult, RowKey, TableId, Value};
+use tabula_core::{ColId, TableId};
 use tabula_ir::PropertyQuery;
+use tabula_types::{TypedColumnEntry, TypedPropertyQueryResult};
 
 /// Provides access to pre-batch committed column state.
 ///
@@ -19,11 +20,7 @@ pub trait CommittedStateProvider: Send + Sync {
     /// Retrieve all entries for a committed column.
     ///
     /// Returns `(row_key, value, is_null)` tuples in key-sorted order.
-    fn get_column(
-        &self,
-        table: TableId,
-        col: ColId,
-    ) -> Result<Vec<(RowKey, Value, bool)>, TabulaError>;
+    fn get_column(&self, table: TableId, col: ColId) -> Result<Vec<TypedColumnEntry>, TabulaError>;
 }
 
 /// Resolves structural property queries for one committed column.
@@ -33,7 +30,7 @@ pub trait PropertyQueryHandler: Send + Sync {
         &self,
         query: &PropertyQuery,
         provider: &dyn CommittedStateProvider,
-    ) -> Result<PropertyQueryResult, TabulaError>;
+    ) -> Result<TypedPropertyQueryResult, TabulaError>;
 }
 
 /// Registry of per-column property query handlers.
@@ -88,7 +85,7 @@ impl PropertyQueryRegistry {
         col: ColId,
         query: &PropertyQuery,
         provider: &dyn CommittedStateProvider,
-    ) -> Result<PropertyQueryResult, TabulaError> {
+    ) -> Result<TypedPropertyQueryResult, TabulaError> {
         let handler = self.handlers.get(&(table, col)).ok_or_else(|| {
             TabulaError::InvalidIr(format!(
                 "PropertyRead encountered for table {} col {} but no handler is registered",

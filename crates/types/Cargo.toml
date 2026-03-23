@@ -1,0 +1,16 @@
+[package]
+name = "tabula-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+borsh = { workspace = true }
+serde = { workspace = true }
+p3-koala-bear = { workspace = true }
+p3-field = { workspace = true }
+tabula-core = { workspace = true }
+tabula-profile = { workspace = true }
+
+[lints]
+workspace = true

@@ -3,6 +3,7 @@
 use tabula_artifact::{State, TransactionBatch};
 use tabula_core::mock::Blake3Hasher;
 use tabula_runtime::{CompiledBatchInput, run_compiled_batch};
+use tabula_types::TypeRuntimeRegistry;
 
 use crate::io::{ExecutionOutput, StateEntry, load_json, write_json};
 
@@ -20,6 +21,7 @@ pub fn cmd_execute(
     // 2. Load state + batch
     let state: State = load_json(state_path)?;
     let transaction_batch: TransactionBatch = load_json(batch_path)?;
+    let type_runtimes = TypeRuntimeRegistry::seeded()?;
 
     // 3. Execute via runtime pipeline
     let executed = run_compiled_batch(&CompiledBatchInput {
@@ -27,6 +29,7 @@ pub fn cmd_execute(
         state: &state,
         batch: &transaction_batch,
         hasher: &Blake3Hasher,
+        type_runtimes: &type_runtimes,
     })?;
 
     if let Some(out_path) = output_state_path {

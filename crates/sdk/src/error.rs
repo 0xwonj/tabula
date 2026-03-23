@@ -12,15 +12,27 @@ pub enum SdkError {
     /// Runtime execution, setup, prove, or verify failure.
     #[error(transparent)]
     Runtime(#[from] tabula_runtime::RuntimeError),
-    /// Invalid or conflicting custom scheme registration.
-    #[error("invalid scheme bundle: {detail}")]
-    InvalidSchemeBundle {
+    /// Invalid or conflicting semantic registry configuration.
+    #[error("invalid semantic registry: {detail}")]
+    InvalidSemanticRegistry {
         /// Human-readable validation detail.
         detail: String,
     },
-    /// Invalid or conflicting custom precompile registration.
-    #[error("invalid precompile bundle: {detail}")]
-    InvalidPrecompileBundle {
+    /// Invalid or conflicting custom column backend registration.
+    #[error("invalid column backend bundle: {detail}")]
+    InvalidColumnBackendBundle {
+        /// Human-readable validation detail.
+        detail: String,
+    },
+    /// Invalid or conflicting precompile descriptor registration.
+    #[error("invalid precompile descriptor registration: {detail}")]
+    InvalidPrecompileDescriptorRegistration {
+        /// Human-readable validation detail.
+        detail: String,
+    },
+    /// Invalid or conflicting installed precompile backend registration.
+    #[error("invalid precompile backend bundle: {detail}")]
+    InvalidPrecompileBackendBundle {
         /// Human-readable validation detail.
         detail: String,
     },

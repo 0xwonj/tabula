@@ -4,6 +4,7 @@ use tabula_core::mock::Blake3Hasher;
 use tabula_runtime::{
     ExecutedBatch, ProveInput, ProveResult, RuntimeError, TabulaRuntime, VerifiedResult, Verifier,
 };
+use tabula_types::TypeRuntimeRegistry;
 
 use crate::exec::compiled_program_from_artifact;
 use crate::fixtures::cases::{ArtifactRuntimeCase, CompiledRuntimeCase};
@@ -78,10 +79,12 @@ pub fn verify_artifact_case(
 pub fn execute_compiled_case_free(
     case: &CompiledRuntimeCase,
 ) -> Result<ExecutedBatch, RuntimeError> {
+    let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
     tabula_runtime::run_compiled_batch(&tabula_runtime::CompiledBatchInput {
         compiled_program: &case.compiled_program,
         state: &case.state,
         batch: &case.batch,
         hasher: &Blake3Hasher,
+        type_runtimes: &type_runtimes,
     })
 }

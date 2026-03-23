@@ -13,7 +13,7 @@ use super::field::NativeDigest;
 /// Field-element-level hash abstraction.
 ///
 /// Distinct from `tabula_core::traits::Hasher` (which is byte-level).
-/// Used by SMT, SSMC, and ColumnState for native field-element hashing.
+/// Used by SMT, SSMC, and canonical commitment state helpers for native field-element hashing.
 pub trait FieldHasher: Clone + Send + Sync {
     /// The field element type.
     type F: Clone + Copy + Default + Eq + Send + Sync;

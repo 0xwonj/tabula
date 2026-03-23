@@ -1,8 +1,10 @@
-//! Canonical schema fixtures.
+//! Canonical source-schema fixtures.
 
-use tabula_core::{ColId, ColumnDef, TableId, TableSchema, ValueType};
+use tabula_compiler::{SourceColumnDef, SourceTableSchema};
+use tabula_core::{ColId, TableId};
+use tabula_profile::TYPE_U64_ID;
 
-pub fn single_u64_table(table: TableId, col_name: &str) -> TableSchema {
+pub fn single_u64_table(table: TableId, col_name: &str) -> SourceTableSchema {
     single_u64_column_schema(table, ColId(0), "test", col_name)
 }
 
@@ -11,14 +13,14 @@ pub fn single_u64_column_schema(
     col_id: ColId,
     table_name: &str,
     col_name: &str,
-) -> TableSchema {
-    TableSchema {
+) -> SourceTableSchema {
+    SourceTableSchema {
         id: table_id,
         name: table_name.to_string(),
-        columns: vec![ColumnDef {
+        columns: vec![SourceColumnDef {
             id: col_id,
             name: col_name.to_string(),
-            value_type: ValueType::U64,
+            type_id: TYPE_U64_ID,
         }],
     }
 }

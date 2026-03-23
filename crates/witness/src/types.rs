@@ -1,7 +1,8 @@
 //! Logical shared input types for runtime-owned proof preparation.
 
-use tabula_core::{CellKey, LogicalTime, PropertyQueryResult, RowKey, Value};
+use tabula_core::{CellKey, EncodingProfileId, LogicalTime, RowKey, TypeId};
 use tabula_ir::PropertyQuery;
+use tabula_types::{TypedPropertyQueryResult, TypedValue};
 
 /// Logical committed-state entry for one row of a committed column.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -9,7 +10,7 @@ pub struct CommittedEntry {
     /// Row key.
     pub row: RowKey,
     /// Logical cell value.
-    pub value: Value,
+    pub value: TypedValue,
     /// Whether the entry is absent in committed state.
     pub is_null: bool,
 }
@@ -20,7 +21,7 @@ pub struct InitCell {
     /// The cell address.
     pub key: CellKey,
     /// The logical cell value.
-    pub value: Value,
+    pub value: TypedValue,
     /// Whether the cell is absent in committed state.
     pub is_null: bool,
 }
@@ -35,7 +36,7 @@ pub struct AccessEvent {
     /// Whether this event is a write.
     pub is_write: bool,
     /// The logical cell value observed or written by the executor.
-    pub value: Value,
+    pub value: TypedValue,
     /// Whether the value is null.
     pub is_null: bool,
     /// Transaction index within the batch.
@@ -50,7 +51,7 @@ pub struct ColumnWrite {
     /// Target row key.
     pub row: RowKey,
     /// Final logical value. `None` means delete / write null.
-    pub value: Option<Value>,
+    pub value: Option<TypedValue>,
 }
 
 /// Logical property-read claim extracted from execution for proof preparation.
@@ -59,5 +60,14 @@ pub struct PropertyReadClaim {
     /// Original structural query.
     pub query: PropertyQuery,
     /// Execution result claimed for this query.
-    pub result: PropertyQueryResult,
+    pub result: TypedPropertyQueryResult,
+}
+
+/// Sealed per-column profile/runtime identity used by proof preparation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColumnValueProfile {
+    /// Column semantic type id.
+    pub type_id: TypeId,
+    /// Column encoding profile id.
+    pub encoding_profile_id: EncodingProfileId,
 }

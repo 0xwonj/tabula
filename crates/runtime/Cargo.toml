@@ -5,16 +5,19 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+borsh = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 tabula-core = { workspace = true }
+tabula-types = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-artifact = { workspace = true }
 tabula-contract = { workspace = true }
 tabula-compiler = { workspace = true }
+tabula-profile = { workspace = true }
 tabula-ext = { workspace = true, default-features = false }
 tabula-executor = { workspace = true }
 
@@ -51,6 +54,8 @@ prove = [
 ]
 
 [dev-dependencies]
+blake3 = { workspace = true }
+borsh = { workspace = true }
 tabula-core = { workspace = true, features = ["test-utils"] }
 tabula-testing = { workspace = true }
 serde_json = { workspace = true }

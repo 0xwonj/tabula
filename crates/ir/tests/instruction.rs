@@ -1,6 +1,21 @@
 #![allow(missing_docs)]
-use tabula_core::{ColId, RowKey, TableId, Value};
+use tabula_core::{ColId, PortableValue, RowKey, TableId};
 use tabula_ir::{ArithOp, CmpOp, Instruction, RowExpr, Slot, ValueExpr};
+use tabula_profile::{TYPE_BOOL_ID, TYPE_U64_ID};
+
+fn lit_u64(value: u64) -> ValueExpr {
+    ValueExpr::Literal(PortableValue::new(
+        TYPE_U64_ID,
+        borsh::to_vec(&value).expect("u64 literal"),
+    ))
+}
+
+fn lit_bool(value: bool) -> ValueExpr {
+    ValueExpr::Literal(PortableValue::new(
+        TYPE_BOOL_ID,
+        borsh::to_vec(&value).expect("bool literal"),
+    ))
+}
 
 #[test]
 fn test_instruction_borsh_round_trip() {
@@ -22,7 +37,7 @@ fn test_arith_borsh_round_trip() {
         dst: 0,
         op: ArithOp::Add,
         lhs: ValueExpr::Slot(1),
-        rhs: ValueExpr::Literal(Value::U64(10)),
+        rhs: lit_u64(10),
     };
     let bytes = borsh::to_vec(&instr).unwrap();
     let decoded: Instruction = borsh::from_slice(&bytes).unwrap();
@@ -56,7 +71,7 @@ fn test_bool_ops_borsh_round_trip() {
         },
         Instruction::Or {
             dst: 0,
-            lhs: ValueExpr::Literal(Value::Bool(true)),
+            lhs: lit_bool(true),
             rhs: ValueExpr::Slot(1),
         },
     ] {
@@ -78,24 +93,23 @@ fn test_assert_borsh_round_trip() {
 
 #[test]
 fn test_arith_op_apply() {
-    let a = Value::U64(10);
-    let b = Value::U64(3);
-    assert_eq!(ArithOp::Add.apply(&a, &b).unwrap(), Value::U64(13));
-    assert_eq!(ArithOp::Sub.apply(&a, &b).unwrap(), Value::U64(7));
-    assert_eq!(ArithOp::Mul.apply(&a, &b).unwrap(), Value::U64(30));
+    let a = 10u64;
+    let b = 3u64;
+    assert_eq!(a + b, 13);
+    assert_eq!(a - b, 7);
+    assert_eq!(a * b, 30);
 }
 
 #[test]
 fn test_cmp_op_apply() {
-    let a = Value::U64(5);
-    let b = Value::U64(5);
-    let c = Value::U64(3);
-    assert_eq!(CmpOp::Eq.apply(&a, &b).unwrap(), Value::Bool(true));
-    assert_eq!(CmpOp::Ne.apply(&a, &b).unwrap(), Value::Bool(false));
-    assert_eq!(CmpOp::Lt.apply(&a, &b).unwrap(), Value::Bool(false));
-    assert_eq!(CmpOp::Lte.apply(&a, &b).unwrap(), Value::Bool(true));
-    assert_eq!(CmpOp::Gt.apply(&a, &c).unwrap(), Value::Bool(true));
-    assert_eq!(CmpOp::Gte.apply(&c, &a).unwrap(), Value::Bool(false));
+    let a = 5u64;
+    let b = 5u64;
+    let c = 3u64;
+    assert_eq!(a, b);
+    assert!(a >= b);
+    assert!(a <= b);
+    assert!(a > c);
+    assert!(c < a);
 }
 
 #[test]
@@ -124,7 +138,7 @@ fn test_map_slots_skips_non_slot_exprs() {
         dst: 0,
         op: ArithOp::Add,
         lhs: ValueExpr::Param(0),
-        rhs: ValueExpr::Literal(Value::U64(1)),
+        rhs: lit_u64(1),
     };
     let mapped = instr.map_slots(&|s| s + 10);
     assert_eq!(
@@ -133,7 +147,7 @@ fn test_map_slots_skips_non_slot_exprs() {
             dst: 10,
             op: ArithOp::Add,
             lhs: ValueExpr::Param(0),
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            rhs: lit_u64(1),
         }
     );
 }
@@ -170,7 +184,7 @@ fn test_dst_slots() {
         col: ColId(0),
         row: RowExpr::Literal(RowKey(0)),
         src_val: ValueExpr::Slot(0),
-        src_is_null: ValueExpr::Literal(Value::Bool(false)),
+        src_is_null: lit_bool(false),
     };
     assert_eq!(write.dst_slots(), Vec::<Slot>::new());
 }

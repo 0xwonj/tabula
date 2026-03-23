@@ -1,7 +1,7 @@
 //! Built-in transfer example program and bundle.
 
 use tabula_artifact::{Artifact, State, StateEntry, TransactionBatch, TransactionInput};
-use tabula_core::Value;
+use tabula_types::u64_portable;
 
 use crate::compile::compile_program_source;
 use crate::register::register_program_definition;
@@ -49,19 +49,19 @@ pub fn transfer_example_bundle() -> anyhow::Result<ExampleBundle> {
                 table: 0,
                 row: 0,
                 col: 0,
-                value: Some(Value::U64(1000)),
+                value: Some(u64_portable(1000)),
             },
             StateEntry {
                 table: 0,
                 row: 1,
                 col: 0,
-                value: Some(Value::U64(500)),
+                value: Some(u64_portable(500)),
             },
             StateEntry {
                 table: 0,
                 row: 2,
                 col: 0,
-                value: Some(Value::U64(200)),
+                value: Some(u64_portable(200)),
             },
         ],
     };
@@ -70,19 +70,19 @@ pub fn transfer_example_bundle() -> anyhow::Result<ExampleBundle> {
         transactions: vec![
             TransactionInput {
                 tx_type: 0,
-                params: vec![Value::U64(0), Value::U64(1), Value::U64(300)],
+                params: vec![u64_portable(0), u64_portable(1), u64_portable(300)],
                 sender: "01".repeat(32),
                 nonce: 0,
             },
             TransactionInput {
                 tx_type: 0,
-                params: vec![Value::U64(1), Value::U64(2), Value::U64(200)],
+                params: vec![u64_portable(1), u64_portable(2), u64_portable(200)],
                 sender: "01".repeat(32),
                 nonce: 1,
             },
             TransactionInput {
                 tx_type: 0,
-                params: vec![Value::U64(2), Value::U64(0), Value::U64(50)],
+                params: vec![u64_portable(2), u64_portable(0), u64_portable(50)],
                 sender: "01".repeat(32),
                 nonce: 2,
             },

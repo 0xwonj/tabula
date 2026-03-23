@@ -34,8 +34,7 @@ pub(crate) fn constrain_operand_selectors<AB: AirBuilder, const W: usize>(
         + local.op_or.into()
         + local.op_assert.into()
         + local.op_select.into()
-        + local.op_write.into()
-        + local.op_hash.into();
+        + local.op_write.into();
 
     // Opcodes that need src2
     let needs_src2: AB::Expr = local.op_arith.into()
@@ -43,8 +42,7 @@ pub(crate) fn constrain_operand_selectors<AB: AirBuilder, const W: usize>(
         + local.op_cmp.into()
         + local.op_and.into()
         + local.op_or.into()
-        + local.op_select.into()
-        + local.op_hash.into();
+        + local.op_select.into();
 
     // Opcodes that need cond
     let needs_cond: AB::Expr = local.op_select.into();

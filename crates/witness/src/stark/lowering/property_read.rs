@@ -5,8 +5,9 @@
 //! an `InstructionRecord`.
 
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, RowKey, TableId, Value};
+use tabula_core::{ColId, RowKey, TableId};
 use tabula_ir::PropertyQuery;
+use tabula_types::{bool_typed, u64_typed};
 
 use tabula_chips::execution::trace::Opcode;
 
@@ -34,7 +35,7 @@ pub(super) fn lower_property_read<const W: usize>(
         })?;
     ctx.property_read_idx += 1;
 
-    let value = stored.value;
+    let value = ctx.decode_column_portable(table, col, &stored.value)?;
     let key_opt = stored.key;
     let is_null = stored.is_null;
 
@@ -44,17 +45,17 @@ pub(super) fn lower_property_read<const W: usize>(
     // 3. Encode the key as U64 → W field elements.
     //    When is_null (no matching key), use RowKey(0) as placeholder.
     let key_u64 = key_opt.unwrap_or(RowKey(0)).0;
-    let key_val = Value::U64(key_u64);
+    let key_val = u64_typed(key_u64);
     let key_enc = ctx.encode_padded(&key_val)?;
 
     // 4. Encode the is_null flag as Bool → W field elements.
-    let null_val = Value::Bool(is_null);
+    let null_val = bool_typed(is_null);
     let null_enc = ctx.encode_padded(&null_val)?;
 
     // 5. Canonical query operand encoding for the proof claim.
     let (query_arg0, query_arg1) = query.encoded_args();
-    let query_arg0_enc = ctx.encode_padded(&Value::U64(query_arg0))?;
-    let query_arg1_enc = ctx.encode_padded(&Value::U64(query_arg1))?;
+    let query_arg0_enc = ctx.encode_u64_padded(query_arg0)?;
+    let query_arg1_enc = ctx.encode_u64_padded(query_arg1)?;
 
     // 6. Update the three destination slots.
     let dst_val_idx = dst_val as usize;

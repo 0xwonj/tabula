@@ -1,15 +1,235 @@
 #![allow(missing_docs)]
-use tabula_core::{ColId, SchemeId, TableId, TxTypeId, Value, ValueType};
-use tabula_ir::{ArithOp, CmpOp, Instruction, Program, RowExpr, ValueExpr};
+use tabula_core::{
+    ColId, ColumnProfileId, PortableValue, SchemeId, TableId, TableSchema, TxTypeId, TypeId,
+};
+use tabula_ir::{
+    ArithOp, CmpOp, Instruction, PrecompileId, PrecompileSignature, PrecompileValueProfile,
+    Program, RowExpr, ValueExpr,
+};
 use tabula_lang::error::ErrorKind;
 use tabula_lang::lexer::lex;
-use tabula_lang::lower::{LoweredProgram, lower};
+use tabula_lang::lower::{
+    LoweredProgram, lower, lower_with_registry, lower_with_registry_and_precompiles,
+};
 use tabula_lang::parser::parse;
+use tabula_profile::{
+    ColumnProfile, CommitmentRole, ENCODING_BOOL_ID, ENCODING_U64_ID, GenericIrFamily,
+    HostValueFamily, NullSemantics, SCHEME_PROFILE_SSMC_ID, SemanticRegistry, TYPE_BOOL_ID,
+    TYPE_U64_ID, TypeCapabilities, TypeDescriptor, ZeroValueSpec, builtin_catalog,
+    builtin_semantic_registry,
+};
+
+const CUSTOM_SOURCE_NUMERIC_TYPE_ID: TypeId = TypeId(0xc101);
+const CUSTOM_SOURCE_OPAQUE_ZERO_TYPE_ID: TypeId = TypeId(0xc102);
+const CUSTOM_SOURCE_SMALL_INT_TYPE_ID: TypeId = TypeId(0xc103);
 
 fn compile(source: &str) -> LoweredProgram {
     let tokens = lex(source).expect("lex failed");
     let ast = parse(tokens).expect("parse failed");
     lower(&ast).expect("lower failed")
+}
+
+fn compile_with_precompiles(
+    source: &str,
+    precompiles: &[(PrecompileId, PrecompileSignature)],
+) -> LoweredProgram {
+    let tokens = lex(source).expect("lex failed");
+    let ast = parse(tokens).expect("parse failed");
+    let precompiles = precompiles.iter().cloned().collect();
+    let registry = builtin_semantic_registry().expect("built-in semantic registry");
+    lower_with_registry_and_precompiles(&ast, &registry, &precompiles).expect("lower failed")
+}
+
+fn compile_with_registry_for_test(source: &str, registry: &SemanticRegistry) -> LoweredProgram {
+    let tokens = lex(source).expect("lex failed");
+    let ast = parse(tokens).expect("parse failed");
+    lower_with_registry(&ast, registry).expect("lower failed")
+}
+
+fn compile_with_registry_err(
+    source: &str,
+    registry: &SemanticRegistry,
+) -> Vec<tabula_lang::error::CompileError> {
+    let tokens = lex(source).expect("lex failed");
+    let ast = parse(tokens).expect("parse failed");
+    lower_with_registry(&ast, registry).expect_err("lower should fail")
+}
+
+fn profile(
+    type_id: tabula_core::TypeId,
+    encoding_profile_id: tabula_core::EncodingProfileId,
+) -> PrecompileValueProfile {
+    PrecompileValueProfile {
+        type_id,
+        encoding_profile_id,
+    }
+}
+
+fn portable_u64(value: u64) -> PortableValue {
+    PortableValue::new(TYPE_U64_ID, value.to_le_bytes().to_vec())
+}
+
+fn portable_bool(value: bool) -> PortableValue {
+    PortableValue::new(TYPE_BOOL_ID, vec![u8::from(value)])
+}
+
+fn portable_zero(type_id: TypeId) -> PortableValue {
+    PortableValue::new(type_id, 0u64.to_le_bytes().to_vec())
+}
+
+fn custom_numeric_registry() -> SemanticRegistry {
+    let mut registry = SemanticRegistry::new();
+    registry
+        .register_type_descriptor(
+            TypeDescriptor::new(
+                CUSTOM_SOURCE_NUMERIC_TYPE_ID,
+                "u64",
+                None,
+                HostValueFamily::UnsignedInt { bits: 64 },
+                GenericIrFamily::UnsignedInteger,
+                TypeCapabilities {
+                    equality: true,
+                    ordering: true,
+                    arithmetic: true,
+                },
+                ZeroValueSpec::IntegerZero,
+                NullSemantics::NullableWithCanonicalZero,
+            )
+            .expect("numeric descriptor"),
+        )
+        .expect("register numeric descriptor");
+    registry
+        .register_type_name("u64", CUSTOM_SOURCE_NUMERIC_TYPE_ID)
+        .expect("register numeric name");
+    registry
+}
+
+fn opaque_zero_registry() -> SemanticRegistry {
+    let mut registry = SemanticRegistry::new();
+    registry
+        .register_type_descriptor(
+            TypeDescriptor::new(
+                CUSTOM_SOURCE_OPAQUE_ZERO_TYPE_ID,
+                "u64",
+                None,
+                HostValueFamily::Opaque {
+                    family: "opaque_u64".to_string(),
+                },
+                GenericIrFamily::EqOnly,
+                TypeCapabilities {
+                    equality: true,
+                    ordering: false,
+                    arithmetic: false,
+                },
+                ZeroValueSpec::Opaque {
+                    label: "opaque_zero".to_string(),
+                },
+                NullSemantics::NullableWithCanonicalZero,
+            )
+            .expect("opaque descriptor"),
+        )
+        .expect("register opaque descriptor");
+    registry
+        .register_type_name("u64", CUSTOM_SOURCE_OPAQUE_ZERO_TYPE_ID)
+        .expect("register opaque name");
+    registry
+}
+
+fn small_int_registry() -> SemanticRegistry {
+    let mut registry = SemanticRegistry::new();
+    registry
+        .register_type_descriptor(
+            TypeDescriptor::new(
+                CUSTOM_SOURCE_SMALL_INT_TYPE_ID,
+                "u64",
+                None,
+                HostValueFamily::UnsignedInt { bits: 32 },
+                GenericIrFamily::UnsignedInteger,
+                TypeCapabilities {
+                    equality: true,
+                    ordering: true,
+                    arithmetic: true,
+                },
+                ZeroValueSpec::IntegerZero,
+                NullSemantics::NullableWithCanonicalZero,
+            )
+            .expect("small-int descriptor"),
+        )
+        .expect("register small-int descriptor");
+    registry
+        .register_type_name("u64", CUSTOM_SOURCE_SMALL_INT_TYPE_ID)
+        .expect("register small-int name");
+    registry
+}
+
+fn lit_bool(value: bool) -> ValueExpr {
+    ValueExpr::Literal(portable_bool(value))
+}
+
+fn seal_schemas(compiled: &LoweredProgram) -> (Vec<TableSchema>, tabula_profile::ProfileCatalog) {
+    let mut catalog = builtin_catalog().expect("built-in catalog");
+    let mut next_column_profile_id = 0u32;
+    let schemas = compiled
+        .schemas
+        .iter()
+        .map(|schema| {
+            let columns = schema
+                .columns
+                .iter()
+                .map(|column| {
+                    let type_descriptor = catalog
+                        .types
+                        .iter()
+                        .find(|descriptor| descriptor.type_id == column.type_id)
+                        .cloned()
+                        .expect("type descriptor");
+                    let encoding_id = match column.type_id {
+                        TYPE_U64_ID => ENCODING_U64_ID,
+                        TYPE_BOOL_ID => ENCODING_BOOL_ID,
+                        other => panic!("unsupported built-in type id in lang tests: {}", other.0),
+                    };
+                    let encoding_profile = catalog
+                        .encodings
+                        .iter()
+                        .find(|profile| profile.encoding_profile_id == encoding_id)
+                        .cloned()
+                        .expect("encoding profile");
+                    let scheme_profile = catalog
+                        .schemes
+                        .iter()
+                        .find(|profile| profile.scheme_profile_id == SCHEME_PROFILE_SSMC_ID)
+                        .cloned()
+                        .expect("ssmc scheme profile");
+                    let column_profile = ColumnProfile::new(
+                        ColumnProfileId(next_column_profile_id),
+                        format!("{}.{}", schema.name, column.name),
+                        None,
+                        &type_descriptor,
+                        &encoding_profile,
+                        &scheme_profile,
+                        CommitmentRole::IncludedInRoot,
+                    )
+                    .expect("column profile");
+                    let column_profile_id = column_profile.column_profile_id;
+                    catalog
+                        .register_column(column_profile)
+                        .expect("register column");
+                    next_column_profile_id += 1;
+                    tabula_core::ColumnDef {
+                        id: column.id,
+                        name: column.name.clone(),
+                        column_profile_id,
+                    }
+                })
+                .collect();
+            TableSchema {
+                id: schema.id,
+                name: schema.name.clone(),
+                columns,
+            }
+        })
+        .collect();
+    (schemas, catalog)
 }
 
 // --- Schema lowering ---
@@ -21,7 +241,7 @@ fn test_lower_table_schema() {
     assert_eq!(prog.schemas[0].id, TableId(0));
     assert_eq!(prog.schemas[0].name, "balances");
     assert_eq!(prog.schemas[0].columns[0].id, ColId(0));
-    assert_eq!(prog.schemas[0].columns[0].value_type, ValueType::U64);
+    assert_eq!(prog.schemas[0].columns[0].type_id, TYPE_U64_ID);
 }
 
 #[test]
@@ -93,8 +313,9 @@ tx rw(id: u64, val: u64) {
             row: RowExpr::Param(0),
             col,
             src_val: ValueExpr::Param(1),
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_is_null: ValueExpr::Literal(v),
         } if *table == TableId(0) && *col == ColId(0)
+            && *v == portable_bool(false)
     ));
 }
 
@@ -127,17 +348,89 @@ tx add_one(id: u64) {
             dst: 2,
             op: ArithOp::Add,
             lhs: ValueExpr::Slot(0),
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            rhs: ValueExpr::Literal(v),
         }
+            if *v == portable_u64(1)
     ));
     assert!(matches!(
         &body[2],
         Instruction::Write {
             src_val: ValueExpr::Slot(2),
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_is_null: ValueExpr::Literal(v),
             ..
         }
+            if *v == portable_bool(false)
     ));
+}
+
+#[test]
+fn custom_numeric_descriptor_supports_unary_negation_lowering() {
+    let prog = compile_with_registry_for_test(
+        "tx negate(x: u64) { let y = -x }",
+        &custom_numeric_registry(),
+    );
+    let body = &prog.tx_types[0].body;
+    assert_eq!(body.len(), 1);
+    assert!(matches!(
+        &body[0],
+        Instruction::Arith {
+            dst: 0,
+            op: ArithOp::Sub,
+            lhs: ValueExpr::Literal(v),
+            rhs: ValueExpr::Param(0),
+        } if *v == portable_zero(CUSTOM_SOURCE_NUMERIC_TYPE_ID)
+    ));
+    assert_eq!(
+        prog.tx_types[0].param_schema[0].type_id,
+        CUSTOM_SOURCE_NUMERIC_TYPE_ID
+    );
+}
+
+#[test]
+fn custom_nullable_numeric_descriptor_supports_null_assignment_lowering() {
+    let prog = compile_with_registry_for_test(
+        "table t { v: u64 }\ntx clear() { t[0].v = null }",
+        &custom_numeric_registry(),
+    );
+    let body = &prog.tx_types[0].body;
+    assert_eq!(body.len(), 1);
+    assert!(matches!(
+        &body[0],
+        Instruction::Write {
+            src_val: ValueExpr::Literal(v),
+            src_is_null: ValueExpr::Literal(flag),
+            ..
+        } if *v == portable_zero(CUSTOM_SOURCE_NUMERIC_TYPE_ID)
+            && *flag == portable_bool(true)
+    ));
+    assert_eq!(
+        prog.schemas[0].columns[0].type_id,
+        CUSTOM_SOURCE_NUMERIC_TYPE_ID
+    );
+}
+
+#[test]
+fn opaque_zero_rule_fails_closed_for_null_assignment() {
+    let errors = compile_with_registry_err(
+        "table t { v: u64 }\ntx clear() { t[0].v = null }",
+        &opaque_zero_registry(),
+    );
+    assert!(errors.iter().any(|err| {
+        err.kind == ErrorKind::TypeMismatch
+            && err.message.contains("descriptor-synthesizable zero")
+            && err.message.contains("opaque zero-value rule")
+    }));
+}
+
+#[test]
+fn unsupported_zero_synthesis_fails_closed_for_unary_negation() {
+    let errors =
+        compile_with_registry_err("tx negate(x: u64) { let y = -x }", &small_int_registry());
+    assert!(errors.iter().any(|err| {
+        err.kind == ErrorKind::TypeMismatch
+            && err.message.contains("statically synthesizable zero")
+            && err.message.contains("incompatible zero-value rule")
+    }));
 }
 
 // --- Assert ---
@@ -187,8 +480,9 @@ tx check(id: u64) {
             dst: 2,
             op: CmpOp::Eq,
             lhs: ValueExpr::Slot(1),
-            rhs: ValueExpr::Literal(Value::Bool(false)),
+            rhs: ValueExpr::Literal(v),
         }
+            if *v == portable_bool(false)
     ));
     assert!(matches!(
         &body[2],
@@ -217,8 +511,9 @@ tx check(id: u64) {
             dst: 2,
             op: CmpOp::Eq,
             lhs: ValueExpr::Slot(1),
-            rhs: ValueExpr::Literal(Value::Bool(true)),
+            rhs: ValueExpr::Literal(v),
         }
+            if *v == portable_bool(true)
     ));
     assert!(matches!(
         &body[2],
@@ -397,14 +692,14 @@ tx transfer(from: u64, to: u64, amount: u64) {
                 row: RowExpr::Param(0),
                 col: ColId(0),
                 src_val: ValueExpr::Slot(5),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_is_null: lit_bool(false),
             },
             Instruction::Write {
                 table: TableId(0),
                 row: RowExpr::Param(1),
                 col: ColId(0),
                 src_val: ValueExpr::Slot(6),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_is_null: lit_bool(false),
             },
         ]
     );
@@ -495,9 +790,10 @@ tx inc(id: u64, amount: u64) {
         &body[2],
         Instruction::Write {
             src_val: ValueExpr::Slot(2),
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_is_null: ValueExpr::Literal(v),
             ..
         }
+            if *v == portable_bool(false)
     ));
 }
 
@@ -541,9 +837,10 @@ fn test_lower_select_literal_branches() {
         Instruction::Select {
             dst: 0,
             cond: ValueExpr::Param(0),
-            if_true: ValueExpr::Literal(Value::U64(42)),
-            if_false: ValueExpr::Literal(Value::U64(0)),
+            if_true: ValueExpr::Literal(t),
+            if_false: ValueExpr::Literal(f),
         }
+            if *t == portable_u64(42) && *f == portable_u64(0)
     ));
 }
 
@@ -566,8 +863,9 @@ tx transfer(amount: u64) {
     balances[1].balance = new_recv
 }";
     let compiled = compile(source);
-    let mut prog = Program::new();
-    for schema in &compiled.schemas {
+    let (sealed_schemas, profile_catalog) = seal_schemas(&compiled);
+    let mut prog = Program::with_profile_catalog(profile_catalog);
+    for schema in &sealed_schemas {
         prog.add_schema(schema.clone());
     }
     for tx_type in &compiled.tx_types {
@@ -576,8 +874,8 @@ tx transfer(amount: u64) {
     }
     // Verify type info was inferred (slot 0 = val U64, slot 1 = is_null Bool)
     let info = prog.type_info(TxTypeId(0)).unwrap();
-    assert_eq!(info.slot_types[0], Some(ValueType::U64));
-    assert_eq!(info.slot_types[1], Some(ValueType::Bool));
+    assert_eq!(info.slot_types[0], Some(TYPE_U64_ID));
+    assert_eq!(info.slot_types[1], Some(TYPE_BOOL_ID));
 }
 
 #[test]
@@ -591,8 +889,9 @@ tx s(id: u64, flag: bool) {
     t[id].a = result
 }";
     let compiled = compile(source);
-    let mut prog = Program::new();
-    for schema in &compiled.schemas {
+    let (sealed_schemas, profile_catalog) = seal_schemas(&compiled);
+    let mut prog = Program::with_profile_catalog(profile_catalog);
+    for schema in &sealed_schemas {
         prog.add_schema(schema.clone());
     }
     for tx_type in &compiled.tx_types {
@@ -606,7 +905,16 @@ tx s(id: u64, flag: bool) {
 #[test]
 fn test_lower_precompile_basic() {
     let source = "tx t(x: u64) { @precompile(1, [out], x) }";
-    let prog = compile(source);
+    let prog = compile_with_precompiles(
+        source,
+        &[(
+            PrecompileId(1),
+            PrecompileSignature::new(
+                vec![profile(TYPE_U64_ID, ENCODING_U64_ID)],
+                vec![profile(TYPE_U64_ID, ENCODING_U64_ID)],
+            ),
+        )],
+    );
     let body = &prog.tx_types[0].body;
     assert_eq!(body.len(), 1);
     assert!(matches!(
@@ -620,9 +928,79 @@ fn test_lower_precompile_basic() {
 }
 
 #[test]
+fn test_lower_precompile_unknown_id_error() {
+    let tokens = lex("tx t(x: u64) { @precompile(1, [out], x) }").unwrap();
+    let ast = parse(tokens).unwrap();
+    let registry = builtin_semantic_registry().expect("built-in semantic registry");
+    let err =
+        lower_with_registry_and_precompiles(&ast, &registry, &std::collections::BTreeMap::new())
+            .unwrap_err();
+    assert!(err.iter().any(|e| e.kind == ErrorKind::UndefinedPrecompile));
+}
+
+#[test]
+fn test_lower_precompile_input_arity_error() {
+    let tokens = lex("tx t(x: u64) { @precompile(1, [out], x) }").unwrap();
+    let ast = parse(tokens).unwrap();
+    let registry = builtin_semantic_registry().expect("built-in semantic registry");
+    let precompiles = [(
+        PrecompileId(1),
+        PrecompileSignature::new(
+            vec![
+                profile(TYPE_U64_ID, ENCODING_U64_ID),
+                profile(TYPE_U64_ID, ENCODING_U64_ID),
+            ],
+            vec![profile(TYPE_U64_ID, ENCODING_U64_ID)],
+        ),
+    )]
+    .into_iter()
+    .collect();
+    let err = lower_with_registry_and_precompiles(&ast, &registry, &precompiles).unwrap_err();
+    assert!(err.iter().any(|e| {
+        e.kind == ErrorKind::TypeMismatch
+            && e.message.contains("expects 2 inputs but 1 were provided")
+    }));
+}
+
+#[test]
+fn test_lower_precompile_input_type_error() {
+    let tokens = lex("tx t(flag: bool) { @precompile(1, [out], flag) }").unwrap();
+    let ast = parse(tokens).unwrap();
+    let registry = builtin_semantic_registry().expect("built-in semantic registry");
+    let precompiles = [(
+        PrecompileId(1),
+        PrecompileSignature::new(
+            vec![profile(TYPE_U64_ID, ENCODING_U64_ID)],
+            vec![profile(TYPE_U64_ID, ENCODING_U64_ID)],
+        ),
+    )]
+    .into_iter()
+    .collect();
+    let err = lower_with_registry_and_precompiles(&ast, &registry, &precompiles).unwrap_err();
+    assert!(err.iter().any(|e| {
+        e.kind == ErrorKind::TypeMismatch && e.message.contains("input expects type id")
+    }));
+}
+
+#[test]
 fn test_lower_precompile_multi_output() {
     let source = "tx t(a: u64, b: u64) { @precompile(42, [x, y], a, b) }";
-    let prog = compile(source);
+    let prog = compile_with_precompiles(
+        source,
+        &[(
+            PrecompileId(42),
+            PrecompileSignature::new(
+                vec![
+                    profile(TYPE_U64_ID, ENCODING_U64_ID),
+                    profile(TYPE_U64_ID, ENCODING_U64_ID),
+                ],
+                vec![
+                    profile(TYPE_U64_ID, ENCODING_U64_ID),
+                    profile(TYPE_U64_ID, ENCODING_U64_ID),
+                ],
+            ),
+        )],
+    );
     let body = &prog.tx_types[0].body;
     assert_eq!(body.len(), 1);
     if let Instruction::Precompile {
@@ -642,14 +1020,51 @@ fn test_lower_precompile_multi_output() {
 }
 
 #[test]
+fn test_lower_precompile_output_slot_typing_follows_signature() {
+    let source = "\
+tx t(x: u64) {
+    @precompile(7, [ok], x)
+    assert ok
+}";
+    let prog = compile_with_precompiles(
+        source,
+        &[(
+            PrecompileId(7),
+            PrecompileSignature::new(
+                vec![profile(TYPE_U64_ID, ENCODING_U64_ID)],
+                vec![profile(TYPE_BOOL_ID, ENCODING_BOOL_ID)],
+            ),
+        )],
+    );
+    let body = &prog.tx_types[0].body;
+    assert_eq!(body.len(), 2);
+    assert!(matches!(&body[0], Instruction::Precompile { .. }));
+    assert!(matches!(
+        &body[1],
+        Instruction::Assert {
+            cond: ValueExpr::Slot(0)
+        }
+    ));
+}
+
+#[test]
 fn test_lower_precompile_output_usable() {
     // Verify precompile outputs can be referenced in subsequent statements.
     let source = "\
 tx t(x: u64) {
     @precompile(1, [result], x)
-    assert result == 0x0000000000000000000000000000000000000000000000000000000000000000
+    assert result == 0
 }";
-    let prog = compile(source);
+    let prog = compile_with_precompiles(
+        source,
+        &[(
+            PrecompileId(1),
+            PrecompileSignature::new(
+                vec![profile(TYPE_U64_ID, ENCODING_U64_ID)],
+                vec![profile(TYPE_U64_ID, ENCODING_U64_ID)],
+            ),
+        )],
+    );
     let body = &prog.tx_types[0].body;
     // Precompile (slot 0) + Cmp (slot 1) + Assert
     assert_eq!(body.len(), 3);
@@ -667,7 +1082,17 @@ tx t(x: u64) {
 fn test_lower_precompile_duplicate_binding_error() {
     let tokens = lex("tx t(x: u64) { @precompile(1, [x], x) }").unwrap();
     let ast = parse(tokens).unwrap();
-    let err = lower(&ast).unwrap_err();
+    let precompiles = [(
+        PrecompileId(1),
+        PrecompileSignature::new(
+            vec![profile(TYPE_U64_ID, ENCODING_U64_ID)],
+            vec![profile(TYPE_U64_ID, ENCODING_U64_ID)],
+        ),
+    )]
+    .into_iter()
+    .collect();
+    let registry = builtin_semantic_registry().expect("built-in semantic registry");
+    let err = lower_with_registry_and_precompiles(&ast, &registry, &precompiles).unwrap_err();
     assert!(err.iter().any(|e| e.kind == ErrorKind::DuplicateBinding));
 }
 

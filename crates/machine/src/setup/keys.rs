@@ -177,8 +177,8 @@ mod tests {
         let pk = &setup.proving_key;
         assert!(pk.get(core_chips::EXECUTION).is_some());
         assert!(pk.get(core_chips::RANGE_CHECK).is_some());
-        assert!(pk.get(core_chips::POSEIDON).is_some());
-        assert_eq!(pk.chip_ids().len(), 4);
+        assert!(pk.get(core_chips::POSEIDON).is_none());
+        assert_eq!(pk.chip_ids().len(), 3);
     }
 
     #[test]

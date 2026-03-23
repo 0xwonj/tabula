@@ -1,7 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/types",
     "crates/core",
+    "crates/profile",
     "crates/contract",
     "crates/ir",
     "crates/executor",
@@ -37,6 +39,8 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 # Internal
 tabula-core = { path = "crates/core" }
+tabula-types = { path = "crates/types" }
+tabula-profile = { path = "crates/profile" }
 tabula-contract = { path = "crates/contract" }
 tabula-ir = { path = "crates/ir" }
 tabula-executor = { path = "crates/executor" }

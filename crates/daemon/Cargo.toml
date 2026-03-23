@@ -28,6 +28,7 @@ tabula-core = { workspace = true, features = ["test-utils"] }
 tabula-compiler = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-runtime = { workspace = true }
+tabula-types = { workspace = true }
 tabula-chips = { workspace = true, optional = true }
 tabula-machine = { workspace = true, optional = true }
 tabula-witness = { workspace = true, optional = true }

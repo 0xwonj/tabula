@@ -115,10 +115,8 @@ pub struct InstructionRecord {
     /// PropertyRead has 3 entries (value, key, is_null flag).
     /// Write/Assert/Emit have 0 entries (no new slot values).
     pub writes: Vec<(usize, Vec<KoalaBear>, bool)>,
-    /// For Hash: precomputed Poseidon permutation input (16 FE).
-    pub hash_perm_input: Option<[KoalaBear; 16]>,
-    /// For Hash: precomputed Poseidon permutation output (8 FE).
-    pub hash_perm_output: Option<[KoalaBear; 8]>,
+    /// For Hash: canonical digest relayed to the dedicated IR-hash lane.
+    pub hash_digest: Option<[KoalaBear; 8]>,
     /// For Read: whether the column being read is empty.
     pub is_empty_col: bool,
     /// For Precompile: the precompile identifier.
@@ -164,8 +162,7 @@ impl Default for InstructionRecord {
             access_val: None,
             access_is_null: None,
             writes: vec![],
-            hash_perm_input: None,
-            hash_perm_output: None,
+            hash_digest: None,
             is_empty_col: false,
             precompile_id: None,
             instruction_index: None,
@@ -305,14 +302,11 @@ pub fn generate_execution_trace<const W: usize>(
             populate_cmp_witness(cols, rec, cmp_op);
         }
 
-        // Hash permutation columns
-        if rec.opcode == Opcode::Hash {
-            if let Some(ref input) = rec.hash_perm_input {
-                cols.hash_perm_input = *input;
-            }
-            if let Some(ref output) = rec.hash_perm_output {
-                cols.hash_perm_output = *output;
-            }
+        // Hash digest relay columns
+        if rec.opcode == Opcode::Hash
+            && let Some(ref digest) = rec.hash_digest
+        {
+            cols.hash_digest = *digest;
         }
 
         // Precompile ID

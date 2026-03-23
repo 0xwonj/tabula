@@ -2651,6 +2651,8 @@ dependencies = [
  "tabula-contract",
  "tabula-core",
  "tabula-ir",
+ "tabula-profile",
+ "tabula-types",
  "thiserror 2.0.18",
 ]
 
@@ -2667,7 +2669,10 @@ dependencies = [
  "tabula-commitment",
  "tabula-core",
  "tabula-gadgets",
+ "tabula-ir",
+ "tabula-profile",
  "tabula-stark",
+ "tabula-types",
 ]
 
 [[package]]
@@ -2685,6 +2690,7 @@ dependencies = [
  "tabula-ir",
  "tabula-runtime",
  "tabula-testing",
+ "tabula-types",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2698,6 +2704,7 @@ dependencies = [
  "p3-poseidon2",
  "p3-symmetric",
  "tabula-core",
+ "tabula-types",
 ]
 
 [[package]]
@@ -2715,6 +2722,8 @@ dependencies = [
  "tabula-core",
  "tabula-ir",
  "tabula-lang",
+ "tabula-profile",
+ "tabula-types",
  "thiserror 2.0.18",
 ]
 
@@ -2761,6 +2770,7 @@ dependencies = [
  "tabula-machine",
  "tabula-runtime",
  "tabula-testing",
+ "tabula-types",
  "tabula-witness",
  "tokio",
  "tower-http",
@@ -2776,7 +2786,9 @@ dependencies = [
  "proptest",
  "tabula-core",
  "tabula-ir",
+ "tabula-profile",
  "tabula-testing",
+ "tabula-types",
  "thiserror 2.0.18",
 ]
 
@@ -2796,7 +2808,9 @@ dependencies = [
  "tabula-gadgets",
  "tabula-ir",
  "tabula-machine",
+ "tabula-profile",
  "tabula-stark",
+ "tabula-types",
  "tabula-witness",
  "thiserror 2.0.18",
 ]
@@ -2819,6 +2833,7 @@ dependencies = [
  "borsh",
  "serde",
  "tabula-core",
+ "tabula-profile",
 ]
 
 [[package]]
@@ -2827,6 +2842,7 @@ version = "0.1.0"
 dependencies = [
  "tabula-core",
  "tabula-ir",
+ "tabula-profile",
  "thiserror 2.0.18",
 ]
 
@@ -2861,9 +2877,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tabula-profile"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "tabula-core",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tabula-runtime"
 version = "0.1.0"
 dependencies = [
+ "blake3",
+ "borsh",
  "p3-field",
  "p3-koala-bear",
  "rayon",
@@ -2880,8 +2909,10 @@ dependencies = [
  "tabula-ext",
  "tabula-ir",
  "tabula-machine",
+ "tabula-profile",
  "tabula-stark",
  "tabula-testing",
+ "tabula-types",
  "tabula-witness",
  "thiserror 2.0.18",
  "tracing",
@@ -2900,9 +2931,11 @@ dependencies = [
  "tabula-ext",
  "tabula-ir",
  "tabula-machine",
+ "tabula-profile",
  "tabula-runtime",
  "tabula-stark",
  "tabula-testing",
+ "tabula-types",
  "thiserror 2.0.18",
 ]
 
@@ -2927,10 +2960,12 @@ dependencies = [
 name = "tabula-testing"
 version = "0.1.0"
 dependencies = [
+ "borsh",
  "p3-air",
  "p3-field",
  "p3-koala-bear",
  "p3-matrix",
+ "sha2",
  "tabula-artifact",
  "tabula-chips",
  "tabula-commitment",
@@ -2942,10 +2977,24 @@ dependencies = [
  "tabula-ir",
  "tabula-lang",
  "tabula-machine",
+ "tabula-profile",
  "tabula-runtime",
  "tabula-stark",
+ "tabula-types",
  "tabula-witness",
  "tempfile",
+]
+
+[[package]]
+name = "tabula-types"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "p3-field",
+ "p3-koala-bear",
+ "serde",
+ "tabula-core",
+ "tabula-profile",
 ]
 
 [[package]]
@@ -2964,6 +3013,8 @@ dependencies = [
  "sha2",
  "tabula-artifact",
  "tabula-core",
+ "tabula-profile",
+ "tabula-types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -2973,6 +3024,7 @@ dependencies = [
 name = "tabula-witness"
 version = "0.1.0"
 dependencies = [
+ "borsh",
  "criterion",
  "p3-air",
  "p3-field",
@@ -2985,8 +3037,10 @@ dependencies = [
  "tabula-gadgets",
  "tabula-ir",
  "tabula-lang",
+ "tabula-profile",
  "tabula-stark",
  "tabula-testing",
+ "tabula-types",
 ]
 
 [[package]]

@@ -3,7 +3,7 @@ use tabula_chips::range_check::RangeCheckChip;
 use tabula_stark::chips::ChipIdAllocator;
 use tabula_stark::trace::{BusConsumer, DynChip};
 
-use crate::columns::ProofColumn;
+use crate::backend::{ColumnChipSet, ProofColumn};
 use crate::setup::execution::execution_dyn_chips;
 use crate::setup::registry::{ChipRegistry, SetupError};
 use crate::setup::root::RootProof;
@@ -13,15 +13,13 @@ use crate::{TabulaProvingKey, TabulaVerifyingKey};
 pub(crate) fn execution_tier_setup() -> Result<TierSetup, SetupError> {
     let mut registry = ChipRegistry::new();
     registry.register_execution();
-    registry.register_bus_consumers();
+    registry.register(RangeCheckChip);
     registry.validate()?;
 
     let mut dyn_chips: Vec<Box<dyn DynChip>> = execution_dyn_chips();
-    dyn_chips.push(Box::new(PoseidonChip));
     dyn_chips.push(Box::new(RangeCheckChip));
 
-    let bus_consumers: Vec<Box<dyn BusConsumer>> =
-        vec![Box::new(PoseidonChip), Box::new(RangeCheckChip)];
+    let bus_consumers: Vec<Box<dyn BusConsumer>> = vec![Box::new(RangeCheckChip)];
 
     let proving_key = TabulaProvingKey::from_registry(&registry);
     let verifying_key = TabulaVerifyingKey::from_proving_key(&proving_key);
@@ -37,7 +35,7 @@ pub(crate) fn execution_tier_setup() -> Result<TierSetup, SetupError> {
 
 pub(crate) fn column_tier_setup(column: &dyn ProofColumn) -> Result<TierSetup, SetupError> {
     let mut alloc = ChipIdAllocator::for_shards();
-    let crate::columns::ColumnChipSet {
+    let ColumnChipSet {
         airs,
         mut dyn_chips,
         mut bus_consumers,
@@ -159,14 +157,13 @@ mod tests {
         let setup = execution_tier_setup().unwrap();
         let ids = setup.registry.chip_ids();
 
-        assert_eq!(ids.len(), 4);
+        assert_eq!(ids.len(), 3);
         assert!(ids.contains(&core_chips::EXECUTION));
         assert!(ids.contains(&core_chips::STATIC_TABLE));
-        assert!(ids.contains(&core_chips::POSEIDON));
         assert!(ids.contains(&core_chips::RANGE_CHECK));
 
-        assert_eq!(setup.dyn_chips.len(), 4);
-        assert_eq!(setup.bus_consumers.len(), 2);
+        assert_eq!(setup.dyn_chips.len(), 3);
+        assert_eq!(setup.bus_consumers.len(), 1);
     }
 
     #[test]

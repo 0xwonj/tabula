@@ -12,7 +12,8 @@ pub use typecheck::BodyTypeInfo;
 // Shared utilities
 // ---------------------------------------------------------------------------
 
-use tabula_core::Value;
+use tabula_core::PortableValue;
+use tabula_profile::TYPE_U64_ID;
 
 use crate::{RowExpr, ValueExpr};
 
@@ -30,7 +31,9 @@ pub(crate) enum RowRelation {
 /// Convert a `RowExpr` to the equivalent `ValueExpr` for use in Cmp instructions.
 pub(crate) fn row_to_value_expr(row: &RowExpr) -> ValueExpr {
     match row {
-        RowExpr::Literal(rk) => ValueExpr::Literal(Value::U64(rk.0)),
+        RowExpr::Literal(rk) => {
+            ValueExpr::Literal(PortableValue::new(TYPE_U64_ID, rk.0.to_le_bytes().to_vec()))
+        }
         RowExpr::Param(p) => ValueExpr::Param(*p),
         RowExpr::Slot(s) => ValueExpr::Slot(*s),
     }

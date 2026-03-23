@@ -1,7 +1,7 @@
 //! Cryptographic trait abstractions: hashing, signatures, program membership, batch digests.
 
 use crate::error::TabulaError;
-use crate::{Batch, Digest, Value};
+use crate::{Batch, Digest, PortableValue};
 
 /// Domain separation tag for the IR `Hash` instruction.
 ///
@@ -33,10 +33,8 @@ pub trait Hasher: Send + Sync {
     ///
     /// Encoding: `hash(domain_tag || n_le32 || encode(v_0) || ... || encode(v_{n-1}))`
     /// where `domain_tag` = `DOMAIN_TAG_HASH_IR` (0x02),
-    /// `encode(v)` = `type_tag:u8 || canonical_bytes(v)`.
-    ///
-    /// Type tags: U64=0, I64=1, Bool=2, Bytes32=3.
-    fn hash_ir(&self, inputs: &[Value]) -> Digest {
+    /// `encode(v)` = `type_id_le32 || payload_len_le32 || canonical_payload`.
+    fn hash_ir(&self, inputs: &[PortableValue]) -> Digest {
         let mut buf = Vec::new();
         buf.push(DOMAIN_TAG_HASH_IR);
         buf.extend_from_slice(&(inputs.len() as u32).to_le_bytes());
@@ -48,25 +46,10 @@ pub trait Hasher: Send + Sync {
 }
 
 /// Deterministic type-tagged encoding for IR Hash instruction.
-fn encode_value_ir(buf: &mut Vec<u8>, v: &Value) {
-    match v {
-        Value::U64(n) => {
-            buf.push(0);
-            buf.extend_from_slice(&n.to_le_bytes());
-        }
-        Value::I64(n) => {
-            buf.push(1);
-            buf.extend_from_slice(&n.to_le_bytes());
-        }
-        Value::Bool(b) => {
-            buf.push(2);
-            buf.push(u8::from(*b));
-        }
-        Value::Bytes32(b) => {
-            buf.push(3);
-            buf.extend_from_slice(b);
-        }
-    }
+fn encode_value_ir(buf: &mut Vec<u8>, v: &PortableValue) {
+    buf.extend_from_slice(&v.type_id().0.to_le_bytes());
+    buf.extend_from_slice(&(v.payload().len() as u32).to_le_bytes());
+    buf.extend_from_slice(v.payload());
 }
 
 /// Signature verification abstraction.

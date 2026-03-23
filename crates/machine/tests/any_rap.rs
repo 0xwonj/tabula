@@ -14,6 +14,8 @@ use tabula_chips::shards::meta::MetaShardChip;
 use tabula_chips::shards::state::StateShardChip;
 use tabula_chips::smt_path::{SmtColPathChip, SmtTablePathChip};
 use tabula_chips::static_table::StaticTableChip;
+use tabula_commitment::{PoseidonHasher, compute_column_root_binding_prefix_digest};
+use tabula_core::{ColId, RootProfileId, TableId};
 use tabula_machine::backend::AnyRap;
 use tabula_stark::chips::{ChipIdAllocator, core_chips};
 
@@ -59,7 +61,19 @@ fn column_tier_chips_implement_any_rap() {
     let chips: Vec<Box<dyn AnyRap>> = vec![
         Box::new(MemoryShardChip::<3>::new(mem_id, 0, 0)),
         Box::new(StateShardChip::<3>::new(state_id, 0, 0)),
-        Box::new(MetaShardChip::new(meta_id, 0, 0, 0, false)),
+        Box::new(MetaShardChip::new(
+            meta_id,
+            0,
+            0,
+            compute_column_root_binding_prefix_digest(
+                &PoseidonHasher::new(),
+                TableId(0),
+                ColId(0),
+                RootProfileId::SMT_V1,
+                &[0; 32],
+            ),
+            false,
+        )),
     ];
 
     let expected = [mem_id, state_id, meta_id];

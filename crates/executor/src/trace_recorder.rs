@@ -2,7 +2,8 @@
 //!
 //! Handles the execution event trace, logical time, and tx index.
 
-use tabula_core::{AccessEvent, CellKey, LogicalTime, OpKind, Value, ValueType, zero_value};
+use tabula_core::{AccessEvent, CellKey, LogicalTime, OpKind, TypeId};
+use tabula_types::{TypeRuntimeRegistry, TypedValue};
 
 /// Checkpoint for the trace recorder.
 pub(crate) struct RecorderCheckpoint {
@@ -41,12 +42,16 @@ impl TraceRecorder {
         &mut self,
         key: &CellKey,
         op: OpKind,
-        opt_value: &Option<Value>,
-        col_type: ValueType,
-    ) {
+        opt_value: &Option<TypedValue>,
+        col_type: TypeId,
+        type_runtimes: &TypeRuntimeRegistry,
+    ) -> Result<(), tabula_core::error::TabulaError> {
         let (value, val_is_null) = match opt_value {
-            Some(v) => (*v, false),
-            None => (zero_value(col_type), true),
+            Some(v) => (type_runtimes.encode_typed(v)?, false),
+            None => (
+                type_runtimes.encode_typed(&type_runtimes.zero_of(col_type)?)?,
+                true,
+            ),
         };
         self.events.push(AccessEvent {
             key: *key,
@@ -58,6 +63,7 @@ impl TraceRecorder {
         });
         self.current_effect_ordinal_in_tx += 1;
         self.time += 1;
+        Ok(())
     }
 
     pub(crate) fn checkpoint(&mut self) {

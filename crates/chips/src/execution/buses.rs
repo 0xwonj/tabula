@@ -8,8 +8,8 @@ use tabula_stark::air::bus::{
 };
 use tabula_stark::air::interaction::{AirInteraction, core_buses};
 
-use super::air::{HASH_INSTRUCTION_DOMAIN_TAG, HASH_INSTRUCTION_INPUT_COUNT};
 use super::columns::ExecutionCols;
+use crate::ir_hash::IR_HASH_BUS;
 
 /// C10 ReadAccess bus send: non-empty reads.
 ///
@@ -163,34 +163,24 @@ pub(super) fn send_range_checks<AB: InteractionAirBuilder, const W: usize>(
     // diff2 proven by Limb2Bits, no RC send needed
 }
 
-/// C5 PoseidonPermutation bus send for Hash opcodes.
-///
-/// Precompile transcript hashing is proven in the dedicated
-/// `PrecompileTranscript` lane, not through execution-row hash columns.
-pub(super) fn send_hash_permutation<AB: InteractionAirBuilder, const W: usize>(
+/// Hash bus send: relay the canonical digest to the dedicated IR-hash lane.
+pub(super) fn send_hash_relay<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
 ) {
-    // Suppress unused-constant warnings: these constants are used by the
-    // Hash opcode's trace builder to construct perm_input. The AIR sends
-    // whatever perm_input/output the trace provides.
-    let _ = HASH_INSTRUCTION_DOMAIN_TAG;
-    let _ = HASH_INSTRUCTION_INPUT_COUNT;
-
     let multiplicity: AB::Expr = local.is_real.into() * local.op_hash.into();
 
-    let mut values: Vec<AB::Expr> = Vec::with_capacity(24);
-    for i in 0..16 {
-        values.push(local.hash_perm_input[i].into());
-    }
+    let mut values: Vec<AB::Expr> = Vec::with_capacity(10);
+    values.push(local.tx_index.into());
+    values.push(local.instruction_index.into());
     for i in 0..8 {
-        values.push(local.hash_perm_output[i].into());
+        values.push(local.hash_digest[i].into());
     }
 
     builder.send(AirInteraction {
         values,
         multiplicity,
-        bus: core_buses::POSEIDON_PERM,
+        bus: IR_HASH_BUS,
     });
 }
 

@@ -10,6 +10,7 @@ use tabula_executor::precompile::PrecompileRegistry;
 use tabula_executor::property::PropertyQueryRegistry;
 use tabula_ir::Program;
 use tabula_machine::{MachineProofInput, TabulaMachine, TabulaProof};
+use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 
 use crate::builder::RuntimeBuilder;
 use crate::error::RuntimeError;
@@ -87,6 +88,16 @@ impl TabulaRuntime {
         self.resolved_program.program()
     }
 
+    /// Runtime type behavior registry.
+    pub fn type_runtimes(&self) -> &TypeRuntimeRegistry {
+        self.resolved_program.type_runtimes()
+    }
+
+    /// Runtime encoding behavior registry.
+    pub fn encoding_runtimes(&self) -> &EncodingRuntimeRegistry {
+        self.resolved_program.encoding_runtimes()
+    }
+
     /// The precompile registry (for executor integration).
     pub fn precompiles(&self) -> &PrecompileRegistry {
         &self.precompiles
@@ -127,13 +138,15 @@ impl TabulaRuntime {
     ) -> Result<ExecutedBatch, RuntimeError> {
         let hasher = PoseidonHasher::new();
         let normalized = normalize_state(state).map_err(RuntimeError::InvalidState)?;
-        let committed = SnapshotStateView::from_state(&normalized);
+        let committed =
+            SnapshotStateView::from_state(&normalized, self.resolved_program.type_runtimes());
 
         execute_pipeline(
             self.resolved_program.program(),
             &normalized,
             batch,
             &hasher,
+            self.resolved_program.type_runtimes(),
             ExecutionResources {
                 precompiles: Some(&self.precompiles),
                 committed_state: Some(&committed),

@@ -3,8 +3,9 @@
 mod common;
 
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, RowKey, TableId, Value};
+use tabula_core::{ColId, RowKey, TableId};
 use tabula_ir::{ArithOp, CmpOp, Instruction, RowExpr, ValueExpr};
+use tabula_profile::TYPE_BYTES32_ID;
 
 use common::*;
 
@@ -16,14 +17,14 @@ fn add_correct() {
         Instruction::Arith {
             dst: 0,
             op: ArithOp::Add,
-            lhs: ValueExpr::Literal(Value::U64(10)),
-            rhs: ValueExpr::Literal(Value::U64(20)),
+            lhs: lit(u64_portable(10)),
+            rhs: lit(u64_portable(20)),
         },
         write_slot0(),
     ]);
     assert_eq!(
         result.write_set_final,
-        vec![(cell(1, 0, 0), Some(Value::U64(30)))]
+        vec![(cell(1, 0, 0), opt(u64_portable(30)))]
     );
 }
 
@@ -32,8 +33,8 @@ fn add_overflow() {
     let err = run_err(vec![Instruction::Arith {
         dst: 0,
         op: ArithOp::Add,
-        lhs: ValueExpr::Literal(Value::U64(u64::MAX)),
-        rhs: ValueExpr::Literal(Value::U64(1)),
+        lhs: lit(u64_portable(u64::MAX)),
+        rhs: lit(u64_portable(1)),
     }]);
     assert_eq!(err.error, TabulaError::ArithmeticOverflow);
 }
@@ -44,14 +45,14 @@ fn sub_correct() {
         Instruction::Arith {
             dst: 0,
             op: ArithOp::Sub,
-            lhs: ValueExpr::Literal(Value::U64(30)),
-            rhs: ValueExpr::Literal(Value::U64(10)),
+            lhs: lit(u64_portable(30)),
+            rhs: lit(u64_portable(10)),
         },
         write_slot0(),
     ]);
     assert_eq!(
         result.write_set_final,
-        vec![(cell(1, 0, 0), Some(Value::U64(20)))]
+        vec![(cell(1, 0, 0), opt(u64_portable(20)))]
     );
 }
 
@@ -61,14 +62,14 @@ fn mul_correct() {
         Instruction::Arith {
             dst: 0,
             op: ArithOp::Mul,
-            lhs: ValueExpr::Literal(Value::U64(5)),
-            rhs: ValueExpr::Literal(Value::U64(7)),
+            lhs: lit(u64_portable(5)),
+            rhs: lit(u64_portable(7)),
         },
         write_slot0(),
     ]);
     assert_eq!(
         result.write_set_final,
-        vec![(cell(1, 0, 0), Some(Value::U64(35)))]
+        vec![(cell(1, 0, 0), opt(u64_portable(35)))]
     );
 }
 
@@ -78,8 +79,8 @@ fn divmod_correct() {
         Instruction::DivMod {
             dst_q: 0,
             dst_r: 1,
-            lhs: ValueExpr::Literal(Value::U64(17)),
-            rhs: ValueExpr::Literal(Value::U64(5)),
+            lhs: lit(u64_portable(17)),
+            rhs: lit(u64_portable(5)),
         },
         write_slot0(),
         Instruction::Write {
@@ -87,18 +88,18 @@ fn divmod_correct() {
             row: RowExpr::Literal(RowKey(1)),
             col: ColId(0),
             src_val: ValueExpr::Slot(1),
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_is_null: lit(bool_portable(false)),
         },
     ]);
     assert!(
         result
             .write_set_final
-            .contains(&(cell(1, 0, 0), Some(Value::U64(3))))
+            .contains(&(cell(1, 0, 0), opt(u64_portable(3))))
     );
     assert!(
         result
             .write_set_final
-            .contains(&(cell(1, 1, 0), Some(Value::U64(2))))
+            .contains(&(cell(1, 1, 0), opt(u64_portable(2))))
     );
 }
 
@@ -107,8 +108,8 @@ fn divmod_by_zero() {
     let err = run_err(vec![Instruction::DivMod {
         dst_q: 0,
         dst_r: 1,
-        lhs: ValueExpr::Literal(Value::U64(10)),
-        rhs: ValueExpr::Literal(Value::U64(0)),
+        lhs: lit(u64_portable(10)),
+        rhs: lit(u64_portable(0)),
     }]);
     assert_eq!(err.error, TabulaError::DivisionByZero);
 }
@@ -121,8 +122,8 @@ fn cmp_eq() {
         Instruction::Cmp {
             dst: 0,
             op: CmpOp::Eq,
-            lhs: ValueExpr::Literal(Value::U64(1)),
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            lhs: lit(u64_portable(1)),
+            rhs: lit(u64_portable(1)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -136,8 +137,8 @@ fn cmp_ne_true() {
         Instruction::Cmp {
             dst: 0,
             op: CmpOp::Ne,
-            lhs: ValueExpr::Literal(Value::U64(1)),
-            rhs: ValueExpr::Literal(Value::U64(2)),
+            lhs: lit(u64_portable(1)),
+            rhs: lit(u64_portable(2)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -151,8 +152,8 @@ fn cmp_ne_false() {
         Instruction::Cmp {
             dst: 0,
             op: CmpOp::Ne,
-            lhs: ValueExpr::Literal(Value::U64(5)),
-            rhs: ValueExpr::Literal(Value::U64(5)),
+            lhs: lit(u64_portable(5)),
+            rhs: lit(u64_portable(5)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -167,8 +168,8 @@ fn cmp_lt() {
         Instruction::Cmp {
             dst: 0,
             op: CmpOp::Lt,
-            lhs: ValueExpr::Literal(Value::U64(1)),
-            rhs: ValueExpr::Literal(Value::U64(2)),
+            lhs: lit(u64_portable(1)),
+            rhs: lit(u64_portable(2)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -182,8 +183,8 @@ fn cmp_lte_equal() {
         Instruction::Cmp {
             dst: 0,
             op: CmpOp::Lte,
-            lhs: ValueExpr::Literal(Value::U64(5)),
-            rhs: ValueExpr::Literal(Value::U64(5)),
+            lhs: lit(u64_portable(5)),
+            rhs: lit(u64_portable(5)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -197,8 +198,8 @@ fn cmp_lte_less() {
         Instruction::Cmp {
             dst: 0,
             op: CmpOp::Lte,
-            lhs: ValueExpr::Literal(Value::U64(3)),
-            rhs: ValueExpr::Literal(Value::U64(5)),
+            lhs: lit(u64_portable(3)),
+            rhs: lit(u64_portable(5)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -212,8 +213,8 @@ fn cmp_lte_greater_fails() {
         Instruction::Cmp {
             dst: 0,
             op: CmpOp::Lte,
-            lhs: ValueExpr::Literal(Value::U64(6)),
-            rhs: ValueExpr::Literal(Value::U64(5)),
+            lhs: lit(u64_portable(6)),
+            rhs: lit(u64_portable(5)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -228,8 +229,8 @@ fn cmp_gt_true() {
         Instruction::Cmp {
             dst: 0,
             op: CmpOp::Gt,
-            lhs: ValueExpr::Literal(Value::U64(10)),
-            rhs: ValueExpr::Literal(Value::U64(5)),
+            lhs: lit(u64_portable(10)),
+            rhs: lit(u64_portable(5)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -243,8 +244,8 @@ fn cmp_gt_equal_fails() {
         Instruction::Cmp {
             dst: 0,
             op: CmpOp::Gt,
-            lhs: ValueExpr::Literal(Value::U64(5)),
-            rhs: ValueExpr::Literal(Value::U64(5)),
+            lhs: lit(u64_portable(5)),
+            rhs: lit(u64_portable(5)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -259,8 +260,8 @@ fn cmp_gte() {
         Instruction::Cmp {
             dst: 0,
             op: CmpOp::Gte,
-            lhs: ValueExpr::Literal(Value::U64(5)),
-            rhs: ValueExpr::Literal(Value::U64(5)),
+            lhs: lit(u64_portable(5)),
+            rhs: lit(u64_portable(5)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -276,8 +277,8 @@ fn and_or_not() {
     run(vec![
         Instruction::And {
             dst: 0,
-            lhs: ValueExpr::Literal(Value::Bool(true)),
-            rhs: ValueExpr::Literal(Value::Bool(true)),
+            lhs: lit(bool_portable(true)),
+            rhs: lit(bool_portable(true)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -288,8 +289,8 @@ fn and_or_not() {
     run(vec![
         Instruction::And {
             dst: 0,
-            lhs: ValueExpr::Literal(Value::Bool(true)),
-            rhs: ValueExpr::Literal(Value::Bool(false)),
+            lhs: lit(bool_portable(true)),
+            rhs: lit(bool_portable(false)),
         },
         Instruction::Not {
             dst: 1,
@@ -304,8 +305,8 @@ fn and_or_not() {
     run(vec![
         Instruction::Or {
             dst: 0,
-            lhs: ValueExpr::Literal(Value::Bool(true)),
-            rhs: ValueExpr::Literal(Value::Bool(false)),
+            lhs: lit(bool_portable(true)),
+            rhs: lit(bool_portable(false)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(0),
@@ -317,15 +318,15 @@ fn and_or_not() {
 fn and_lhs_non_bool_fails() {
     let err = run_err(vec![Instruction::And {
         dst: 0,
-        lhs: ValueExpr::Literal(Value::U64(1)),
-        rhs: ValueExpr::Literal(Value::Bool(true)),
+        lhs: lit(u64_portable(1)),
+        rhs: lit(bool_portable(true)),
     }]);
     assert!(matches!(
         err.error,
         TabulaError::TypeMismatch {
-            expected: "Bool",
+            expected,
             ..
-        }
+        } if expected == "Boolean"
     ));
 }
 
@@ -333,15 +334,15 @@ fn and_lhs_non_bool_fails() {
 fn and_rhs_non_bool_fails() {
     let err = run_err(vec![Instruction::And {
         dst: 0,
-        lhs: ValueExpr::Literal(Value::Bool(true)),
-        rhs: ValueExpr::Literal(Value::U64(1)),
+        lhs: lit(bool_portable(true)),
+        rhs: lit(u64_portable(1)),
     }]);
     assert!(matches!(
         err.error,
         TabulaError::TypeMismatch {
-            expected: "Bool",
+            expected,
             ..
-        }
+        } if expected == "Boolean"
     ));
 }
 
@@ -349,15 +350,15 @@ fn and_rhs_non_bool_fails() {
 fn or_non_bool_fails() {
     let err = run_err(vec![Instruction::Or {
         dst: 0,
-        lhs: ValueExpr::Literal(Value::U64(0)),
-        rhs: ValueExpr::Literal(Value::Bool(false)),
+        lhs: lit(u64_portable(0)),
+        rhs: lit(bool_portable(false)),
     }]);
     assert!(matches!(
         err.error,
         TabulaError::TypeMismatch {
-            expected: "Bool",
+            expected,
             ..
-        }
+        } if expected == "Boolean"
     ));
 }
 
@@ -365,14 +366,14 @@ fn or_non_bool_fails() {
 fn not_non_bool_fails() {
     let err = run_err(vec![Instruction::Not {
         dst: 0,
-        src: ValueExpr::Literal(Value::U64(1)),
+        src: lit(u64_portable(1)),
     }]);
     assert!(matches!(
         err.error,
         TabulaError::TypeMismatch {
-            expected: "Bool",
+            expected,
             ..
-        }
+        } if expected == "Boolean"
     ));
 }
 
@@ -381,14 +382,14 @@ fn not_non_bool_fails() {
 #[test]
 fn assert_passing() {
     run(vec![Instruction::Assert {
-        cond: ValueExpr::Literal(Value::Bool(true)),
+        cond: lit(bool_portable(true)),
     }]);
 }
 
 #[test]
 fn assert_failing() {
     let err = run_err(vec![Instruction::Assert {
-        cond: ValueExpr::Literal(Value::Bool(false)),
+        cond: lit(bool_portable(false)),
     }]);
     assert!(matches!(err.error, TabulaError::AssertionFailed(_)));
 }
@@ -406,7 +407,7 @@ fn read_populates_slot() {
             col: ColId(0),
         }],
         &[],
-        vec![(cell(1, 0, 0), Value::U64(100))],
+        vec![(cell(1, 0, 0), u64_portable(100))],
     );
     assert!(out.emitted.is_empty());
 }
@@ -418,8 +419,8 @@ fn write_updates_overlay() {
             table: TableId(1),
             row: RowExpr::Literal(RowKey(0)),
             col: ColId(0),
-            src_val: ValueExpr::Literal(Value::U64(42)),
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_val: lit(u64_portable(42)),
+            src_is_null: lit(bool_portable(false)),
         },
         Instruction::Read {
             dst_val: 0,
@@ -431,7 +432,7 @@ fn write_updates_overlay() {
     ]);
     assert_eq!(
         result.write_set_final,
-        vec![(cell(1, 0, 0), Some(Value::U64(42)))]
+        vec![(cell(1, 0, 0), opt(u64_portable(42)))]
     );
 }
 
@@ -442,11 +443,11 @@ fn write_null_makes_absent() {
             table: TableId(1),
             row: RowExpr::Literal(RowKey(0)),
             col: ColId(0),
-            src_val: ValueExpr::Literal(Value::U64(0)),
-            src_is_null: ValueExpr::Literal(Value::Bool(true)),
+            src_val: lit(u64_portable(0)),
+            src_is_null: lit(bool_portable(true)),
         }],
         &[],
-        vec![(cell(1, 0, 0), Value::U64(100))],
+        vec![(cell(1, 0, 0), u64_portable(100))],
     );
     assert_eq!(result.write_set_final, vec![(cell(1, 0, 0), None)]);
 }
@@ -465,7 +466,7 @@ fn read_absent_cell_sets_is_null_true() {
             dst: 2,
             op: CmpOp::Eq,
             lhs: ValueExpr::Slot(1),
-            rhs: ValueExpr::Literal(Value::Bool(true)),
+            rhs: lit(bool_portable(true)),
         },
         Instruction::Assert {
             cond: ValueExpr::Slot(2),
@@ -487,7 +488,7 @@ fn write_is_null_from_slot() {
             table: TableId(1),
             row: RowExpr::Literal(RowKey(0)),
             col: ColId(0),
-            src_val: ValueExpr::Literal(Value::U64(0)),
+            src_val: lit(u64_portable(0)),
             src_is_null: ValueExpr::Slot(1),
         },
     ])
@@ -501,15 +502,15 @@ fn write_is_null_non_bool_fails() {
         table: TableId(1),
         row: RowExpr::Literal(RowKey(0)),
         col: ColId(0),
-        src_val: ValueExpr::Literal(Value::U64(42)),
-        src_is_null: ValueExpr::Literal(Value::U64(0)),
+        src_val: lit(u64_portable(42)),
+        src_is_null: lit(u64_portable(0)),
     }]);
     assert!(matches!(
         err.error,
         TabulaError::TypeMismatch {
-            expected: "Bool",
+            expected,
             ..
-        }
+        } if expected == "Boolean"
     ));
 }
 
@@ -523,12 +524,12 @@ fn read_with_param_row() {
             row: RowExpr::Param(0),
             col: ColId(0),
         }],
-        &[Value::U64(5)],
-        vec![(cell(1, 5, 0), Value::U64(77))],
+        &[u64_portable(5)],
+        vec![(cell(1, 5, 0), u64_portable(77))],
     );
     assert_eq!(
         result.read_set_old,
-        vec![(cell(1, 5, 0), Some(Value::U64(77)))]
+        vec![(cell(1, 5, 0), opt(u64_portable(77)))]
     );
 }
 
@@ -539,12 +540,12 @@ fn hash_produces_bytes32() {
     let (_, result) = run(vec![
         Instruction::Hash {
             dst: 0,
-            inputs: vec![ValueExpr::Literal(Value::U64(42))],
+            inputs: vec![lit(u64_portable(42))],
         },
         write_slot0(),
     ]);
-    let v = result.write_set_final[0].1.unwrap();
-    assert!(matches!(v, Value::Bytes32(_)));
+    let v = result.write_set_final[0].1.clone().unwrap();
+    assert_eq!(v.type_id(), TYPE_BYTES32_ID);
 }
 
 #[test]
@@ -553,16 +554,16 @@ fn hash_multiple_inputs() {
         Instruction::Hash {
             dst: 0,
             inputs: vec![
-                ValueExpr::Literal(Value::U64(1)),
-                ValueExpr::Literal(Value::U64(2)),
-                ValueExpr::Literal(Value::U64(3)),
+                lit(u64_portable(1)),
+                lit(u64_portable(2)),
+                lit(u64_portable(3)),
             ],
         },
         write_slot0(),
     ])
     .1;
-    let v = result.write_set_final[0].1.unwrap();
-    assert!(matches!(v, Value::Bytes32(_)));
+    let v = result.write_set_final[0].1.clone().unwrap();
+    assert_eq!(v.type_id(), TYPE_BYTES32_ID);
 }
 
 #[test]
@@ -575,8 +576,8 @@ fn hash_empty_inputs() {
         write_slot0(),
     ])
     .1;
-    let v = result.write_set_final[0].1.unwrap();
-    assert!(matches!(v, Value::Bytes32(_)));
+    let v = result.write_set_final[0].1.clone().unwrap();
+    assert_eq!(v.type_id(), TYPE_BYTES32_ID);
 }
 
 // ── Emit ────────────────────────────────────────────────────────────────
@@ -585,7 +586,7 @@ fn hash_empty_inputs() {
 fn emit_captures_event() {
     let (out, _) = run(vec![Instruction::Emit {
         topic: b"transfer".to_vec(),
-        data: vec![ValueExpr::Literal(Value::U64(100))],
+        data: vec![lit(u64_portable(100))],
     }]);
     assert_eq!(out.emitted.len(), 1);
     assert_eq!(out.emitted[0].topic, b"transfer");
@@ -606,7 +607,7 @@ fn lookup_delegates() {
     ]);
     assert_eq!(
         result.write_set_final,
-        vec![(cell(1, 0, 0), Some(Value::U64(7)))]
+        vec![(cell(1, 0, 0), opt(u64_portable(7)))]
     );
 }
 
@@ -617,15 +618,15 @@ fn select_true_branch() {
     let (_, result) = run(vec![
         Instruction::Select {
             dst: 0,
-            cond: ValueExpr::Literal(Value::Bool(true)),
-            if_true: ValueExpr::Literal(Value::U64(10)),
-            if_false: ValueExpr::Literal(Value::U64(20)),
+            cond: lit(bool_portable(true)),
+            if_true: lit(u64_portable(10)),
+            if_false: lit(u64_portable(20)),
         },
         write_slot0(),
     ]);
     assert_eq!(
         result.write_set_final,
-        vec![(cell(1, 0, 0), Some(Value::U64(10)))]
+        vec![(cell(1, 0, 0), opt(u64_portable(10)))]
     );
 }
 
@@ -634,15 +635,15 @@ fn select_false_branch() {
     let (_, result) = run(vec![
         Instruction::Select {
             dst: 0,
-            cond: ValueExpr::Literal(Value::Bool(false)),
-            if_true: ValueExpr::Literal(Value::U64(10)),
-            if_false: ValueExpr::Literal(Value::U64(20)),
+            cond: lit(bool_portable(false)),
+            if_true: lit(u64_portable(10)),
+            if_false: lit(u64_portable(20)),
         },
         write_slot0(),
     ]);
     assert_eq!(
         result.write_set_final,
-        vec![(cell(1, 0, 0), Some(Value::U64(20)))]
+        vec![(cell(1, 0, 0), opt(u64_portable(20)))]
     );
 }
 
@@ -650,9 +651,9 @@ fn select_false_branch() {
 fn select_non_bool_cond_fails() {
     let err = run_err(vec![Instruction::Select {
         dst: 0,
-        cond: ValueExpr::Literal(Value::U64(1)),
-        if_true: ValueExpr::Literal(Value::U64(10)),
-        if_false: ValueExpr::Literal(Value::U64(20)),
+        cond: lit(u64_portable(1)),
+        if_true: lit(u64_portable(10)),
+        if_false: lit(u64_portable(20)),
     }]);
     assert!(matches!(err.error, TabulaError::TypeMismatch { .. }));
 }
@@ -665,7 +666,7 @@ fn slot_out_of_bounds() {
         dst: 0,
         op: ArithOp::Add,
         lhs: ValueExpr::Slot(5),
-        rhs: ValueExpr::Literal(Value::U64(1)),
+        rhs: lit(u64_portable(1)),
     }]);
     assert!(matches!(err.error, TabulaError::SlotOutOfBounds { .. }));
 }
@@ -676,7 +677,7 @@ fn param_out_of_bounds() {
         dst: 0,
         op: ArithOp::Add,
         lhs: ValueExpr::Param(10),
-        rhs: ValueExpr::Literal(Value::U64(1)),
+        rhs: lit(u64_portable(1)),
     }]);
     assert!(matches!(err.error, TabulaError::ParamOutOfBounds { .. }));
 }
@@ -687,14 +688,14 @@ fn slot_gap_error() {
         Instruction::Arith {
             dst: 0,
             op: ArithOp::Add,
-            lhs: ValueExpr::Literal(Value::U64(1)),
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            lhs: lit(u64_portable(1)),
+            rhs: lit(u64_portable(1)),
         },
         Instruction::Arith {
             dst: 2,
             op: ArithOp::Add,
-            lhs: ValueExpr::Literal(Value::U64(1)),
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            lhs: lit(u64_portable(1)),
+            rhs: lit(u64_portable(1)),
         },
     ]);
     assert!(matches!(err.error, TabulaError::InvalidIr(_)));
@@ -731,8 +732,8 @@ fn write_table_not_found() {
         table: TableId(99),
         row: RowExpr::Literal(RowKey(0)),
         col: ColId(0),
-        src_val: ValueExpr::Literal(Value::U64(1)),
-        src_is_null: ValueExpr::Literal(Value::Bool(false)),
+        src_val: lit(u64_portable(1)),
+        src_is_null: lit(bool_portable(false)),
     }]);
     assert!(matches!(err.error, TabulaError::TableNotFound(TableId(99))));
 }
@@ -742,7 +743,7 @@ fn write_table_not_found() {
 #[test]
 fn error_index_first_instruction() {
     let err = run_err(vec![Instruction::Assert {
-        cond: ValueExpr::Literal(Value::Bool(false)),
+        cond: lit(bool_portable(false)),
     }]);
     assert_eq!(err.instruction_index, 0);
 }
@@ -753,17 +754,17 @@ fn error_index_third_instruction() {
         Instruction::Arith {
             dst: 0,
             op: ArithOp::Add,
-            lhs: ValueExpr::Literal(Value::U64(1)),
-            rhs: ValueExpr::Literal(Value::U64(2)),
+            lhs: lit(u64_portable(1)),
+            rhs: lit(u64_portable(2)),
         },
         Instruction::Arith {
             dst: 1,
             op: ArithOp::Add,
-            lhs: ValueExpr::Literal(Value::U64(3)),
-            rhs: ValueExpr::Literal(Value::U64(4)),
+            lhs: lit(u64_portable(3)),
+            rhs: lit(u64_portable(4)),
         },
         Instruction::Assert {
-            cond: ValueExpr::Literal(Value::Bool(false)),
+            cond: lit(bool_portable(false)),
         },
     ]);
     assert_eq!(err.instruction_index, 2);
@@ -775,14 +776,14 @@ fn error_index_on_overflow() {
         Instruction::Arith {
             dst: 0,
             op: ArithOp::Add,
-            lhs: ValueExpr::Literal(Value::U64(1)),
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            lhs: lit(u64_portable(1)),
+            rhs: lit(u64_portable(1)),
         },
         Instruction::Arith {
             dst: 1,
             op: ArithOp::Add,
-            lhs: ValueExpr::Literal(Value::U64(u64::MAX)),
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            lhs: lit(u64_portable(u64::MAX)),
+            rhs: lit(u64_portable(1)),
         },
     ]);
     assert_eq!(err.instruction_index, 1);

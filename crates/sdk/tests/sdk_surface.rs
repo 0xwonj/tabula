@@ -1,33 +1,38 @@
 #![allow(missing_docs)]
 
 use std::collections::BTreeMap;
-#[cfg(feature = "prove")]
-use std::sync::Arc;
 
+#[cfg(feature = "prove")]
+use tabula_compiler::ProgramDefinition;
 use tabula_compiler::{
     TRANSFER_EXAMPLE_TAB_SOURCE, compile_program_source, register_program_definition,
     transfer_example_bundle,
 };
+use tabula_core::ExecutionConsistencyStatus;
 #[cfg(feature = "prove")]
-use tabula_core::{ColId, RootProfileId, RowKey, SchemeId, TableId};
-use tabula_core::{ExecutionConsistencyStatus, Value};
+use tabula_core::{ColId, RootProfileId, RowKey, SchemeId, TableId, TxTypeId};
 #[cfg(feature = "prove")]
-use tabula_ext::backend::ProofColumn;
+use tabula_ext::{ColumnBackendFactory, ColumnBackendSetup, ExtError, MaterializedColumnBackend};
 #[cfg(feature = "prove")]
-use tabula_ext::backend::scheme::{ColumnProofPreparer, ProofSchemeFactory};
+use tabula_ir::{Instruction, TxTypeDef};
 #[cfg(feature = "prove")]
-use tabula_ext::{ColumnSchemeFactory, ExtError, ResolvedColumnPlan, RuntimeColumn};
+use tabula_profile::{
+    CanonicalNullEncoding, CommitmentContractKind, ENCODING_U64_ID, EncodingClass,
+    EncodingRequirements, FieldFamily, SchemeProfile, SemanticRegistry, TranscriptSerialization,
+    VerifierDigestFormat, WidthConstraint, builtin_semantic_registry,
+};
 #[cfg(feature = "prove")]
 use tabula_sdk::Artifact;
 #[cfg(feature = "prove")]
 use tabula_sdk::ext::{
-    ColumnLayoutKind, PrecompileBundle, PropertyQueryKind, SchemeBundle, SchemeDescriptor,
+    ColumnBackendFactoryBundle, ColumnLayoutKind, PrecompileBackendFactoryBundle, PrecompileId,
+    PropertyQueryKind,
 };
 use tabula_sdk::{Sdk, SdkError};
 #[cfg(feature = "prove")]
 use tabula_testing::extensions::precompile::{
-    ConstantOnePrecompileHandler, ConstantOnePrecompileProofFactory, SequencePrecompileHandler,
-    SequencePrecompileProofFactory, constant_one_precompile_descriptor,
+    ConstantOnePrecompileBackendFactory, SequencePrecompileBackendFactory,
+    constant_one_precompile_descriptor,
 };
 #[cfg(feature = "prove")]
 use tabula_testing::fixtures::artifacts::{
@@ -40,18 +45,22 @@ use tabula_testing::fixtures::batch::single_tx_batch;
 use tabula_testing::fixtures::compiled::compiled_single_write_program;
 #[cfg(feature = "prove")]
 use tabula_testing::fixtures::state::single_cell_u64;
+use tabula_types::u64_portable;
 
 #[cfg(feature = "prove")]
 const CUSTOM_ORDERED_SCHEME_ID: SchemeId = SchemeId(0x7201);
 
-fn state_values(state: &tabula_sdk::State) -> BTreeMap<(u32, u64, u16), Value> {
+fn state_values(
+    state: &tabula_sdk::State,
+) -> BTreeMap<(u32, u64, u16), tabula_core::PortableValue> {
     state
         .cells
         .iter()
         .filter_map(|entry| {
             entry
                 .value
-                .map(|value| ((entry.table, entry.row, entry.col), value))
+                .as_ref()
+                .map(|value| ((entry.table, entry.row, entry.col), value.clone()))
         })
         .collect()
 }
@@ -130,9 +139,9 @@ fn execute_simple_program() {
     assert_eq!(execution.write_set().len(), 3);
 
     let values = state_values(execution.state_after());
-    assert_eq!(values.get(&(0, 0, 0)), Some(&Value::U64(750)));
-    assert_eq!(values.get(&(0, 1, 0)), Some(&Value::U64(600)));
-    assert_eq!(values.get(&(0, 2, 0)), Some(&Value::U64(350)));
+    assert_eq!(values.get(&(0, 0, 0)), Some(&u64_portable(750)));
+    assert_eq!(values.get(&(0, 1, 0)), Some(&u64_portable(600)));
+    assert_eq!(values.get(&(0, 2, 0)), Some(&u64_portable(350)));
 }
 
 #[cfg(feature = "prove")]
@@ -140,15 +149,9 @@ fn execute_simple_program() {
 fn execute_capability_program_prepares_runtime_lazily() {
     let descriptor = precompile_requirement_descriptor();
     let sdk = Sdk::builder()
-        .with_precompile(
-            PrecompileBundle::verification(
-                descriptor.clone(),
-                ConstantOnePrecompileProofFactory::new(descriptor.clone()),
-            )
-            .and_then(|bundle| {
-                bundle.with_handler(ConstantOnePrecompileHandler::new(descriptor.precompile_id))
-            })
-            .expect("precompile bundle"),
+        .with_precompile_support(
+            descriptor.clone(),
+            constant_one_backend_bundle(descriptor.clone()),
         )
         .expect("register precompile")
         .build();
@@ -274,47 +277,36 @@ fn execute_and_prove_convenience() {
 
 #[cfg(feature = "prove")]
 #[test]
-fn sdk_builder_rejects_duplicate_scheme_and_precompile_registrations() {
+fn sdk_builder_rejects_duplicate_scheme_descriptor_and_backend_registrations() {
     let scheme_err = Sdk::builder()
-        .with_scheme(
-            SchemeBundle::new(CustomOrderedRuntimeScheme, CustomOrderedProofScheme)
-                .expect("scheme bundle"),
-        )
+        .with_column_backend(ColumnBackendFactoryBundle::new(CustomOrderedBackend))
         .expect("first scheme registration")
-        .with_scheme(
-            SchemeBundle::new(CustomOrderedRuntimeScheme, CustomOrderedProofScheme)
-                .expect("scheme bundle"),
-        )
+        .with_column_backend(ColumnBackendFactoryBundle::new(CustomOrderedBackend))
         .expect_err("duplicate scheme registration should fail");
-    assert!(matches!(scheme_err, SdkError::InvalidSchemeBundle { .. }));
+    assert!(matches!(
+        scheme_err,
+        SdkError::InvalidColumnBackendBundle { .. }
+    ));
 
     let descriptor = constant_one_precompile_descriptor(tabula_sdk::ext::PrecompileId(0x0001));
+    let descriptor_err = Sdk::builder()
+        .with_precompile_descriptor(descriptor.clone())
+        .expect("first descriptor registration")
+        .with_precompile_descriptor(descriptor.clone())
+        .expect_err("duplicate descriptor registration should fail");
+    assert!(matches!(
+        descriptor_err,
+        SdkError::InvalidPrecompileDescriptorRegistration { .. }
+    ));
+
     let precompile_err = Sdk::builder()
-        .with_precompile(
-            PrecompileBundle::verification(
-                descriptor.clone(),
-                ConstantOnePrecompileProofFactory::new(descriptor.clone()),
-            )
-            .and_then(|bundle| {
-                bundle.with_handler(ConstantOnePrecompileHandler::new(descriptor.precompile_id))
-            })
-            .expect("precompile bundle"),
-        )
-        .expect("first precompile registration")
-        .with_precompile(
-            PrecompileBundle::verification(
-                descriptor.clone(),
-                ConstantOnePrecompileProofFactory::new(descriptor.clone()),
-            )
-            .and_then(|bundle| {
-                bundle.with_handler(ConstantOnePrecompileHandler::new(descriptor.precompile_id))
-            })
-            .expect("precompile bundle"),
-        )
-        .expect_err("duplicate precompile registration should fail");
+        .with_precompile_backend(constant_one_backend_bundle(descriptor.clone()))
+        .expect("first precompile backend registration")
+        .with_precompile_backend(constant_one_backend_bundle(descriptor))
+        .expect_err("duplicate precompile backend registration should fail");
     assert!(matches!(
         precompile_err,
-        SdkError::InvalidPrecompileBundle { .. }
+        SdkError::InvalidPrecompileBackendBundle { .. }
     ));
 }
 
@@ -333,21 +325,24 @@ tx bump(amount: u64) {
 ";
 
     let sdk = Sdk::builder()
-        .with_scheme(
-            SchemeBundle::new(CustomOrderedRuntimeScheme, CustomOrderedProofScheme)
-                .expect("scheme bundle"),
-        )
-        .expect("register scheme")
+        .with_semantic_registry(custom_semantic_registry())
+        .expect("register custom semantic registry")
+        .with_column_backend(ColumnBackendFactoryBundle::new(CustomOrderedBackend))
+        .expect("register backend")
         .build();
 
     let program = sdk.compile(source).expect("compile custom source");
+    let resolved = program
+        .artifact()
+        .resolve_column_profile(TableId(0), ColId(0))
+        .expect("resolve custom column");
     assert_eq!(
-        program.artifact().column_proof_plan[0].scheme_id,
+        resolved.scheme_profile.scheme_family_id,
         CUSTOM_ORDERED_SCHEME_ID
     );
 
     let state = single_cell_u64(TableId(0), ColId(0), RowKey(0), 7);
-    let batch = single_tx_batch(0, vec![Value::U64(8)]);
+    let batch = single_tx_batch(0, vec![u64_portable(8)]);
     let execution = program.execute(&state, &batch).expect("execute");
     let proof = program.prove(&execution).expect("prove");
 
@@ -360,18 +355,12 @@ tx bump(amount: u64) {
 
 #[cfg(feature = "prove")]
 #[test]
-fn custom_precompile_bundle_roundtrip() {
+fn custom_precompile_support_roundtrip() {
     let descriptor = precompile_requirement_descriptor();
     let sdk = Sdk::builder()
-        .with_precompile(
-            PrecompileBundle::verification(
-                descriptor.clone(),
-                ConstantOnePrecompileProofFactory::new(descriptor.clone()),
-            )
-            .and_then(|bundle| {
-                bundle.with_handler(ConstantOnePrecompileHandler::new(descriptor.precompile_id))
-            })
-            .expect("precompile bundle"),
+        .with_precompile_support(
+            descriptor.clone(),
+            constant_one_backend_bundle(descriptor.clone()),
         )
         .expect("register precompile")
         .build();
@@ -398,40 +387,48 @@ fn custom_precompile_bundle_roundtrip() {
 
 #[cfg(feature = "prove")]
 #[test]
-fn verification_only_precompile_bundle_supports_verifier_but_rejects_execution() {
+fn descriptor_only_precompile_registration_keeps_opening_but_rejects_host_builds() {
     let descriptor = precompile_requirement_descriptor();
     let sdk = Sdk::builder()
-        .with_precompile(
-            PrecompileBundle::verification(
-                descriptor.clone(),
-                ConstantOnePrecompileProofFactory::new(descriptor),
-            )
-            .expect("verification bundle"),
-        )
-        .expect("register verification-only precompile")
+        .with_precompile_descriptor(descriptor)
+        .expect("register descriptor")
         .build();
 
     let artifact = precompile_requirement_artifact();
-    sdk.verifier(artifact.clone())
+    let verifier_err = sdk
+        .verifier(artifact.clone())
         .expect("sdk verifier")
         .warm()
-        .expect("verification-only bundle should build verifier");
+        .expect_err("verifier should reject missing host backend");
+    match verifier_err {
+        SdkError::Runtime(tabula_runtime::RuntimeError::ValidationFailed { detail }) => {
+            assert!(detail.contains("precompile backend"));
+        }
+        other => panic!("unexpected verifier error: {other}"),
+    }
+
     let program = sdk.open(artifact).expect("open artifact");
-    program
+    let warm_err = program
         .verifier()
         .expect("program verifier")
         .warm()
-        .expect("program verifier warm");
+        .expect_err("program verifier should reject missing host backend");
+    match warm_err {
+        SdkError::Runtime(tabula_runtime::RuntimeError::ValidationFailed { detail }) => {
+            assert!(detail.contains("precompile backend"));
+        }
+        other => panic!("unexpected program verifier error: {other}"),
+    }
 
     let err = program
         .execute(
             &tabula_testing::fixtures::state::empty_state(),
             &single_tx_batch(1, vec![]),
         )
-        .expect_err("execution should reject verification-only precompile bundle");
+        .expect_err("execution should reject descriptor-only precompile support");
     match err {
         SdkError::Runtime(tabula_runtime::RuntimeError::ValidationFailed { detail }) => {
-            assert!(detail.contains("verification only"));
+            assert!(detail.contains("precompile backend"));
         }
         other => panic!("unexpected error: {other}"),
     }
@@ -439,18 +436,28 @@ fn verification_only_precompile_bundle_supports_verifier_but_rejects_execution()
 
 #[cfg(feature = "prove")]
 #[test]
+fn backend_only_precompile_support_does_not_enable_source_registration() {
+    let descriptor = precompile_requirement_descriptor();
+    let sdk = Sdk::builder()
+        .with_precompile_backend(constant_one_backend_bundle(descriptor.clone()))
+        .expect("register host backend")
+        .build();
+
+    let definition = precompile_requirement_definition(descriptor.precompile_id);
+    let err = sdk
+        .register(&definition)
+        .expect_err("source registration should reject missing compiler descriptor");
+    assert!(matches!(err, SdkError::Compiler(_)));
+}
+
+#[cfg(feature = "prove")]
+#[test]
 fn multi_output_precompile_roundtrip_proves_large_transcript_payload() {
     let descriptor = sequence_precompile_descriptor_fixture();
     let sdk = Sdk::builder()
-        .with_precompile(
-            PrecompileBundle::verification(
-                descriptor.clone(),
-                SequencePrecompileProofFactory::new(descriptor.clone()),
-            )
-            .and_then(|bundle| {
-                bundle.with_handler(SequencePrecompileHandler::new(descriptor.precompile_id))
-            })
-            .expect("sequence precompile bundle"),
+        .with_precompile_support(
+            descriptor.clone(),
+            sequence_backend_bundle(descriptor.clone()),
         )
         .expect("register sequence precompile")
         .build();
@@ -475,64 +482,109 @@ fn multi_output_precompile_roundtrip_proves_large_transcript_payload() {
 }
 
 #[cfg(feature = "prove")]
-fn custom_descriptor() -> SchemeDescriptor {
-    SchemeDescriptor {
-        scheme_id: CUSTOM_ORDERED_SCHEME_ID,
-        scheme_version: 1,
-        layout_kind: ColumnLayoutKind::SSMC_V1,
-        params_hash: [0x72; 32],
-        root_profile_id: RootProfileId::SMT_V1,
-        supported_property_query_kinds: vec![PropertyQueryKind::Successor],
-    }
+fn custom_scheme_profile() -> SchemeProfile {
+    SchemeProfile::new(
+        tabula_core::SchemeProfileId(0x7201),
+        "custom_ordered_v1",
+        None,
+        CUSTOM_ORDERED_SCHEME_ID,
+        CommitmentContractKind::SortedStateMerkleChain,
+        VerifierDigestFormat::FieldElementArray { width: 8 },
+        vec![PropertyQueryKind::Successor],
+        EncodingRequirements {
+            field_family: FieldFamily::KoalaBear31,
+            encoding_class: EncodingClass::FieldElementArray,
+            width_constraint: WidthConstraint::InclusiveRange { min: 1, max: 5 },
+            canonical_null_encoding: CanonicalNullEncoding::SeparateNullFlagWithZeroValue,
+            transcript_serialization: TranscriptSerialization::FieldElementsWithNullFlag,
+            ordering_preserving: Some(true),
+        },
+        ColumnLayoutKind::SSMC_V1,
+        RootProfileId::SMT_V1,
+    )
+    .expect("custom ordered scheme profile")
+}
+
+#[cfg(feature = "prove")]
+fn custom_semantic_registry() -> SemanticRegistry {
+    let mut registry = builtin_semantic_registry().expect("built-in semantic registry");
+    registry
+        .register_scheme_profile(custom_scheme_profile())
+        .expect("register custom scheme profile");
+    registry
+        .register_default_scheme_profile(
+            CUSTOM_ORDERED_SCHEME_ID,
+            ENCODING_U64_ID,
+            tabula_core::SchemeProfileId(0x7201),
+        )
+        .expect("register custom scheme mapping");
+    registry.validate().expect("semantic registry");
+    registry
 }
 
 #[cfg(feature = "prove")]
 #[derive(Clone)]
-struct CustomOrderedRuntimeScheme;
+struct CustomOrderedBackend;
 
 #[cfg(feature = "prove")]
-impl ColumnSchemeFactory for CustomOrderedRuntimeScheme {
-    fn descriptor(&self) -> SchemeDescriptor {
-        custom_descriptor()
+impl ColumnBackendFactory for CustomOrderedBackend {
+    fn scheme_id(&self) -> SchemeId {
+        CUSTOM_ORDERED_SCHEME_ID
     }
 
     fn name(&self) -> &str {
         "custom_ordered"
     }
 
-    fn build_runtime_column(
+    fn materialize_backend(
         &self,
-        plan: &ResolvedColumnPlan,
-    ) -> Result<Arc<dyn RuntimeColumn>, ExtError> {
-        tabula_runtime::SsmcScheme::<3>.build_runtime_column(plan)
+        setup: ColumnBackendSetup<'_>,
+    ) -> Result<MaterializedColumnBackend, ExtError> {
+        if setup.profile.scheme_profile.scheme_family_id != CUSTOM_ORDERED_SCHEME_ID {
+            return Err(ExtError::validation(format!(
+                "custom ordered backend expected id {} but received {}",
+                CUSTOM_ORDERED_SCHEME_ID.0, setup.profile.scheme_profile.scheme_family_id.0
+            )));
+        }
+        if setup.profile.proof_layout_family() != ColumnLayoutKind::SSMC_V1 {
+            return Err(ExtError::validation(format!(
+                "custom ordered backend expected layout {} but received {}",
+                ColumnLayoutKind::SSMC_V1.0,
+                setup.profile.proof_layout_family().0
+            )));
+        }
+        tabula_runtime::SsmcScheme::<3>.materialize_backend(setup)
     }
 }
 
 #[cfg(feature = "prove")]
-#[derive(Clone)]
-struct CustomOrderedProofScheme;
+fn constant_one_backend_bundle(
+    descriptor: tabula_sdk::ext::PrecompileDescriptor,
+) -> PrecompileBackendFactoryBundle {
+    PrecompileBackendFactoryBundle::new(ConstantOnePrecompileBackendFactory::new(descriptor))
+}
 
 #[cfg(feature = "prove")]
-impl ProofSchemeFactory for CustomOrderedProofScheme {
-    fn descriptor(&self) -> SchemeDescriptor {
-        custom_descriptor()
-    }
+fn sequence_backend_bundle(
+    descriptor: tabula_sdk::ext::PrecompileDescriptor,
+) -> PrecompileBackendFactoryBundle {
+    PrecompileBackendFactoryBundle::new(SequencePrecompileBackendFactory::new(descriptor))
+}
 
-    fn name(&self) -> &str {
-        "custom_ordered"
-    }
-
-    fn build_proof_column(
-        &self,
-        plan: &ResolvedColumnPlan,
-    ) -> Result<Arc<dyn ProofColumn>, ExtError> {
-        tabula_runtime::SsmcScheme::<3>.build_proof_column(plan)
-    }
-
-    fn build_proof_preparer(
-        &self,
-        plan: &ResolvedColumnPlan,
-    ) -> Result<Arc<dyn ColumnProofPreparer>, ExtError> {
-        tabula_runtime::SsmcScheme::<3>.build_proof_preparer(plan)
+#[cfg(feature = "prove")]
+fn precompile_requirement_definition(precompile_id: PrecompileId) -> ProgramDefinition {
+    ProgramDefinition {
+        table_schemas: vec![],
+        tx_types: vec![TxTypeDef {
+            id: TxTypeId(1),
+            name: "scan".to_string(),
+            param_schema: vec![],
+            body: vec![Instruction::Precompile {
+                id: precompile_id,
+                dst_slots: vec![0],
+                inputs: vec![],
+            }],
+        }],
+        column_schemes: vec![],
     }
 }

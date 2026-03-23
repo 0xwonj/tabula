@@ -121,6 +121,8 @@ pub enum ErrorKind {
     UndefinedColumn,
     /// Reference to an undefined variable.
     UndefinedVariable,
+    /// Reference to an undefined precompile descriptor.
+    UndefinedPrecompile,
     /// Duplicate `let` binding name within a tx.
     DuplicateBinding,
     /// Duplicate table declaration.

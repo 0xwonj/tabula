@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 tabula-core = { workspace = true }
+tabula-profile = { workspace = true }
 borsh = { workspace = true }
 serde = { workspace = true }
 

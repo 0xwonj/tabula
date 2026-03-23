@@ -1,5 +1,5 @@
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, TableId, zero_value};
+use tabula_core::{ColId, TableId};
 use tabula_ir::{RowExpr, ValueExpr};
 
 use tabula_chips::execution::MAX_SLOTS;
@@ -21,19 +21,12 @@ pub(super) fn lower_read<const W: usize>(
     let effect_ordinal = ctx.effect_ordinal;
     ctx.effect_ordinal += 1;
 
-    let vtype = *ctx
-        .type_map
-        .get(&(table, col))
-        .ok_or_else(|| TabulaError::ProofError {
-            phase: "trace_lowering",
-            detail: format!("missing schema type for ({table:?}, {col:?})"),
-        })?;
-
-    let encoded = if event.val_is_null {
-        ctx.encode_padded(&zero_value(vtype))?
+    let slot_value = if event.val_is_null {
+        ctx.zero_for_column(table, col)?
     } else {
-        ctx.encode_padded(&event.value)?
+        ctx.decode_column_portable(table, col, &event.value)?
     };
+    let encoded = ctx.encode_padded(&slot_value)?;
 
     let slot = dst_val as usize;
     if slot >= MAX_SLOTS {
@@ -44,11 +37,6 @@ pub(super) fn lower_read<const W: usize>(
     }
 
     // Update slot state.
-    let slot_value = if event.val_is_null {
-        zero_value(vtype)
-    } else {
-        event.value
-    };
     ctx.slots[slot] = Some(slot_value);
     ctx.slot_fes[slot] = encoded.clone();
     ctx.slot_nulls[slot] = event.val_is_null;

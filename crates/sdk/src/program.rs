@@ -24,7 +24,6 @@ pub struct Program {
 }
 
 struct ProgramInner {
-    #[cfg(any(feature = "prove", feature = "verify"))]
     sdk: Sdk,
     sealed: SealedProgram,
     artifact: Artifact,
@@ -45,13 +44,10 @@ impl Program {
         sealed: SealedProgram,
         artifact: Artifact,
     ) -> Result<Self, SdkError> {
-        #[cfg(not(any(feature = "prove", feature = "verify")))]
-        let _ = &sdk;
         #[cfg(feature = "prove")]
         let program_hash = artifact.canonical_digest()?;
         Ok(Self {
             inner: Arc::new(ProgramInner {
-                #[cfg(any(feature = "prove", feature = "verify"))]
                 sdk,
                 sealed,
                 artifact,
@@ -75,6 +71,7 @@ impl Program {
             state,
             batch,
             hasher: &SdkBlake3Hasher,
+            type_runtimes: self.inner.sdk.inner.type_runtimes(),
         }) {
             Ok(executed) => {
                 #[cfg(feature = "prove")]

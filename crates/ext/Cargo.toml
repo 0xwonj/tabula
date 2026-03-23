@@ -9,6 +9,7 @@ default = ["prove"]
 verify = [
     "dep:tabula-machine",
     "dep:tabula-stark",
+    "dep:tabula-commitment",
     "dep:p3-air",
     "dep:p3-field",
     "dep:p3-koala-bear",
@@ -17,7 +18,6 @@ verify = [
 prove = [
     "verify",
     "dep:tabula-executor",
-    "dep:tabula-commitment",
     "dep:tabula-gadgets",
     "dep:tabula-witness",
 ]
@@ -27,7 +27,9 @@ thiserror = { workspace = true }
 tabula-artifact = { workspace = true }
 tabula-contract = { workspace = true }
 tabula-core = { workspace = true }
+tabula-types = { workspace = true }
 tabula-ir = { workspace = true }
+tabula-profile = { workspace = true }
 tabula-machine = { workspace = true, optional = true }
 tabula-stark = { workspace = true, optional = true }
 tabula-executor = { workspace = true, optional = true }

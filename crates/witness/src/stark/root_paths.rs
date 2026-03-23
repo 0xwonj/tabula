@@ -7,9 +7,10 @@ use p3_koala_bear::KoalaBear;
 use tabula_commitment::primitives::{
     COL_STATE_SMT_DEPTH, DOMAIN_COL, DOMAIN_TABLE, TABLE_STATE_SMT_DEPTH,
 };
-use tabula_commitment::roots::compute_column_meta_leaf;
 use tabula_commitment::schemes::smt::SparseMerkleTree;
-use tabula_commitment::{ColumnMeta, FieldHasher, NativeDigest};
+use tabula_commitment::{
+    ColumnRootBinding, FieldHasher, NativeDigest, compute_column_root_binding_leaf,
+};
 use tabula_core::TableId;
 use tabula_core::error::TabulaError;
 
@@ -86,7 +87,7 @@ pub(crate) fn smt_table_public_statement(
 /// table-level SMT paths (depth 30) per table. Validates that
 /// the reconstructed roots match the witness's state roots.
 pub(crate) fn build_smt_paths<H>(
-    metas: &[ColumnMeta],
+    bindings: &[ColumnRootBinding],
     old_root: &NativeDigest,
     new_root: &NativeDigest,
     hasher: H,
@@ -95,9 +96,9 @@ where
     H: FieldHasher<F = KoalaBear, Digest = NativeDigest>,
 {
     // Group metas by table.
-    let mut by_table: BTreeMap<TableId, Vec<&ColumnMeta>> = BTreeMap::new();
-    for meta in metas {
-        by_table.entry(meta.table).or_default().push(meta);
+    let mut by_table: BTreeMap<TableId, Vec<&ColumnRootBinding>> = BTreeMap::new();
+    for binding in bindings {
+        by_table.entry(binding.table).or_default().push(binding);
     }
 
     let mut col_paths = Vec::new();
@@ -110,40 +111,36 @@ where
         let mut new_tree = SparseMerkleTree::new(hasher.clone(), COL_STATE_SMT_DEPTH, DOMAIN_COL);
 
         // Insert all leaves.
-        for meta in metas_for_table {
-            let old_leaf =
-                compute_column_meta_leaf(&hasher, meta.table, meta.col, meta.tag, &meta.com_old);
-            let new_leaf =
-                compute_column_meta_leaf(&hasher, meta.table, meta.col, meta.tag, &meta.com_new);
-            old_tree.insert(meta.col.0 as u64, old_leaf)?;
-            new_tree.insert(meta.col.0 as u64, new_leaf)?;
+        for binding in metas_for_table {
+            let old_leaf = compute_column_root_binding_leaf(&hasher, binding, &binding.old_digest);
+            let new_leaf = compute_column_root_binding_leaf(&hasher, binding, &binding.new_digest);
+            old_tree.insert(binding.col.0 as u64, old_leaf)?;
+            new_tree.insert(binding.col.0 as u64, new_leaf)?;
         }
 
         // Generate proofs only for touched columns.
         // Untouched columns' leaf digests are captured as SMT siblings.
         let mut touched_count = 0u32;
-        for meta in metas_for_table {
-            if !meta.is_touched {
+        for binding in metas_for_table {
+            if !binding.is_touched {
                 continue;
             }
             touched_count += 1;
 
-            let old_leaf =
-                compute_column_meta_leaf(&hasher, meta.table, meta.col, meta.tag, &meta.com_old);
-            let new_leaf =
-                compute_column_meta_leaf(&hasher, meta.table, meta.col, meta.tag, &meta.com_new);
+            let old_leaf = compute_column_root_binding_leaf(&hasher, binding, &binding.old_digest);
+            let new_leaf = compute_column_root_binding_leaf(&hasher, binding, &binding.new_digest);
 
-            let old_proof = old_tree.prove(meta.col.0 as u64)?;
-            let new_proof = new_tree.prove(meta.col.0 as u64)?;
+            let old_proof = old_tree.prove(binding.col.0 as u64)?;
+            let new_proof = new_tree.prove(binding.col.0 as u64)?;
 
             col_paths.push(SmtPathWitness {
                 table_id: table.0,
-                key: meta.col.0 as u32,
+                key: binding.col.0 as u32,
                 old_leaf,
                 new_leaf,
                 old_siblings: old_proof.siblings,
                 new_siblings: new_proof.siblings,
-                path_bits: path_bits_from_key(meta.col.0 as u64, COL_STATE_SMT_DEPTH),
+                path_bits: path_bits_from_key(binding.col.0 as u64, COL_STATE_SMT_DEPTH),
             });
         }
 

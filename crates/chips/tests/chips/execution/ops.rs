@@ -162,36 +162,6 @@ fn hash_wrong_output_fails() {
         .expect_err("wrong hash output should fail result binding");
 }
 
-#[test]
-fn hash_wrong_input_composition_fails() {
-    let mut records = vec![
-        make_read(0, 0, 0, 100, 42, false),
-        make_read(1, 0, 0, 200, 99, false),
-        make_hash(2, 0, 1, 0x20, 2, [42, 0, 0], [99, 0, 0]),
-    ];
-    // Corrupt perm_input[2] (should match src1_val[0])
-    if let Some(ref mut input) = records[2].hash_perm_input {
-        input[2] = KoalaBear::new(999);
-    }
-    let trace = generate_execution_trace::<W>(&records);
-    debug_check(&ExecutionChip::<W>, &trace).expect_err("wrong input composition should fail");
-}
-
-#[test]
-fn hash_nonzero_capacity_fails() {
-    let mut records = vec![
-        make_read(0, 0, 0, 100, 42, false),
-        make_read(1, 0, 0, 200, 99, false),
-        make_hash(2, 0, 1, 0x20, 2, [42, 0, 0], [99, 0, 0]),
-    ];
-    // Corrupt capacity (perm_input[8] should be 0)
-    if let Some(ref mut input) = records[2].hash_perm_input {
-        input[8] = KoalaBear::ONE;
-    }
-    let trace = generate_execution_trace::<W>(&records);
-    debug_check(&ExecutionChip::<W>, &trace).expect_err("nonzero capacity should fail");
-}
-
 // ── Lookup opcode tests (M10-B3) ──
 
 #[test]

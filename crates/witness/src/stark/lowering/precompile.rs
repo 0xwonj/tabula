@@ -28,12 +28,17 @@ pub(super) fn lower_precompile<const W: usize>(
             ),
         });
     }
+    let signature = ctx.precompile_signature(id)?;
 
     let input_vals = inputs
         .iter()
         .map(|expr| ctx.resolve_val(expr))
         .collect::<Result<Vec<_>, _>>()?;
-    if input_vals != event.inputs {
+    let input_portables = input_vals
+        .iter()
+        .map(|value| ctx.type_runtimes.encode_typed(value))
+        .collect::<Result<Vec<_>, _>>()?;
+    if input_portables != event.inputs {
         return Err(TabulaError::ProofError {
             phase: "trace_lowering",
             detail: format!(
@@ -55,7 +60,13 @@ pub(super) fn lower_precompile<const W: usize>(
         });
     }
 
-    let header = compute_precompile_call_header(event)?;
+    let header = compute_precompile_call_header(
+        event,
+        id.0,
+        signature,
+        ctx.type_runtimes,
+        ctx.encoding_runtimes,
+    )?;
 
     let exclude: Vec<usize> = dst_slots.iter().map(|slot| *slot as usize).collect();
     let src1_idx = if !inputs.is_empty() {
@@ -75,8 +86,9 @@ pub(super) fn lower_precompile<const W: usize>(
     let mut written_slots = Vec::with_capacity(dst_slots.len());
     for (dst_slot, output) in dst_slots.iter().zip(&event.outputs) {
         let slot_index = *dst_slot as usize;
-        let encoded = ctx.encode_padded(output)?;
-        ctx.update_slot(slot_index, *output, encoded.clone(), false)?;
+        let logical_output = ctx.type_runtimes.decode_portable(output)?;
+        let encoded = ctx.encode_padded(&logical_output)?;
+        ctx.update_slot(slot_index, logical_output, encoded.clone(), false)?;
         writes.push((slot_index, encoded, false));
         written_slots.push(slot_index);
     }

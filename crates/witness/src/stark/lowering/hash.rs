@@ -1,12 +1,12 @@
-use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
+use tabula_commitment::NativeDigest;
 use tabula_core::error::TabulaError;
 use tabula_ir::ValueExpr;
+use tabula_types::bytes32_typed;
 
 use tabula_chips::execution::trace::Opcode;
-use tabula_chips::execution::{HASH_INSTRUCTION_DOMAIN_TAG, HASH_INSTRUCTION_INPUT_COUNT};
-use tabula_chips::poseidon::constants::poseidon2_permutation;
+use tabula_chips::ir_hash::IrHashCall;
 
 use super::context::LoweringContext;
 
@@ -15,53 +15,31 @@ pub(super) fn lower_hash<const W: usize>(
     dst: u16,
     inputs: &[ValueExpr],
 ) -> Result<(), TabulaError> {
-    if inputs.len() != HASH_INSTRUCTION_INPUT_COUNT as usize {
-        return Err(TabulaError::ProofError {
-            phase: "trace_lowering",
-            detail: format!(
-                "Hash instruction requires {} inputs, got {}",
-                HASH_INSTRUCTION_INPUT_COUNT,
-                inputs.len()
-            ),
-        });
-    }
+    let typed_inputs = inputs
+        .iter()
+        .map(|expr| ctx.resolve_val(expr))
+        .collect::<Result<Vec<_>, _>>()?;
+    let portable_inputs = typed_inputs
+        .iter()
+        .map(|value| ctx.type_runtimes.encode_typed(value))
+        .collect::<Result<Vec<_>, _>>()?;
 
-    let v0 = ctx.resolve_val(&inputs[0])?;
-    let v1 = ctx.resolve_val(&inputs[1])?;
-    let v0_enc = ctx.encode_padded(&v0)?;
-    let v1_enc = ctx.encode_padded(&v1)?;
-
-    // Build Poseidon permutation input.
-    let mut perm_input = [KoalaBear::ZERO; 16];
-    perm_input[0] = KoalaBear::new(HASH_INSTRUCTION_DOMAIN_TAG);
-    perm_input[1] = KoalaBear::new(HASH_INSTRUCTION_INPUT_COUNT);
-    for (j, v) in v0_enc.iter().enumerate().take(W) {
-        perm_input[2 + j] = *v;
-    }
-    for (j, v) in v1_enc.iter().enumerate().take(W) {
-        perm_input[2 + W + j] = *v;
-    }
-
-    let (_rounds, perm_output) = poseidon2_permutation(perm_input);
-    let digest: [KoalaBear; 8] = core::array::from_fn(|i| perm_output[i]);
-
-    // Hash output is 8 FE (Bytes32 width). Pad to W.
-    let mut dst_enc = digest.to_vec();
-    dst_enc.resize(W, KoalaBear::ZERO);
+    let instruction_index = ctx.records.len() as u32;
+    let call = IrHashCall::from_inputs(ctx.tx_index, instruction_index, &portable_inputs)?;
+    let digest_bytes =
+        NativeDigest(core::array::from_fn(|idx| KoalaBear::new(call.digest[idx]))).to_bytes();
+    let digest_typed = bytes32_typed(digest_bytes);
 
     let slot = dst as usize;
-    let exclude = [slot];
-    let src1_idx = ctx.resolve_slot_idx(&inputs[0], &v0_enc, false, &exclude)?;
-    let src2_idx = ctx.resolve_slot_idx(&inputs[1], &v1_enc, false, &exclude)?;
+    let digest_prefix: Vec<KoalaBear> = call
+        .digest
+        .iter()
+        .take(W)
+        .map(|value| KoalaBear::new(*value))
+        .collect();
 
-    // For Hash, the result value is Bytes32 — store the digest as 8 FE in slot.
-    let result_fes = digest.to_vec();
-    let mut slot_enc = result_fes;
-    slot_enc.resize(W, KoalaBear::ZERO);
-
-    // Can't produce a proper Value for Bytes32 from FE; store None in Value slot.
-    ctx.slots[slot] = None;
-    ctx.slot_fes[slot] = slot_enc;
+    ctx.slots[slot] = Some(digest_typed.clone());
+    ctx.slot_fes[slot] = digest_prefix.clone();
     ctx.slot_nulls[slot] = false;
     ctx.slot_initialized[slot] = true;
     if slot >= ctx.max_slot {
@@ -70,14 +48,11 @@ pub(super) fn lower_hash<const W: usize>(
 
     let mut rec = ctx.empty_record(Opcode::Hash);
     rec.written_slots = vec![slot];
-    rec.src1_val = v0_enc;
-    rec.src2_val = v1_enc;
-    rec.src1_slot_idx = src1_idx;
-    rec.src2_slot_idx = src2_idx;
-    rec.writes.push((slot, dst_enc, false));
-    rec.hash_perm_input = Some(perm_input);
-    rec.hash_perm_output = Some(digest);
+    rec.writes.push((slot, digest_prefix, false));
+    rec.instruction_index = Some(instruction_index);
+    rec.hash_digest = Some(core::array::from_fn(|idx| KoalaBear::new(call.digest[idx])));
     ctx.push_record(rec);
+    ctx.push_ir_hash_call(call);
 
     Ok(())
 }

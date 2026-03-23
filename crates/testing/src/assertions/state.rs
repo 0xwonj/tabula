@@ -1,18 +1,18 @@
 use std::collections::BTreeMap;
 
 use tabula_artifact::{State, normalize_state};
-use tabula_core::{CellKey, ColId, RowKey, TableId, Value};
+use tabula_core::{CellKey, ColId, PortableValue, RowKey, TableId};
 
 /// Canonical state-cell expectation used by semantic assertions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpectedStateCell {
     pub table: TableId,
     pub col: ColId,
     pub row: RowKey,
-    pub value: Option<Value>,
+    pub value: Option<PortableValue>,
 }
 
-fn normalized_state_map(state: &State) -> BTreeMap<CellKey, Option<Value>> {
+fn normalized_state_map(state: &State) -> BTreeMap<CellKey, Option<PortableValue>> {
     let normalized = normalize_state(state).expect("normalize state for assertion");
     normalized
         .cells
@@ -36,16 +36,19 @@ pub fn assert_state_cell(
     table: TableId,
     col: ColId,
     row: RowKey,
-    expected: Option<Value>,
+    expected: Option<&PortableValue>,
 ) {
     let actual = normalized_state_map(state)
         .get(&CellKey { table, col, row })
-        .copied()
+        .cloned()
         .flatten();
     assert_eq!(
-        actual, expected,
+        actual.as_ref(),
+        expected,
         "state cell mismatch at ({}, {}, {})",
-        table.0, col.0, row.0
+        table.0,
+        col.0,
+        row.0
     );
 }
 
@@ -61,7 +64,7 @@ pub fn assert_state_cells_exact(state: &State, expected_cells: &[ExpectedStateCe
                     col: cell.col,
                     row: cell.row,
                 },
-                cell.value,
+                cell.value.clone(),
             )
         })
         .collect();

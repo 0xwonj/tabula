@@ -14,7 +14,7 @@ fn builder_creates_valid_machine() {
         .expect("builder should create a valid machine");
 
     let setups = machine.setup().proof_setups();
-    assert_eq!(setups.execution.registry.chip_ids().len(), 4);
+    assert_eq!(setups.execution.registry.chip_ids().len(), 3);
     assert_eq!(setups.columns.len(), 1);
     assert_eq!(setups.root.registry.chip_ids().len(), 4);
 }
@@ -36,7 +36,7 @@ fn builder_with_config() {
             .registry
             .chip_ids()
             .len(),
-        4
+        3
     );
 }
 
@@ -96,7 +96,7 @@ fn build_setup_round_trips_through_machine() {
     let machine = TabulaMachine::from_setup(setup);
     let setups = machine.setup().proof_setups();
 
-    assert_eq!(setups.execution.registry.chip_ids().len(), 4);
+    assert_eq!(setups.execution.registry.chip_ids().len(), 3);
     assert_eq!(setups.columns.len(), 1);
     assert_eq!(setups.root.registry.chip_ids().len(), 4);
 }
@@ -177,10 +177,9 @@ fn builder_with_extension_registers_chip() {
     let exec_ids = machine.setup().proof_setups().execution.registry.chip_ids();
     assert!(exec_ids.contains(&core_chips::EXECUTION));
     assert!(exec_ids.contains(&core_chips::STATIC_TABLE));
-    assert!(exec_ids.contains(&core_chips::POSEIDON));
     assert!(exec_ids.contains(&core_chips::RANGE_CHECK));
     assert!(exec_ids.contains(&DUMMY_CHIP_ID));
-    assert_eq!(exec_ids.len(), 5);
+    assert_eq!(exec_ids.len(), 4);
 }
 
 #[test]

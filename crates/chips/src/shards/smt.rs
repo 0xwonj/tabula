@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use tabula_commitment::schemes::tags;
+use tabula_commitment::{PoseidonHasher, compute_column_root_binding_prefix_digest};
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId};
 
@@ -120,6 +120,7 @@ impl<const W: usize> ColumnCommitment for SmtCommitment<W> {
     ) -> Result<Vec<(ChipId, TraceEntry)>, TabulaError> {
         let witness = store.get::<SmtWitness>(SMT_WITNESS_LABEL)?;
         let mut entries = Vec::new();
+        let hasher = PoseidonHasher::new();
 
         for col in cols {
             let chips = self
@@ -142,7 +143,18 @@ impl<const W: usize> ColumnCommitment for SmtCommitment<W> {
             let c = col.col.0;
 
             let mem_trace = generate_memory_shard_trace::<W>(t, c, &col_data.memory_rows);
-            let meta_trace = generate_meta_shard_trace(t, c, tags::SMT, col_data.meta_row.as_ref());
+            let meta_trace = generate_meta_shard_trace(
+                t,
+                c,
+                compute_column_root_binding_prefix_digest(
+                    &hasher,
+                    col.table,
+                    col.col,
+                    col.root_binding_family,
+                    &col.column_profile_hash,
+                ),
+                col_data.meta_row.as_ref(),
+            );
 
             entries.push((chips.memory, TraceEntry::main_only(mem_trace)));
             entries.push((chips.meta, TraceEntry::main_only(meta_trace)));

@@ -3,9 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_core::error::TabulaError;
-use tabula_core::{BatchResult, ColId, OpKind, TableId, TableSchema, ValueType, zero_value};
+use tabula_core::{BatchResult, ColId, OpKind, TableId, TableSchema};
+use tabula_profile::ProfileCatalog;
+use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 
-use crate::{AccessEvent, ColumnWrite, InitCell};
+use crate::{AccessEvent, ColumnValueProfile, ColumnWrite, InitCell};
 
 type LogicalColumnWritesByColumn = BTreeMap<(TableId, ColId), Vec<ColumnWrite>>;
 
@@ -16,8 +18,10 @@ pub struct PreparedExecutionColumn {
     pub table: TableId,
     /// Column identifier.
     pub col: ColId,
-    /// Declared value type for the column.
-    pub value_type: ValueType,
+    /// Declared semantic type id for the column.
+    pub type_id: tabula_core::TypeId,
+    /// Declared encoding profile id for the column.
+    pub encoding_profile_id: tabula_core::EncodingProfileId,
     /// Base-state init cells grouped for this column.
     pub init_cells: Vec<InitCell>,
     /// Execution access events for this column.
@@ -64,6 +68,9 @@ impl ExecutionInputPreparer {
         &self,
         result: &BatchResult,
         schemas: &BTreeMap<TableId, TableSchema>,
+        profile_catalog: &ProfileCatalog,
+        type_runtimes: &TypeRuntimeRegistry,
+        encoding_runtimes: &EncodingRuntimeRegistry,
         all_columns: impl IntoIterator<Item = &'a (TableId, ColId)>,
     ) -> Result<PreparedExecutionColumns, TabulaError> {
         let all_columns: Vec<(TableId, ColId)> = all_columns.into_iter().copied().collect();
@@ -90,22 +97,35 @@ impl ExecutionInputPreparer {
             }
         }
 
-        let type_map = Self::build_type_map(schemas, all_columns.iter())?;
-        let mut init_cells_by_col = Self::build_init_cells(result, &type_map)?;
-        let mut access_events_by_col = Self::build_access_events(result, &type_map)?;
-        let mut writes_by_col = Self::group_writes(result, &type_map)?;
+        let profile_map = Self::build_profile_map(
+            schemas,
+            profile_catalog,
+            type_runtimes,
+            encoding_runtimes,
+            all_columns.iter(),
+        )?;
+        let mut init_cells_by_col = Self::build_init_cells(result, type_runtimes, &profile_map)?;
+        let mut access_events_by_col =
+            Self::build_access_events(result, type_runtimes, &profile_map)?;
+        let mut writes_by_col = Self::group_writes(result, type_runtimes, &profile_map)?;
 
         let columns = all_columns
             .into_iter()
-            .map(|(table, col)| PreparedExecutionColumn {
-                table,
-                col,
-                value_type: type_map[&(table, col)],
-                init_cells: init_cells_by_col.remove(&(table, col)).unwrap_or_default(),
-                access_events: access_events_by_col
-                    .remove(&(table, col))
-                    .unwrap_or_default(),
-                writes: writes_by_col.remove(&(table, col)).unwrap_or_default(),
+            .map(|(table, col)| {
+                let profile = profile_map
+                    .get(&(table, col))
+                    .expect("planned column profile must exist");
+                PreparedExecutionColumn {
+                    table,
+                    col,
+                    type_id: profile.type_id,
+                    encoding_profile_id: profile.encoding_profile_id,
+                    init_cells: init_cells_by_col.remove(&(table, col)).unwrap_or_default(),
+                    access_events: access_events_by_col
+                        .remove(&(table, col))
+                        .unwrap_or_default(),
+                    writes: writes_by_col.remove(&(table, col)).unwrap_or_default(),
+                }
             })
             .collect();
 
@@ -120,11 +140,14 @@ impl ExecutionInputPreparer {
             .collect()
     }
 
-    fn build_type_map<'a>(
+    fn build_profile_map<'a>(
         schemas: &BTreeMap<TableId, TableSchema>,
+        profile_catalog: &ProfileCatalog,
+        type_runtimes: &TypeRuntimeRegistry,
+        encoding_runtimes: &EncodingRuntimeRegistry,
         all_columns: impl IntoIterator<Item = &'a (TableId, ColId)>,
-    ) -> Result<BTreeMap<(TableId, ColId), ValueType>, TabulaError> {
-        let mut type_map = BTreeMap::new();
+    ) -> Result<BTreeMap<(TableId, ColId), ColumnValueProfile>, TabulaError> {
+        let mut profile_map = BTreeMap::new();
         for &(table, col) in all_columns {
             let schema = schemas.get(&table).ok_or_else(|| TabulaError::ProofError {
                 phase: "witness",
@@ -136,26 +159,70 @@ impl ExecutionInputPreparer {
                     detail: format!("no column {col:?} in table {table:?}"),
                 }
             })?;
-            type_map.insert((table, col), col_def.value_type);
+            let resolved = profile_catalog
+                .resolve_column_profile(col_def.column_profile_id)
+                .map_err(|err| TabulaError::ProofError {
+                    phase: "witness",
+                    detail: format!(
+                        "column profile {} for table {:?} col {:?} is invalid: {err}",
+                        col_def.column_profile_id.0, table, col
+                    ),
+                })?;
+            type_runtimes
+                .resolve(resolved.type_descriptor.type_id)
+                .map_err(|err| TabulaError::ProofError {
+                    phase: "witness",
+                    detail: format!(
+                        "column profile {} references missing type runtime {}: {err}",
+                        col_def.column_profile_id.0, resolved.type_descriptor.type_id.0
+                    ),
+                })?;
+            encoding_runtimes
+                .resolve(resolved.encoding_profile.encoding_profile_id)
+                .map_err(|err| TabulaError::ProofError {
+                    phase: "witness",
+                    detail: format!(
+                        "column profile {} references missing encoding runtime {}: {err}",
+                        col_def.column_profile_id.0,
+                        resolved.encoding_profile.encoding_profile_id.0
+                    ),
+                })?;
+            profile_map.insert(
+                (table, col),
+                ColumnValueProfile {
+                    type_id: resolved.type_descriptor.type_id,
+                    encoding_profile_id: resolved.encoding_profile.encoding_profile_id,
+                },
+            );
         }
-        Ok(type_map)
+        Ok(profile_map)
     }
 
     fn build_init_cells(
         result: &BatchResult,
-        type_map: &BTreeMap<(TableId, ColId), ValueType>,
+        type_runtimes: &TypeRuntimeRegistry,
+        profile_map: &BTreeMap<(TableId, ColId), ColumnValueProfile>,
     ) -> Result<BTreeMap<(TableId, ColId), Vec<InitCell>>, TabulaError> {
         let mut grouped: BTreeMap<(TableId, ColId), Vec<InitCell>> = BTreeMap::new();
 
         for (key, value) in &result.read_set_old {
             let tc = (key.table, key.col);
-            let value_type = *type_map.get(&tc).ok_or_else(|| TabulaError::ProofError {
-                phase: "witness",
-                detail: format!("no type for ({:?}, {:?}) in init cell", key.table, key.col),
-            })?;
+            let profile = profile_map
+                .get(&tc)
+                .ok_or_else(|| TabulaError::ProofError {
+                    phase: "witness",
+                    detail: format!(
+                        "no sealed type/encoding profile for ({:?}, {:?}) in init cell",
+                        key.table, key.col
+                    ),
+                })?;
+            let decoded = match value {
+                Some(value) => Self::decode_column_value(type_runtimes, profile, value)?,
+                None => type_runtimes.zero_of(profile.type_id)?,
+            };
             grouped.entry(tc).or_default().push(InitCell {
                 key: *key,
-                value: (*value).unwrap_or_else(|| zero_value(value_type)),
+                value: decoded,
                 is_null: value.is_none(),
             });
         }
@@ -169,24 +236,32 @@ impl ExecutionInputPreparer {
 
     fn build_access_events(
         result: &BatchResult,
-        type_map: &BTreeMap<(TableId, ColId), ValueType>,
+        type_runtimes: &TypeRuntimeRegistry,
+        profile_map: &BTreeMap<(TableId, ColId), ColumnValueProfile>,
     ) -> Result<BTreeMap<(TableId, ColId), Vec<AccessEvent>>, TabulaError> {
         let mut grouped: BTreeMap<(TableId, ColId), Vec<AccessEvent>> = BTreeMap::new();
 
         for (tx_index, event) in result.successful_events_with_tx() {
             let tc = (event.key.table, event.key.col);
-            type_map.get(&tc).ok_or_else(|| TabulaError::ProofError {
-                phase: "witness",
-                detail: format!(
-                    "no type for ({:?}, {:?}) in access event",
-                    event.key.table, event.key.col
-                ),
-            })?;
+            let profile = profile_map
+                .get(&tc)
+                .ok_or_else(|| TabulaError::ProofError {
+                    phase: "witness",
+                    detail: format!(
+                        "no sealed type/encoding profile for ({:?}, {:?}) in access event",
+                        event.key.table, event.key.col
+                    ),
+                })?;
+            let value = if event.val_is_null {
+                type_runtimes.zero_of(profile.type_id)?
+            } else {
+                Self::decode_column_value(type_runtimes, profile, &event.value)?
+            };
             grouped.entry(tc).or_default().push(AccessEvent {
                 key: event.key,
                 time: event.time,
                 is_write: event.op == OpKind::Write,
-                value: event.value,
+                value,
                 is_null: event.val_is_null,
                 tx_index,
                 effect_ordinal_in_tx: event.effect_ordinal_in_tx,
@@ -198,19 +273,29 @@ impl ExecutionInputPreparer {
 
     fn group_writes(
         result: &BatchResult,
-        type_map: &BTreeMap<(TableId, ColId), ValueType>,
+        type_runtimes: &TypeRuntimeRegistry,
+        profile_map: &BTreeMap<(TableId, ColId), ColumnValueProfile>,
     ) -> Result<LogicalColumnWritesByColumn, TabulaError> {
         let mut grouped: LogicalColumnWritesByColumn = BTreeMap::new();
 
         for (key, value) in &result.write_set_final {
             let tc = (key.table, key.col);
-            type_map.get(&tc).ok_or_else(|| TabulaError::ProofError {
-                phase: "witness",
-                detail: format!("no type for ({:?}, {:?}) in write set", key.table, key.col),
-            })?;
+            let profile = profile_map
+                .get(&tc)
+                .ok_or_else(|| TabulaError::ProofError {
+                    phase: "witness",
+                    detail: format!(
+                        "no sealed type/encoding profile for ({:?}, {:?}) in write set",
+                        key.table, key.col
+                    ),
+                })?;
+            let decoded = value
+                .as_ref()
+                .map(|value| Self::decode_column_value(type_runtimes, profile, value))
+                .transpose()?;
             grouped.entry(tc).or_default().push(ColumnWrite {
                 row: key.row,
-                value: *value,
+                value: decoded,
             });
         }
 
@@ -219,5 +304,23 @@ impl ExecutionInputPreparer {
         }
 
         Ok(grouped)
+    }
+
+    fn decode_column_value(
+        type_runtimes: &TypeRuntimeRegistry,
+        profile: &ColumnValueProfile,
+        value: &tabula_core::PortableValue,
+    ) -> Result<tabula_types::TypedValue, TabulaError> {
+        if value.type_id() != profile.type_id {
+            return Err(TabulaError::ProofError {
+                phase: "witness",
+                detail: format!(
+                    "portable value type {} does not match sealed column type {}",
+                    value.type_id().0,
+                    profile.type_id.0
+                ),
+            });
+        }
+        type_runtimes.decode_portable(value)
     }
 }

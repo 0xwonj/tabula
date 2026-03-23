@@ -1,8 +1,165 @@
 #![allow(missing_docs)]
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, ColumnDef, RowKey, TableSchema, Value, ValueType};
+use tabula_core::{ColId, ColumnDef, ColumnProfileId, PortableValue, RowKey, TableSchema, TypeId};
 use tabula_core::{TableId, TxTypeId};
 use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, Program, RowExpr, TxTypeDef, ValueExpr};
+use tabula_profile::{
+    ColumnProfile, CommitmentRole, ENCODING_BOOL_ID, ENCODING_BYTES32_ID, ENCODING_I64_ID,
+    ENCODING_U64_ID, ProfileCatalog, SCHEME_PROFILE_SSMC_ID, TYPE_BOOL_ID, TYPE_BYTES32_ID,
+    TYPE_I64_ID, TYPE_U64_ID, builtin_catalog,
+};
+
+fn some_type(type_id: TypeId) -> Option<TypeId> {
+    Some(type_id)
+}
+
+fn lit_u64(value: u64) -> ValueExpr {
+    ValueExpr::Literal(PortableValue::new(
+        TYPE_U64_ID,
+        borsh::to_vec(&value).expect("u64 literal"),
+    ))
+}
+
+fn lit_i64(value: i64) -> ValueExpr {
+    ValueExpr::Literal(PortableValue::new(
+        TYPE_I64_ID,
+        borsh::to_vec(&value).expect("i64 literal"),
+    ))
+}
+
+fn lit_bool(value: bool) -> ValueExpr {
+    ValueExpr::Literal(PortableValue::new(
+        TYPE_BOOL_ID,
+        borsh::to_vec(&value).expect("bool literal"),
+    ))
+}
+
+fn param(name: &str, type_id: TypeId) -> ParamDef {
+    ParamDef {
+        name: name.into(),
+        type_id,
+    }
+}
+
+fn single_column_schema(
+    table_id: TableId,
+    table_name: &str,
+    col_id: ColId,
+    col_name: &str,
+    type_id: TypeId,
+) -> (TableSchema, ProfileCatalog) {
+    let mut catalog = builtin_catalog().expect("built-in catalog");
+    let type_descriptor = catalog
+        .type_descriptor(type_id)
+        .cloned()
+        .expect("built-in type descriptor");
+    let encoding_id = match type_id {
+        TYPE_U64_ID => ENCODING_U64_ID,
+        TYPE_I64_ID => ENCODING_I64_ID,
+        TYPE_BOOL_ID => ENCODING_BOOL_ID,
+        TYPE_BYTES32_ID => ENCODING_BYTES32_ID,
+        other => panic!("unsupported built-in type id {}", other.0),
+    };
+    let encoding_profile = catalog
+        .encoding_profile(encoding_id)
+        .cloned()
+        .expect("built-in encoding profile");
+    let scheme_profile = catalog
+        .scheme_profile(SCHEME_PROFILE_SSMC_ID)
+        .cloned()
+        .expect("built-in ssmc profile");
+    let column_profile = ColumnProfile::new(
+        ColumnProfileId(0),
+        format!("{table_name}.{col_name}"),
+        None,
+        &type_descriptor,
+        &encoding_profile,
+        &scheme_profile,
+        CommitmentRole::IncludedInRoot,
+    )
+    .expect("column profile");
+    let column_profile_id = column_profile.column_profile_id;
+    catalog
+        .register_column(column_profile)
+        .expect("register column profile");
+    (
+        TableSchema {
+            id: table_id,
+            name: table_name.into(),
+            columns: vec![ColumnDef {
+                id: col_id,
+                name: col_name.into(),
+                column_profile_id,
+            }],
+        },
+        catalog,
+    )
+}
+
+fn schemas_with_columns(
+    specs: &[(TableId, &str, ColId, &str, TypeId)],
+) -> (Vec<TableSchema>, ProfileCatalog) {
+    use std::collections::BTreeMap;
+
+    let mut catalog = builtin_catalog().expect("built-in catalog");
+    let scheme_profile = catalog
+        .scheme_profile(SCHEME_PROFILE_SSMC_ID)
+        .cloned()
+        .expect("built-in ssmc profile");
+    let mut schemas: BTreeMap<TableId, TableSchema> = BTreeMap::new();
+
+    for (index, (table_id, table_name, col_id, col_name, type_id)) in specs.iter().enumerate() {
+        let type_descriptor = catalog
+            .type_descriptor(*type_id)
+            .cloned()
+            .expect("built-in type descriptor");
+        let encoding_profile = catalog
+            .encoding_profile(match *type_id {
+                TYPE_U64_ID => ENCODING_U64_ID,
+                TYPE_I64_ID => ENCODING_I64_ID,
+                TYPE_BOOL_ID => ENCODING_BOOL_ID,
+                TYPE_BYTES32_ID => ENCODING_BYTES32_ID,
+                other => panic!("unsupported built-in type id {}", other.0),
+            })
+            .cloned()
+            .expect("built-in encoding profile");
+        let column_profile = ColumnProfile::new(
+            ColumnProfileId(index as u32),
+            format!("{table_name}.{col_name}"),
+            None,
+            &type_descriptor,
+            &encoding_profile,
+            &scheme_profile,
+            CommitmentRole::IncludedInRoot,
+        )
+        .expect("column profile");
+        let column_profile_id = column_profile.column_profile_id;
+        catalog
+            .register_column(column_profile)
+            .expect("register column profile");
+
+        schemas
+            .entry(*table_id)
+            .or_insert_with(|| TableSchema {
+                id: *table_id,
+                name: (*table_name).into(),
+                columns: Vec::new(),
+            })
+            .columns
+            .push(ColumnDef {
+                id: *col_id,
+                name: (*col_name).into(),
+                column_profile_id,
+            });
+    }
+
+    let mut schemas: Vec<_> = schemas.into_values().collect();
+    schemas.sort_by_key(|schema| schema.id);
+    for schema in &mut schemas {
+        schema.columns.sort_by_key(|column| column.id);
+    }
+    (schemas, catalog)
+}
 
 /// NF-compliant transfer: reads row 0 and row 1 of (table 1, col 0),
 /// transfers `amount` (param 0) from row 0 to row 1.
@@ -10,10 +167,7 @@ fn transfer_def() -> TxTypeDef {
     TxTypeDef {
         id: TxTypeId(1),
         name: "transfer".into(),
-        param_schema: vec![ParamDef {
-            name: "amount".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("amount", TYPE_U64_ID)],
         body: vec![
             Instruction::Read {
                 dst_val: 0,
@@ -55,58 +209,63 @@ fn transfer_def() -> TxTypeDef {
                 row: RowExpr::Literal(RowKey(0)),
                 col: ColId(0),
                 src_val: ValueExpr::Slot(5),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_is_null: lit_bool(false),
             },
             Instruction::Write {
                 table: TableId(1),
                 row: RowExpr::Literal(RowKey(1)),
                 col: ColId(0),
                 src_val: ValueExpr::Slot(6),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_is_null: lit_bool(false),
             },
         ],
     }
 }
 
-fn balances_schema() -> TableSchema {
-    TableSchema {
-        id: TableId(1),
-        name: "balances".into(),
-        columns: vec![ColumnDef {
-            id: ColId(0),
-            name: "balance".into(),
-            value_type: ValueType::U64,
-        }],
+fn balances_program() -> Program {
+    let (schema, catalog) =
+        single_column_schema(TableId(1), "balances", ColId(0), "balance", TYPE_U64_ID);
+    let mut prog = Program::with_profile_catalog(catalog);
+    prog.add_schema(schema);
+    prog
+}
+
+fn program_with_columns(specs: &[(TableId, &str, ColId, &str, TypeId)]) -> Program {
+    let (schemas, catalog) = schemas_with_columns(specs);
+    let mut prog = Program::with_profile_catalog(catalog);
+    for schema in schemas {
+        prog.add_schema(schema);
     }
+    prog
 }
 
 #[test]
 fn test_register_valid_program() {
-    let mut prog = Program::new();
+    let mut prog = balances_program();
     prog.register(transfer_def()).unwrap();
     assert!(prog.resolve(TxTypeId(1)).is_ok());
 }
 
 #[test]
 fn test_type_info_inferred() {
-    let mut prog = Program::new();
+    let mut prog = balances_program();
     prog.register(transfer_def()).unwrap();
     let info = prog.type_info(TxTypeId(1)).unwrap();
 
-    // Slots 0, 2 = Read dst_val → None (unknown without table schema)
+    // Slots 0, 2 = Read dst_val → U64 from sealed profile-backed schema.
     // Slots 1, 3 = Read dst_is_null → Bool
-    assert_eq!(info.slot_types[0], None);
-    assert_eq!(info.slot_types[1], Some(ValueType::Bool));
-    assert_eq!(info.slot_types[2], None);
-    assert_eq!(info.slot_types[3], Some(ValueType::Bool));
+    assert_eq!(info.slot_types[0], some_type(TYPE_U64_ID));
+    assert_eq!(info.slot_types[1], some_type(TYPE_BOOL_ID));
+    assert_eq!(info.slot_types[2], some_type(TYPE_U64_ID));
+    assert_eq!(info.slot_types[3], some_type(TYPE_BOOL_ID));
     // Slot 4 = Cmp → Bool
-    assert_eq!(info.slot_types[4], Some(ValueType::Bool));
+    assert_eq!(info.slot_types[4], some_type(TYPE_BOOL_ID));
     // Slot 5 = Sub(Slot(0), Param(0)) → Param(0) is U64 → U64
-    assert_eq!(info.slot_types[5], Some(ValueType::U64));
+    assert_eq!(info.slot_types[5], some_type(TYPE_U64_ID));
     // Slot 6 = Add(Slot(2), Param(0)) → Param(0) is U64 → U64
-    assert_eq!(info.slot_types[6], Some(ValueType::U64));
+    assert_eq!(info.slot_types[6], some_type(TYPE_U64_ID));
     assert_eq!(info.max_slot, Some(6));
-    assert_eq!(info.param_types, vec![ValueType::U64]);
+    assert_eq!(info.param_types, vec![TYPE_U64_ID]);
 }
 
 #[test]
@@ -114,10 +273,7 @@ fn test_hash_produces_bytes32_type() {
     let def = TxTypeDef {
         id: TxTypeId(2),
         name: "hash_test".into(),
-        param_schema: vec![ParamDef {
-            name: "input".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("input", TYPE_U64_ID)],
         body: vec![Instruction::Hash {
             dst: 0,
             inputs: vec![ValueExpr::Param(0)],
@@ -126,7 +282,7 @@ fn test_hash_produces_bytes32_type() {
     let mut prog = Program::new();
     prog.register(def).unwrap();
     let info = prog.type_info(TxTypeId(2)).unwrap();
-    assert_eq!(info.slot_types[0], Some(ValueType::Bytes32));
+    assert_eq!(info.slot_types[0], some_type(TYPE_BYTES32_ID));
 }
 
 #[test]
@@ -139,8 +295,8 @@ fn test_param_out_of_bounds_rejected() {
             table: TableId(1),
             row: RowExpr::Param(0), // param 0 doesn't exist
             col: ColId(0),
-            src_val: ValueExpr::Literal(Value::U64(1)),
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_val: lit_u64(1),
+            src_is_null: lit_bool(false),
         }],
     };
     let mut prog = Program::new();
@@ -153,20 +309,16 @@ fn test_row_param_non_u64_rejected() {
     let def = TxTypeDef {
         id: TxTypeId(20),
         name: "bad_row_param".into(),
-        param_schema: vec![ParamDef {
-            name: "row".into(),
-            value_type: ValueType::Bool,
-        }],
+        param_schema: vec![param("row", TYPE_BOOL_ID)],
         body: vec![Instruction::Write {
             table: TableId(1),
             row: RowExpr::Param(0),
             col: ColId(0),
-            src_val: ValueExpr::Literal(Value::U64(1)),
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_val: lit_u64(1),
+            src_is_null: lit_bool(false),
         }],
     };
-    let mut prog = Program::new();
-    prog.add_schema(balances_schema());
+    let mut prog = balances_program();
     let err = prog.register(def).unwrap_err();
     assert!(matches!(
         err,
@@ -184,20 +336,19 @@ fn test_row_slot_non_u64_rejected() {
             Instruction::Cmp {
                 dst: 0,
                 op: CmpOp::Eq,
-                lhs: ValueExpr::Literal(Value::Bool(true)),
-                rhs: ValueExpr::Literal(Value::Bool(false)),
+                lhs: lit_bool(true),
+                rhs: lit_bool(false),
             },
             Instruction::Write {
                 table: TableId(1),
                 row: RowExpr::Slot(0),
                 col: ColId(0),
-                src_val: ValueExpr::Literal(Value::U64(1)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(1),
+                src_is_null: lit_bool(false),
             },
         ],
     };
-    let mut prog = Program::new();
-    prog.add_schema(balances_schema());
+    let mut prog = balances_program();
     let err = prog.register(def).unwrap_err();
     assert!(matches!(
         err,
@@ -215,7 +366,7 @@ fn test_slot_read_before_assign_rejected() {
             dst: 1,
             op: ArithOp::Add,
             lhs: ValueExpr::Slot(0), // slot 0 never assigned
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            rhs: lit_u64(1),
         }],
     };
     let mut prog = Program::new();
@@ -254,14 +405,14 @@ fn test_literal_type_inference() {
         body: vec![Instruction::Arith {
             dst: 0,
             op: ArithOp::Add,
-            lhs: ValueExpr::Literal(Value::I64(10)),
-            rhs: ValueExpr::Literal(Value::I64(20)),
+            lhs: lit_i64(10),
+            rhs: lit_i64(20),
         }],
     };
     let mut prog = Program::new();
     prog.register(def).unwrap();
     let info = prog.type_info(TxTypeId(6)).unwrap();
-    assert_eq!(info.slot_types[0], Some(ValueType::I64));
+    assert_eq!(info.slot_types[0], some_type(TYPE_I64_ID));
 }
 
 #[test]
@@ -269,16 +420,7 @@ fn test_operand_type_mismatch_rejected() {
     let def = TxTypeDef {
         id: TxTypeId(7),
         name: "bad_add".into(),
-        param_schema: vec![
-            ParamDef {
-                name: "a".into(),
-                value_type: ValueType::I64,
-            },
-            ParamDef {
-                name: "b".into(),
-                value_type: ValueType::U64,
-            },
-        ],
+        param_schema: vec![param("a", TYPE_I64_ID), param("b", TYPE_U64_ID)],
         body: vec![Instruction::Arith {
             dst: 0,
             op: ArithOp::Add,
@@ -293,14 +435,13 @@ fn test_operand_type_mismatch_rejected() {
 
 #[test]
 fn test_schema_infers_read_type() {
-    let mut prog = Program::new();
-    prog.add_schema(balances_schema());
+    let mut prog = balances_program();
     prog.register(transfer_def()).unwrap();
     let info = prog.type_info(TxTypeId(1)).unwrap();
-    assert_eq!(info.slot_types[0], Some(ValueType::U64));
-    assert_eq!(info.slot_types[1], Some(ValueType::Bool));
-    assert_eq!(info.slot_types[2], Some(ValueType::U64));
-    assert_eq!(info.slot_types[3], Some(ValueType::Bool));
+    assert_eq!(info.slot_types[0], some_type(TYPE_U64_ID));
+    assert_eq!(info.slot_types[1], some_type(TYPE_BOOL_ID));
+    assert_eq!(info.slot_types[2], some_type(TYPE_U64_ID));
+    assert_eq!(info.slot_types[3], some_type(TYPE_BOOL_ID));
 }
 
 #[test]
@@ -313,12 +454,11 @@ fn test_schema_write_type_mismatch() {
             table: TableId(1),
             row: RowExpr::Literal(RowKey(0)),
             col: ColId(0),
-            src_val: ValueExpr::Literal(Value::Bool(true)), // schema expects U64
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_val: lit_bool(true), // schema expects U64
+            src_is_null: lit_bool(false),
         }],
     };
-    let mut prog = Program::new();
-    prog.add_schema(balances_schema());
+    let mut prog = balances_program();
     let err = prog.register(def).unwrap_err();
     assert!(matches!(err, TabulaError::InvalidIr(_)));
 }
@@ -346,38 +486,28 @@ fn test_schema_write_unknown_src_accepted() {
             },
         ],
     };
-    let mut prog = Program::new();
-    prog.add_schema(balances_schema());
+    let mut prog = balances_program();
     prog.register(def).unwrap();
 }
 
 #[test]
 fn test_no_schema_read_type_unknown() {
     let mut prog = Program::new();
-    prog.register(transfer_def()).unwrap();
-    let info = prog.type_info(TxTypeId(1)).unwrap();
-    assert_eq!(info.slot_types[0], None);
-    assert_eq!(info.slot_types[1], Some(ValueType::Bool));
+    let err = prog.register(transfer_def()).unwrap_err();
+    assert!(matches!(
+        err,
+        TabulaError::InvalidIr(ref msg) if msg.contains("schema is missing table 1 col 0")
+    ));
 }
 
 #[test]
 fn test_lookup_type_from_schema() {
-    let schema = TableSchema {
-        id: TableId(99),
-        name: "config".into(),
-        columns: vec![ColumnDef {
-            id: ColId(0),
-            name: "flag".into(),
-            value_type: ValueType::Bool,
-        }],
-    };
+    let (schema, catalog) =
+        single_column_schema(TableId(99), "config", ColId(0), "flag", TYPE_BOOL_ID);
     let def = TxTypeDef {
         id: TxTypeId(12),
         name: "lookup_test".into(),
-        param_schema: vec![ParamDef {
-            name: "key".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("key", TYPE_U64_ID)],
         body: vec![Instruction::Lookup {
             dst: 0,
             static_table: TableId(99),
@@ -385,11 +515,11 @@ fn test_lookup_type_from_schema() {
             row: RowExpr::Param(0),
         }],
     };
-    let mut prog = Program::new();
+    let mut prog = Program::with_profile_catalog(catalog);
     prog.add_schema(schema);
     prog.register(def).unwrap();
     let info = prog.type_info(TxTypeId(12)).unwrap();
-    assert_eq!(info.slot_types[0], Some(ValueType::Bool));
+    assert_eq!(info.slot_types[0], some_type(TYPE_BOOL_ID));
 }
 
 #[test]
@@ -398,18 +528,9 @@ fn test_select_type_inference() {
         id: TxTypeId(16),
         name: "select_test".into(),
         param_schema: vec![
-            ParamDef {
-                name: "flag".into(),
-                value_type: ValueType::Bool,
-            },
-            ParamDef {
-                name: "a".into(),
-                value_type: ValueType::U64,
-            },
-            ParamDef {
-                name: "b".into(),
-                value_type: ValueType::U64,
-            },
+            param("flag", TYPE_BOOL_ID),
+            param("a", TYPE_U64_ID),
+            param("b", TYPE_U64_ID),
         ],
         body: vec![Instruction::Select {
             dst: 0,
@@ -421,7 +542,7 @@ fn test_select_type_inference() {
     let mut prog = Program::new();
     prog.register(def).unwrap();
     let info = prog.type_info(TxTypeId(16)).unwrap();
-    assert_eq!(info.slot_types[0], Some(ValueType::U64));
+    assert_eq!(info.slot_types[0], some_type(TYPE_U64_ID));
 }
 
 #[test]
@@ -430,18 +551,9 @@ fn test_select_branch_type_mismatch_rejected() {
         id: TxTypeId(17),
         name: "select_mismatch".into(),
         param_schema: vec![
-            ParamDef {
-                name: "flag".into(),
-                value_type: ValueType::Bool,
-            },
-            ParamDef {
-                name: "a".into(),
-                value_type: ValueType::U64,
-            },
-            ParamDef {
-                name: "b".into(),
-                value_type: ValueType::I64,
-            },
+            param("flag", TYPE_BOOL_ID),
+            param("a", TYPE_U64_ID),
+            param("b", TYPE_I64_ID),
         ],
         body: vec![Instruction::Select {
             dst: 0,
@@ -460,15 +572,12 @@ fn test_select_non_bool_cond_rejected() {
     let def = TxTypeDef {
         id: TxTypeId(18),
         name: "select_bad_cond".into(),
-        param_schema: vec![ParamDef {
-            name: "x".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("x", TYPE_U64_ID)],
         body: vec![Instruction::Select {
             dst: 0,
             cond: ValueExpr::Param(0), // U64, not Bool
-            if_true: ValueExpr::Literal(Value::U64(1)),
-            if_false: ValueExpr::Literal(Value::U64(2)),
+            if_true: lit_u64(1),
+            if_false: lit_u64(2),
         }],
     };
     let mut prog = Program::new();
@@ -481,28 +590,19 @@ fn test_ssa_violation_rejected() {
     let def = TxTypeDef {
         id: TxTypeId(13),
         name: "ssa_violate".into(),
-        param_schema: vec![
-            ParamDef {
-                name: "a".into(),
-                value_type: ValueType::U64,
-            },
-            ParamDef {
-                name: "b".into(),
-                value_type: ValueType::U64,
-            },
-        ],
+        param_schema: vec![param("a", TYPE_U64_ID), param("b", TYPE_U64_ID)],
         body: vec![
             Instruction::Arith {
                 dst: 0,
                 op: ArithOp::Add,
                 lhs: ValueExpr::Param(0),
-                rhs: ValueExpr::Literal(Value::U64(1)),
+                rhs: lit_u64(1),
             },
             Instruction::Arith {
                 dst: 0, // SSA violation
                 op: ArithOp::Add,
                 lhs: ValueExpr::Param(1),
-                rhs: ValueExpr::Literal(Value::U64(2)),
+                rhs: lit_u64(2),
             },
         ],
     };
@@ -516,22 +616,19 @@ fn test_ssa_distinct_slots_accepted() {
     let def = TxTypeDef {
         id: TxTypeId(14),
         name: "ssa_valid".into(),
-        param_schema: vec![ParamDef {
-            name: "x".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("x", TYPE_U64_ID)],
         body: vec![
             Instruction::Arith {
                 dst: 0,
                 op: ArithOp::Add,
                 lhs: ValueExpr::Param(0),
-                rhs: ValueExpr::Literal(Value::U64(1)),
+                rhs: lit_u64(1),
             },
             Instruction::Arith {
                 dst: 1,
                 op: ArithOp::Add,
                 lhs: ValueExpr::Slot(0),
-                rhs: ValueExpr::Literal(Value::U64(2)),
+                rhs: lit_u64(2),
             },
         ],
     };
@@ -544,22 +641,19 @@ fn test_ssa_divmod_both_slots_unique() {
     let def = TxTypeDef {
         id: TxTypeId(15),
         name: "divmod_ssa".into(),
-        param_schema: vec![ParamDef {
-            name: "x".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("x", TYPE_U64_ID)],
         body: vec![
             Instruction::Arith {
                 dst: 0,
                 op: ArithOp::Add,
                 lhs: ValueExpr::Param(0),
-                rhs: ValueExpr::Literal(Value::U64(1)),
+                rhs: lit_u64(1),
             },
             Instruction::DivMod {
                 dst_q: 1,
                 dst_r: 0, // SSA violation
                 lhs: ValueExpr::Slot(0),
-                rhs: ValueExpr::Literal(Value::U64(3)),
+                rhs: lit_u64(3),
             },
         ],
     };
@@ -573,16 +667,7 @@ fn test_ssa_divmod_same_dst_rejected() {
     let def = TxTypeDef {
         id: TxTypeId(19),
         name: "divmod_same_dst".into(),
-        param_schema: vec![
-            ParamDef {
-                name: "a".into(),
-                value_type: ValueType::U64,
-            },
-            ParamDef {
-                name: "b".into(),
-                value_type: ValueType::U64,
-            },
-        ],
+        param_schema: vec![param("a", TYPE_U64_ID), param("b", TYPE_U64_ID)],
         body: vec![Instruction::DivMod {
             dst_q: 0,
             dst_r: 0, // SSA violation: same slot
@@ -601,7 +686,7 @@ fn test_ssa_divmod_same_dst_rejected() {
 
 #[test]
 fn test_nf_transfer_passes() {
-    let mut prog = Program::new();
+    let mut prog = balances_program();
     prog.register(transfer_def()).unwrap();
 }
 
@@ -629,7 +714,7 @@ fn test_nf1_duplicate_read_canonicalized() {
             },
         ],
     };
-    let mut prog = Program::new();
+    let mut prog = balances_program();
     prog.register(def).unwrap(); // should succeed after canonicalization
 }
 
@@ -638,28 +723,25 @@ fn test_nf2_duplicate_write_rejected() {
     let def = TxTypeDef {
         id: TxTypeId(31),
         name: "dup_write".into(),
-        param_schema: vec![ParamDef {
-            name: "v".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("v", TYPE_U64_ID)],
         body: vec![
             Instruction::Write {
                 table: TableId(1),
                 col: ColId(0),
                 row: RowExpr::Param(0),
-                src_val: ValueExpr::Literal(Value::U64(1)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(1),
+                src_is_null: lit_bool(false),
             },
             Instruction::Write {
                 table: TableId(1),
                 col: ColId(0),
                 row: RowExpr::Param(0),
-                src_val: ValueExpr::Literal(Value::U64(2)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(2),
+                src_is_null: lit_bool(false),
             },
         ],
     };
-    let mut prog = Program::new();
+    let mut prog = balances_program();
     let err = prog.register(def).unwrap_err();
     assert!(matches!(
         err,
@@ -682,8 +764,8 @@ fn test_nf3_read_after_write_rejected() {
                 table: TableId(1),
                 col: ColId(0),
                 row: RowExpr::Literal(RowKey(5)),
-                src_val: ValueExpr::Literal(Value::U64(42)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(42),
+                src_is_null: lit_bool(false),
             },
             Instruction::Read {
                 dst_val: 0,
@@ -694,7 +776,7 @@ fn test_nf3_read_after_write_rejected() {
             },
         ],
     };
-    let mut prog = Program::new();
+    let mut prog = balances_program();
     let err = prog.register(def).unwrap_err();
     assert!(matches!(
         err,
@@ -712,16 +794,13 @@ fn test_nf4_write_involved_ambiguous_auto_guarded() {
     let def = TxTypeDef {
         id: TxTypeId(33),
         name: "ambiguous".into(),
-        param_schema: vec![ParamDef {
-            name: "row".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("row", TYPE_U64_ID)],
         body: vec![
             Instruction::Arith {
                 dst: 0,
                 op: ArithOp::Add,
                 lhs: ValueExpr::Param(0),
-                rhs: ValueExpr::Literal(Value::U64(1)),
+                rhs: lit_u64(1),
             },
             Instruction::Read {
                 dst_val: 1,
@@ -734,12 +813,12 @@ fn test_nf4_write_involved_ambiguous_auto_guarded() {
                 table: TableId(1),
                 col: ColId(0),
                 row: RowExpr::Param(0),
-                src_val: ValueExpr::Literal(Value::U64(99)),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_val: lit_u64(99),
+                src_is_null: lit_bool(false),
             },
         ],
     };
-    let mut prog = Program::new();
+    let mut prog = balances_program();
     prog.register(def).unwrap(); // succeeds: canonicalize inserts guard
 }
 
@@ -749,16 +828,7 @@ fn test_nf4_read_read_ambiguous_allowed() {
     let def = TxTypeDef {
         id: TxTypeId(34),
         name: "diff_params".into(),
-        param_schema: vec![
-            ParamDef {
-                name: "a".into(),
-                value_type: ValueType::U64,
-            },
-            ParamDef {
-                name: "b".into(),
-                value_type: ValueType::U64,
-            },
-        ],
+        param_schema: vec![param("a", TYPE_U64_ID), param("b", TYPE_U64_ID)],
         body: vec![
             Instruction::Read {
                 dst_val: 0,
@@ -776,7 +846,7 @@ fn test_nf4_read_read_ambiguous_allowed() {
             },
         ],
     };
-    let mut prog = Program::new();
+    let mut prog = balances_program();
     prog.register(def).unwrap(); // succeeds: read-read ambiguous is safe
 }
 
@@ -799,11 +869,11 @@ fn test_nf_distinct_literal_rows_accepted() {
                 col: ColId(0),
                 row: RowExpr::Literal(RowKey(1)),
                 src_val: ValueExpr::Slot(0),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_is_null: lit_bool(false),
             },
         ],
     };
-    let mut prog = Program::new();
+    let mut prog = balances_program();
     prog.register(def).unwrap();
 }
 
@@ -826,11 +896,11 @@ fn test_nf_read_then_write_same_cell_accepted() {
                 col: ColId(0),
                 row: RowExpr::Literal(RowKey(0)),
                 src_val: ValueExpr::Slot(0),
-                src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                src_is_null: lit_bool(false),
             },
         ],
     };
-    let mut prog = Program::new();
+    let mut prog = balances_program();
     prog.register(def).unwrap();
 }
 
@@ -839,10 +909,7 @@ fn test_nf_different_tables_no_conflict() {
     let def = TxTypeDef {
         id: TxTypeId(37),
         name: "diff_tables".into(),
-        param_schema: vec![ParamDef {
-            name: "r".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("r", TYPE_U64_ID)],
         body: vec![
             Instruction::Read {
                 dst_val: 0,
@@ -860,7 +927,10 @@ fn test_nf_different_tables_no_conflict() {
             },
         ],
     };
-    let mut prog = Program::new();
+    let mut prog = program_with_columns(&[
+        (TableId(1), "balances", ColId(0), "balance", TYPE_U64_ID),
+        (TableId(2), "balances_2", ColId(0), "balance", TYPE_U64_ID),
+    ]);
     prog.register(def).unwrap();
 }
 
@@ -869,10 +939,7 @@ fn test_nf_different_columns_no_conflict() {
     let def = TxTypeDef {
         id: TxTypeId(38),
         name: "diff_cols".into(),
-        param_schema: vec![ParamDef {
-            name: "r".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("r", TYPE_U64_ID)],
         body: vec![
             Instruction::Read {
                 dst_val: 0,
@@ -890,7 +957,10 @@ fn test_nf_different_columns_no_conflict() {
             },
         ],
     };
-    let mut prog = Program::new();
+    let mut prog = program_with_columns(&[
+        (TableId(1), "balances", ColId(0), "balance", TYPE_U64_ID),
+        (TableId(1), "balances", ColId(1), "pending", TYPE_U64_ID),
+    ]);
     prog.register(def).unwrap();
 }
 
@@ -900,10 +970,7 @@ fn test_nf_same_param_read_canonicalized() {
     let def = TxTypeDef {
         id: TxTypeId(39),
         name: "same_param_read".into(),
-        param_schema: vec![ParamDef {
-            name: "r".into(),
-            value_type: ValueType::U64,
-        }],
+        param_schema: vec![param("r", TYPE_U64_ID)],
         body: vec![
             Instruction::Read {
                 dst_val: 0,
@@ -921,6 +988,6 @@ fn test_nf_same_param_read_canonicalized() {
             },
         ],
     };
-    let mut prog = Program::new();
+    let mut prog = balances_program();
     prog.register(def).unwrap(); // should succeed after canonicalization
 }

@@ -1,15 +1,22 @@
 //! Interpreter benchmarks.
 
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, StateView, StaticTableProvider};
-use tabula_core::{CellKey, ColId, RowKey, TableId, TableSchema, Value};
+use tabula_core::{
+    CellKey, ColId, ColumnDef, ColumnProfileId, PortableValue, RowKey, TableId, TableSchema,
+};
 use tabula_ir::{ArithOp, CmpOp, Instruction, RowExpr, ValueExpr};
-use tabula_testing::fixtures::schema::single_u64_column_schema;
+use tabula_profile::{
+    ColumnProfile, CommitmentRole, ENCODING_U64_ID, ProfileCatalog, SCHEME_PROFILE_SSMC_ID,
+    TYPE_U64_ID, builtin_catalog,
+};
 use tabula_testing::fixtures::state::cell_key;
+use tabula_types::{TypeRuntimeRegistry, bool_portable, u64_portable};
 
 use tabula_executor::interpreter::{ExecContext, execute};
 use tabula_executor::overlay::Overlay;
@@ -17,11 +24,11 @@ use tabula_executor::property::PropertyQueryRegistry;
 
 // ── Test doubles ─────────────────────────────────────────────────────
 
-struct BenchSnapshot(BTreeMap<CellKey, Value>);
+struct BenchSnapshot(BTreeMap<CellKey, PortableValue>);
 
 impl StateView for BenchSnapshot {
-    fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
-        Ok(self.0.get(key).copied())
+    fn read(&self, key: &CellKey) -> Result<Option<PortableValue>, TabulaError> {
+        Ok(self.0.get(key).cloned())
     }
     fn table_exists(&self, _: TableId) -> bool {
         true
@@ -49,21 +56,71 @@ impl Hasher for XorHasher {
 struct TestStaticTables;
 
 impl StaticTableProvider for TestStaticTables {
-    fn lookup(&self, _: TableId, key: RowKey, _: ColId) -> Result<Value, TabulaError> {
-        Ok(Value::U64(key.0))
+    fn lookup(&self, _: TableId, key: RowKey, _: ColId) -> Result<PortableValue, TabulaError> {
+        Ok(u64_portable(key.0))
     }
     fn contains(&self, _: TableId, _: RowKey) -> Result<bool, TabulaError> {
         Ok(true)
     }
 }
 
-fn test_schemas() -> BTreeMap<TableId, TableSchema> {
-    let mut m = BTreeMap::new();
-    m.insert(
+fn portable(value: PortableValue) -> PortableValue {
+    value
+}
+
+fn lit(value: PortableValue) -> ValueExpr {
+    ValueExpr::Literal(portable(value))
+}
+
+fn type_runtimes() -> &'static TypeRuntimeRegistry {
+    static TYPE_RUNTIMES: OnceLock<TypeRuntimeRegistry> = OnceLock::new();
+    TYPE_RUNTIMES.get_or_init(|| TypeRuntimeRegistry::seeded().expect("seeded type runtimes"))
+}
+
+fn test_schema_bundle() -> (BTreeMap<TableId, TableSchema>, ProfileCatalog) {
+    let mut catalog = builtin_catalog().expect("built-in catalog");
+    let type_descriptor = catalog
+        .type_descriptor(TYPE_U64_ID)
+        .cloned()
+        .expect("u64 type descriptor");
+    let encoding_profile = catalog
+        .encoding_profile(ENCODING_U64_ID)
+        .cloned()
+        .expect("u64 encoding");
+    let scheme_profile = catalog
+        .scheme_profile(SCHEME_PROFILE_SSMC_ID)
+        .cloned()
+        .expect("ssmc scheme");
+    let column_profile = ColumnProfile::new(
+        ColumnProfileId(0),
+        "test.val",
+        None,
+        &type_descriptor,
+        &encoding_profile,
+        &scheme_profile,
+        CommitmentRole::IncludedInRoot,
+    )
+    .expect("column profile");
+    let column_profile_id = column_profile.column_profile_id;
+    catalog
+        .register_column(column_profile)
+        .expect("register column");
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert(
         TableId(1),
-        single_u64_column_schema(TableId(1), ColId(0), "test", "val"),
+        TableSchema {
+            id: TableId(1),
+            name: "test".into(),
+            columns: vec![ColumnDef {
+                id: ColId(0),
+                name: "val".into(),
+                column_profile_id,
+            }],
+        },
     );
-    m
+
+    (schemas, catalog)
 }
 
 // ── Benchmarks ───────────────────────────────────────────────────────
@@ -74,15 +131,15 @@ fn bench_arith_chain(c: &mut Criterion) {
     instrs.push(Instruction::Arith {
         dst: 0,
         op: ArithOp::Add,
-        lhs: ValueExpr::Literal(Value::U64(1)),
-        rhs: ValueExpr::Literal(Value::U64(2)),
+        lhs: lit(u64_portable(1)),
+        rhs: lit(u64_portable(2)),
     });
     for i in 1..100u32 {
         instrs.push(Instruction::Arith {
             dst: i as u16,
             op: ArithOp::Add,
             lhs: ValueExpr::Slot((i - 1) as u16),
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            rhs: lit(u64_portable(1)),
         });
     }
     instrs.push(Instruction::Write {
@@ -90,16 +147,18 @@ fn bench_arith_chain(c: &mut Criterion) {
         row: RowExpr::Literal(RowKey(0)),
         col: ColId(0),
         src_val: ValueExpr::Slot(99),
-        src_is_null: ValueExpr::Literal(Value::Bool(false)),
+        src_is_null: lit(bool_portable(false)),
     });
 
     let snap = BenchSnapshot(BTreeMap::new());
-    let schemas = test_schemas();
+    let (schemas, profile_catalog) = test_schema_bundle();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
+        type_runtimes: type_runtimes(),
         schemas: &schemas,
+        profile_catalog: &profile_catalog,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,
@@ -107,8 +166,8 @@ fn bench_arith_chain(c: &mut Criterion) {
 
     c.bench_function("arith_chain_100", |b| {
         b.iter(|| {
-            let mut ov = Overlay::new(&snap);
-            execute(&instrs, &[], &mut ov, &ctx).unwrap();
+            let mut ov = Overlay::new(&snap, type_runtimes());
+            execute(0, &instrs, &[], &mut ov, &ctx).unwrap();
         });
     });
 }
@@ -117,7 +176,7 @@ fn bench_read_write_mix(c: &mut Criterion) {
     // 50 reads from state + 50 writes.
     let mut data = BTreeMap::new();
     for i in 0..50u64 {
-        data.insert(cell_key(1, i, 0), Value::U64(i * 10));
+        data.insert(cell_key(1, i, 0), portable(u64_portable(i * 10)));
     }
 
     let mut instrs = Vec::new();
@@ -136,17 +195,19 @@ fn bench_read_write_mix(c: &mut Criterion) {
             row: RowExpr::Literal(RowKey(i as u64)),
             col: ColId(0),
             src_val: ValueExpr::Slot(i as u16 * 2),
-            src_is_null: ValueExpr::Literal(Value::Bool(false)),
+            src_is_null: lit(bool_portable(false)),
         });
     }
 
     let snap = BenchSnapshot(data);
-    let schemas = test_schemas();
+    let (schemas, profile_catalog) = test_schema_bundle();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
+        type_runtimes: type_runtimes(),
         schemas: &schemas,
+        profile_catalog: &profile_catalog,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,
@@ -154,8 +215,8 @@ fn bench_read_write_mix(c: &mut Criterion) {
 
     c.bench_function("read_write_50_50", |b| {
         b.iter(|| {
-            let mut ov = Overlay::new(&snap);
-            execute(&instrs, &[], &mut ov, &ctx).unwrap();
+            let mut ov = Overlay::new(&snap, type_runtimes());
+            execute(0, &instrs, &[], &mut ov, &ctx).unwrap();
         });
     });
 }
@@ -167,8 +228,8 @@ fn bench_cmp_assert(c: &mut Criterion) {
         instrs.push(Instruction::Cmp {
             dst: i as u16,
             op: CmpOp::Lt,
-            lhs: ValueExpr::Literal(Value::U64(i as u64)),
-            rhs: ValueExpr::Literal(Value::U64(i as u64 + 1)),
+            lhs: lit(u64_portable(i as u64)),
+            rhs: lit(u64_portable(i as u64 + 1)),
         });
         instrs.push(Instruction::Assert {
             cond: ValueExpr::Slot(i as u16),
@@ -176,12 +237,14 @@ fn bench_cmp_assert(c: &mut Criterion) {
     }
 
     let snap = BenchSnapshot(BTreeMap::new());
-    let schemas = test_schemas();
+    let (schemas, profile_catalog) = test_schema_bundle();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
+        type_runtimes: type_runtimes(),
         schemas: &schemas,
+        profile_catalog: &profile_catalog,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,
@@ -189,8 +252,8 @@ fn bench_cmp_assert(c: &mut Criterion) {
 
     c.bench_function("cmp_assert_100", |b| {
         b.iter(|| {
-            let mut ov = Overlay::new(&snap);
-            execute(&instrs, &[], &mut ov, &ctx).unwrap();
+            let mut ov = Overlay::new(&snap, type_runtimes());
+            execute(0, &instrs, &[], &mut ov, &ctx).unwrap();
         });
     });
 }

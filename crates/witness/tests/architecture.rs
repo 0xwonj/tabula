@@ -8,7 +8,7 @@ fn crate_root() -> &'static Path {
 }
 
 #[test]
-fn root_surface_does_not_reexport_legacy_witness_types() {
+fn root_surface_does_not_reexport_old_witness_types() {
     let lib = fs::read_to_string(crate_root().join("src/lib.rs")).expect("read lib.rs");
 
     assert!(
@@ -38,7 +38,6 @@ fn root_surface_does_not_reexport_legacy_witness_types() {
         "TemplateId",
         "LiteralCell",
         "proof_column_commitment",
-        "ExecutionInputPreparer",
     ] {
         assert!(
             !lib.contains(forbidden),
@@ -51,12 +50,20 @@ fn root_surface_does_not_reexport_legacy_witness_types() {
         ),
         "root must expose the minimal preparation seam"
     );
-    assert!(
-        lib.contains(
-            "pub use types::{AccessEvent, ColumnWrite, CommittedEntry, InitCell, PropertyReadClaim};"
-        ),
-        "root must expose logical preparation types"
-    );
+    for required in [
+        "pub use types::{",
+        "AccessEvent",
+        "ColumnValueProfile",
+        "ColumnWrite",
+        "CommittedEntry",
+        "InitCell",
+        "PropertyReadClaim",
+    ] {
+        assert!(
+            lib.contains(required),
+            "root must expose logical preparation type surface '{required}'"
+        );
+    }
     assert!(
         lib.contains("pub mod stark;"),
         "witness crate must expose STARK-specific helpers under a namespaced module"
@@ -143,26 +150,24 @@ fn stark_module_keeps_low_level_memory_helpers_internal() {
 }
 
 #[test]
-fn trace_encoding_helpers_are_local_to_witness_stark() {
-    let encoding =
-        fs::read_to_string(crate_root().join("src/stark/encoding.rs")).expect("read encoding.rs");
+fn trace_encoding_helpers_do_not_live_in_witness() {
+    assert!(
+        !crate_root().join("src/stark/encoding.rs").exists(),
+        "trace/null encoding behavior should live in tabula-types, not witness"
+    );
 
-    for required in [
-        "pub(crate) fn trace_width(",
-        "pub(crate) fn encode_trace(",
-        "pub(crate) fn decode_trace(",
-    ] {
-        assert!(
-            encoding.contains(required),
-            "trace encoding helpers should live in witness::stark::encoding: {required}"
-        );
-    }
+    let stark_mod =
+        fs::read_to_string(crate_root().join("src/stark/mod.rs")).expect("read stark mod.rs");
+    assert!(
+        !stark_mod.contains("mod encoding;"),
+        "witness stark module must not own a separate encoding behavior layer"
+    );
 
     let lib = fs::read_to_string(crate_root().join("src/lib.rs")).expect("read lib.rs");
-    assert!(
-        !lib.contains("encode_trace")
-            && !lib.contains("decode_trace")
-            && !lib.contains("trace_width"),
-        "trace encoding helpers must not leak into the witness root surface"
-    );
+    for forbidden in ["encode_trace", "decode_trace", "trace_width"] {
+        assert!(
+            !lib.contains(forbidden),
+            "trace encoding helpers must not leak into the witness root surface: {forbidden}"
+        );
+    }
 }

@@ -1,18 +1,21 @@
 //! Expression lowering methods for TxLower.
 
 use super::{
-    Binding, CompileError, ErrorKind, Instruction, LoweredExpr, TxLower, Value, ValueExpr,
-    ValueType, is_arithmetic,
+    Binding, CompileError, ErrorKind, Instruction, LoweredExpr, TxLower, ValueExpr,
+    builtin_bool_literal, builtin_bytes32_literal, builtin_u64_literal, is_arithmetic,
+    synthesize_canonical_zero,
 };
 
+use tabula_core::TypeId;
 use tabula_ir::{ArithOp, CmpOp, RowExpr};
+use tabula_profile::{TYPE_I64_ID, TYPE_U64_ID};
 
 use crate::ast::{BinOp, Expr, ExprKind, UnaryOp};
 
 impl<'a> TxLower<'a> {
     /// Lower an expression that needs its own slot (for arithmetic results).
     /// Returns (LoweredExpr, inferred type).
-    pub(super) fn lower_expr_to_slot(&mut self, expr: &Expr) -> Option<(LoweredExpr, ValueType)> {
+    pub(super) fn lower_expr_to_slot(&mut self, expr: &Expr) -> Option<(LoweredExpr, TypeId)> {
         match &expr.kind {
             ExprKind::BinOp { op, lhs, rhs } if is_arithmetic(*op) => {
                 let lhs_ve = self.lower_value_expr(lhs)?;
@@ -20,7 +23,7 @@ impl<'a> TxLower<'a> {
                 let ty = self
                     .expr_type(lhs)
                     .or_else(|| self.expr_type(rhs))
-                    .unwrap_or(ValueType::U64);
+                    .unwrap_or(TYPE_U64_ID);
                 let dst = self.alloc_slot();
                 let instr = match op {
                     BinOp::Add => Instruction::Arith {
@@ -74,12 +77,25 @@ impl<'a> TxLower<'a> {
             } => {
                 // -x  ⟹  Sub(dst, Literal(0), x)
                 let operand_ve = self.lower_value_expr(operand)?;
-                let ty = self.expr_type(operand).unwrap_or(ValueType::I64);
+                let ty = self.expr_type(operand).unwrap_or(TYPE_I64_ID);
                 let dst = self.alloc_slot();
+                let zero = match synthesize_canonical_zero(self.registry, ty, false) {
+                    Ok(zero) => zero,
+                    Err(detail) => {
+                        self.errors.push(CompileError::new(
+                            ErrorKind::TypeMismatch,
+                            expr.span,
+                            format!(
+                                "unary negation requires a statically synthesizable zero: {detail}"
+                            ),
+                        ));
+                        return None;
+                    }
+                };
                 self.instructions.push(Instruction::Arith {
                     dst,
                     op: ArithOp::Sub,
-                    lhs: ValueExpr::Literal(tabula_core::zero_value(ty)),
+                    lhs: ValueExpr::Literal(zero),
                     rhs: operand_ve,
                 });
                 Some((LoweredExpr::Slot(dst), ty))
@@ -87,7 +103,7 @@ impl<'a> TxLower<'a> {
             // For non-arithmetic expressions, just return as ValueExpr.
             _ => {
                 let ve = self.lower_value_expr(expr)?;
-                let ty = self.expr_type(expr).unwrap_or(ValueType::U64);
+                let ty = self.expr_type(expr).unwrap_or(TYPE_U64_ID);
                 Some((LoweredExpr::ValueExpr(ve, ty), ty))
             }
         }
@@ -96,9 +112,9 @@ impl<'a> TxLower<'a> {
     /// Lower an expression to a ValueExpr (for use as instruction operands).
     pub(super) fn lower_value_expr(&mut self, expr: &Expr) -> Option<ValueExpr> {
         match &expr.kind {
-            ExprKind::IntLit(n) => Some(ValueExpr::Literal(Value::U64(*n))),
-            ExprKind::BoolLit(b) => Some(ValueExpr::Literal(Value::Bool(*b))),
-            ExprKind::HexLit(b) => Some(ValueExpr::Literal(Value::Bytes32(*b))),
+            ExprKind::IntLit(n) => Some(ValueExpr::Literal(builtin_u64_literal(*n))),
+            ExprKind::BoolLit(b) => Some(ValueExpr::Literal(builtin_bool_literal(*b))),
+            ExprKind::HexLit(b) => Some(ValueExpr::Literal(builtin_bytes32_literal(*b))),
             ExprKind::Null => {
                 self.errors.push(CompileError::new(
                     ErrorKind::TypeMismatch,
@@ -201,39 +217,52 @@ impl<'a> TxLower<'a> {
                 if let Some(binding) = self.locals.get(name).cloned() {
                     match binding {
                         Binding::Slot(slot, ty) => {
-                            if ty != ValueType::U64 {
+                            if ty != TYPE_U64_ID {
                                 self.errors.push(CompileError::new(
                                     ErrorKind::TypeMismatch,
                                     expr.span,
-                                    format!("row key expression must have type u64, found {ty:?}"),
+                                    format!(
+                                        "row key expression must have type u64, found type id {}",
+                                        ty.0
+                                    ),
                                 ));
                                 return None;
                             }
                             Some(RowExpr::Slot(slot))
                         }
                         Binding::ReadSlot { val, ty, .. } => {
-                            if ty != ValueType::U64 {
+                            if ty != TYPE_U64_ID {
                                 self.errors.push(CompileError::new(
                                     ErrorKind::TypeMismatch,
                                     expr.span,
-                                    format!("row key expression must have type u64, found {ty:?}"),
+                                    format!(
+                                        "row key expression must have type u64, found type id {}",
+                                        ty.0
+                                    ),
                                 ));
                                 return None;
                             }
                             Some(RowExpr::Slot(val))
                         }
                         Binding::Alias(value_expr, ty) => {
-                            if ty != ValueType::U64 {
+                            if ty != TYPE_U64_ID {
                                 self.errors.push(CompileError::new(
                                     ErrorKind::TypeMismatch,
                                     expr.span,
-                                    format!("row key expression must have type u64, found {ty:?}"),
+                                    format!(
+                                        "row key expression must have type u64, found type id {}",
+                                        ty.0
+                                    ),
                                 ));
                                 return None;
                             }
                             match value_expr {
-                                ValueExpr::Literal(Value::U64(n)) => {
-                                    Some(RowExpr::Literal(tabula_core::RowKey(n)))
+                                ValueExpr::Literal(value) if value.type_id() == TYPE_U64_ID => {
+                                    let payload: [u8; 8] =
+                                        value.payload().try_into().expect("u64 literal payload");
+                                    Some(RowExpr::Literal(tabula_core::RowKey(u64::from_le_bytes(
+                                        payload,
+                                    ))))
                                 }
                                 ValueExpr::Slot(slot) => Some(RowExpr::Slot(slot)),
                                 ValueExpr::Param(param) => Some(RowExpr::Param(param)),
@@ -242,8 +271,8 @@ impl<'a> TxLower<'a> {
                                         ErrorKind::TypeMismatch,
                                         expr.span,
                                         format!(
-                                            "row key expression must have type u64, found {}",
-                                            other.type_name()
+                                            "row key expression must have type u64, found type id {}",
+                                            other.type_id().0
                                         ),
                                     ));
                                     None
@@ -251,12 +280,15 @@ impl<'a> TxLower<'a> {
                             }
                         }
                     }
-                } else if let Some((idx, ty)) = self.params.get(name) {
-                    if *ty != ValueType::U64 {
+                } else if let Some((idx, type_id)) = self.params.get(name) {
+                    if *type_id != TYPE_U64_ID {
                         self.errors.push(CompileError::new(
                             ErrorKind::TypeMismatch,
                             expr.span,
-                            format!("row key expression must have type u64, found {ty:?}"),
+                            format!(
+                                "row key expression must have type u64, found type id {}",
+                                type_id.0
+                            ),
                         ));
                         return None;
                     }
@@ -274,8 +306,12 @@ impl<'a> TxLower<'a> {
             _ => {
                 let ve = self.lower_value_expr(expr)?;
                 match ve {
-                    ValueExpr::Literal(Value::U64(n)) => {
-                        Some(RowExpr::Literal(tabula_core::RowKey(n)))
+                    ValueExpr::Literal(value) if value.type_id() == TYPE_U64_ID => {
+                        let payload: [u8; 8] =
+                            value.payload().try_into().expect("u64 literal payload");
+                        Some(RowExpr::Literal(tabula_core::RowKey(u64::from_le_bytes(
+                            payload,
+                        ))))
                     }
                     ValueExpr::Slot(s) => Some(RowExpr::Slot(s)),
                     ValueExpr::Param(p) => Some(RowExpr::Param(p)),
@@ -364,7 +400,7 @@ impl<'a> TxLower<'a> {
                 self.instructions.push(Instruction::Not { dst, src: inner });
                 Some(ValueExpr::Slot(dst))
             }
-            ExprKind::BoolLit(b) => Some(ValueExpr::Literal(Value::Bool(*b))),
+            ExprKind::BoolLit(b) => Some(ValueExpr::Literal(builtin_bool_literal(*b))),
             ExprKind::Ident(name) => self.resolve_ident(name, expr.span),
             _ => {
                 self.errors.push(CompileError::new(

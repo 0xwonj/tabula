@@ -253,9 +253,10 @@ mod tests {
     use crate::service::ErrorKind;
     use crate::service::{CreateInstanceCommand, RunStatus, SubmitRunCommand};
     use tabula_artifact::{StateEntry, Statement, merge_output_state_entries};
-    use tabula_core::{ColId, RowKey, TableId, Value};
+    use tabula_core::{ColId, RowKey, TableId};
     use tabula_testing::assertions::assert_state_cell;
     use tabula_testing::fixtures::examples::transfer_example_artifact_case;
+    use tabula_types::u64_portable;
 
     #[test]
     fn inline_source_program_compiles() {
@@ -309,19 +310,19 @@ mod tests {
                 table: 0,
                 row: 1,
                 col: 2,
-                value: Some(Value::U64(10)),
+                value: Some(u64_portable(10)),
             },
             StateEntry {
                 table: 0,
                 row: 1,
                 col: 2,
-                value: Some(Value::U64(20)),
+                value: Some(u64_portable(20)),
             },
         ];
 
         let merged = merge_output_state_entries(&initial, &[]);
         assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].value, Some(Value::U64(20)));
+        assert_eq!(merged[0].value, Some(u64_portable(20)));
     }
 
     #[test]
@@ -382,21 +383,21 @@ mod tests {
             TableId(0),
             ColId(0),
             RowKey(0),
-            Some(Value::U64(750)),
+            Some(&u64_portable(750)),
         );
         assert_state_cell(
             &fetched.state,
             TableId(0),
             ColId(0),
             RowKey(1),
-            Some(Value::U64(600)),
+            Some(&u64_portable(600)),
         );
         assert_state_cell(
             &fetched.state,
             TableId(0),
             ColId(0),
             RowKey(2),
-            Some(Value::U64(350)),
+            Some(&u64_portable(350)),
         );
 
         let fetched_run = engine

@@ -9,4 +9,6 @@ pub mod stark;
 mod types;
 
 pub use prepare::{ExecutionInputPreparer, PreparedExecutionColumn, PreparedExecutionColumns};
-pub use types::{AccessEvent, ColumnWrite, CommittedEntry, InitCell, PropertyReadClaim};
+pub use types::{
+    AccessEvent, ColumnValueProfile, ColumnWrite, CommittedEntry, InitCell, PropertyReadClaim,
+};

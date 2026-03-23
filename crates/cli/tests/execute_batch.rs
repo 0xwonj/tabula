@@ -1,6 +1,6 @@
 //! Integration tests: multi-tx batch execution with mixed outcomes and determinism.
 
-use tabula_core::{ColId, RowKey, TableId, Value};
+use tabula_core::{ColId, RowKey, TableId};
 use tabula_executor::consistency::check_consistency;
 use tabula_testing::assertions::{
     ExpectedTxOutcome, assert_all_txs_success, assert_tx_outcomes, assert_write_set_cell,
@@ -11,6 +11,7 @@ use tabula_testing::exec::{
 };
 use tabula_testing::fixtures::cases::mixed_outcome_transfer_trace_case;
 use tabula_testing::fixtures::examples::transfer_example_trace_case;
+use tabula_types::u64_portable;
 
 #[test]
 fn test_multi_tx_mixed_outcomes() {
@@ -33,21 +34,21 @@ fn test_multi_tx_mixed_outcomes() {
         TableId(0),
         ColId(0),
         RowKey(0),
-        Some(Value::U64(700)),
+        Some(&u64_portable(700)),
     );
     assert_write_set_cell(
         &result,
         TableId(0),
         ColId(0),
         RowKey(1),
-        Some(Value::U64(700)),
+        Some(&u64_portable(700)),
     );
     assert_write_set_cell(
         &result,
         TableId(0),
         ColId(0),
         RowKey(2),
-        Some(Value::U64(300)),
+        Some(&u64_portable(300)),
     );
 }
 

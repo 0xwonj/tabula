@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::TabulaError;
 use crate::traits::{StateView, StaticTableProvider};
-use crate::{CellKey, ColId, RowKey, TableId, Value};
+use crate::{CellKey, ColId, PortableValue, RowKey, TableId};
 
 // ---------------------------------------------------------------------------
 // InMemoryState
@@ -13,7 +13,7 @@ use crate::{CellKey, ColId, RowKey, TableId, Value};
 /// BTreeMap-backed [`StateView`].
 #[derive(Debug, Clone)]
 pub struct InMemoryState {
-    data: BTreeMap<CellKey, Value>,
+    data: BTreeMap<CellKey, PortableValue>,
     tables: BTreeSet<TableId>,
 }
 
@@ -27,7 +27,7 @@ impl InMemoryState {
     }
 
     /// Set a cell value.
-    pub fn set(&mut self, key: CellKey, value: Value) {
+    pub fn set(&mut self, key: CellKey, value: PortableValue) {
         self.tables.insert(key.table);
         self.data.insert(key, value);
     }
@@ -40,8 +40,8 @@ impl Default for InMemoryState {
 }
 
 impl StateView for InMemoryState {
-    fn read(&self, key: &CellKey) -> Result<Option<Value>, TabulaError> {
-        Ok(self.data.get(key).copied())
+    fn read(&self, key: &CellKey) -> Result<Option<PortableValue>, TabulaError> {
+        Ok(self.data.get(key).cloned())
     }
 
     fn table_exists(&self, table: TableId) -> bool {
@@ -56,7 +56,7 @@ impl StateView for InMemoryState {
 /// BTreeMap-backed [`StaticTableProvider`].
 #[derive(Debug, Clone)]
 pub struct InMemoryStaticTables {
-    data: BTreeMap<(TableId, RowKey, ColId), Value>,
+    data: BTreeMap<(TableId, RowKey, ColId), PortableValue>,
 }
 
 impl InMemoryStaticTables {
@@ -68,7 +68,7 @@ impl InMemoryStaticTables {
     }
 
     /// Insert a value into the static tables.
-    pub fn insert(&mut self, table: TableId, key: RowKey, col: ColId, value: Value) {
+    pub fn insert(&mut self, table: TableId, key: RowKey, col: ColId, value: PortableValue) {
         self.data.insert((table, key, col), value);
     }
 }
@@ -80,10 +80,15 @@ impl Default for InMemoryStaticTables {
 }
 
 impl StaticTableProvider for InMemoryStaticTables {
-    fn lookup(&self, table: TableId, key: RowKey, col: ColId) -> Result<Value, TabulaError> {
+    fn lookup(
+        &self,
+        table: TableId,
+        key: RowKey,
+        col: ColId,
+    ) -> Result<PortableValue, TabulaError> {
         self.data
             .get(&(table, key, col))
-            .copied()
+            .cloned()
             .ok_or(TabulaError::CellNotFound(CellKey {
                 table,
                 col,
@@ -106,15 +111,20 @@ impl StaticTableProvider for InMemoryStaticTables {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{PortableValue, TypeId};
+
+    fn portable_u64(value: u64) -> PortableValue {
+        PortableValue::new(TypeId(0), value.to_le_bytes().to_vec())
+    }
 
     #[test]
     fn in_memory_static_tables_lookup() {
         let mut st = InMemoryStaticTables::new();
-        st.insert(TableId(1), RowKey(0), ColId(0), Value::U64(42));
+        st.insert(TableId(1), RowKey(0), ColId(0), portable_u64(42));
 
         assert_eq!(
             st.lookup(TableId(1), RowKey(0), ColId(0)).unwrap(),
-            Value::U64(42)
+            portable_u64(42)
         );
         assert!(st.contains(TableId(1), RowKey(0)).unwrap());
         assert!(!st.contains(TableId(1), RowKey(999)).unwrap());
@@ -129,9 +139,9 @@ mod tests {
             col: ColId(0),
             row: RowKey(0),
         };
-        state.set(k, Value::U64(100));
+        state.set(k, portable_u64(100));
 
-        assert_eq!(state.read(&k).unwrap(), Some(Value::U64(100)));
+        assert_eq!(state.read(&k).unwrap(), Some(portable_u64(100)));
         assert!(state.table_exists(TableId(1)));
         assert!(!state.table_exists(TableId(99)));
     }

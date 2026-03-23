@@ -1,7 +1,8 @@
-use tabula_compiler::{SealedProgram, register_program};
-use tabula_core::{ColId, TableId, TableSchema, TxTypeId, ValueType};
+use tabula_compiler::SealedProgram;
+use tabula_core::{ColId, TableId, TxTypeId};
 use tabula_ir::{AggregateKind, Instruction, PropertyQuery, TxTypeDef};
-use tabula_testing::exec::compiled_property_successor_program;
+use tabula_testing::exec::{compiled_program_from_definition, compiled_property_successor_program};
+use tabula_testing::fixtures::schema::single_u64_column_schema;
 
 pub(crate) fn compiled_program_with_property_query() -> SealedProgram {
     compiled_property_successor_program()
@@ -9,15 +10,7 @@ pub(crate) fn compiled_program_with_property_query() -> SealedProgram {
 
 #[cfg(feature = "prove")]
 pub(crate) fn compiled_program_with_unsupported_property_query() -> SealedProgram {
-    let schema = TableSchema {
-        id: TableId(1),
-        name: "accounts".to_string(),
-        columns: vec![tabula_core::ColumnDef {
-            id: ColId(0),
-            name: "balance".to_string(),
-            value_type: ValueType::U64,
-        }],
-    };
+    let schema = single_u64_column_schema(TableId(1), ColId(0), "accounts", "balance");
     let tx = TxTypeDef {
         id: TxTypeId(1),
         name: "scan".to_string(),
@@ -34,5 +27,5 @@ pub(crate) fn compiled_program_with_unsupported_property_query() -> SealedProgra
         }],
     };
 
-    register_program(&[schema], &[tx]).expect("register program")
+    compiled_program_from_definition(vec![schema], vec![tx])
 }

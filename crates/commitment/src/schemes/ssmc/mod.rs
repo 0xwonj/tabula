@@ -1,6 +1,6 @@
 //! SSMC: Sorted Sparse Map Commitment for small columns.
 
-pub(crate) mod merge;
+mod merge;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
@@ -82,7 +82,7 @@ fn proof_step(input: [KoalaBear; 16]) -> NativeDigest {
     NativeDigest(core::array::from_fn(|i| state[i]))
 }
 
-pub(crate) fn proof_commitment(
+fn proof_commitment(
     table: TableId,
     col: ColId,
     list: &SsmcList,
@@ -201,6 +201,20 @@ impl SsmcList {
     /// Read-only access to entries.
     pub fn entries(&self) -> &[SsmcEntry] {
         &self.entries
+    }
+
+    /// Apply writes to produce a new list and native commitment.
+    pub fn apply_writes<H: FieldHasher<F = KoalaBear>>(
+        &self,
+        writes: &[(RowKey, Option<Vec<KoalaBear>>)],
+        hasher: &H,
+    ) -> (SsmcList, SsmcCommitment<H::Digest>) {
+        merge::merge(self, writes, self.table, self.col, hasher)
+    }
+
+    /// Compute the proof-visible commitment for this list.
+    pub fn proof_commitment(&self) -> Result<NativeDigest, TabulaError> {
+        proof_commitment(self.table, self.col, self)
     }
 
     /// Create from pre-sorted entries without validation.

@@ -1,6 +1,6 @@
-use tabula_core::Value;
 use tabula_core::error::TabulaError;
 use tabula_ir::ValueExpr;
+use tabula_types::typed_bool;
 
 use tabula_chips::execution::trace::Opcode;
 
@@ -36,15 +36,14 @@ pub(super) fn lower_select<const W: usize>(
     if_false: &ValueExpr,
 ) -> Result<(), TabulaError> {
     let cond_val = ctx.resolve_val(cond)?;
-    let Value::Bool(cond_bool) = cond_val else {
-        return Err(TabulaError::TypeMismatch {
-            expected: "Bool",
-            actual: cond_val.type_name(),
-        });
-    };
+    let cond_bool = typed_bool(&cond_val, ctx.type_runtimes)?;
     let t_val = ctx.resolve_val(if_true)?;
     let f_val = ctx.resolve_val(if_false)?;
-    let result = if cond_bool { t_val } else { f_val };
+    let result = if cond_bool {
+        t_val.clone()
+    } else {
+        f_val.clone()
+    };
 
     let t_enc = ctx.encode_padded(&t_val)?;
     let f_enc = ctx.encode_padded(&f_val)?;

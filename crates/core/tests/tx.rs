@@ -1,12 +1,16 @@
 #![allow(missing_docs)]
-use tabula_core::{Batch, Transaction, TxTypeId, Value};
+use tabula_core::{Batch, PortableValue, Transaction, TxTypeId, TypeId};
+
+fn portable_u64(value: u64) -> PortableValue {
+    PortableValue::new(TypeId(0), borsh::to_vec(&value).expect("portable u64"))
+}
 
 #[test]
 fn test_batch_borsh_round_trip() {
     let batch = Batch {
         transactions: vec![Transaction {
             tx_type: TxTypeId(1),
-            params: vec![Value::U64(42)],
+            params: vec![portable_u64(42)],
             sender: [1u8; 32],
             nonce: 0,
             signature: vec![0xDE, 0xAD],
@@ -21,14 +25,14 @@ fn test_batch_borsh_round_trip() {
 fn test_signable_bytes_excludes_signature() {
     let tx1 = Transaction {
         tx_type: TxTypeId(1),
-        params: vec![Value::U64(42)],
+        params: vec![portable_u64(42)],
         sender: [1u8; 32],
         nonce: 0,
         signature: vec![0xDE, 0xAD],
     };
     let tx2 = Transaction {
         tx_type: TxTypeId(1),
-        params: vec![Value::U64(42)],
+        params: vec![portable_u64(42)],
         sender: [1u8; 32],
         nonce: 0,
         signature: vec![0xFF, 0xFF, 0xFF],
@@ -41,14 +45,14 @@ fn test_signable_bytes_excludes_signature() {
 fn test_signable_bytes_differs_on_nonce() {
     let tx1 = Transaction {
         tx_type: TxTypeId(1),
-        params: vec![Value::U64(42)],
+        params: vec![portable_u64(42)],
         sender: [1u8; 32],
         nonce: 0,
         signature: vec![],
     };
     let tx2 = Transaction {
         tx_type: TxTypeId(1),
-        params: vec![Value::U64(42)],
+        params: vec![portable_u64(42)],
         sender: [1u8; 32],
         nonce: 1,
         signature: vec![],

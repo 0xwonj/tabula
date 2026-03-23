@@ -9,7 +9,7 @@ use std::rc::Rc;
 use gloo_file::{File, callbacks::FileReader, callbacks::read_as_text};
 use leptos::prelude::*;
 use serde_json::json;
-use tabula_core::Value as CoreValue;
+use tabula_types::u64_portable;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
@@ -399,7 +399,7 @@ pub(crate) fn add_state_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clo
                 table: 0,
                 row: 0,
                 col: 0,
-                value: Some(CoreValue::U64(0)),
+                value: Some(u64_portable(0)),
             });
         }
 
@@ -436,7 +436,7 @@ pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
         } else {
             batch.transactions.push(TransactionInput {
                 tx_type: 0,
-                params: vec![CoreValue::U64(0)],
+                params: vec![u64_portable(0)],
                 sender: "01".repeat(32),
                 nonce: next_nonce,
             });

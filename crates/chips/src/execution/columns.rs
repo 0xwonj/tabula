@@ -9,6 +9,7 @@
 //! - SSA slots (Layout A: full carry)
 
 use tabula_gadgets::KeyRangeChecked;
+use tabula_ir::GENERIC_EXECUTION_VALUE_WIDTH;
 use tabula_stark::air::columns::num_cols;
 
 use super::ops::cmp::CmpWitness;
@@ -20,6 +21,9 @@ use super::ops::mul::MulCarry;
 /// Must be ≥ `ProgramBudgets.max_slots` for any registered program.
 /// 16 covers the expected upper bound for M8; future phases may make this dynamic.
 pub const MAX_SLOTS: usize = 16;
+
+/// Fixed logical value width used by the generic execution lane.
+pub const EXECUTION_STANDARD_VALUE_WIDTH: usize = GENERIC_EXECUTION_VALUE_WIDTH;
 
 /// Column layout for the ExecutionChip AIR.
 ///
@@ -60,7 +64,7 @@ pub struct ExecutionCols<T, const W: usize> {
     pub op_assert: T,
     /// Select (conditional value).
     pub op_select: T,
-    /// Hash (Poseidon permutation).
+    /// Hash (digest relay to the dedicated IR-hash lane).
     pub op_hash: T,
     /// Lookup (static table query).
     pub op_lookup: T,
@@ -146,11 +150,9 @@ pub struct ExecutionCols<T, const W: usize> {
     /// Cmp witness: sub-selectors + ordering/equality proof (27 cols).
     pub cmp: CmpWitness<T>,
 
-    // ── Hash opcode (M10-B2) ──
-    /// Poseidon permutation input (16 field elements).
-    pub hash_perm_input: [T; 16],
-    /// Poseidon permutation output / digest (8 field elements).
-    pub hash_perm_output: [T; 8],
+    // ── Hash opcode ──
+    /// Canonical IR-hash digest (first 8 KoalaBear elements of the final sponge state).
+    pub hash_digest: [T; 8],
 
     // ── Mul opcode (M10-C1) ──
     /// Mul carry chain witnesses (5 cols).
@@ -163,9 +165,9 @@ pub struct ExecutionCols<T, const W: usize> {
     // ── PropertyRead opcode ──
     /// Query type discriminant (PropertyQueryKind ordinal, 0–5).
     pub property_query_type: T,
-    /// First canonical query operand (encoded as `Value::U64`).
+    /// First canonical query operand (encoded as canonical portable `u64`).
     pub property_query_arg0: [T; W],
-    /// Second canonical query operand (encoded as `Value::U64`).
+    /// Second canonical query operand (encoded as canonical portable `u64`).
     pub property_query_arg1: [T; W],
     /// Result value field elements.
     pub property_result_val: [T; W],
@@ -184,5 +186,5 @@ pub const fn execution_width<const W: usize>() -> usize {
     num_cols::<ExecutionCols<u8, W>, u8>()
 }
 
-/// Width for Standard value width (W=3).
-pub const EXECUTION_STANDARD_WIDTH: usize = execution_width::<3>();
+/// Total trace-column width for the standard generic execution lane (W=3).
+pub const EXECUTION_STANDARD_WIDTH: usize = execution_width::<EXECUTION_STANDARD_VALUE_WIDTH>();

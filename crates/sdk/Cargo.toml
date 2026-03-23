@@ -9,7 +9,6 @@ default = ["prove"]
 verify = [
     "dep:tabula-executor",
     "dep:tabula-ext",
-    "dep:tabula-ir",
     "dep:tabula-machine",
     "dep:tabula-stark",
     "tabula-ext/verify",
@@ -27,10 +26,12 @@ thiserror = { workspace = true }
 tabula-artifact = { workspace = true }
 tabula-compiler = { workspace = true }
 tabula-core = { workspace = true }
+tabula-ir = { workspace = true }
+tabula-types = { workspace = true }
 tabula-ext = { workspace = true, optional = true, default-features = false }
+tabula-profile = { workspace = true }
 tabula-runtime = { path = "../runtime", default-features = false }
 tabula-executor = { workspace = true, optional = true }
-tabula-ir = { workspace = true, optional = true }
 tabula-machine = { workspace = true, optional = true }
 tabula-stark = { workspace = true, optional = true }
 

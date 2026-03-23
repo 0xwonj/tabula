@@ -1,7 +1,15 @@
 #![allow(missing_docs)]
-use tabula_core::{ColId, RowKey, TableId, Value};
+use tabula_core::{ColId, PortableValue, RowKey, TableId};
 use tabula_ir::pass::canonicalize::canonicalize;
 use tabula_ir::{ArithOp, Instruction, RowExpr, ValueExpr};
+use tabula_profile::TYPE_U64_ID;
+
+fn lit_u64(value: u64) -> ValueExpr {
+    ValueExpr::Literal(PortableValue::new(
+        TYPE_U64_ID,
+        borsh::to_vec(&value).expect("u64 literal"),
+    ))
+}
 
 #[test]
 fn test_no_duplicates_unchanged() {
@@ -47,7 +55,7 @@ fn test_dedup_literal_reads() {
             dst: 4,
             op: ArithOp::Add,
             lhs: ValueExpr::Slot(2),
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            rhs: lit_u64(1),
         },
     ];
     let result = canonicalize(body);
@@ -122,13 +130,13 @@ fn test_slot_renumbering() {
             dst: 4,
             op: ArithOp::Add,
             lhs: ValueExpr::Slot(0),
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            rhs: lit_u64(1),
         },
         Instruction::Arith {
             dst: 5,
             op: ArithOp::Add,
             lhs: ValueExpr::Slot(4),
-            rhs: ValueExpr::Literal(Value::U64(2)),
+            rhs: lit_u64(2),
         },
     ];
     let result = canonicalize(body);
@@ -165,7 +173,7 @@ fn test_already_contiguous_no_change() {
             dst: 2,
             op: ArithOp::Add,
             lhs: ValueExpr::Slot(0),
-            rhs: ValueExpr::Literal(Value::U64(1)),
+            rhs: lit_u64(1),
         },
     ];
     let result = canonicalize(body.clone());

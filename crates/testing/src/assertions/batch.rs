@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use tabula_core::{BatchResult, CellKey, ColId, RowKey, TableId, TxResult, Value};
+use tabula_core::{BatchResult, CellKey, ColId, PortableValue, RowKey, TableId, TxResult};
 use tabula_runtime::ExecutedBatch;
 
 /// Canonical expected outcome for one transaction.
@@ -17,7 +17,7 @@ pub trait TxOutcomeView {
 
 /// Minimal semantic projection for result types that carry a final write-set.
 pub trait WriteSetView {
-    fn write_set_entries(&self) -> &[(CellKey, Option<Value>)];
+    fn write_set_entries(&self) -> &[(CellKey, Option<PortableValue>)];
 }
 
 impl TxOutcomeView for BatchResult {
@@ -33,13 +33,13 @@ impl TxOutcomeView for ExecutedBatch {
 }
 
 impl WriteSetView for BatchResult {
-    fn write_set_entries(&self) -> &[(CellKey, Option<Value>)] {
+    fn write_set_entries(&self) -> &[(CellKey, Option<PortableValue>)] {
         &self.write_set_final
     }
 }
 
 impl WriteSetView for ExecutedBatch {
-    fn write_set_entries(&self) -> &[(CellKey, Option<Value>)] {
+    fn write_set_entries(&self) -> &[(CellKey, Option<PortableValue>)] {
         self.write_set()
     }
 }
@@ -87,16 +87,15 @@ pub fn assert_write_set_cell<T: WriteSetView>(
     table: TableId,
     col: ColId,
     row: RowKey,
-    expected: Option<Value>,
+    expected: Option<&PortableValue>,
 ) {
-    let writes: BTreeMap<_, _> = result.write_set_entries().iter().copied().collect();
-    let actual = writes.get(&CellKey { table, col, row }).copied();
+    let writes: BTreeMap<_, _> = result.write_set_entries().iter().cloned().collect();
+    let actual = writes
+        .get(&CellKey { table, col, row })
+        .and_then(std::option::Option::as_ref);
     assert_eq!(
-        actual,
-        Some(expected),
+        actual, expected,
         "write-set mismatch at ({}, {}, {})",
-        table.0,
-        col.0,
-        row.0
+        table.0, col.0, row.0
     );
 }

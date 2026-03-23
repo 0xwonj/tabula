@@ -6,11 +6,10 @@ use std::collections::BTreeMap;
 
 use proptest::prelude::*;
 
-use tabula_core::{
-    Batch, ColId, ColumnDef, OpKind, RowKey, TableId, TableSchema, Transaction, TxTypeId, Value,
-    ValueType,
-};
-use tabula_ir::{ArithOp, Instruction, ParamDef, RowExpr, TxTypeDef, ValueExpr};
+use tabula_core::{Batch, ColId, OpKind, PortableValue, RowKey, TableId, Transaction, TxTypeId};
+use tabula_ir::{ArithOp, Instruction, ParamDef, RowExpr, TxTypeDef};
+use tabula_profile::TYPE_U64_ID;
+use tabula_types::u64_portable;
 
 use tabula_executor::consistency::check_consistency;
 use tabula_executor::overlay::Overlay;
@@ -18,22 +17,17 @@ use tabula_executor::property::PropertyQueryRegistry;
 
 use common::*;
 
-/// Proptest-specific shorthand: single-column cell by row.
 fn pcell(r: u64) -> tabula_core::CellKey {
     cell(1, r, 0)
 }
 
-// ── Strategies ──────────────────────────────────────────────────────────
-
-fn arb_value() -> impl Strategy<Value = Option<Value>> {
-    prop_oneof![any::<u64>().prop_map(|n| Some(Value::U64(n))), Just(None)]
+fn arb_value() -> impl Strategy<Value = Option<PortableValue>> {
+    prop_oneof![any::<u64>().prop_map(|n| Some(u64_portable(n))), Just(None)]
 }
 
 fn arb_row() -> impl Strategy<Value = u64> {
     0u64..10
 }
-
-// ── Properties ──────────────────────────────────────────────────────────
 
 proptest! {
     #[test]
@@ -42,17 +36,18 @@ proptest! {
         read_row in arb_row(),
     ) {
         let snap = TestSnapshot(BTreeMap::new());
-        let mut ov = Overlay::new(&snap);
+        let mut ov = Overlay::new(&snap, type_runtimes());
 
         for (r, v) in &writes {
-            ov.write(&pcell(*r), *v, ValueType::U64);
+            ov.write(&pcell(*r), v.clone().map(typed), TYPE_U64_ID).unwrap();
         }
 
-        let result = ov.read(&pcell(read_row), ValueType::U64).unwrap();
-        let expected: Option<Value> = writes.iter()
+        let result = ov.read(&pcell(read_row), TYPE_U64_ID).unwrap();
+        let expected: Option<_> = writes
+            .iter()
             .rev()
             .find(|(r, _)| *r == read_row)
-            .and_then(|(_, v)| *v);
+            .and_then(|(_, v)| v.clone().map(typed));
 
         prop_assert_eq!(result, expected);
     }
@@ -64,15 +59,15 @@ proptest! {
         writes in proptest::collection::vec((arb_row(), arb_value()), 1..30),
     ) {
         let snap = TestSnapshot(BTreeMap::new());
-        let mut ov = Overlay::new(&snap);
+        let mut ov = Overlay::new(&snap, type_runtimes());
 
         for (r, v) in &writes {
-            ov.write(&pcell(*r), *v, ValueType::U64);
+            ov.write(&pcell(*r), v.clone().map(typed), TYPE_U64_ID).unwrap();
         }
 
-        let result = ov.into_result();
-        let keys: Vec<tabula_core::CellKey> = result.write_set_final.iter().map(|(k, _)| *k).collect();
-        let unique: std::collections::BTreeSet<tabula_core::CellKey> = keys.iter().copied().collect();
+        let result = ov.into_result().unwrap();
+        let keys: Vec<_> = result.write_set_final.iter().map(|(k, _)| *k).collect();
+        let unique: std::collections::BTreeSet<_> = keys.iter().copied().collect();
         prop_assert_eq!(keys.len(), unique.len(), "duplicate keys in write_set_final");
     }
 }
@@ -84,18 +79,18 @@ proptest! {
     ) {
         let mut data = BTreeMap::new();
         for r in 0..10u64 {
-            data.insert(pcell(r), Value::U64(r * 10));
+            data.insert(pcell(r), u64_portable(r * 10));
         }
-        let snap = TestSnapshot(data);
-        let mut ov = Overlay::new(&snap);
+        let snap = snapshot(data);
+        let mut ov = Overlay::new(&snap, type_runtimes());
 
         for r in &reads {
-            let _ = ov.read(&pcell(*r), ValueType::U64).unwrap();
+            let _ = ov.read(&pcell(*r), TYPE_U64_ID).unwrap();
         }
 
-        let result = ov.into_result();
-        let keys: Vec<tabula_core::CellKey> = result.read_set_old.iter().map(|(k, _)| *k).collect();
-        let unique: std::collections::BTreeSet<tabula_core::CellKey> = keys.iter().copied().collect();
+        let result = ov.into_result().unwrap();
+        let keys: Vec<_> = result.read_set_old.iter().map(|(k, _)| *k).collect();
+        let unique: std::collections::BTreeSet<_> = keys.iter().copied().collect();
         prop_assert_eq!(keys.len(), unique.len(), "duplicate keys in read_set_old");
     }
 }
@@ -108,22 +103,22 @@ proptest! {
         read_row in arb_row(),
     ) {
         let snap = TestSnapshot(BTreeMap::new());
-        let mut ov = Overlay::new(&snap);
+        let mut ov = Overlay::new(&snap, type_runtimes());
 
         for (r, v) in &pre_writes {
-            ov.write(&pcell(*r), *v, ValueType::U64);
+            ov.write(&pcell(*r), v.clone().map(typed), TYPE_U64_ID).unwrap();
         }
 
-        let expected = ov.read(&pcell(read_row), ValueType::U64).unwrap();
+        let expected = ov.read(&pcell(read_row), TYPE_U64_ID).unwrap();
 
         ov.checkpoint();
         for (r, v) in &post_writes {
-            ov.write(&pcell(*r), *v, ValueType::U64);
+            ov.write(&pcell(*r), v.clone().map(typed), TYPE_U64_ID).unwrap();
         }
 
         ov.rollback();
 
-        let actual = ov.read(&pcell(read_row), ValueType::U64).unwrap();
+        let actual = ov.read(&pcell(read_row), TYPE_U64_ID).unwrap();
         prop_assert_eq!(actual, expected);
     }
 }
@@ -136,22 +131,22 @@ proptest! {
     ) {
         let mut data = BTreeMap::new();
         for r in 0..10u64 {
-            data.insert(pcell(r), Value::U64(r));
+            data.insert(pcell(r), u64_portable(r));
         }
-        let snap = TestSnapshot(data);
-        let mut ov = Overlay::new(&snap);
+        let snap = snapshot(data);
+        let mut ov = Overlay::new(&snap, type_runtimes());
 
         for r in &write_rows {
-            ov.write(&pcell(*r), Some(Value::U64(999)), ValueType::U64);
+            ov.write(&pcell(*r), Some(typed(u64_portable(999))), TYPE_U64_ID).unwrap();
         }
         for r in &read_rows {
-            let _ = ov.read(&pcell(*r), ValueType::U64).unwrap();
+            let _ = ov.read(&pcell(*r), TYPE_U64_ID).unwrap();
         }
 
-        let result = ov.into_result();
-        let read_keys: std::collections::BTreeSet<tabula_core::CellKey> =
+        let result = ov.into_result().unwrap();
+        let read_keys: std::collections::BTreeSet<_> =
             result.read_set_old.iter().map(|(k, _)| *k).collect();
-        let write_keys: std::collections::BTreeSet<tabula_core::CellKey> =
+        let write_keys: std::collections::BTreeSet<_> =
             write_rows.iter().map(|r| pcell(*r)).collect();
 
         for k in &write_keys {
@@ -170,36 +165,39 @@ proptest! {
     ) {
         let initial_balance = 1000u64;
         let mut data = BTreeMap::new();
-        data.insert(pcell(0), Value::U64(initial_balance));
-        let snap = TestSnapshot(data);
+        data.insert(pcell(0), u64_portable(initial_balance));
+        let snap = snapshot(data);
 
-        let mut prog = tabula_ir::Program::new();
-        prog.add_schema(TableSchema {
-            id: TableId(1),
-            name: "test".into(),
-            columns: vec![ColumnDef {
-                id: ColId(0),
-                name: "val".into(),
-                value_type: ValueType::U64,
-            }],
-        });
+        let (schemas, profile_catalog) = test_schema_bundle();
+        let mut prog = tabula_ir::Program::with_profile_catalog(profile_catalog);
+        prog.add_schema(schemas.get(&TableId(1)).expect("test schema").clone());
         prog.register(TxTypeDef {
             id: TxTypeId(1),
             name: "withdraw".into(),
-            param_schema: vec![ParamDef { name: "amount".into(), value_type: ValueType::U64 }],
+            param_schema: vec![ParamDef {
+                name: "amount".into(),
+                type_id: TYPE_U64_ID,
+            }],
             body: vec![
                 Instruction::Read {
-                    dst_val: 0, dst_is_null: 1,
-                    table: TableId(1), row: RowExpr::Literal(RowKey(0)), col: ColId(0),
+                    dst_val: 0,
+                    dst_is_null: 1,
+                    table: TableId(1),
+                    row: RowExpr::Literal(RowKey(0)),
+                    col: ColId(0),
                 },
                 Instruction::Arith {
-                    dst: 2, op: ArithOp::Sub,
-                    lhs: ValueExpr::Slot(0), rhs: ValueExpr::Param(0),
+                    dst: 2,
+                    op: ArithOp::Sub,
+                    lhs: tabula_ir::ValueExpr::Slot(0),
+                    rhs: tabula_ir::ValueExpr::Param(0),
                 },
                 Instruction::Write {
-                    table: TableId(1), row: RowExpr::Literal(RowKey(0)), col: ColId(0),
-                    src_val: ValueExpr::Slot(2),
-                    src_is_null: ValueExpr::Literal(Value::Bool(false)),
+                    table: TableId(1),
+                    row: RowExpr::Literal(RowKey(0)),
+                    col: ColId(0),
+                    src_val: tabula_ir::ValueExpr::Slot(2),
+                    src_is_null: lit(bool_portable(false)),
                 },
             ],
         }).unwrap();
@@ -208,7 +206,7 @@ proptest! {
         let txs: Vec<Transaction> = amounts.iter().enumerate()
             .map(|(i, &amt)| Transaction {
                 tx_type: TxTypeId(1),
-                params: vec![Value::U64(amt)],
+                params: vec![u64_portable(amt)],
                 sender,
                 nonce: i as u64,
                 signature: vec![],
@@ -225,6 +223,7 @@ proptest! {
             precompiles: None,
             committed_state: None,
             property_queries: &property_queries,
+            type_runtimes: type_runtimes(),
         };
         let result = tabula_executor::batch::execute_batch(
             &batch, &prog, &snap, &env, &BTreeMap::new(),
@@ -245,18 +244,17 @@ proptest! {
 
         let k = pcell(0);
         let mut events = vec![
-            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(100), val_is_null: false, time: 0, effect_ordinal_in_tx: 0 },
-            AccessEvent { key: k, op: OpKind::Write, value: Value::U64(80), val_is_null: false, time: 1, effect_ordinal_in_tx: 1 },
-            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(80), val_is_null: false, time: 2, effect_ordinal_in_tx: 2 },
-            AccessEvent { key: k, op: OpKind::Write, value: Value::U64(60), val_is_null: false, time: 3, effect_ordinal_in_tx: 3 },
-            AccessEvent { key: k, op: OpKind::Read, value: Value::U64(60), val_is_null: false, time: 4, effect_ordinal_in_tx: 4 },
+            AccessEvent { key: k, op: OpKind::Read, value: portable(u64_portable(100)), val_is_null: false, time: 0, effect_ordinal_in_tx: 0 },
+            AccessEvent { key: k, op: OpKind::Write, value: portable(u64_portable(80)), val_is_null: false, time: 1, effect_ordinal_in_tx: 1 },
+            AccessEvent { key: k, op: OpKind::Read, value: portable(u64_portable(80)), val_is_null: false, time: 2, effect_ordinal_in_tx: 2 },
+            AccessEvent { key: k, op: OpKind::Write, value: portable(u64_portable(60)), val_is_null: false, time: 3, effect_ordinal_in_tx: 3 },
+            AccessEvent { key: k, op: OpKind::Read, value: portable(u64_portable(60)), val_is_null: false, time: 4, effect_ordinal_in_tx: 4 },
         ];
-        let read_set_old = vec![(k, Some(Value::U64(100)))];
+        let read_set_old = vec![(k, opt(u64_portable(100)))];
 
         let idx = tamper_idx % events.len();
-        events[idx].value = Value::U64(999);
+        events[idx].value = portable(u64_portable(999));
 
-        // Wrap events in a single TxResult for etrace identity check
         let txs = vec![TxResult::success(events.clone(), vec![])];
         let check = check_consistency(&events, &read_set_old, &txs);
         prop_assert!(check.is_err(), "tampered trace should fail consistency check");

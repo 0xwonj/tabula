@@ -186,43 +186,33 @@ pub fn make_read_then_add(
 
 /// Build a Hash instruction record.
 ///
-/// Composes the Poseidon permutation input from domain_tag, n, src1, src2,
-/// runs the actual permutation, and constructs the record.
+/// Computes a digest relay for a synthetic two-input hash opcode record.
 pub fn make_hash(
     dst_slot: usize,
     src1_slot: usize,
     src2_slot: usize,
-    domain_tag: u32,
-    n: u32,
+    _domain_tag: u32,
+    _n: u32,
     src1: [u32; 3],
     src2: [u32; 3],
 ) -> InstructionRecord {
-    use crate::poseidon::constants::poseidon2_permutation;
-
     let src1_fe: Vec<KoalaBear> = src1.iter().map(|v| KoalaBear::new(*v)).collect();
     let src2_fe: Vec<KoalaBear> = src2.iter().map(|v| KoalaBear::new(*v)).collect();
-
-    // Compose permutation input
-    let mut perm_input = [KoalaBear::ZERO; 16];
-    perm_input[0] = KoalaBear::new(domain_tag);
-    perm_input[1] = KoalaBear::new(n);
-    perm_input[2] = src1_fe[0];
-    perm_input[3] = src1_fe[1];
-    perm_input[4] = src1_fe[2];
-    perm_input[5] = src2_fe[0];
-    perm_input[6] = src2_fe[1];
-    perm_input[7] = src2_fe[2];
-
-    let (_rounds, perm_output_full) = poseidon2_permutation(perm_input);
-    let perm_output: [KoalaBear; 8] = core::array::from_fn(|i| perm_output_full[i]);
-    let dst_val = vec![perm_output[0], perm_output[1], perm_output[2]];
+    let digest = core::array::from_fn(|idx| {
+        if idx < 3 {
+            src1_fe[idx] + src2_fe[idx]
+        } else {
+            KoalaBear::ZERO
+        }
+    });
+    let dst_val = vec![digest[0], digest[1], digest[2]];
 
     InstructionBuilder::new(Opcode::Hash)
         .written_slots(vec![dst_slot])
         .src1_fe(src1_slot, src1_fe)
         .src2_fe(src2_slot, src2_fe)
         .write_fe(dst_slot, dst_val, false)
-        .hash_perm(perm_input, perm_output)
+        .hash_digest(digest)
         .build()
 }
 

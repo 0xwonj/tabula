@@ -1,4 +1,4 @@
-use tabula_core::Value as CoreValue;
+use tabula_types::u64_portable;
 
 use crate::models::{State, StateEntry, TransactionBatch, TransactionInput, WorkspaceDoc};
 
@@ -24,19 +24,19 @@ pub fn built_in_templates() -> Vec<ScenarioTemplate> {
                         table: 0,
                         row: 0,
                         col: 0,
-                        value: Some(CoreValue::U64(1000)),
+                        value: Some(u64_portable(1000)),
                     },
                     StateEntry {
                         table: 0,
                         row: 1,
                         col: 0,
-                        value: Some(CoreValue::U64(500)),
+                        value: Some(u64_portable(500)),
                     },
                     StateEntry {
                         table: 0,
                         row: 2,
                         col: 0,
-                        value: Some(CoreValue::U64(200)),
+                        value: Some(u64_portable(200)),
                     },
                 ],
             },
@@ -44,19 +44,19 @@ pub fn built_in_templates() -> Vec<ScenarioTemplate> {
                 transactions: vec![
                     TransactionInput {
                         tx_type: 0,
-                        params: vec![CoreValue::U64(0), CoreValue::U64(1), CoreValue::U64(300)],
+                        params: vec![u64_portable(0), u64_portable(1), u64_portable(300)],
                         sender: "01".repeat(32),
                         nonce: 0,
                     },
                     TransactionInput {
                         tx_type: 0,
-                        params: vec![CoreValue::U64(1), CoreValue::U64(2), CoreValue::U64(200)],
+                        params: vec![u64_portable(1), u64_portable(2), u64_portable(200)],
                         sender: "01".repeat(32),
                         nonce: 1,
                     },
                     TransactionInput {
                         tx_type: 0,
-                        params: vec![CoreValue::U64(2), CoreValue::U64(0), CoreValue::U64(50)],
+                        params: vec![u64_portable(2), u64_portable(0), u64_portable(50)],
                         sender: "01".repeat(32),
                         nonce: 2,
                     },
@@ -73,13 +73,13 @@ pub fn built_in_templates() -> Vec<ScenarioTemplate> {
                     table: 0,
                     row: 0,
                     col: 0,
-                    value: Some(CoreValue::U64(10)),
+                    value: Some(u64_portable(10)),
                 }],
             },
             batch: TransactionBatch {
                 transactions: vec![TransactionInput {
                     tx_type: 0,
-                    params: vec![CoreValue::U64(0), CoreValue::U64(99)],
+                    params: vec![u64_portable(0), u64_portable(99)],
                     sender: "01".repeat(32),
                     nonce: 0,
                 }],

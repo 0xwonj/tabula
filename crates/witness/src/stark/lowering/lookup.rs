@@ -1,5 +1,4 @@
 use tabula_core::error::TabulaError;
-use tabula_core::traits::ValueCodec;
 use tabula_core::{ColId, TableId};
 use tabula_ir::RowExpr;
 
@@ -17,10 +16,11 @@ pub(super) fn lower_lookup<const W: usize>(
 ) -> Result<(), TabulaError> {
     let row_key = ctx.resolve_row(row)?;
     let value = ctx.static_tables.lookup(static_table, row_key, col)?;
-    let dst_enc = ctx.encode_padded(&value)?;
+    let logical_value = ctx.type_runtimes.decode_portable(&value)?;
+    let dst_enc = ctx.encode_padded(&logical_value)?;
 
     let slot = dst as usize;
-    ctx.update_slot(slot, value, dst_enc.clone(), false)?;
+    ctx.update_slot(slot, logical_value.clone(), dst_enc.clone(), false)?;
 
     let mut rec = ctx.empty_record(Opcode::Lookup);
     rec.written_slots = vec![slot];
@@ -36,7 +36,10 @@ pub(super) fn lower_lookup<const W: usize>(
         table_id: static_table.0,
         col_id: col.0,
         row_key: row_key.0,
-        value: ctx.codec.encode(&value)?,
+        value: ctx
+            .encoding_runtimes
+            .resolve_for_type(value.type_id())?
+            .encode_field_elements(&logical_value)?,
         lookup_mult: 1,
     });
 

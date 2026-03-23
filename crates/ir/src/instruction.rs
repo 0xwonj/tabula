@@ -1,15 +1,21 @@
 //! Tabula IR (TIR) instruction set: the language of Tabula transaction bodies.
 
-use std::cmp::Ordering;
-
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use tabula_core::error::TabulaError;
-use tabula_core::{ColId, RowKey, TableId, Value};
+use tabula_core::{
+    ColId, EncodingProfileId, PortableValue, PropertyQueryKind, RowKey, TableId, TypeId,
+};
 
 /// Slot index for local variables within a tx execution.
 pub type Slot = u16;
+
+/// Fixed logical value width supported by the generic execution lane.
+///
+/// This is the width of one generic execution slot in field elements. Wider
+/// values may still be valid elsewhere in the system, but they cannot flow
+/// through generic execution slots until execution-width generalization lands.
+pub const GENERIC_EXECUTION_VALUE_WIDTH: usize = 3;
 
 /// Where a row key comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -26,7 +32,7 @@ pub enum RowExpr {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub enum ValueExpr {
     /// Hardcoded value.
-    Literal(Value),
+    Literal(PortableValue),
     /// Reference to a local variable slot.
     Slot(Slot),
     /// Transaction parameter index.
@@ -44,17 +50,6 @@ pub enum ArithOp {
     Sub,
     /// Multiplication.
     Mul,
-}
-
-impl ArithOp {
-    /// Apply this arithmetic operation to two values.
-    pub fn apply(&self, lhs: &Value, rhs: &Value) -> Result<Value, TabulaError> {
-        match self {
-            Self::Add => lhs.checked_add(rhs),
-            Self::Sub => lhs.checked_sub(rhs),
-            Self::Mul => lhs.checked_mul(rhs),
-        }
-    }
 }
 
 /// Comparison operation kind.
@@ -115,10 +110,7 @@ impl ValueExpr {
 )]
 pub struct PrecompileId(pub u16);
 
-/// Kind of structural property query on committed column state.
-///
-/// Closed enum — apps extend support via custom column schemes,
-/// not custom query variants.
+/// One typed precompile value slot contract.
 #[derive(
     Debug,
     Clone,
@@ -133,19 +125,40 @@ pub struct PrecompileId(pub u16);
     BorshSerialize,
     BorshDeserialize,
 )]
-pub enum PropertyQueryKind {
-    /// Find the row with the minimum value.
-    Minimum,
-    /// Find the row with the maximum value.
-    Maximum,
-    /// Find the row immediately after a given key.
-    Successor,
-    /// Find the row immediately before a given key.
-    Predecessor,
-    /// Prove no keys exist in a given range.
-    NonExistenceRange,
-    /// Compute an aggregate over column values.
-    Aggregate,
+pub struct PrecompileValueProfile {
+    /// Semantic runtime type expected at this slot.
+    pub type_id: TypeId,
+    /// Runtime encoding profile expected for transcript/proof materialization.
+    pub encoding_profile_id: EncodingProfileId,
+}
+
+/// Sealed typed I/O contract for one precompile family.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub struct PrecompileSignature {
+    /// Ordered input slots.
+    pub inputs: Vec<PrecompileValueProfile>,
+    /// Ordered output slots.
+    pub outputs: Vec<PrecompileValueProfile>,
+}
+
+impl PrecompileSignature {
+    /// Build one typed signature from ordered input/output value profiles.
+    #[must_use]
+    pub fn new(inputs: Vec<PrecompileValueProfile>, outputs: Vec<PrecompileValueProfile>) -> Self {
+        Self { inputs, outputs }
+    }
 }
 
 /// Type of aggregate computation.
@@ -260,20 +273,6 @@ impl PropertyQuery {
     }
 }
 
-impl PropertyQueryKind {
-    /// Canonical proof-time ordinal used in execution/property traces.
-    pub const fn ordinal(self) -> u8 {
-        match self {
-            Self::Minimum => 0,
-            Self::Maximum => 1,
-            Self::Successor => 2,
-            Self::Predecessor => 3,
-            Self::NonExistenceRange => 4,
-            Self::Aggregate => 5,
-        }
-    }
-}
-
 /// Compiler-derived structural property capability for one specific column.
 #[derive(
     Debug,
@@ -296,21 +295,6 @@ pub struct PropertyRequirement {
     pub col_id: ColId,
     /// Structural query kind required by the program.
     pub query_kind: PropertyQueryKind,
-}
-
-impl CmpOp {
-    /// Apply this comparison to two values, producing `Value::Bool`.
-    pub fn apply(&self, lhs: &Value, rhs: &Value) -> Result<Value, TabulaError> {
-        let b = match self {
-            Self::Eq => Ok(lhs == rhs),
-            Self::Ne => Ok(lhs != rhs),
-            Self::Lt => lhs.compare(rhs).map(|o| o == Ordering::Less),
-            Self::Lte => lhs.compare(rhs).map(|o| o != Ordering::Greater),
-            Self::Gt => lhs.compare(rhs).map(|o| o == Ordering::Greater),
-            Self::Gte => lhs.compare(rhs).map(|o| o != Ordering::Less),
-        }?;
-        Ok(Value::Bool(b))
-    }
 }
 
 /// A single Tabula IR instruction.
@@ -426,7 +410,7 @@ pub enum Instruction {
         cond: ValueExpr,
     },
 
-    /// Hash inputs, store result in `dst` as `Value::Bytes32`.
+    /// Hash inputs, store result in `dst` as a `Bytes32`-typed value.
     Hash {
         /// Destination slot.
         dst: Slot,

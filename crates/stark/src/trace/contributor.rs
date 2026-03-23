@@ -27,7 +27,7 @@ pub struct TracePhase(pub u32);
 impl TracePhase {
     /// Chips whose traces are independent: Execution, StaticTable, SmtColPath, SmtTablePath.
     pub const INDEPENDENT: Self = Self(0);
-    /// Memory-layer chips built from witness data: InterTxOrder, StateColumn, ColumnMeta.
+    /// Memory-layer chips built from witness data: InterTxOrder, StateShard, MetaShard.
     pub const MEMORY: Self = Self(100);
     /// Chips consuming interaction data from earlier phases: Poseidon, RangeCheck.
     pub const DEPENDENT: Self = Self(200);

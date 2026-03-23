@@ -1,5 +1,8 @@
+use std::cmp::Ordering;
+
 use tabula_core::error::TabulaError;
 use tabula_ir::ValueExpr;
+use tabula_types::bool_typed;
 
 use tabula_chips::execution::trace::{CmpOp, Opcode};
 
@@ -14,7 +17,15 @@ pub(super) fn lower_cmp<const W: usize>(
 ) -> Result<(), TabulaError> {
     let lhs_val = ctx.resolve_val(lhs)?;
     let rhs_val = ctx.resolve_val(rhs)?;
-    let result = op.apply(&lhs_val, &rhs_val)?;
+    let runtime = ctx.type_runtimes.resolve(lhs_val.type_id())?;
+    let result = bool_typed(match op {
+        tabula_ir::CmpOp::Eq => runtime.eq_value(&lhs_val, &rhs_val)?,
+        tabula_ir::CmpOp::Ne => !runtime.eq_value(&lhs_val, &rhs_val)?,
+        tabula_ir::CmpOp::Lt => runtime.cmp_value(&lhs_val, &rhs_val)? == Ordering::Less,
+        tabula_ir::CmpOp::Lte => runtime.cmp_value(&lhs_val, &rhs_val)? != Ordering::Greater,
+        tabula_ir::CmpOp::Gt => runtime.cmp_value(&lhs_val, &rhs_val)? == Ordering::Greater,
+        tabula_ir::CmpOp::Gte => runtime.cmp_value(&lhs_val, &rhs_val)? != Ordering::Less,
+    });
 
     let lhs_enc = ctx.encode_padded(&lhs_val)?;
     let rhs_enc = ctx.encode_padded(&rhs_val)?;

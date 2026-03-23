@@ -51,13 +51,13 @@ fn make_is_zero_trace(val: KoalaBear) -> RowMajorMatrix<KoalaBear> {
 }
 
 #[test]
-fn is_zero_with_zero_value() {
+fn is_zero_with_zero_typed() {
     let trace = make_is_zero_trace(KoalaBear::ZERO);
     debug_check(&IsZeroTestChip, &trace).expect("zero should pass");
 }
 
 #[test]
-fn is_zero_with_nonzero_value() {
+fn is_zero_with_nonzero_typed() {
     let trace = make_is_zero_trace(KoalaBear::new(42));
     debug_check(&IsZeroTestChip, &trace).expect("nonzero should pass");
 }

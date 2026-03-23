@@ -20,7 +20,7 @@
 //! Layer 1: ColumnCommitment (pluggable, per-column)
 //!   └─ receives Memory bus, sends CommitVerif bus
 //! Layer 2: Root proof (fixed)
-//!   └─ ColumnMeta, SmtTablePath
+//!   └─ MetaShard, SmtTablePath
 //! Layer 3: BusConsumer (bus-driven)
 //!   └─ Poseidon, RangeCheck, ...custom
 //! ```
@@ -28,7 +28,7 @@
 use p3_koala_bear::KoalaBear;
 
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, TableId};
+use tabula_core::{ColId, Digest, RootProfileId, TableId};
 
 use crate::air::interaction::BusId;
 use crate::chips::ChipId;
@@ -74,6 +74,10 @@ pub struct ColumnPlan {
     pub table: TableId,
     /// Column within the table.
     pub col: ColId,
+    /// Root-binding family used for the canonical meta leaf contract.
+    pub root_binding_family: RootProfileId,
+    /// Sealed column profile hash bound into the canonical root leaf.
+    pub column_profile_hash: Digest,
     /// Value encoding width in field elements.
     pub encoding_width: EncodingWidth,
     /// Name of the commitment scheme (e.g., `"ssmc"`, `"smt"`).

@@ -3,7 +3,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::{CellKey, RowKey, Value};
+use crate::{CellKey, PortableValue, RowKey};
 
 /// Monotonically increasing logical timestamp within a batch execution.
 pub type LogicalTime = u64;
@@ -51,7 +51,7 @@ pub struct AccessEvent {
     /// Whether this is a read or write.
     pub op: OpKind,
     /// The value read or written (canonical zero when absent).
-    pub value: Value,
+    pub value: PortableValue,
     /// Whether the cell is absent (null).
     #[serde(default)]
     pub val_is_null: bool,
@@ -72,16 +72,16 @@ pub struct PrecompileEvent {
     /// Precompile identifier.
     pub precompile_id: u16,
     /// Input values passed to the precompile.
-    pub inputs: Vec<Value>,
+    pub inputs: Vec<PortableValue>,
     /// Output values returned by the precompile.
-    pub outputs: Vec<Value>,
+    pub outputs: Vec<PortableValue>,
 }
 
 /// Canonical result of evaluating a property query against committed state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PropertyQueryResult {
     /// The resolved value.
-    pub value: Value,
+    pub value: PortableValue,
     /// The key at which the value was found (None if not applicable).
     pub key: Option<RowKey>,
     /// Whether the result is null (no matching row).
@@ -94,7 +94,7 @@ pub struct PropertyReadResult {
     /// Zero-based index of the instruction within the tx body.
     pub instruction_index: usize,
     /// The resolved value.
-    pub value: Value,
+    pub value: PortableValue,
     /// The key at which the value was found (None if not applicable).
     pub key: Option<RowKey>,
     /// Whether the result is null (no matching row).
@@ -165,7 +165,7 @@ pub struct EmittedEvent {
     /// Topic identifier (application-defined).
     pub topic: Vec<u8>,
     /// Payload data.
-    pub data: Vec<Value>,
+    pub data: Vec<PortableValue>,
 }
 
 /// Typed consistency check status for command-level contracts.
@@ -189,10 +189,10 @@ pub enum ExecutionConsistencyStatus {
 pub struct BatchResult {
     /// Cells read from committed state (not from overlay). Deduplicated.
     /// `None` = cell was absent.
-    pub read_set_old: Vec<(CellKey, Option<Value>)>,
+    pub read_set_old: Vec<(CellKey, Option<PortableValue>)>,
     /// Final writes to apply to committed state. Coalesced (last-write-wins).
     /// `None` = delete (write null).
-    pub write_set_final: Vec<(CellKey, Option<Value>)>,
+    pub write_set_final: Vec<(CellKey, Option<PortableValue>)>,
     /// Per-transaction results, in batch order.
     pub txs: Vec<TxResult>,
 }

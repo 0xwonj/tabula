@@ -6,10 +6,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_core::error::TabulaError;
 use tabula_core::{TableId, TableSchema, TxTypeId};
+use tabula_profile::{ProfileCatalog, builtin_catalog};
 
-use crate::instruction::{PrecompileId, PropertyQueryKind, PropertyRequirement};
+use crate::instruction::{PrecompileId, PrecompileSignature, PropertyRequirement};
 use crate::pass::{BodyTypeInfo, canonicalize, typecheck, validate};
-use crate::{Instruction, TxTypeDef};
+use crate::{Instruction, PropertyQueryKind, TxTypeDef};
 
 /// Holds registered transaction type definitions.
 #[derive(Debug, Clone)]
@@ -17,15 +18,40 @@ pub struct Program {
     types: BTreeMap<TxTypeId, TxTypeDef>,
     type_info: BTreeMap<TxTypeId, BodyTypeInfo>,
     schemas: BTreeMap<TableId, TableSchema>,
+    profile_catalog: ProfileCatalog,
+    precompiles: BTreeMap<PrecompileId, PrecompileSignature>,
 }
 
 impl Program {
     /// Create an empty program.
     pub fn new() -> Self {
+        Self::with_profile_catalog(
+            builtin_catalog().expect("built-in profile catalog must remain valid"),
+        )
+    }
+
+    /// Create an empty program with one explicit semantic profile catalog.
+    pub fn with_profile_catalog(profile_catalog: ProfileCatalog) -> Self {
         Self {
             types: BTreeMap::new(),
             type_info: BTreeMap::new(),
             schemas: BTreeMap::new(),
+            profile_catalog,
+            precompiles: BTreeMap::new(),
+        }
+    }
+
+    /// Create an empty program with one explicit semantic profile catalog and sealed precompile signatures.
+    pub fn with_profile_catalog_and_precompiles(
+        profile_catalog: ProfileCatalog,
+        precompiles: BTreeMap<PrecompileId, PrecompileSignature>,
+    ) -> Self {
+        Self {
+            types: BTreeMap::new(),
+            type_info: BTreeMap::new(),
+            schemas: BTreeMap::new(),
+            profile_catalog,
+            precompiles,
         }
     }
 
@@ -42,7 +68,12 @@ impl Program {
     /// or remaining NF violations that cannot be auto-fixed.
     pub fn register(&mut self, mut def: TxTypeDef) -> Result<(), TabulaError> {
         def.body = canonicalize::canonicalize(def.body);
-        let info = typecheck::check(&def, &self.schemas)?;
+        let info = typecheck::check(
+            &def,
+            &self.schemas,
+            &self.profile_catalog,
+            &self.precompiles,
+        )?;
         validate::check_normal_form(&def.body)?;
         self.type_info.insert(def.id, info);
         self.types.insert(def.id, def);
@@ -67,6 +98,16 @@ impl Program {
     /// Return the table schemas.
     pub fn schemas(&self) -> &BTreeMap<TableId, TableSchema> {
         &self.schemas
+    }
+
+    /// Canonical semantic profile catalog used for typechecking this program.
+    pub fn profile_catalog(&self) -> &ProfileCatalog {
+        &self.profile_catalog
+    }
+
+    /// Sealed typed precompile signatures indexed by portable id.
+    pub fn precompiles(&self) -> &BTreeMap<PrecompileId, PrecompileSignature> {
+        &self.precompiles
     }
 
     /// Collect all `TableId` values referenced by state-accessing instructions.

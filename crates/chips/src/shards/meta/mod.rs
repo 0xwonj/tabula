@@ -1,6 +1,6 @@
 //! MetaShard chip — per-column commitment metadata.
 //!
-//! Per-column version of `ColumnMetaChip`. Each instance handles exactly one
+//! Per-column version of `MetaShardChip`. Each instance handles exactly one
 //! `(table_id, col_id)` pair, eliminating lex ordering and IsZero gadgets.
 //!
 //! Canonical 3-file chip layout:

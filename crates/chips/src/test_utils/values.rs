@@ -16,7 +16,7 @@ pub fn distinct_digest(seed: u32) -> NativeDigest {
 /// Compute `Com_empty = Poseidon(0x00 || t || c || 0..)` — the canonical empty-column commitment.
 ///
 /// This is the protocol-defined commitment for an empty column, verified by the
-/// ColumnMeta AIR's `constrain_com_empty` constraint.
+/// Meta-shard AIR's `constrain_com_empty` constraint.
 pub fn com_empty(table: u32, col: u16) -> NativeDigest {
     use crate::poseidon::constants::poseidon2_permutation;
     let mut input = [KoalaBear::ZERO; 16];

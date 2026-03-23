@@ -1,10 +1,10 @@
 //! MetaShardChip — AIR constraints for per-column commitment metadata.
 //!
-//! Per-column version of `ColumnMetaChip`. Each instance handles a single
+//! Per-column version of `MetaShardChip`. Each instance handles a single
 //! `(table_id, col_id)` pair, eliminating ordering constraints.
 //!
-//! The commitment scheme is parameterized via constructor fields:
-//! - `scheme_tag`: domain-separation value for leaf digest hashing
+//! The root-binding contract is parameterized via constructor fields:
+//! - `binding_digest`: precomputed `(table, col, profile)` digest prefix
 //! - `receives_commitment`: whether to receive on the C6 CommitmentVerif bus
 //!
 //! This design allows unlimited commitment schemes without modifying AIR code.
@@ -26,7 +26,7 @@
 //! - C15 SmtLeafDigest send
 
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 
 use tabula_gadgets::{constrain_constant_identity, constrain_is_real_prefix};
 use tabula_stark::air::builder::InteractionAirBuilder;
@@ -46,7 +46,8 @@ use super::columns::{DIGEST_WIDTH, META_SHARD_WIDTH, MetaShardCols};
 /// Each instance operates on a single `(table_id, col_id)` pair.
 /// Tracks commitment transitions (Com_old → Com_new) for that column.
 ///
-/// The `scheme_tag` is used for leaf digest domain separation (e.g., 0=SSMC, 1=SMT).
+/// The `binding_digest` binds leaf digests to the sealed column profile and
+/// concrete column identity selected at setup time.
 /// The `receives_commitment` flag controls whether this chip receives on the
 /// C6 CommitmentVerification bus gate for scheme-owned state proofs.
 #[derive(Debug, Clone)]
@@ -54,8 +55,8 @@ pub struct MetaShardChip {
     chip_id: ChipId,
     table_id: u32,
     col_id: u16,
-    /// Scheme tag for leaf digest domain separation.
-    scheme_tag: u16,
+    /// Precomputed root-binding digest prefix for this column slot.
+    binding_digest: tabula_commitment::NativeDigest,
     /// Whether to receive on C6 CommitmentVerification bus.
     receives_commitment: bool,
 }
@@ -63,20 +64,20 @@ pub struct MetaShardChip {
 impl MetaShardChip {
     /// Create a new meta shard chip for a specific column.
     ///
-    /// - `scheme_tag`: domain-separation value (e.g., `scheme_tags::SSMC` = 0)
+    /// - `binding_digest`: precomputed root-binding digest prefix for this slot
     /// - `receives_commitment`: true if this scheme's state chip sends commitments via C6
     pub fn new(
         chip_id: ChipId,
         table_id: u32,
         col_id: u16,
-        scheme_tag: u16,
+        binding_digest: tabula_commitment::NativeDigest,
         receives_commitment: bool,
     ) -> Self {
         Self {
             chip_id,
             table_id,
             col_id,
-            scheme_tag,
+            binding_digest,
             receives_commitment,
         }
     }
@@ -91,9 +92,9 @@ impl MetaShardChip {
         self.col_id
     }
 
-    /// Scheme tag value as u16.
-    pub fn scheme_tag(&self) -> u16 {
-        self.scheme_tag
+    /// Precomputed root-binding digest prefix.
+    pub fn binding_digest(&self) -> tabula_commitment::NativeDigest {
+        self.binding_digest
     }
 }
 
@@ -170,7 +171,7 @@ impl<AB: InteractionAirBuilder> Air<AB> for MetaShardChip {
         constrain_com_empty(builder, local);
 
         // ── 8. Leaf digest composition ──
-        constrain_leaf_digest(builder, local, self.scheme_tag);
+        constrain_leaf_digest(builder, local, self.binding_digest);
 
         // ── LogUp buses ──
 
@@ -329,29 +330,21 @@ fn constrain_com_empty<AB: AirBuilder>(builder: &mut AB, local: &MetaShardCols<A
 
 /// 8. Leaf digest perm input composition.
 ///
-/// `leaf_perm_input = [0x10, table_id, col_id, scheme_tag, 0,0,0,0, com[8]]`
-///
-/// `scheme_tag` is a constructor constant, not a trace column.
+/// `leaf_perm_input = [binding_digest[8], com[8]]`
 fn constrain_leaf_digest<AB: AirBuilder>(
     builder: &mut AB,
     local: &MetaShardCols<AB::Var>,
-    scheme_tag: u16,
+    binding_digest: tabula_commitment::NativeDigest,
 ) {
     let is_real: AB::Expr = local.is_real.into();
-    let tag_expr = AB::Expr::from_u16(scheme_tag);
 
     // Old leaf
-    builder.assert_zero(
-        is_real.clone() * (local.leaf_perm_input_old[0].into() - AB::Expr::from_u64(0x10)),
-    );
-    builder.assert_zero(
-        is_real.clone() * (local.leaf_perm_input_old[1].into() - local.table_id.into()),
-    );
-    builder
-        .assert_zero(is_real.clone() * (local.leaf_perm_input_old[2].into() - local.col_id.into()));
-    builder.assert_zero(is_real.clone() * (local.leaf_perm_input_old[3].into() - tag_expr.clone()));
-    for i in 4..8 {
-        builder.assert_zero(is_real.clone() * local.leaf_perm_input_old[i].into());
+    for i in 0..DIGEST_WIDTH {
+        builder.assert_zero(
+            is_real.clone()
+                * (local.leaf_perm_input_old[i].into()
+                    - AB::Expr::from_u64(binding_digest.0[i].as_canonical_u32() as u64)),
+        );
     }
     for i in 0..DIGEST_WIDTH {
         builder.assert_zero(
@@ -360,17 +353,12 @@ fn constrain_leaf_digest<AB: AirBuilder>(
     }
 
     // New leaf
-    builder.assert_zero(
-        is_real.clone() * (local.leaf_perm_input_new[0].into() - AB::Expr::from_u64(0x10)),
-    );
-    builder.assert_zero(
-        is_real.clone() * (local.leaf_perm_input_new[1].into() - local.table_id.into()),
-    );
-    builder
-        .assert_zero(is_real.clone() * (local.leaf_perm_input_new[2].into() - local.col_id.into()));
-    builder.assert_zero(is_real.clone() * (local.leaf_perm_input_new[3].into() - tag_expr));
-    for i in 4..8 {
-        builder.assert_zero(is_real.clone() * local.leaf_perm_input_new[i].into());
+    for i in 0..DIGEST_WIDTH {
+        builder.assert_zero(
+            is_real.clone()
+                * (local.leaf_perm_input_new[i].into()
+                    - AB::Expr::from_u64(binding_digest.0[i].as_canonical_u32() as u64)),
+        );
     }
     for i in 0..DIGEST_WIDTH {
         builder.assert_zero(
