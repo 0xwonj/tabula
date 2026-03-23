@@ -21,7 +21,7 @@ use tabula_profile::{
     SemanticRegistry, TYPE_BYTES32_ID, TYPE_U64_ID, TranscriptSerialization, TypeCapabilities,
     TypeDescriptor, ZeroValueSpec, builtin_semantic_registry,
 };
-use tabula_runtime::{HostEnvironment, HostTypeRuntimes, ProveInput, TabulaRuntime, Verifier};
+use tabula_runtime::{HostEnvironment, ProveInput, RuntimeRegistries, TabulaRuntime, Verifier};
 use tabula_testing::exec::compiled_program_from_artifact;
 use tabula_types::builtins::{decode_seeded_field_elements, encode_seeded_field_elements};
 use tabula_types::{
@@ -556,8 +556,8 @@ impl EncodingRuntime for CustomOpaqueEncodingRuntime {
     }
 }
 
-fn host_types_with_custom_numeric() -> HostTypeRuntimes {
-    HostTypeRuntimes::standard()
+fn host_types_with_custom_numeric() -> RuntimeRegistries {
+    RuntimeRegistries::standard()
         .with_type_runtime(CustomNumericTypeRuntime {
             descriptor: numeric_descriptor(),
         })
@@ -568,8 +568,8 @@ fn host_types_with_custom_numeric() -> HostTypeRuntimes {
         .expect("register numeric encoding runtime")
 }
 
-fn host_types_with_custom_opaque() -> HostTypeRuntimes {
-    HostTypeRuntimes::standard()
+fn host_types_with_custom_opaque() -> RuntimeRegistries {
+    RuntimeRegistries::standard()
         .with_type_runtime(CustomOpaqueTypeRuntime {
             descriptor: opaque_descriptor(),
         })
@@ -595,7 +595,7 @@ fn proof_path_proves_and_verifies_custom_numeric_type_through_ssmc() {
     assert_eq!(resolved.proof_layout_family(), ColumnLayoutKind::SSMC_V1);
 
     let host_environment =
-        HostEnvironment::standard().with_type_runtimes(host_types_with_custom_numeric());
+        HostEnvironment::standard().with_runtime_registries(host_types_with_custom_numeric());
     let runtime = TabulaRuntime::builder(compiled)
         .with_host_environment(host_environment.clone())
         .build()
@@ -636,7 +636,7 @@ fn proof_path_proves_and_verifies_custom_opaque_type_through_smt() {
     assert_eq!(resolved.proof_layout_family(), ColumnLayoutKind::SMT_V1);
 
     let host_environment =
-        HostEnvironment::standard().with_type_runtimes(host_types_with_custom_opaque());
+        HostEnvironment::standard().with_runtime_registries(host_types_with_custom_opaque());
     let runtime = TabulaRuntime::builder(compiled)
         .with_host_environment(host_environment.clone())
         .build()

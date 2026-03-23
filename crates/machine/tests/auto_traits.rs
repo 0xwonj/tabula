@@ -175,12 +175,12 @@ fn core_transaction_types_are_send_sync() {
 #[test]
 fn core_execution_types_are_send_sync() {
     use tabula_core::{
-        AccessEvent, BatchResult, ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, OpKind,
+        AccessEvent, BatchReport, ETraceEventId, EmittedEvent, ExecutionConsistencyStatus, OpKind,
         TxResult,
     };
 
     assert_send_sync::<AccessEvent>();
-    assert_send_sync::<BatchResult>();
+    assert_send_sync::<BatchReport>();
     assert_send_sync::<TxResult>();
     assert_send_sync::<EmittedEvent>();
     assert_send_sync::<OpKind>();

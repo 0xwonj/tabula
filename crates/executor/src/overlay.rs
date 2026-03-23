@@ -1,39 +1,29 @@
-//! Local overlay Δ (write-buffer) for deterministic execution.
+//! Local state overlay for deterministic execution.
 //!
-//! Implements three core semantics rules:
-//! - **Read-your-writes**: reads check the write buffer first
-//! - **Read deduplication**: reads from snapshot are cached
-//! - **Write coalescing**: only the last write per key survives
+//! The overlay owns only state semantics:
+//! - **Read-your-writes**
+//! - **Read deduplication**
+//! - **Write coalescing**
 //!
-//! Internally composed of two sub-components:
-//! - [`ExecutionState`](crate::execution_state) — state management (write buffer, read cache, undo log)
-//! - [`TraceRecorder`](crate::trace_recorder) — event recording (execution trace, logical time)
-//!
-//! This separation prepares for Phase 4 (ok-gating), where failed-tx
-//! rollback will roll back state only while preserving the event trace.
+//! Typed execution effects are recorded by the executor journal layer, not by
+//! the overlay itself.
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
-use tabula_core::{AccessEvent, CellKey, LogicalTime, OpKind, PortableValue, TypeId};
+use tabula_core::{CellKey, TypeId};
 use tabula_types::{TypeRuntimeRegistry, TypedValue};
 
 use crate::execution_state::ExecutionState;
-use crate::trace_recorder::TraceRecorder;
+use crate::journal::{TypedStateSnapshot, TypedStateWrite};
 
-// ── OverlayResult ───────────────────────────────────────────────────────
-
-/// Finalized overlay output, consumed by the batch executor.
+/// Finalized overlay state output, consumed by the batch executor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OverlayResult {
     /// Cells read from committed state (deduplicated). `None` = absent.
-    pub read_set_old: Vec<(CellKey, Option<PortableValue>)>,
+    pub read_set_old: Vec<TypedStateSnapshot>,
     /// Final writes to committed state (coalesced). `None` = delete.
-    pub write_set_final: Vec<(CellKey, Option<PortableValue>)>,
-    /// Full execution trace.
-    pub events: Vec<AccessEvent>,
+    pub write_set_final: Vec<TypedStateWrite>,
 }
-
-// ── Overlay (public facade) ─────────────────────────────────────────────
 
 /// A local overlay sitting on top of a `StateView`.
 ///
@@ -42,12 +32,8 @@ pub struct OverlayResult {
 ///
 /// Uses an undo-log for O(1) checkpoint and O(k) rollback (where k
 /// is the number of mutations since the checkpoint).
-///
-/// Internally composed of **ExecutionState** (state management) and
-/// **TraceRecorder** (event recording). The public API is unchanged.
 pub struct Overlay<'a, S: StateView> {
     state: ExecutionState<'a, S>,
-    recorder: TraceRecorder,
     type_runtimes: &'a TypeRuntimeRegistry,
 }
 
@@ -56,108 +42,60 @@ impl<'a, S: StateView> Overlay<'a, S> {
     pub fn new(snapshot: &'a S, type_runtimes: &'a TypeRuntimeRegistry) -> Self {
         Self {
             state: ExecutionState::new(snapshot),
-            recorder: TraceRecorder::new(),
             type_runtimes,
         }
     }
 
-    /// Set the current transaction index (called by the batch executor).
-    pub fn set_tx_index(&mut self, idx: u32) {
-        self.recorder.set_tx_index(idx);
-    }
-
     /// Read a cell: checks write buffer, then read cache, then snapshot.
-    ///
-    /// `col_type` is needed to produce the canonical zero value for events
-    /// when the cell is absent.
     pub fn read(
         &mut self,
         key: &CellKey,
         col_type: TypeId,
     ) -> Result<Option<TypedValue>, TabulaError> {
-        // Rule A: read-your-writes
-        if let Some(opt) = self.state.read_from_buffer(key) {
-            let opt = opt.clone();
-            self.recorder
-                .record_event(key, OpKind::Read, &opt, col_type, self.type_runtimes)?;
-            return Ok(opt);
+        if let Some(entry) = self.state.read_from_buffer(key) {
+            return Ok(entry.value.clone());
         }
-
-        // Rule B: read deduplication
-        if let Some(opt) = self.state.read_from_cache(key) {
-            let opt = opt.clone();
-            self.recorder
-                .record_event(key, OpKind::Read, &opt, col_type, self.type_runtimes)?;
-            return Ok(opt);
+        if let Some(entry) = self.state.read_from_cache(key) {
+            return Ok(entry.value.clone());
         }
-
-        // Cache miss: read from snapshot
-        let opt = self.state.read_from_snapshot(key, self.type_runtimes)?;
-        self.recorder
-            .record_event(key, OpKind::Read, &opt, col_type, self.type_runtimes)?;
-        Ok(opt)
+        Ok(self
+            .state
+            .read_from_snapshot(key, col_type, self.type_runtimes)?
+            .value)
     }
 
-    /// Write a value to a cell (buffered locally).
-    ///
-    /// `value` is `None` for a delete (null write), `Some(v)` for a value write.
-    /// `col_type` is needed to produce the canonical zero value for events.
+    /// Buffer a write to a cell.
     pub fn write(
         &mut self,
         key: &CellKey,
         value: Option<TypedValue>,
         col_type: TypeId,
     ) -> Result<(), TabulaError> {
-        self.recorder
-            .record_event(key, OpKind::Write, &value, col_type, self.type_runtimes)?;
-        // Rule C: write coalescing — last write wins
-        self.state.write_buffered(key, value);
+        self.state.write_buffered(key, col_type, value);
         Ok(())
     }
 
     /// Save the current overlay state for potential rollback. O(1).
     pub fn checkpoint(&mut self) {
         self.state.checkpoint();
-        self.recorder.checkpoint();
     }
 
     /// Restore the overlay to the most recent checkpoint. O(k).
-    ///
-    /// Returns `None` if no checkpoint exists.
     pub fn rollback(&mut self) -> Option<()> {
-        self.state.rollback()?;
-        self.recorder.rollback()?;
-        Some(())
+        self.state.rollback()
     }
 
-    /// Discard the most recent checkpoint (tx succeeded).
+    /// Discard the most recent checkpoint.
     pub fn discard_checkpoint(&mut self) {
         self.state.discard_checkpoint();
-        self.recorder.discard_checkpoint();
     }
 
-    /// Current logical time.
-    pub fn time(&self) -> LogicalTime {
-        self.recorder.time()
-    }
-
-    /// Number of events recorded so far.
-    pub fn events_len(&self) -> usize {
-        self.recorder.events_len()
-    }
-
-    /// Clone events recorded since a given index.
-    pub fn events_since(&self, since: usize) -> Vec<AccessEvent> {
-        self.recorder.events_since(since)
-    }
-
-    /// Finalize the overlay into its output components.
+    /// Finalize the overlay into typed state results.
     pub fn into_result(self) -> Result<OverlayResult, TabulaError> {
         let (read_set_old, write_set_final) = self.state.into_sets(self.type_runtimes)?;
         Ok(OverlayResult {
             read_set_old,
             write_set_final,
-            events: self.recorder.into_events(),
         })
     }
 }
@@ -170,12 +108,11 @@ mod tests {
 
     use tabula_core::error::TabulaError;
     use tabula_core::traits::StateView;
-    use tabula_core::{CellKey, ColId, OpKind, PortableValue, RowKey, TableId};
+    use tabula_core::{CellKey, ColId, PortableValue, RowKey, TableId};
     use tabula_profile::TYPE_U64_ID;
-    use tabula_types::{TypeRuntimeRegistry, u64_portable, u64_typed};
+    use tabula_types::{TypeRuntimeRegistry, bool_portable, u64_portable, u64_typed};
 
     use crate::execution_state::ExecutionState;
-    use crate::trace_recorder::TraceRecorder;
 
     const TY: tabula_core::TypeId = TYPE_U64_ID;
 
@@ -224,8 +161,6 @@ mod tests {
         }
     }
 
-    // ── ExecutionState unit tests ───────────────────────────────────────
-
     #[test]
     fn execution_state_buffer_roundtrip() {
         let snap = CountingSnapshot::new(BTreeMap::new());
@@ -233,8 +168,11 @@ mod tests {
         let k = cell(1, 0, 0);
 
         assert!(state.read_from_buffer(&k).is_none());
-        state.write_buffered(&k, Some(u64_typed(42)));
-        assert_eq!(state.read_from_buffer(&k), Some(&Some(u64_typed(42))));
+        state.write_buffered(&k, TY, Some(u64_typed(42)));
+        assert_eq!(
+            state.read_from_buffer(&k).map(|entry| entry.value.clone()),
+            Some(Some(u64_typed(42)))
+        );
     }
 
     #[test]
@@ -246,9 +184,12 @@ mod tests {
         let mut state = ExecutionState::new(&snap);
 
         assert!(state.read_from_cache(&k).is_none());
-        let v = state.read_from_snapshot(&k, type_runtimes()).unwrap();
-        assert_eq!(v, Some(u64_typed(100)));
-        assert_eq!(state.read_from_cache(&k), Some(&Some(u64_typed(100))));
+        let v = state.read_from_snapshot(&k, TY, type_runtimes()).unwrap();
+        assert_eq!(v.value, Some(u64_typed(100)));
+        assert_eq!(
+            state.read_from_cache(&k).map(|entry| entry.value.clone()),
+            Some(Some(u64_typed(100)))
+        );
         assert_eq!(snap.call_count(), 1);
     }
 
@@ -258,12 +199,15 @@ mod tests {
         let mut state = ExecutionState::new(&snap);
         let k = cell(1, 0, 0);
 
-        state.write_buffered(&k, Some(u64_typed(10)));
+        state.write_buffered(&k, TY, Some(u64_typed(10)));
         state.checkpoint();
-        state.write_buffered(&k, Some(u64_typed(20)));
+        state.write_buffered(&k, TY, Some(u64_typed(20)));
         state.rollback();
 
-        assert_eq!(state.read_from_buffer(&k), Some(&Some(u64_typed(10))));
+        assert_eq!(
+            state.read_from_buffer(&k).map(|entry| entry.value.clone()),
+            Some(Some(u64_typed(10)))
+        );
     }
 
     #[test]
@@ -275,7 +219,7 @@ mod tests {
         let mut state = ExecutionState::new(&snap);
 
         state.checkpoint();
-        let _ = state.read_from_snapshot(&k, type_runtimes()).unwrap();
+        let _ = state.read_from_snapshot(&k, TY, type_runtimes()).unwrap();
         assert!(state.read_from_cache(&k).is_some());
         state.rollback();
         assert!(state.read_from_cache(&k).is_none());
@@ -290,81 +234,33 @@ mod tests {
         let snap = CountingSnapshot::new(data);
         let mut state = ExecutionState::new(&snap);
 
-        let _ = state.read_from_snapshot(&k1, type_runtimes()).unwrap();
-        state.write_buffered(&k2, Some(u64_typed(42)));
+        let _ = state.read_from_snapshot(&k1, TY, type_runtimes()).unwrap();
+        state.write_buffered(&k2, TY, Some(u64_typed(42)));
 
         let (read_set, write_set) = state.into_sets(type_runtimes()).unwrap();
         assert_eq!(read_set.len(), 1);
-        assert_eq!(read_set[0], (k1, Some(u64_portable(100))));
+        assert_eq!(read_set[0].key, k1);
+        assert_eq!(read_set[0].type_id, TY);
+        assert_eq!(read_set[0].value, Some(u64_typed(100)));
         assert_eq!(write_set.len(), 1);
-        assert_eq!(write_set[0], (k2, Some(u64_portable(42))));
-    }
-
-    // ── TraceRecorder unit tests ────────────────────────────────────────
-
-    #[test]
-    fn recorder_event_advances_time() {
-        let mut rec = TraceRecorder::new();
-        let k = cell(1, 0, 0);
-
-        assert_eq!(rec.time(), 0);
-        rec.record_event(&k, OpKind::Read, &Some(u64_typed(1)), TY, type_runtimes())
-            .unwrap();
-        assert_eq!(rec.time(), 1);
-        rec.record_event(&k, OpKind::Write, &Some(u64_typed(2)), TY, type_runtimes())
-            .unwrap();
-        assert_eq!(rec.time(), 2);
-        assert_eq!(rec.events_len(), 2);
+        assert_eq!(write_set[0].key, k2);
+        assert_eq!(write_set[0].type_id, TY);
+        assert_eq!(write_set[0].value, Some(u64_typed(42)));
     }
 
     #[test]
-    fn recorder_rollback_restores_time_and_events() {
-        let mut rec = TraceRecorder::new();
+    fn execution_state_snapshot_type_mismatch_fails_closed() {
         let k = cell(1, 0, 0);
+        let snap = CountingSnapshot {
+            data: BTreeMap::from([(k, bool_portable(true))]),
+            call_count: AtomicU32::new(0),
+        };
+        let mut state = ExecutionState::new(&snap);
 
-        rec.record_event(&k, OpKind::Read, &Some(u64_typed(1)), TY, type_runtimes())
-            .unwrap();
-        rec.checkpoint();
-        rec.record_event(&k, OpKind::Write, &Some(u64_typed(2)), TY, type_runtimes())
-            .unwrap();
-        rec.record_event(&k, OpKind::Write, &Some(u64_typed(3)), TY, type_runtimes())
-            .unwrap();
-        assert_eq!(rec.time(), 3);
-        assert_eq!(rec.events_len(), 3);
-
-        rec.rollback();
-        assert_eq!(rec.time(), 1);
-        assert_eq!(rec.events_len(), 1);
-    }
-
-    #[test]
-    fn recorder_tx_index_and_events_since() {
-        let mut rec = TraceRecorder::new();
-        let k = cell(1, 0, 0);
-
-        rec.set_tx_index(0);
-        rec.record_event(&k, OpKind::Read, &Some(u64_typed(1)), TY, type_runtimes())
-            .unwrap();
-        let since = rec.events_len();
-        rec.set_tx_index(1);
-        rec.record_event(&k, OpKind::Write, &Some(u64_typed(2)), TY, type_runtimes())
-            .unwrap();
-
-        let recent = rec.events_since(since);
-        assert_eq!(recent.len(), 1);
-        assert_eq!(recent[0].effect_ordinal_in_tx, 0);
-    }
-
-    #[test]
-    fn recorder_null_event_records_canonical_zero() {
-        let mut rec = TraceRecorder::new();
-        let k = cell(1, 0, 0);
-
-        rec.record_event(&k, OpKind::Read, &None, TY, type_runtimes())
-            .unwrap();
-        let events = rec.into_events();
-        assert_eq!(events.len(), 1);
-        assert!(events[0].val_is_null);
-        assert_eq!(events[0].value, u64_portable(0));
+        let err = state
+            .read_from_snapshot(&k, TY, type_runtimes())
+            .expect_err("type mismatch must fail");
+        assert!(matches!(err, TabulaError::TypeMismatch { .. }));
+        assert!(state.read_from_cache(&k).is_none());
     }
 }

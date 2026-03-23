@@ -37,9 +37,11 @@ fn test_overlay_read_your_writes_end_to_end() {
 
     let result = ov.into_result().unwrap();
     assert_eq!(result.read_set_old.len(), 1);
-    assert_eq!(result.read_set_old[0], (k, Some(u64_portable(100))));
+    assert_eq!(result.read_set_old[0].key, k);
+    assert_eq!(result.read_set_old[0].value, Some(u64_typed(100)));
     assert_eq!(result.write_set_final.len(), 1);
-    assert_eq!(result.write_set_final[0], (k, Some(u64_portable(200))));
+    assert_eq!(result.write_set_final[0].key, k);
+    assert_eq!(result.write_set_final[0].value, Some(u64_typed(200)));
 }
 
 #[test]
@@ -68,7 +70,8 @@ fn test_overlay_checkpoint_rollback_end_to_end() {
 
     let result = ov.into_result().unwrap();
     assert_eq!(result.write_set_final.len(), 1);
-    assert_eq!(result.write_set_final[0], (k1, Some(u64_portable(50))));
+    assert_eq!(result.write_set_final[0].key, k1);
+    assert_eq!(result.write_set_final[0].value, Some(u64_typed(50)));
 }
 
 #[test]
@@ -87,5 +90,6 @@ fn test_overlay_write_coalescing_end_to_end() {
 
     let result = ov.into_result().unwrap();
     assert_eq!(result.write_set_final.len(), 1);
-    assert_eq!(result.write_set_final[0], (k, Some(u64_portable(3))));
+    assert_eq!(result.write_set_final[0].key, k);
+    assert_eq!(result.write_set_final[0].value, Some(u64_typed(3)));
 }

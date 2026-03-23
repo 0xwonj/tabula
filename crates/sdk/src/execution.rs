@@ -2,7 +2,7 @@ use tabula_artifact::State;
 #[cfg(feature = "prove")]
 use tabula_artifact::TransactionBatch;
 use tabula_core::{CellKey, ExecutionConsistencyStatus, PortableValue, TxResult};
-use tabula_runtime::ExecutedBatch;
+use tabula_runtime::ExecutionEnvelope;
 
 /// SDK wrapper over one completed execution plus the original inputs used to produce it.
 #[derive(Debug, Clone)]
@@ -13,7 +13,7 @@ pub struct Execution {
     pub(crate) state: State,
     #[cfg(feature = "prove")]
     pub(crate) batch: TransactionBatch,
-    pub(crate) inner: ExecutedBatch,
+    pub(crate) inner: ExecutionEnvelope,
 }
 
 impl Execution {
@@ -22,7 +22,7 @@ impl Execution {
         program_hash: String,
         state: State,
         batch: TransactionBatch,
-        inner: ExecutedBatch,
+        inner: ExecutionEnvelope,
     ) -> Self {
         Self {
             program_hash,
@@ -33,7 +33,7 @@ impl Execution {
     }
 
     #[cfg(not(feature = "prove"))]
-    pub(crate) fn new(inner: ExecutedBatch) -> Self {
+    pub(crate) fn new(inner: ExecutionEnvelope) -> Self {
         Self { inner }
     }
 

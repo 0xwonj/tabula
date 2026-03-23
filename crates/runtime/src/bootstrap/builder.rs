@@ -19,18 +19,18 @@ use tabula_ir::Instruction;
 use tabula_machine::backend::AnyRap;
 use tabula_machine::backend::extension::ExecutionTierExtension;
 
-use crate::error::RuntimeError;
-use crate::host::HostEnvironment;
-use crate::machine_config::MachineConfig;
-use crate::program::ResolvedProgram;
-use crate::runtime::TabulaRuntime;
-use crate::setup::materialize::{
-    ColumnProofRecipe, materialize_column_backends, materialize_precompile_runtime_backends,
+use crate::bootstrap::machine::MachineConfig;
+use crate::bootstrap::materialize::{
+    materialize_column_backends, materialize_precompile_runtime_backends,
 };
-use crate::setup::registries::{build_precompile_registry, build_property_query_registry};
-use crate::setup::validation::{
+use crate::bootstrap::registries::{build_precompile_registry, build_property_query_registry};
+use crate::bootstrap::validation::{
     validate_compiler_owned_profiles, validate_precompile_requirements,
 };
+use crate::error::RuntimeError;
+use crate::host::HostEnvironment;
+use crate::program::{ColumnProofSlot, PrecompileProofSlot, ProofPlan, RuntimeProgram};
+use crate::runtime::TabulaRuntime;
 
 /// Fluent builder for [`TabulaRuntime`](crate::TabulaRuntime).
 pub struct RuntimeBuilder {
@@ -68,8 +68,10 @@ impl RuntimeBuilder {
         let resolved_runtime = materialize_column_backends(
             &self.compiled_program,
             self.host_environment.schemes().factories(),
-            self.host_environment.type_runtimes().type_runtimes(),
-            self.host_environment.type_runtimes().encoding_runtimes(),
+            self.host_environment.runtime_registries().type_runtimes(),
+            self.host_environment
+                .runtime_registries()
+                .encoding_runtimes(),
             self.machine_config.supported_root_binding_families(),
         )?;
         let proof_columns: Vec<_> = resolved_runtime
@@ -77,10 +79,10 @@ impl RuntimeBuilder {
             .values()
             .map(|backend| Arc::clone(&backend.proof_column))
             .collect();
-        let proof_recipes: Vec<_> = resolved_runtime
+        let proof_slots: Vec<_> = resolved_runtime
             .column_backends
             .values()
-            .map(|backend| ColumnProofRecipe {
+            .map(|backend| ColumnProofSlot {
                 table: backend.table_id,
                 col: backend.col_id,
                 proof_backend: Arc::clone(&backend.proof_backend),
@@ -89,21 +91,10 @@ impl RuntimeBuilder {
         let precompile_slots = materialize_precompile_runtime_backends(
             self.compiled_program.precompile_manifest(),
             self.host_environment.precompiles().factories(),
-            self.host_environment.type_runtimes().encoding_runtimes(),
-        )?;
-        let resolved_program = ResolvedProgram::from_compiled_program(
-            &self.compiled_program,
-            resolved_runtime,
             self.host_environment
-                .type_runtimes()
-                .type_runtimes()
-                .clone(),
-            self.host_environment
-                .type_runtimes()
-                .encoding_runtimes()
-                .clone(),
+                .runtime_registries()
+                .encoding_runtimes(),
         )?;
-
         let mut machine_builder = self
             .machine_config
             .build_machine_builder()
@@ -117,12 +108,11 @@ impl RuntimeBuilder {
                 InternalPrecompileTranscriptExtension,
             ));
         }
-
         let mut precompile_handlers = Vec::with_capacity(precompile_slots.len());
-        let mut precompile_recipes = Vec::with_capacity(precompile_slots.len());
+        let mut precompile_proof_slots = Vec::with_capacity(precompile_slots.len());
         for slot in precompile_slots {
             precompile_handlers.push(boxed_precompile_handler(slot.handler));
-            precompile_recipes.push(crate::proving::PrecompileProofRecipe {
+            precompile_proof_slots.push(PrecompileProofSlot {
                 descriptor: slot.descriptor,
                 preparer: slot.preparer,
             });
@@ -132,20 +122,32 @@ impl RuntimeBuilder {
                 },
             ));
         }
+        let proof_plan = ProofPlan::new(proof_slots, precompile_proof_slots);
+        let runtime_program = RuntimeProgram::from_compiled_program(
+            &self.compiled_program,
+            resolved_runtime,
+            self.host_environment
+                .runtime_registries()
+                .type_runtimes()
+                .clone(),
+            self.host_environment
+                .runtime_registries()
+                .encoding_runtimes()
+                .clone(),
+            proof_plan,
+        )?;
 
         let machine = machine_builder
             .build()
             .map_err(RuntimeError::MachineSetup)?;
         let precompiles = build_precompile_registry(precompile_handlers)?;
         let property_queries = build_property_query_registry(
-            resolved_program.runtime_columns(),
-            resolved_program.column_backends(),
+            runtime_program.proof().runtime_columns(),
+            runtime_program.proof().column_backends(),
         )?;
 
         Ok(TabulaRuntime::from_parts(
-            resolved_program,
-            proof_recipes,
-            precompile_recipes,
+            runtime_program,
             machine,
             precompiles,
             property_queries,
@@ -496,10 +498,10 @@ mod tests {
             .build()
             .expect("runtime");
 
-        assert_eq!(runtime.resolved_program().runtime_columns().len(), 1);
-        assert_eq!(runtime.proof_recipes().len(), 1);
+        assert_eq!(runtime.proof_program().runtime_columns().len(), 1);
+        assert_eq!(runtime.proof_program().proof_plan().column_slots().len(), 1);
         let backend = runtime
-            .resolved_program()
+            .proof_program()
             .column_backends()
             .get(&(TableId(1), ColId(0)))
             .expect("column backend");
@@ -536,13 +538,13 @@ mod tests {
     }
 
     #[test]
-    fn built_in_runtime_registers_ordered_proof_recipes() {
+    fn built_in_runtime_registers_ordered_proof_slots() {
         let compiled = compiled_single_column_noop_program();
 
         let runtime = RuntimeBuilder::new(compiled).build().expect("runtime");
 
-        assert_eq!(runtime.resolved_program().runtime_columns().len(), 1);
-        assert_eq!(runtime.proof_recipes().len(), 1);
+        assert_eq!(runtime.proof_program().runtime_columns().len(), 1);
+        assert_eq!(runtime.proof_program().proof_plan().column_slots().len(), 1);
     }
 
     #[test]
@@ -612,18 +614,18 @@ mod tests {
     }
 
     #[test]
-    fn runtime_materializes_matching_ordered_proof_recipes() {
+    fn runtime_materializes_matching_ordered_proof_slots() {
         let compiled = compiled_program_with_property_query();
         let runtime = RuntimeBuilder::new(compiled).build().expect("runtime");
 
         assert_eq!(
-            runtime.resolved_program().runtime_columns().len(),
-            runtime.proof_recipes().len()
+            runtime.proof_program().runtime_columns().len(),
+            runtime.proof_program().proof_plan().column_slots().len()
         );
 
-        for slot in runtime.proof_recipes() {
+        for slot in runtime.proof_program().proof_plan().column_slots() {
             let backend = runtime
-                .resolved_program()
+                .proof_program()
                 .column_backends()
                 .get(&(slot.table, slot.col))
                 .expect("column backend");
@@ -641,7 +643,7 @@ mod tests {
         set_artifact_column_scheme(&mut artifact, 0, custom_scheme_profile(SchemeId(0x1000)));
         let compiled = compiled_program_from_artifact(&artifact);
         let host_environment = HostEnvironment::empty()
-            .with_type_runtimes(crate::host::HostTypeRuntimes::standard())
+            .with_runtime_registries(crate::host::RuntimeRegistries::standard())
             .with_column_backend_bundle(ColumnBackendFactoryBundle::new(EmptySchemeFactory))
             .expect("register custom backend bundle");
 
@@ -650,8 +652,8 @@ mod tests {
             .build()
             .expect("custom-only runtime");
 
-        assert_eq!(runtime.resolved_program().runtime_columns().len(), 1);
-        assert_eq!(runtime.proof_recipes().len(), 1);
+        assert_eq!(runtime.proof_program().runtime_columns().len(), 1);
+        assert_eq!(runtime.proof_program().proof_plan().column_slots().len(), 1);
     }
 
     #[test]
@@ -660,8 +662,8 @@ mod tests {
         let mut artifact = compiled.into_artifact();
         set_artifact_column_scheme(&mut artifact, 0, custom_scheme_profile(SchemeId(0x1000)));
         let compiled = compiled_program_from_artifact(&artifact);
-        let host_environment =
-            HostEnvironment::empty().with_type_runtimes(crate::host::HostTypeRuntimes::standard());
+        let host_environment = HostEnvironment::empty()
+            .with_runtime_registries(crate::host::RuntimeRegistries::standard());
 
         let err = RuntimeBuilder::new(compiled)
             .with_host_environment(host_environment)

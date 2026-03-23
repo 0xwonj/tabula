@@ -4,11 +4,11 @@ use tabula_commitment::NativeDigest;
 use tabula_machine::PublicStatement;
 
 use crate::error::RuntimeError;
-use crate::program::ResolvedProgram;
+use crate::program::ResolvedProofProgram;
 
 /// Build the canonical execution statement from execution artifacts and AIR public values.
 pub fn build_execution_statement(
-    resolved_program: &ResolvedProgram,
+    resolved_program: &ResolvedProofProgram,
     state: &State,
     batch: &TransactionBatch,
     state_after: &State,

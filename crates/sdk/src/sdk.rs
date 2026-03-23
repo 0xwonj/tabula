@@ -9,7 +9,7 @@ use tabula_compiler::{
     register_program_definition_with_catalogs,
 };
 use tabula_profile::SemanticRegistry;
-use tabula_runtime::{HostEnvironment, HostTypeRuntimes};
+use tabula_runtime::{HostEnvironment, RuntimeRegistries};
 use tabula_types::{EncodingRuntime, TypeRuntime, TypeRuntimeRegistry};
 
 #[cfg(feature = "verify")]
@@ -46,7 +46,7 @@ pub(crate) struct SdkInner {
 
 impl SdkInner {
     pub(crate) fn type_runtimes(&self) -> &TypeRuntimeRegistry {
-        self.host_environment.type_runtimes().type_runtimes()
+        self.host_environment.runtime_registries().type_runtimes()
     }
 }
 
@@ -170,7 +170,7 @@ impl SdkBuilder {
     pub fn without_default_types(mut self) -> Self {
         self.host_environment = self
             .host_environment
-            .with_type_runtimes(HostTypeRuntimes::empty());
+            .with_runtime_registries(RuntimeRegistries::empty());
         self
     }
 

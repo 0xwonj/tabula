@@ -67,7 +67,7 @@ impl EncodingWidth {
 /// Proof plan metadata for a single column.
 ///
 /// Describes which commitment scheme and encoding width a column uses.
-/// Generated during [`ProofPlan::generate()`].
+/// Generated during [`CommitmentPlan::generate()`].
 #[derive(Clone, Debug)]
 pub struct ColumnPlan {
     /// Table this column belongs to.
@@ -93,12 +93,12 @@ pub struct ColumnPlan {
 /// - How witness data is routed per-column
 /// - Which columns can be built in parallel
 #[derive(Clone, Debug)]
-pub struct ProofPlan {
+pub struct CommitmentPlan {
     /// Per-column plans, in deterministic order.
     columns: Vec<ColumnPlan>,
 }
 
-impl ProofPlan {
+impl CommitmentPlan {
     /// Create a proof plan from a list of column plans.
     pub fn new(columns: Vec<ColumnPlan>) -> Self {
         Self { columns }

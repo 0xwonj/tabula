@@ -13,14 +13,20 @@ use tabula_chips::execution::trace::Opcode;
 
 use super::context::LoweringContext;
 
+#[derive(Clone, Copy)]
+pub(super) struct PropertyReadLoweringInput<'a> {
+    pub(super) instr_idx: usize,
+    pub(super) dst_val: u16,
+    pub(super) dst_key: u16,
+    pub(super) dst_is_null: u16,
+    pub(super) table: TableId,
+    pub(super) col: ColId,
+    pub(super) query: &'a PropertyQuery,
+}
+
 pub(super) fn lower_property_read<const W: usize>(
     ctx: &mut LoweringContext<'_, W>,
-    dst_val: u16,
-    dst_key: u16,
-    dst_is_null: u16,
-    table: TableId,
-    col: ColId,
-    query: &PropertyQuery,
+    input: PropertyReadLoweringInput<'_>,
 ) -> Result<(), TabulaError> {
     // 1. Read stored result from execution.
     let stored = ctx
@@ -33,11 +39,32 @@ pub(super) fn lower_property_read<const W: usize>(
                 ctx.property_read_idx
             ),
         })?;
+    if stored.instruction_index != input.instr_idx {
+        return Err(TabulaError::ProofError {
+            phase: "trace_lowering",
+            detail: format!(
+                "stored property-read instruction {} does not match IR instruction {}",
+                stored.instruction_index, input.instr_idx,
+            ),
+        });
+    }
     ctx.property_read_idx += 1;
 
-    let value = ctx.decode_column_portable(table, col, &stored.value)?;
-    let key_opt = stored.key;
-    let is_null = stored.is_null;
+    let value = stored.result.value.clone();
+    if value.type_id() != ctx.column_profile(input.table, input.col)?.type_id {
+        return Err(TabulaError::ProofError {
+            phase: "trace_lowering",
+            detail: format!(
+                "stored property-read type {} does not match sealed column type {} for ({}, {})",
+                value.type_id().0,
+                ctx.column_profile(input.table, input.col)?.type_id.0,
+                input.table.0,
+                input.col.0,
+            ),
+        });
+    }
+    let key_opt = stored.result.key;
+    let is_null = stored.result.is_null;
 
     // 2. Encode the value to W field elements.
     let val_enc = ctx.encode_padded(&value)?;
@@ -53,14 +80,14 @@ pub(super) fn lower_property_read<const W: usize>(
     let null_enc = ctx.encode_padded(&null_val)?;
 
     // 5. Canonical query operand encoding for the proof claim.
-    let (query_arg0, query_arg1) = query.encoded_args();
+    let (query_arg0, query_arg1) = input.query.encoded_args();
     let query_arg0_enc = ctx.encode_u64_padded(query_arg0)?;
     let query_arg1_enc = ctx.encode_u64_padded(query_arg1)?;
 
     // 6. Update the three destination slots.
-    let dst_val_idx = dst_val as usize;
-    let dst_key_idx = dst_key as usize;
-    let dst_is_null_idx = dst_is_null as usize;
+    let dst_val_idx = input.dst_val as usize;
+    let dst_key_idx = input.dst_key as usize;
+    let dst_is_null_idx = input.dst_is_null as usize;
 
     ctx.update_slot(dst_val_idx, value, val_enc.clone(), false)?;
     ctx.update_slot(dst_key_idx, key_val, key_enc.clone(), false)?;
@@ -69,9 +96,9 @@ pub(super) fn lower_property_read<const W: usize>(
     // 7. Build instruction record.
     let mut rec = ctx.empty_record(Opcode::PropertyRead);
     rec.written_slots = vec![dst_val_idx, dst_key_idx, dst_is_null_idx];
-    rec.access_t = Some(table.0);
-    rec.access_c = Some(col.0);
-    rec.property_query_type = Some(query.kind_ordinal());
+    rec.access_t = Some(input.table.0);
+    rec.access_c = Some(input.col.0);
+    rec.property_query_type = Some(input.query.kind_ordinal());
     rec.property_query_arg0 = query_arg0_enc;
     rec.property_query_arg1 = query_arg1_enc;
     rec.property_result_val = val_enc.clone();

@@ -16,6 +16,7 @@ use tabula_core::{
 };
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::property::PropertyQueryRegistry;
+use tabula_executor::{ResolvedExecutionProgram, derive_batch_report};
 use tabula_ir::{Instruction, Program, PropertyQuery, TxTypeDef};
 use tabula_profile::SemanticRegistry;
 use tabula_types::TypeRuntimeRegistry;
@@ -157,10 +158,11 @@ pub fn execute_batch_with_defaults<S: StateView>(
     batch: &Batch,
     program: &Program,
     snapshot: &S,
-) -> Result<tabula_core::BatchResult, TabulaError> {
+) -> Result<tabula_core::BatchReport, TabulaError> {
     let static_tables = InMemoryStaticTables::new();
     let property_queries = PropertyQueryRegistry::new();
     let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
+    let resolved = ResolvedExecutionProgram::from_program(program)?;
     let env = BatchEnv {
         hasher: &Blake3Hasher,
         type_runtimes: &type_runtimes,
@@ -171,5 +173,6 @@ pub fn execute_batch_with_defaults<S: StateView>(
         committed_state: None,
         property_queries: &property_queries,
     };
-    execute_batch(batch, program, snapshot, &env, &BTreeMap::new())
+    let journal = execute_batch(batch, &resolved, snapshot, &env, &BTreeMap::new())?;
+    derive_batch_report(&journal, &type_runtimes)
 }

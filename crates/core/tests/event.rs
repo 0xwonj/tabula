@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 use tabula_core::{
-    AccessEvent, BatchResult, CellKey, ColId, OpKind, PortableValue, RowKey, TableId, TxResult,
+    AccessEvent, BatchReport, CellKey, ColId, OpKind, PortableValue, RowKey, TableId, TxResult,
     TypeId,
 };
 
@@ -29,7 +29,7 @@ fn test_execution_event_borsh_round_trip() {
 
 #[test]
 fn test_batch_result_construction() {
-    let result = BatchResult {
+    let result = BatchReport {
         read_set_old: vec![],
         write_set_final: vec![],
         txs: vec![TxResult::success(vec![], vec![])],
@@ -52,7 +52,7 @@ fn test_batch_result_successful_events() {
         time: 1,
         effect_ordinal_in_tx: 0,
     };
-    let result = BatchResult {
+    let result = BatchReport {
         read_set_old: vec![],
         write_set_final: vec![],
         txs: vec![

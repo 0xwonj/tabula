@@ -12,7 +12,7 @@ use tabula_profile::{
     VerifierDigestFormat, WidthConstraint, builtin_semantic_registry,
 };
 use tabula_runtime::{
-    HostEnvironment, HostTypeRuntimes, ProveInput, SsmcScheme, TabulaRuntime, Verifier,
+    HostEnvironment, ProveInput, RuntimeRegistries, SsmcScheme, TabulaRuntime, Verifier,
 };
 use tabula_testing::exec::{artifact_from_source_with_registry, compiled_program_from_artifact};
 use tabula_testing::fixtures::batch::single_tx_batch;
@@ -121,7 +121,7 @@ fn proof_extension_surface_proves_and_verifies_custom_scheme() {
     );
 
     let host_environment = HostEnvironment::empty()
-        .with_type_runtimes(HostTypeRuntimes::standard())
+        .with_runtime_registries(RuntimeRegistries::standard())
         .with_column_backend_bundle(ColumnBackendFactoryBundle::new(CustomOrderedBackend))
         .expect("register custom backend bundle");
 

@@ -1,19 +1,17 @@
 //! STARK instruction-lowering helpers for the current witness pipeline.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
+use tabula_core::PortableValue;
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, PortableValue, TableId, TableSchema};
 use tabula_ir::{Instruction, ValueExpr};
-use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue};
+use tabula_types::{TypeRuntimeRegistry, TypedValue};
 
 use tabula_chips::execution::MAX_SLOTS;
 use tabula_chips::execution::trace::Opcode;
-
-use crate::ColumnValueProfile;
 
 mod access;
 mod arith;
@@ -29,40 +27,12 @@ mod precompile;
 mod property_read;
 
 use context::LoweringContext;
+use property_read::PropertyReadLoweringInput;
 
-pub use orchestration::{LowerProgramBatchInput, LoweringOutput, lower_program_batch};
-
-fn build_profile_map(
-    schemas: &BTreeMap<TableId, TableSchema>,
-    profile_catalog: &tabula_profile::ProfileCatalog,
-    type_runtimes: &TypeRuntimeRegistry,
-    encoding_runtimes: &EncodingRuntimeRegistry,
-) -> Result<BTreeMap<(TableId, ColId), ColumnValueProfile>, TabulaError> {
-    let mut profile_map = BTreeMap::new();
-    for (&table_id, schema) in schemas {
-        for col in &schema.columns {
-            let resolved = profile_catalog
-                .resolve_column_profile(col.column_profile_id)
-                .map_err(|err| TabulaError::ProofError {
-                    phase: "trace_lowering",
-                    detail: format!(
-                        "column profile {} for table {} col {} is invalid: {err}",
-                        col.column_profile_id.0, table_id.0, col.id.0
-                    ),
-                })?;
-            type_runtimes.resolve(resolved.type_descriptor.type_id)?;
-            encoding_runtimes.resolve(resolved.encoding_profile.encoding_profile_id)?;
-            profile_map.insert(
-                (table_id, col.id),
-                ColumnValueProfile {
-                    type_id: resolved.type_descriptor.type_id,
-                    encoding_profile_id: resolved.encoding_profile.encoding_profile_id,
-                },
-            );
-        }
-    }
-    Ok(profile_map)
-}
+pub use orchestration::{
+    LowerSuccessfulTxInput, LoweringOutput, LoweringPrecompileCall, LoweringPropertyRead,
+    TxLoweringOutput, lower_successful_tx,
+};
 
 fn max_dst_slot(instr: &Instruction) -> Option<usize> {
     match instr {
@@ -283,12 +253,15 @@ fn lower_tx_body<const W: usize>(
                 query,
             } => property_read::lower_property_read(
                 ctx,
-                *dst_val,
-                *dst_key,
-                *dst_is_null,
-                *table,
-                *col,
-                query,
+                PropertyReadLoweringInput {
+                    instr_idx,
+                    dst_val: *dst_val,
+                    dst_key: *dst_key,
+                    dst_is_null: *dst_is_null,
+                    table: *table,
+                    col: *col,
+                    query,
+                },
             )?,
 
             Instruction::Emit { .. } => {}

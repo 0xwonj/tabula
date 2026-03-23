@@ -104,19 +104,37 @@ maps them onto the current code.
 - `Verifier`
   - Prepared verification object bound to one artifact and binding.
   - Current main type: `tabula_runtime::Verifier`.
-- `ExecutedBatch`
+- `ExecutionEnvelope`
   - Runtime-owned envelope containing execution outputs and consistency status.
-  - Current type: `tabula_runtime::ExecutedBatch`.
+  - Current type: `tabula_runtime::ExecutionEnvelope`.
+- `ExecutionJournal`
+  - Canonical internal execution-effect journal used as the execution truth for
+    runtime proving.
+  - Current canonical runtime execution output.
+- `ExecutionStateSummary`
+  - Nested derived batch-level state projection carried inside
+    `ExecutionJournal`.
+  - Current canonical journal summary for `read_set_old` /
+    `write_set_final`.
+- `ProofJournal`
+  - Canonical runtime-owned proof-front-end journal aligned to proof-plan
+    order.
+  - Current canonical runtime proof input.
+- `ProofArtifacts`
+  - Backend-prepared machine-facing proof bundle derived from
+    `ProofJournal`.
+  - Current canonical machine-ready proof-preparation output.
 
 ### 6.1 Host Bootstrap
 
 - `HostEnvironment`
   - Canonical process-local installation model for runtime behavior and backend
-    capabilities.
+    capabilities on the `verify` / `prove` runtime surface.
   - Current type: `tabula_runtime::HostEnvironment`.
-- `HostTypeRuntimes`
-  - Installed type and encoding runtime set.
-  - Current type: `tabula_runtime::HostTypeRuntimes`.
+- `RuntimeRegistries`
+  - Installed type and encoding runtime set on the `verify` / `prove` runtime
+    surface.
+  - Current type: `tabula_runtime::RuntimeRegistries`.
 - `InstalledSchemes`
   - Installed canonical column backend families.
   - Current type: `tabula_runtime::InstalledSchemes`.
@@ -183,6 +201,12 @@ There is no canonical public `ColumnMeta` or `ColumnState` vocabulary anymore.
   - Backend trace representation used during proving.
 - `Witness`
   - Prepared backend proving inputs derived from execution.
+- `Effect`
+  - Canonical semantic fact emitted by execution and consumed by proving.
+- `Shard`
+  - Immutable tx-local unit later reduced into proof-plan order.
+- `Plan`
+  - Runtime-owned resolved proof-slot contract.
 
 ### 10. Adapters and Tools
 
@@ -211,7 +235,7 @@ These are delivery surfaces, not core semantic concepts.
 | `PortableValue` | Canonical public value carrier | `tabula_core::PortableValue` |
 | `TypedValue` | Canonical internal value carrier | `tabula_types::TypedValue` |
 | `Binding` | Expected verifier-side program identity | `Binding` |
-| `HostEnvironment` | Canonical bootstrap installation model | `tabula_runtime::HostEnvironment` |
+| `HostEnvironment` | Canonical bootstrap installation model on the `verify` / `prove` runtime surface | `tabula_runtime::HostEnvironment` |
 | `Verifier` | Reusable verification object bound to one program context | `Verifier` |
 | `TypeDescriptor` | Registered semantic type definition | `tabula_profile::TypeDescriptor` |
 | `EncodingProfile` | Registered proof/transcript representation contract | `tabula_profile::EncodingProfile` |
@@ -231,8 +255,17 @@ public SDK vocabulary.
 | `AST Program` | Syntax-layer program |
 | `IR Program` | Instruction-layer program |
 | `CompiledProgram` | Compiler-owned in-memory semantic program |
-| `ResolvedProgram` | Runtime-materialized form of a compiled program |
+| `RuntimeProgram` | Runtime-owned root contract split into execution and proof subcontracts |
+| `ResolvedExecutionProgram` | Executor-owned resolved hot-path execution contract |
+| `ResolvedProofProgram` | Runtime-owned resolved proof/planning contract |
 | `TabulaRuntime` | Prepared per-program execution/proving engine |
-| `HostTypeRuntimes` | Installed runtime behavior bundle |
+| `RuntimeRegistries` | Installed runtime behavior bundle |
 | `InstalledSchemes` | Installed canonical scheme families |
 | `InstalledPrecompiles` | Installed canonical precompile families |
+| `ExecutionJournal` | Canonical executor-owned execution truth consumed by runtime proving |
+| `ExecutionStateSummary` | Nested derived batch-level state view inside `ExecutionJournal` |
+| `FailedAccessObservation` | Diagnostic failed-tx access observation excluded from proof reduction |
+| `ProofJournal` | Canonical runtime-owned proof input aligned to proof-plan slot order |
+| `ProofArtifacts` | Backend-prepared machine-facing proof bundle derived from `ProofJournal` |
+| `SuccessfulTxExecution` | Canonical tx-local immutable success-path execution-effect unit |
+| `ProofPlan` | Canonical runtime-owned slot-order proof contract |

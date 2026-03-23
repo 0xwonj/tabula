@@ -15,7 +15,7 @@ use crate::protocol::error::ErrorCode;
 pub struct ExecutedBatch {
     pub compiled_program: SealedProgram,
     pub transaction_batch: TransactionBatch,
-    pub inner: tabula_runtime::ExecutedBatch,
+    pub inner: tabula_runtime::ExecutionEnvelope,
 }
 
 impl ExecutedBatch {

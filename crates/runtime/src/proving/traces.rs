@@ -1,18 +1,28 @@
 use rayon::prelude::*;
 use tabula_core::error::TabulaError;
 use tabula_machine::{ColumnProofTrace, ProofSetups, ProofTraces, TabulaMachine, TierSetup};
-use tabula_stark::trace::{TraceMap, WitnessStore, build_all_traces};
+use tabula_stark::trace::{TraceMap, WitnessStore, build_all_traces, witness_labels};
 
 use crate::error::RuntimeError;
 
-use super::partition::{PartitionedStores, partition_by_tier};
-use super::prepare::PreparedProofBatch;
+use super::ProofArtifacts;
+
+struct PartitionedStores {
+    execution: WitnessStore,
+    root: WitnessStore,
+}
+
+const ROOT_LABELS: &[&str] = &[
+    witness_labels::SMT_COL_PATHS,
+    witness_labels::SMT_TABLE_PATHS,
+    witness_labels::SMT_TABLE_PVS,
+];
 
 /// Build traces from a fully prepared runtime-owned proof batch.
 #[tracing::instrument(skip_all)]
 pub(crate) fn build_traces(
     machine: &TabulaMachine,
-    prepared: &mut PreparedProofBatch,
+    prepared: &mut ProofArtifacts,
 ) -> Result<ProofTraces, RuntimeError> {
     let shared_store = std::mem::take(&mut prepared.shared_store);
     let columns = std::mem::take(&mut prepared.columns);
@@ -21,10 +31,18 @@ pub(crate) fn build_traces(
         .map_err(RuntimeError::TraceBuild)
 }
 
+fn partition_by_tier(mut global_store: WitnessStore) -> PartitionedStores {
+    let root = global_store.drain_labels(ROOT_LABELS);
+    PartitionedStores {
+        execution: global_store,
+        root,
+    }
+}
+
 fn build_proof_traces(
     setups: &ProofSetups,
     stores: PartitionedStores,
-    columns: Vec<super::prepare::ColumnTraceInput>,
+    columns: Vec<super::artifacts::ColumnTraceInput>,
 ) -> Result<ProofTraces, TabulaError> {
     let exec_traces = build_tier_traces(&setups.execution, stores.execution)?;
 
@@ -79,7 +97,10 @@ mod tests {
 
     use super::*;
     use crate::TabulaRuntime;
-    use crate::proving::prepare_proof_batch;
+    use crate::proving::{
+        JournalInput, build_proof_journal, convert_batch, prepare_proof_artifacts,
+    };
+    use tabula_core::InMemoryStaticTables;
 
     #[test]
     fn prepared_proof_batch_assembles_one_store_per_planned_column() {
@@ -90,15 +111,20 @@ mod tests {
         let executed = runtime
             .execute(&case.state, &case.batch)
             .expect("execution succeeds");
-        let prepared = prepare_proof_batch(
-            runtime.resolved_program(),
-            runtime.proof_recipes(),
-            runtime.precompile_recipes(),
-            &case.state,
-            &case.batch,
-            &executed,
+        let batch = convert_batch(&case.batch, runtime.type_runtimes()).expect("convert batch");
+        let static_tables = InMemoryStaticTables::new();
+        let prepared = prepare_proof_artifacts(
+            runtime.proof_program(),
+            build_proof_journal(JournalInput {
+                resolved_program: runtime.proof_program(),
+                state: &case.state,
+                batch: &batch,
+                execution_journal: executed.execution_journal(),
+                static_tables: &static_tables,
+            })
+            .expect("prepared batch journal"),
         )
-        .expect("prepared proof batch");
+        .expect("prepared proof artifacts");
 
         let expected_keys: Vec<_> = prepared
             .columns
@@ -128,15 +154,20 @@ mod tests {
         let executed = runtime
             .execute(&case.state, &case.batch)
             .expect("execution succeeds");
-        let prepared = prepare_proof_batch(
-            runtime.resolved_program(),
-            runtime.proof_recipes(),
-            runtime.precompile_recipes(),
-            &case.state,
-            &case.batch,
-            &executed,
+        let batch = convert_batch(&case.batch, runtime.type_runtimes()).expect("convert batch");
+        let static_tables = InMemoryStaticTables::new();
+        let prepared = prepare_proof_artifacts(
+            runtime.proof_program(),
+            build_proof_journal(JournalInput {
+                resolved_program: runtime.proof_program(),
+                state: &case.state,
+                batch: &batch,
+                execution_journal: executed.execution_journal(),
+                static_tables: &static_tables,
+            })
+            .expect("prepared batch journal"),
         )
-        .expect("prepared proof batch");
+        .expect("prepared proof artifacts");
 
         let mut prepared = prepared;
         let traces = build_traces(runtime.machine(), &mut prepared).expect("proof traces");

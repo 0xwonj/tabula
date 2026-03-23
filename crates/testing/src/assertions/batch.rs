@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use tabula_core::{BatchResult, CellKey, ColId, PortableValue, RowKey, TableId, TxResult};
-use tabula_runtime::ExecutedBatch;
+use tabula_core::{BatchReport, CellKey, ColId, PortableValue, RowKey, TableId, TxResult};
+use tabula_runtime::ExecutionEnvelope;
 
 /// Canonical expected outcome for one transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,25 +20,25 @@ pub trait WriteSetView {
     fn write_set_entries(&self) -> &[(CellKey, Option<PortableValue>)];
 }
 
-impl TxOutcomeView for BatchResult {
+impl TxOutcomeView for BatchReport {
     fn tx_results(&self) -> &[TxResult] {
         &self.txs
     }
 }
 
-impl TxOutcomeView for ExecutedBatch {
+impl TxOutcomeView for ExecutionEnvelope {
     fn tx_results(&self) -> &[TxResult] {
         self.txs()
     }
 }
 
-impl WriteSetView for BatchResult {
+impl WriteSetView for BatchReport {
     fn write_set_entries(&self) -> &[(CellKey, Option<PortableValue>)] {
         &self.write_set_final
     }
 }
 
-impl WriteSetView for ExecutedBatch {
+impl WriteSetView for ExecutionEnvelope {
     fn write_set_entries(&self) -> &[(CellKey, Option<PortableValue>)] {
         self.write_set()
     }

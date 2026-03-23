@@ -7,6 +7,9 @@
 > **Related**: [canonical-vocabulary.md](canonical-vocabulary.md),
 > [column-profile-architecture-workstreams.md](column-profile-architecture-workstreams.md),
 > [proof-hierarchy-and-grouping.md](proof-hierarchy-and-grouping.md),
+> [proof-front-end-journal-architecture.md](proof-front-end-journal-architecture.md),
+> [executor-proof-codesign-architecture.md](executor-proof-codesign-architecture.md),
+> [execution-proof-redesign-workplan.md](execution-proof-redesign-workplan.md),
 > [../research/symbolic-air-compilation.md](../research/symbolic-air-compilation.md)
 
 ---
@@ -152,7 +155,8 @@ It does not expose `ColumnState`, `ColumnMeta`, or `compat`.
 
 ## 4. Host Bootstrap Model
 
-`HostEnvironment` is the canonical installation seam.
+`HostEnvironment` is the canonical installation seam on the `verify` / `prove`
+runtime surface.
 
 It owns:
 
@@ -237,10 +241,11 @@ The architecture is complete because all of the following are now true:
 
 ## 9. Deliberately Deferred Work
 
-Two items remain intentionally out of scope for this completed migration:
+Three items remain intentionally out of scope for this completed migration:
 
 - execution AIR width generalization
 - symbolic AIR compilation
+- proof front-end journalization and deterministic parallel reduction
 
 The current generic execution AIR remains fixed-width with width `3`.
 Wide custom values are supported in profile, runtime, storage, proof, and typed
@@ -248,3 +253,7 @@ precompile contracts, but not as arbitrary generic execution-slot values.
 
 Future work on symbolic AIR compilation should be treated as a new architecture
 track, not as unfinished migration debt from this bundle.
+
+Likewise, future work on a canonical execution journal and runtime-owned proof
+front-end reduction should be treated as a post-migration architecture track,
+not as leftover legacy-carrier debt.

@@ -23,7 +23,7 @@ fn add_correct() {
         write_slot0(),
     ]);
     assert_eq!(
-        result.write_set_final,
+        portable_write_set(&result),
         vec![(cell(1, 0, 0), opt(u64_portable(30)))]
     );
 }
@@ -51,7 +51,7 @@ fn sub_correct() {
         write_slot0(),
     ]);
     assert_eq!(
-        result.write_set_final,
+        portable_write_set(&result),
         vec![(cell(1, 0, 0), opt(u64_portable(20)))]
     );
 }
@@ -68,7 +68,7 @@ fn mul_correct() {
         write_slot0(),
     ]);
     assert_eq!(
-        result.write_set_final,
+        portable_write_set(&result),
         vec![(cell(1, 0, 0), opt(u64_portable(35)))]
     );
 }
@@ -91,16 +91,9 @@ fn divmod_correct() {
             src_is_null: lit(bool_portable(false)),
         },
     ]);
-    assert!(
-        result
-            .write_set_final
-            .contains(&(cell(1, 0, 0), opt(u64_portable(3))))
-    );
-    assert!(
-        result
-            .write_set_final
-            .contains(&(cell(1, 1, 0), opt(u64_portable(2))))
-    );
+    let writes = portable_write_set(&result);
+    assert!(writes.contains(&(cell(1, 0, 0), opt(u64_portable(3)))));
+    assert!(writes.contains(&(cell(1, 1, 0), opt(u64_portable(2)))));
 }
 
 #[test]
@@ -409,7 +402,7 @@ fn read_populates_slot() {
         &[],
         vec![(cell(1, 0, 0), u64_portable(100))],
     );
-    assert!(out.emitted.is_empty());
+    assert!(out.emitted_events.is_empty());
 }
 
 #[test]
@@ -431,7 +424,7 @@ fn write_updates_overlay() {
         },
     ]);
     assert_eq!(
-        result.write_set_final,
+        portable_write_set(&result),
         vec![(cell(1, 0, 0), opt(u64_portable(42)))]
     );
 }
@@ -449,7 +442,7 @@ fn write_null_makes_absent() {
         &[],
         vec![(cell(1, 0, 0), u64_portable(100))],
     );
-    assert_eq!(result.write_set_final, vec![(cell(1, 0, 0), None)]);
+    assert_eq!(portable_write_set(&result), vec![(cell(1, 0, 0), None)]);
 }
 
 #[test]
@@ -493,7 +486,7 @@ fn write_is_null_from_slot() {
         },
     ])
     .1;
-    assert_eq!(result.write_set_final, vec![(cell(1, 0, 0), None)]);
+    assert_eq!(portable_write_set(&result), vec![(cell(1, 0, 0), None)]);
 }
 
 #[test]
@@ -528,7 +521,7 @@ fn read_with_param_row() {
         vec![(cell(1, 5, 0), u64_portable(77))],
     );
     assert_eq!(
-        result.read_set_old,
+        portable_read_set(&result),
         vec![(cell(1, 5, 0), opt(u64_portable(77)))]
     );
 }
@@ -544,7 +537,7 @@ fn hash_produces_bytes32() {
         },
         write_slot0(),
     ]);
-    let v = result.write_set_final[0].1.clone().unwrap();
+    let v = portable_write_set(&result)[0].1.clone().unwrap();
     assert_eq!(v.type_id(), TYPE_BYTES32_ID);
 }
 
@@ -562,7 +555,7 @@ fn hash_multiple_inputs() {
         write_slot0(),
     ])
     .1;
-    let v = result.write_set_final[0].1.clone().unwrap();
+    let v = portable_write_set(&result)[0].1.clone().unwrap();
     assert_eq!(v.type_id(), TYPE_BYTES32_ID);
 }
 
@@ -576,7 +569,7 @@ fn hash_empty_inputs() {
         write_slot0(),
     ])
     .1;
-    let v = result.write_set_final[0].1.clone().unwrap();
+    let v = portable_write_set(&result)[0].1.clone().unwrap();
     assert_eq!(v.type_id(), TYPE_BYTES32_ID);
 }
 
@@ -588,8 +581,8 @@ fn emit_captures_event() {
         topic: b"transfer".to_vec(),
         data: vec![lit(u64_portable(100))],
     }]);
-    assert_eq!(out.emitted.len(), 1);
-    assert_eq!(out.emitted[0].topic, b"transfer");
+    assert_eq!(out.emitted_events.len(), 1);
+    assert_eq!(out.emitted_events[0].topic, b"transfer");
 }
 
 // ── Lookup ──────────────────────────────────────────────────────────────
@@ -606,7 +599,7 @@ fn lookup_delegates() {
         write_slot0(),
     ]);
     assert_eq!(
-        result.write_set_final,
+        portable_write_set(&result),
         vec![(cell(1, 0, 0), opt(u64_portable(7)))]
     );
 }
@@ -625,7 +618,7 @@ fn select_true_branch() {
         write_slot0(),
     ]);
     assert_eq!(
-        result.write_set_final,
+        portable_write_set(&result),
         vec![(cell(1, 0, 0), opt(u64_portable(10)))]
     );
 }
@@ -642,7 +635,7 @@ fn select_false_branch() {
         write_slot0(),
     ]);
     assert_eq!(
-        result.write_set_final,
+        portable_write_set(&result),
         vec![(cell(1, 0, 0), opt(u64_portable(20)))]
     );
 }

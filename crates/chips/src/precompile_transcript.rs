@@ -79,15 +79,13 @@ impl PrecompileTranscriptCall {
         type_runtimes: &TypeRuntimeRegistry,
         encoding_runtimes: &EncodingRuntimeRegistry,
     ) -> Result<Self, TabulaError> {
-        let payload = encode_precompile_event_payload(
+        let (header, payload) = materialize_precompile_call_parts(
             event,
             expected_precompile_id,
             signature,
             type_runtimes,
             encoding_runtimes,
         )?;
-        let header =
-            build_precompile_call_header(event, expected_precompile_id, signature, &payload)?;
         Ok(Self {
             event: event.clone(),
             header,
@@ -104,6 +102,23 @@ pub fn compute_precompile_call_header(
     type_runtimes: &TypeRuntimeRegistry,
     encoding_runtimes: &EncodingRuntimeRegistry,
 ) -> Result<PrecompileCallHeader, TabulaError> {
+    materialize_precompile_call_parts(
+        event,
+        expected_precompile_id,
+        signature,
+        type_runtimes,
+        encoding_runtimes,
+    )
+    .map(|(header, _)| header)
+}
+
+fn materialize_precompile_call_parts(
+    event: &PrecompileEvent,
+    expected_precompile_id: u16,
+    signature: &PrecompileSignature,
+    type_runtimes: &TypeRuntimeRegistry,
+    encoding_runtimes: &EncodingRuntimeRegistry,
+) -> Result<(PrecompileCallHeader, Vec<KoalaBear>), TabulaError> {
     let payload = encode_precompile_event_payload(
         event,
         expected_precompile_id,
@@ -111,7 +126,8 @@ pub fn compute_precompile_call_header(
         type_runtimes,
         encoding_runtimes,
     )?;
-    build_precompile_call_header(event, expected_precompile_id, signature, &payload)
+    let header = build_precompile_call_header(event, expected_precompile_id, signature, &payload)?;
+    Ok((header, payload))
 }
 
 fn build_precompile_call_header(

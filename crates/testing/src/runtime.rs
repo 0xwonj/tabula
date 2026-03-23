@@ -2,7 +2,8 @@
 
 use tabula_core::mock::Blake3Hasher;
 use tabula_runtime::{
-    ExecutedBatch, ProveInput, ProveResult, RuntimeError, TabulaRuntime, VerifiedResult, Verifier,
+    ExecutionEnvelope, ProveInput, ProveResult, RuntimeError, TabulaRuntime, VerifiedResult,
+    Verifier,
 };
 use tabula_types::TypeRuntimeRegistry;
 
@@ -23,14 +24,14 @@ pub fn build_runtime(compiled: tabula_compiler::SealedProgram) -> TabulaRuntime 
 }
 
 /// Execute one compiled runtime case with the canonical runtime harness.
-pub fn execute_compiled_case(case: &CompiledRuntimeCase) -> ExecutedBatch {
+pub fn execute_compiled_case(case: &CompiledRuntimeCase) -> ExecutionEnvelope {
     build_runtime(case.compiled_program.clone())
         .execute(&case.state, &case.batch)
         .expect("execute compiled runtime case")
 }
 
 /// Execute one artifact runtime case by first compiling its sealed artifact.
-pub fn execute_artifact_case(case: &ArtifactRuntimeCase) -> ExecutedBatch {
+pub fn execute_artifact_case(case: &ArtifactRuntimeCase) -> ExecutionEnvelope {
     build_runtime(compiled_program_from_artifact(&case.artifact))
         .execute(&case.state, &case.batch)
         .expect("execute artifact runtime case")
@@ -78,7 +79,7 @@ pub fn verify_artifact_case(
 /// Execute one compiled case through the free execution seam.
 pub fn execute_compiled_case_free(
     case: &CompiledRuntimeCase,
-) -> Result<ExecutedBatch, RuntimeError> {
+) -> Result<ExecutionEnvelope, RuntimeError> {
     let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
     tabula_runtime::run_compiled_batch(&tabula_runtime::CompiledBatchInput {
         compiled_program: &case.compiled_program,

@@ -7,20 +7,16 @@ use criterion::{Criterion, criterion_group, criterion_main};
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, StateView, StaticTableProvider};
-use tabula_core::{
-    CellKey, ColId, ColumnDef, ColumnProfileId, PortableValue, RowKey, TableId, TableSchema,
-};
-use tabula_ir::{ArithOp, CmpOp, Instruction, RowExpr, ValueExpr};
-use tabula_profile::{
-    ColumnProfile, CommitmentRole, ENCODING_U64_ID, ProfileCatalog, SCHEME_PROFILE_SSMC_ID,
-    TYPE_U64_ID, builtin_catalog,
-};
+use tabula_core::{CellKey, ColId, PortableValue, RowKey, TableId, TxTypeId};
+use tabula_ir::{ArithOp, CmpOp, Instruction, ParamDef, RowExpr, ValueExpr};
+use tabula_profile::TYPE_U64_ID;
 use tabula_testing::fixtures::state::cell_key;
 use tabula_types::{TypeRuntimeRegistry, bool_portable, u64_portable};
 
 use tabula_executor::interpreter::{ExecContext, execute};
 use tabula_executor::overlay::Overlay;
 use tabula_executor::property::PropertyQueryRegistry;
+use tabula_executor::{ResolvedColumnLayout, ResolvedExecutionProgram, ResolvedTxDefinition};
 
 // ── Test doubles ─────────────────────────────────────────────────────
 
@@ -77,50 +73,30 @@ fn type_runtimes() -> &'static TypeRuntimeRegistry {
     TYPE_RUNTIMES.get_or_init(|| TypeRuntimeRegistry::seeded().expect("seeded type runtimes"))
 }
 
-fn test_schema_bundle() -> (BTreeMap<TableId, TableSchema>, ProfileCatalog) {
-    let mut catalog = builtin_catalog().expect("built-in catalog");
-    let type_descriptor = catalog
-        .type_descriptor(TYPE_U64_ID)
-        .cloned()
-        .expect("u64 type descriptor");
-    let encoding_profile = catalog
-        .encoding_profile(ENCODING_U64_ID)
-        .cloned()
-        .expect("u64 encoding");
-    let scheme_profile = catalog
-        .scheme_profile(SCHEME_PROFILE_SSMC_ID)
-        .cloned()
-        .expect("ssmc scheme");
-    let column_profile = ColumnProfile::new(
-        ColumnProfileId(0),
-        "test.val",
-        None,
-        &type_descriptor,
-        &encoding_profile,
-        &scheme_profile,
-        CommitmentRole::IncludedInRoot,
-    )
-    .expect("column profile");
-    let column_profile_id = column_profile.column_profile_id;
-    catalog
-        .register_column(column_profile)
-        .expect("register column");
-
-    let mut schemas = BTreeMap::new();
-    schemas.insert(
-        TableId(1),
-        TableSchema {
-            id: TableId(1),
-            name: "test".into(),
-            columns: vec![ColumnDef {
-                id: ColId(0),
-                name: "val".into(),
-                column_profile_id,
-            }],
+fn execution_program(
+    tx_type: TxTypeId,
+    param_schema: Vec<ParamDef>,
+    body: Vec<Instruction>,
+) -> ResolvedExecutionProgram {
+    let mut tx_definitions = BTreeMap::new();
+    tx_definitions.insert(
+        tx_type,
+        ResolvedTxDefinition {
+            tx_type,
+            param_schema,
+            body,
         },
     );
 
-    (schemas, catalog)
+    let mut columns = BTreeMap::new();
+    columns.insert(
+        (TableId(1), ColId(0)),
+        ResolvedColumnLayout {
+            type_id: TYPE_U64_ID,
+        },
+    );
+
+    ResolvedExecutionProgram::new(tx_definitions, columns)
 }
 
 // ── Benchmarks ───────────────────────────────────────────────────────
@@ -150,15 +126,14 @@ fn bench_arith_chain(c: &mut Criterion) {
         src_is_null: lit(bool_portable(false)),
     });
 
+    let execution_program = execution_program(TxTypeId(1), vec![], instrs.clone());
     let snap = BenchSnapshot(BTreeMap::new());
-    let (schemas, profile_catalog) = test_schema_bundle();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         type_runtimes: type_runtimes(),
-        schemas: &schemas,
-        profile_catalog: &profile_catalog,
+        execution_program: &execution_program,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,
@@ -199,15 +174,14 @@ fn bench_read_write_mix(c: &mut Criterion) {
         });
     }
 
+    let execution_program = execution_program(TxTypeId(2), vec![], instrs.clone());
     let snap = BenchSnapshot(data);
-    let (schemas, profile_catalog) = test_schema_bundle();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         type_runtimes: type_runtimes(),
-        schemas: &schemas,
-        profile_catalog: &profile_catalog,
+        execution_program: &execution_program,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,
@@ -236,15 +210,14 @@ fn bench_cmp_assert(c: &mut Criterion) {
         });
     }
 
+    let execution_program = execution_program(TxTypeId(3), vec![], instrs.clone());
     let snap = BenchSnapshot(BTreeMap::new());
-    let (schemas, profile_catalog) = test_schema_bundle();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         type_runtimes: type_runtimes(),
-        schemas: &schemas,
-        profile_catalog: &profile_catalog,
+        execution_program: &execution_program,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,

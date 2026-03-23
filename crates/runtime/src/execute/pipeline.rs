@@ -1,97 +1,21 @@
-//! Canonical batch execution pipeline.
-//!
-//! Provides [`run_batch`] -- the single entry-point for executing a transaction
-//! batch against a program and state. Both the CLI and daemon delegate here
-//! instead of assembling the pipeline independently.
-
 use std::collections::BTreeMap;
 
 use tabula_artifact::{State, TransactionBatch, merge_output_state_entries, normalize_state};
-use tabula_compiler::SealedProgram;
 use tabula_core::traits::Hasher;
-use tabula_core::{
-    Batch, BatchResult, CellKey, ExecutionConsistencyStatus, InMemoryState, InMemoryStaticTables,
-    NoopSigVerifier, PortableValue, SequentialNonce, TxResult,
+use tabula_core::{Batch, InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce};
+use tabula_executor::property::PropertyQueryRegistry;
+use tabula_executor::{
+    ResolvedExecutionProgram,
+    batch::{BatchEnv, execute_batch},
+    derive_batch_report, derive_consistency_status, derive_portable_state_summary,
 };
-use tabula_executor::batch::{BatchEnv, execute_batch};
-use tabula_executor::consistency::check_consistency_status;
-use tabula_executor::precompile::PrecompileRegistry;
-use tabula_executor::property::{CommittedStateProvider, PropertyQueryRegistry};
-use tabula_ir::Program;
 use tabula_types::TypeRuntimeRegistry;
 
 use crate::error::RuntimeError;
+use crate::policy::{validate_execution_state_surface, validate_free_execution_requirements};
 
-/// Inputs for batch execution (all immutable references).
-pub struct BatchInput<'a> {
-    /// The IR program to execute.
-    pub program: &'a Program,
-    /// Pre-execution state.
-    pub state: &'a State,
-    /// Transaction batch.
-    pub batch: &'a TransactionBatch,
-    /// Hasher implementation (Blake3Hasher for CLI, PoseidonHasher for STARK).
-    pub hasher: &'a dyn Hasher,
-    /// Runtime type registry used to decode portable artifact values.
-    pub type_runtimes: &'a TypeRuntimeRegistry,
-}
-
-/// Inputs for batch execution using a compiler-produced artifact.
-pub struct CompiledBatchInput<'a> {
-    /// Semantic artifact produced by the compiler/registration phase.
-    pub compiled_program: &'a SealedProgram,
-    /// Pre-execution state.
-    pub state: &'a State,
-    /// Transaction batch.
-    pub batch: &'a TransactionBatch,
-    /// Hasher implementation (Blake3Hasher for CLI, PoseidonHasher for STARK).
-    pub hasher: &'a dyn Hasher,
-    /// Runtime type registry used to decode portable artifact values.
-    pub type_runtimes: &'a TypeRuntimeRegistry,
-}
-
-/// Optional runtime-owned resources used during execution.
-#[derive(Clone, Copy)]
-pub(crate) struct ExecutionResources<'a> {
-    pub precompiles: Option<&'a PrecompileRegistry>,
-    pub committed_state: Option<&'a dyn CommittedStateProvider>,
-    pub property_queries: &'a PropertyQueryRegistry,
-}
-
-/// Result of executing a batch through the canonical pipeline.
-#[derive(Debug, Clone)]
-pub struct ExecutedBatch {
-    /// Normalized pre-state.
-    pub state_before: State,
-    /// Post-execution state.
-    pub state_after: State,
-    /// Canonical execution result.
-    batch_result: BatchResult,
-    /// Consistency check result.
-    pub consistency: ExecutionConsistencyStatus,
-}
-
-impl ExecutedBatch {
-    /// Canonical execution result for this batch.
-    pub fn batch_result(&self) -> &BatchResult {
-        &self.batch_result
-    }
-
-    /// Per-transaction outcomes in execution order.
-    pub fn txs(&self) -> &[TxResult] {
-        &self.batch_result.txs
-    }
-
-    /// Base-state reads observed by the executor.
-    pub fn read_set(&self) -> &[(CellKey, Option<PortableValue>)] {
-        &self.batch_result.read_set_old
-    }
-
-    /// Final coalesced writes after execution.
-    pub fn write_set(&self) -> &[(CellKey, Option<PortableValue>)] {
-        &self.batch_result.write_set_final
-    }
-}
+use super::envelope::ExecutionEnvelope;
+use super::inputs::{BatchInput, CompiledBatchInput, ExecutionResources};
 
 /// Execute a batch through the canonical pipeline.
 ///
@@ -102,10 +26,18 @@ impl ExecutedBatch {
 /// 4. Execute batch
 /// 5. Check consistency
 /// 6. Merge output state
-pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, RuntimeError> {
+pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutionEnvelope, RuntimeError> {
     let property_queries = PropertyQueryRegistry::new();
+    let resolved_program =
+        ResolvedExecutionProgram::from_program(input.program).map_err(|source| {
+            RuntimeError::Execution {
+                source,
+                instruction_index: None,
+                tx_index: None,
+            }
+        })?;
     execute_pipeline(
-        input.program,
+        &resolved_program,
         input.state,
         input.batch,
         input.hasher,
@@ -119,17 +51,16 @@ pub fn run_batch(input: &BatchInput<'_>) -> Result<ExecutedBatch, RuntimeError> 
 }
 
 pub(crate) fn execute_pipeline(
-    program: &Program,
+    program: &ResolvedExecutionProgram,
     state: &State,
     batch: &TransactionBatch,
     hasher: &dyn Hasher,
     type_runtimes: &TypeRuntimeRegistry,
     resources: ExecutionResources<'_>,
-) -> Result<ExecutedBatch, RuntimeError> {
-    // 1. Normalize state.
+) -> Result<ExecutionEnvelope, RuntimeError> {
     let normalized = normalize_state(state).map_err(RuntimeError::InvalidState)?;
+    validate_execution_state_surface(program, &normalized)?;
 
-    // 2. Build in-memory state.
     let mut state_store = InMemoryState::new();
     for cell in &normalized.cells {
         let (key, value) = cell
@@ -138,7 +69,6 @@ pub(crate) fn execute_pipeline(
         state_store.set(key, value);
     }
 
-    // 3. Convert transactions.
     let transactions: Vec<_> = batch
         .transactions
         .iter()
@@ -149,7 +79,6 @@ pub(crate) fn execute_pipeline(
         .collect::<Result<_, _>>()?;
     let batch_core = Batch { transactions };
 
-    // 4. Execute.
     let st = InMemoryStaticTables::new();
     let env = BatchEnv {
         hasher,
@@ -162,36 +91,60 @@ pub(crate) fn execute_pipeline(
         property_queries: resources.property_queries,
     };
 
-    let result = execute_batch(&batch_core, program, &state_store, &env, &BTreeMap::new())
-        .map_err(|e| RuntimeError::Execution {
+    let execution_journal =
+        execute_batch(&batch_core, program, &state_store, &env, &BTreeMap::new()).map_err(|e| {
+            RuntimeError::Execution {
+                source: e,
+                instruction_index: None,
+                tx_index: None,
+            }
+        })?;
+    let batch_report = derive_batch_report(&execution_journal, type_runtimes).map_err(|e| {
+        RuntimeError::Execution {
             source: e,
             instruction_index: None,
             tx_index: None,
-        })?;
-
-    // 5. Consistency check.
-    let all_events: Vec<_> = result.successful_events().cloned().collect();
-    let consistency = check_consistency_status(&all_events, &result.read_set_old, &result.txs);
-
-    // 6. Merge output state.
+        }
+    })?;
+    let portable_state_summary =
+        derive_portable_state_summary(&execution_journal.state_summary, type_runtimes).map_err(
+            |e| RuntimeError::Execution {
+                source: e,
+                instruction_index: None,
+                tx_index: None,
+            },
+        )?;
+    let consistency = derive_consistency_status(&execution_journal, type_runtimes);
     let state_after = State {
-        cells: merge_output_state_entries(&normalized.cells, &result.write_set_final),
+        cells: merge_output_state_entries(
+            &normalized.cells,
+            &portable_state_summary.write_set_final,
+        ),
     };
 
-    Ok(ExecutedBatch {
-        state_before: normalized,
+    Ok(ExecutionEnvelope::new(
+        normalized,
         state_after,
-        batch_result: result,
+        execution_journal,
+        batch_report,
         consistency,
-    })
+    ))
 }
 
 /// Execute a batch using a compiler-produced artifact.
-pub fn run_compiled_batch(input: &CompiledBatchInput<'_>) -> Result<ExecutedBatch, RuntimeError> {
+pub fn run_compiled_batch(
+    input: &CompiledBatchInput<'_>,
+) -> Result<ExecutionEnvelope, RuntimeError> {
     validate_free_execution_requirements(input.compiled_program)?;
     let property_queries = PropertyQueryRegistry::new();
+    let resolved_program = ResolvedExecutionProgram::from_program(input.compiled_program.program())
+        .map_err(|source| RuntimeError::Execution {
+            source,
+            instruction_index: None,
+            tx_index: None,
+        })?;
     execute_pipeline(
-        input.compiled_program.program(),
+        &resolved_program,
         input.state,
         input.batch,
         input.hasher,
@@ -204,30 +157,11 @@ pub fn run_compiled_batch(input: &CompiledBatchInput<'_>) -> Result<ExecutedBatc
     )
 }
 
-fn validate_free_execution_requirements(
-    compiled_program: &SealedProgram,
-) -> Result<(), RuntimeError> {
-    if !compiled_program.precompile_manifest().is_empty() {
-        return Err(RuntimeError::ValidationFailed {
-            detail:
-                "program requires precompiles; build a TabulaRuntime with a HostEnvironment that installs the required precompile backends before execution"
-                    .to_string(),
-        });
-    }
-    if !compiled_program.required_property_requirements().is_empty() {
-        return Err(RuntimeError::ValidationFailed {
-            detail:
-                "program requires scheme-backed property queries; build a TabulaRuntime with a HostEnvironment that installs any required scheme backends before execution"
-                    .to_string(),
-        });
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use tabula_artifact::StateEntry;
+    use tabula_artifact::{State, StateEntry, merge_output_state_entries};
     use tabula_core::mock::Blake3Hasher;
+    use tabula_executor::derive_portable_state_summary;
     use tabula_testing::fixtures::compiled::{
         compiled_empty_batch_case, compiled_precompile_requirement_case,
         compiled_property_successor_case, compiled_single_write_case,
@@ -235,7 +169,18 @@ mod tests {
     use tabula_testing::fixtures::state::empty_state;
     use tabula_types::{TypeRuntimeRegistry, u64_portable};
 
-    use super::{CompiledBatchInput, RuntimeError, run_compiled_batch};
+    use super::{BatchInput, CompiledBatchInput, run_batch, run_compiled_batch};
+    use crate::RuntimeError;
+
+    fn state_with_extra_surface_cell(mut state: State) -> State {
+        state.cells.push(StateEntry {
+            table: 99,
+            row: 0,
+            col: 0,
+            value: Some(u64_portable(9)),
+        });
+        state
+    }
 
     #[test]
     fn run_compiled_batch_applies_writes() {
@@ -261,6 +206,46 @@ mod tests {
     }
 
     #[test]
+    fn run_compiled_batch_state_after_comes_from_journal_state_summary() {
+        let case = compiled_single_write_case();
+        let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
+
+        let executed = run_compiled_batch(&CompiledBatchInput {
+            compiled_program: &case.compiled_program,
+            state: &case.state,
+            batch: &case.batch,
+            hasher: &Blake3Hasher,
+            type_runtimes: &type_runtimes,
+        })
+        .expect("execute compiled batch");
+
+        let portable_state = derive_portable_state_summary(
+            &executed.execution_journal().state_summary,
+            &type_runtimes,
+        )
+        .expect("portable state summary");
+        let merged = merge_output_state_entries(
+            &executed.state_before.cells,
+            &portable_state.write_set_final,
+        );
+        let actual_after: Vec<_> = executed
+            .state_after
+            .cells
+            .iter()
+            .map(|cell| (cell.table, cell.row, cell.col, cell.value.clone()))
+            .collect();
+        let expected_after: Vec<_> = merged
+            .iter()
+            .map(|cell| (cell.table, cell.row, cell.col, cell.value.clone()))
+            .collect();
+        assert_eq!(actual_after, expected_after);
+        assert_eq!(
+            executed.batch_report().write_set_final,
+            portable_state.write_set_final
+        );
+    }
+
+    #[test]
     fn run_compiled_batch_rejects_invalid_state() {
         let case = compiled_single_write_case();
         let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
@@ -283,6 +268,52 @@ mod tests {
         .expect_err("invalid state must fail");
 
         assert!(matches!(err, RuntimeError::InvalidState(_)));
+    }
+
+    #[test]
+    fn run_batch_rejects_state_outside_declared_surface() {
+        let case = compiled_single_write_case();
+        let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
+        let invalid_state = state_with_extra_surface_cell(case.state.clone());
+
+        let err = run_batch(&BatchInput {
+            program: case.compiled_program.program(),
+            state: &invalid_state,
+            batch: &case.batch,
+            hasher: &Blake3Hasher,
+            type_runtimes: &type_runtimes,
+        })
+        .expect_err("state outside execution surface must fail");
+
+        match err {
+            RuntimeError::ValidationFailed { detail } => {
+                assert!(detail.contains("outside the declared program state surface"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn run_compiled_batch_rejects_state_outside_declared_surface() {
+        let case = compiled_single_write_case();
+        let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded type runtimes");
+        let invalid_state = state_with_extra_surface_cell(case.state.clone());
+
+        let err = run_compiled_batch(&CompiledBatchInput {
+            compiled_program: &case.compiled_program,
+            state: &invalid_state,
+            batch: &case.batch,
+            hasher: &Blake3Hasher,
+            type_runtimes: &type_runtimes,
+        })
+        .expect_err("state outside execution surface must fail");
+
+        match err {
+            RuntimeError::ValidationFailed { detail } => {
+                assert!(detail.contains("outside the declared program state surface"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
 
     #[test]

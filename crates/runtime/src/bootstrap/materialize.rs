@@ -1,9 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::error::RuntimeError;
 use crate::host::{PrecompileFactoryMap, SchemeFactoryMap};
-use crate::setup::planning::required_property_queries_by_column;
 use tabula_artifact::PrecompileDescriptor;
 use tabula_compiler::SealedProgram;
 use tabula_core::{ColId, RootProfileId, TableId};
@@ -14,9 +13,8 @@ use tabula_ext::RuntimeColumn;
 #[cfg(feature = "prove")]
 use tabula_ext::backend::precompile::PrecompileProofPreparer;
 use tabula_ext::backend::precompile::{PrecompileProofSystem, ResolvedPrecompile};
-#[cfg(feature = "prove")]
-use tabula_ext::backend::scheme::ColumnProofBackend;
 use tabula_ext::{ColumnBackendSetup, MaterializedColumnBackend, PrecompileBackendFactory};
+#[cfg(feature = "prove")]
 use tabula_ir::GENERIC_EXECUTION_VALUE_WIDTH;
 use tabula_profile::ResolvedColumnProfileRef;
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
@@ -26,14 +24,6 @@ pub(crate) struct ResolvedRuntimeColumns {
     #[cfg(feature = "prove")]
     pub(crate) runtime_columns: BTreeMap<(TableId, ColId), Arc<dyn RuntimeColumn>>,
     pub(crate) column_backends: BTreeMap<(TableId, ColId), MaterializedColumnBackend>,
-}
-
-/// Ordered proof-preparation slot for one materialized backend.
-#[cfg(feature = "prove")]
-pub(crate) struct ColumnProofRecipe {
-    pub(crate) table: TableId,
-    pub(crate) col: ColId,
-    pub(crate) proof_backend: Arc<dyn ColumnProofBackend>,
 }
 
 /// Canonical ordered proof-materialization slot for one sealed precompile descriptor.
@@ -226,6 +216,19 @@ pub(crate) fn materialize_precompile_runtime_backends(
     Ok(slots)
 }
 
+fn required_property_queries_by_column(
+    compiled_program: &SealedProgram,
+) -> BTreeMap<(tabula_core::TableId, tabula_core::ColId), BTreeSet<tabula_ir::PropertyQueryKind>> {
+    let mut required_property_query_kinds: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+    for requirement in compiled_program.required_property_requirements() {
+        required_property_query_kinds
+            .entry((requirement.table_id, requirement.col_id))
+            .or_default()
+            .insert(requirement.query_kind);
+    }
+    required_property_query_kinds
+}
+
 fn resolve_precompile_factory<'a>(
     descriptor: &PrecompileDescriptor,
     factories: &'a PrecompileFactoryMap,
@@ -249,6 +252,7 @@ fn resolve_precompile_factory<'a>(
     ))
 }
 
+#[cfg(feature = "prove")]
 fn validate_precompile_execution_width(
     descriptor: &PrecompileDescriptor,
     encoding_runtimes: &EncodingRuntimeRegistry,

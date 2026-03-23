@@ -1,11 +1,12 @@
 //! Witness lowering for the Precompile opcode.
 //!
-//! Binds each IR call site to a unique structured [`PrecompileEvent`], proves
-//! actual program-visible outputs in the execution lane, and relays the
-//! canonical transcript digest through the execution row.
+//! Binds each IR call site to a unique typed precompile call, proves actual
+//! program-visible outputs in the execution lane, and relays the canonical
+//! transcript digest through the execution row.
 
 use tabula_chips::execution::trace::Opcode;
 use tabula_chips::precompile_transcript::compute_precompile_call_header;
+use tabula_core::PrecompileEvent;
 use tabula_core::error::TabulaError;
 use tabula_ir::{PrecompileId, ValueExpr};
 
@@ -18,13 +19,13 @@ pub(super) fn lower_precompile<const W: usize>(
     dst_slots: &[u16],
     inputs: &[ValueExpr],
 ) -> Result<(), TabulaError> {
-    let event = ctx.precompile_event(instr_idx)?;
-    if event.precompile_id != id.0 {
+    let call = ctx.precompile_event(instr_idx)?;
+    if call.precompile_id != id {
         return Err(TabulaError::ProofError {
             phase: "trace_lowering",
             detail: format!(
                 "precompile event id 0x{:04x} does not match instruction id 0x{:04x} at tx={} instruction {}",
-                event.precompile_id, id.0, ctx.tx_index, instr_idx,
+                call.precompile_id.0, id.0, ctx.tx_index, instr_idx,
             ),
         });
     }
@@ -34,11 +35,7 @@ pub(super) fn lower_precompile<const W: usize>(
         .iter()
         .map(|expr| ctx.resolve_val(expr))
         .collect::<Result<Vec<_>, _>>()?;
-    let input_portables = input_vals
-        .iter()
-        .map(|value| ctx.type_runtimes.encode_typed(value))
-        .collect::<Result<Vec<_>, _>>()?;
-    if input_portables != event.inputs {
+    if input_vals != call.inputs {
         return Err(TabulaError::ProofError {
             phase: "trace_lowering",
             detail: format!(
@@ -47,21 +44,36 @@ pub(super) fn lower_precompile<const W: usize>(
             ),
         });
     }
-    if event.outputs.len() != dst_slots.len() {
+    if call.outputs.len() != dst_slots.len() {
         return Err(TabulaError::ProofError {
             phase: "trace_lowering",
             detail: format!(
                 "precompile event for tx={} instruction {} reports {} outputs but IR declares {} dst_slots",
                 ctx.tx_index,
                 instr_idx,
-                event.outputs.len(),
+                call.outputs.len(),
                 dst_slots.len(),
             ),
         });
     }
 
+    let portable_event = PrecompileEvent {
+        tx_index: ctx.tx_index as usize,
+        instruction_index: call.instruction_index,
+        precompile_id: call.precompile_id.0,
+        inputs: call
+            .inputs
+            .iter()
+            .map(|value| ctx.type_runtimes.encode_typed(value))
+            .collect::<Result<Vec<_>, _>>()?,
+        outputs: call
+            .outputs
+            .iter()
+            .map(|value| ctx.type_runtimes.encode_typed(value))
+            .collect::<Result<Vec<_>, _>>()?,
+    };
     let header = compute_precompile_call_header(
-        event,
+        &portable_event,
         id.0,
         signature,
         ctx.type_runtimes,
@@ -84,11 +96,10 @@ pub(super) fn lower_precompile<const W: usize>(
 
     let mut writes = Vec::with_capacity(dst_slots.len());
     let mut written_slots = Vec::with_capacity(dst_slots.len());
-    for (dst_slot, output) in dst_slots.iter().zip(&event.outputs) {
+    for (dst_slot, output) in dst_slots.iter().zip(&call.outputs) {
         let slot_index = *dst_slot as usize;
-        let logical_output = ctx.type_runtimes.decode_portable(output)?;
-        let encoded = ctx.encode_padded(&logical_output)?;
-        ctx.update_slot(slot_index, logical_output, encoded.clone(), false)?;
+        let encoded = ctx.encode_padded(output)?;
+        ctx.update_slot(slot_index, output.clone(), encoded.clone(), false)?;
         writes.push((slot_index, encoded, false));
         written_slots.push(slot_index);
     }
@@ -99,7 +110,7 @@ pub(super) fn lower_precompile<const W: usize>(
     rec.precompile_id = Some(id.0);
     rec.instruction_index = Some(instr_idx as u32);
     rec.precompile_input_count = Some(input_vals.len() as u32);
-    rec.precompile_output_count = Some(event.outputs.len() as u32);
+    rec.precompile_output_count = Some(call.outputs.len() as u32);
     rec.precompile_event_digest = Some(core::array::from_fn(|idx| {
         p3_koala_bear::KoalaBear::new(header.event_digest[idx])
     }));

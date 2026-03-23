@@ -1,12 +1,13 @@
-mod partition;
-mod prepare;
+mod artifacts;
+mod journal;
 mod statement;
 mod traces;
 
 use serde::{Deserialize, Serialize};
 use tabula_machine::TabulaProof;
 
-pub(crate) use prepare::{PrecompileProofRecipe, prepare_proof_batch};
+pub(crate) use artifacts::{ProofArtifacts, prepare_proof_artifacts};
+pub(crate) use journal::{JournalInput, build_proof_journal, convert_batch};
 pub(crate) use statement::build_execution_statement;
 pub use statement::digest_to_hex;
 pub(crate) use traces::build_traces;
@@ -21,7 +22,7 @@ pub struct ProveInput<'a> {
     /// Transaction batch (for witness store preparation).
     pub batch: &'a tabula_artifact::TransactionBatch,
     /// Executed batch result (from [`run_batch`](crate::run_batch)).
-    pub executed: &'a crate::execute::ExecutedBatch,
+    pub executed: &'a crate::execute::ExecutionEnvelope,
 }
 
 /// Result of STARK proof generation.

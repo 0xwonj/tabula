@@ -11,9 +11,10 @@ use tabula_ir::{ArithOp, Instruction, ParamDef, RowExpr, TxTypeDef};
 use tabula_profile::TYPE_U64_ID;
 use tabula_types::u64_portable;
 
-use tabula_executor::consistency::check_consistency;
+use tabula_executor::consistency::{check_consistency, check_journal_consistency};
 use tabula_executor::overlay::Overlay;
 use tabula_executor::property::PropertyQueryRegistry;
+use tabula_executor::{ResolvedExecutionProgram, execute_batch};
 
 use common::*;
 
@@ -66,7 +67,7 @@ proptest! {
         }
 
         let result = ov.into_result().unwrap();
-        let keys: Vec<_> = result.write_set_final.iter().map(|(k, _)| *k).collect();
+        let keys: Vec<_> = result.write_set_final.iter().map(|entry| entry.key).collect();
         let unique: std::collections::BTreeSet<_> = keys.iter().copied().collect();
         prop_assert_eq!(keys.len(), unique.len(), "duplicate keys in write_set_final");
     }
@@ -89,7 +90,7 @@ proptest! {
         }
 
         let result = ov.into_result().unwrap();
-        let keys: Vec<_> = result.read_set_old.iter().map(|(k, _)| *k).collect();
+        let keys: Vec<_> = result.read_set_old.iter().map(|entry| entry.key).collect();
         let unique: std::collections::BTreeSet<_> = keys.iter().copied().collect();
         prop_assert_eq!(keys.len(), unique.len(), "duplicate keys in read_set_old");
     }
@@ -145,7 +146,7 @@ proptest! {
 
         let result = ov.into_result().unwrap();
         let read_keys: std::collections::BTreeSet<_> =
-            result.read_set_old.iter().map(|(k, _)| *k).collect();
+            result.read_set_old.iter().map(|entry| entry.key).collect();
         let write_keys: std::collections::BTreeSet<_> =
             write_rows.iter().map(|r| pcell(*r)).collect();
 
@@ -225,12 +226,9 @@ proptest! {
             property_queries: &property_queries,
             type_runtimes: type_runtimes(),
         };
-        let result = tabula_executor::batch::execute_batch(
-            &batch, &prog, &snap, &env, &BTreeMap::new(),
-        ).unwrap();
-
-        let events: Vec<_> = result.successful_events().cloned().collect();
-        let check = check_consistency(&events, &result.read_set_old, &result.txs);
+        let resolved = ResolvedExecutionProgram::from_program(&prog).unwrap();
+        let result = execute_batch(&batch, &resolved, &snap, &env, &BTreeMap::new()).unwrap();
+        let check = check_journal_consistency(&result);
         prop_assert!(check.is_ok(), "consistency check failed: {:?}", check.err());
     }
 }

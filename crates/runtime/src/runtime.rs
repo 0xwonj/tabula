@@ -6,19 +6,21 @@
 
 use tabula_artifact::{State, Statement, TransactionBatch, normalize_state};
 use tabula_commitment::PoseidonHasher;
+use tabula_core::InMemoryStaticTables;
 use tabula_executor::precompile::PrecompileRegistry;
 use tabula_executor::property::PropertyQueryRegistry;
 use tabula_ir::Program;
 use tabula_machine::{MachineProofInput, TabulaMachine, TabulaProof};
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 
-use crate::builder::RuntimeBuilder;
+use crate::bootstrap::RuntimeBuilder;
 use crate::error::RuntimeError;
-use crate::execute::{ExecutedBatch, ExecutionResources, execute_pipeline};
-use crate::program::ResolvedProgram;
-use crate::program::SnapshotStateView;
+use crate::execute::{ExecutionEnvelope, ExecutionResources, SnapshotStateView, execute_pipeline};
+use crate::policy::{
+    validate_execution_state_surface, validate_proof_state_surface, validate_prove_input_prestate,
+};
+use crate::program::RuntimeProgram;
 use crate::proving::{self, ProofSummary, ProveInput, ProveResult, VerifiedResult};
-use crate::setup::materialize::ColumnProofRecipe;
 use crate::verifier::verify_with_binding;
 
 /// Unified runtime owning execution and proving infrastructure.
@@ -40,14 +42,12 @@ use crate::verifier::verify_with_binding;
 ///
 /// # What it owns
 ///
-/// - **ResolvedProgram** — runtime materialization of the compiler artifact
+/// - **RuntimeProgram** — split execution/proof runtime contract
 /// - **TabulaMachine** — STARK prover/verifier (built once from schemas)
 /// - **PrecompileRegistry** — executor-side precompile handlers
 /// - **PropertyQueryRegistry** — executor-side property query handlers
 pub struct TabulaRuntime {
-    resolved_program: ResolvedProgram,
-    proof_recipes: Vec<ColumnProofRecipe>,
-    precompile_recipes: Vec<crate::proving::PrecompileProofRecipe>,
+    runtime_program: RuntimeProgram,
     machine: TabulaMachine,
     precompiles: PrecompileRegistry,
     property_queries: PropertyQueryRegistry,
@@ -61,41 +61,47 @@ impl TabulaRuntime {
 
     /// Construct from pre-built parts (used by [`RuntimeBuilder`]).
     pub(crate) fn from_parts(
-        resolved_program: ResolvedProgram,
-        proof_recipes: Vec<ColumnProofRecipe>,
-        precompile_recipes: Vec<crate::proving::PrecompileProofRecipe>,
+        runtime_program: RuntimeProgram,
         machine: TabulaMachine,
         precompiles: PrecompileRegistry,
         property_queries: PropertyQueryRegistry,
     ) -> Self {
         Self {
-            resolved_program,
-            proof_recipes,
-            precompile_recipes,
+            runtime_program,
             machine,
             precompiles,
             property_queries,
         }
     }
 
-    /// The resolved program backing this runtime.
-    pub fn resolved_program(&self) -> &ResolvedProgram {
-        &self.resolved_program
+    /// The split resolved runtime contract backing this runtime.
+    pub fn runtime_program(&self) -> &RuntimeProgram {
+        &self.runtime_program
+    }
+
+    /// Canonical resolved execution contract consumed by the executor.
+    pub fn execution_program(&self) -> &tabula_executor::ResolvedExecutionProgram {
+        self.runtime_program.execution()
+    }
+
+    /// Canonical resolved proof contract consumed by runtime proving.
+    pub fn proof_program(&self) -> &crate::program::ResolvedProofProgram {
+        self.runtime_program.proof()
     }
 
     /// The IR program executed by this runtime.
     pub fn program(&self) -> &Program {
-        self.resolved_program.program()
+        self.proof_program().program()
     }
 
     /// Runtime type behavior registry.
     pub fn type_runtimes(&self) -> &TypeRuntimeRegistry {
-        self.resolved_program.type_runtimes()
+        self.proof_program().type_runtimes()
     }
 
     /// Runtime encoding behavior registry.
     pub fn encoding_runtimes(&self) -> &EncodingRuntimeRegistry {
-        self.resolved_program.encoding_runtimes()
+        self.proof_program().encoding_runtimes()
     }
 
     /// The precompile registry (for executor integration).
@@ -113,40 +119,30 @@ impl TabulaRuntime {
         &self.machine
     }
 
-    #[cfg(test)]
-    pub(crate) fn proof_recipes(&self) -> &[ColumnProofRecipe] {
-        &self.proof_recipes
-    }
-
-    #[cfg(test)]
-    pub(crate) fn precompile_recipes(&self) -> &[crate::proving::PrecompileProofRecipe] {
-        &self.precompile_recipes
-    }
-
     /// Execute a batch using the runtime's owned resources.
     ///
     /// Unlike the free function [`run_batch()`](crate::run_batch), this method:
     /// - Uses `PoseidonHasher` (consistent with the proving path)
     /// - Passes registered precompiles and property query handlers to the executor
     ///
-    /// Returns an [`ExecutedBatch`] ready for [`prove()`](Self::prove).
+    /// Returns an [`ExecutionEnvelope`] ready for [`prove()`](Self::prove).
     #[tracing::instrument(skip_all, name = "execute")]
     pub fn execute(
         &self,
         state: &State,
         batch: &TransactionBatch,
-    ) -> Result<ExecutedBatch, RuntimeError> {
+    ) -> Result<ExecutionEnvelope, RuntimeError> {
         let hasher = PoseidonHasher::new();
         let normalized = normalize_state(state).map_err(RuntimeError::InvalidState)?;
-        let committed =
-            SnapshotStateView::from_state(&normalized, self.resolved_program.type_runtimes());
+        validate_execution_state_surface(self.execution_program(), &normalized)?;
+        let committed = SnapshotStateView::from_state(&normalized, self.type_runtimes());
 
         execute_pipeline(
-            self.resolved_program.program(),
+            self.execution_program(),
             &normalized,
             batch,
             &hasher,
-            self.resolved_program.type_runtimes(),
+            self.type_runtimes(),
             ExecutionResources {
                 precompiles: Some(&self.precompiles),
                 committed_state: Some(&committed),
@@ -161,21 +157,24 @@ impl TabulaRuntime {
         &self,
         input: &ProveInput<'_>,
     ) -> Result<Statement, RuntimeError> {
-        let prepared = proving::prepare_proof_batch(
-            &self.resolved_program,
-            &self.proof_recipes,
-            &self.precompile_recipes,
-            input.state,
-            input.batch,
-            input.executed,
-        )?;
+        let normalized_state = self.validate_prove_input_state(input)?;
+        let batch = proving::convert_batch(input.batch, self.type_runtimes())?;
+        let static_tables = InMemoryStaticTables::new();
+        let journal = proving::build_proof_journal(proving::JournalInput {
+            resolved_program: self.proof_program(),
+            state: &normalized_state,
+            batch: &batch,
+            execution_journal: input.executed.execution_journal(),
+            static_tables: &static_tables,
+        })?;
+        let artifacts = proving::prepare_proof_artifacts(self.proof_program(), journal)?;
 
         proving::build_execution_statement(
-            &self.resolved_program,
-            input.state,
+            self.proof_program(),
+            &normalized_state,
             input.batch,
             &input.executed.state_after,
-            &prepared.air_statement,
+            &artifacts.air_statement,
         )
     }
 
@@ -184,30 +183,33 @@ impl TabulaRuntime {
     /// Pipeline: column states -> witness -> traces -> prove.
     #[tracing::instrument(skip_all, name = "prove")]
     pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, RuntimeError> {
-        let mut prepared = proving::prepare_proof_batch(
-            &self.resolved_program,
-            &self.proof_recipes,
-            &self.precompile_recipes,
-            input.state,
-            input.batch,
-            input.executed,
-        )?;
+        let normalized_state = self.validate_prove_input_state(input)?;
+        let batch = proving::convert_batch(input.batch, self.type_runtimes())?;
+        let static_tables = InMemoryStaticTables::new();
+        let journal = proving::build_proof_journal(proving::JournalInput {
+            resolved_program: self.proof_program(),
+            state: &normalized_state,
+            batch: &batch,
+            execution_journal: input.executed.execution_journal(),
+            static_tables: &static_tables,
+        })?;
+        let mut artifacts = proving::prepare_proof_artifacts(self.proof_program(), journal)?;
         let statement = proving::build_execution_statement(
-            &self.resolved_program,
-            input.state,
+            self.proof_program(),
+            &normalized_state,
             input.batch,
             &input.executed.state_after,
-            &prepared.air_statement,
+            &artifacts.air_statement,
         )?;
 
         let proof = {
             let _span = tracing::info_span!("stark_prove").entered();
-            let traces = proving::build_traces(&self.machine, &mut prepared)?;
+            let traces = proving::build_traces(&self.machine, &mut artifacts)?;
             self.machine
                 .prover()
                 .prove(MachineProofInput {
                     traces,
-                    statement: prepared.air_statement,
+                    statement: artifacts.air_statement,
                     statement_digest: statement.statement_hash_bytes(),
                 })
                 .map_err(RuntimeError::Proving)?
@@ -227,7 +229,7 @@ impl TabulaRuntime {
     #[tracing::instrument(skip_all, name = "verify")]
     pub fn verify(&self, proof: &TabulaProof, statement: &Statement) -> Result<(), RuntimeError> {
         verify_with_binding(
-            self.resolved_program.binding(),
+            self.proof_program().binding(),
             &self.machine,
             proof,
             statement,
@@ -274,13 +276,19 @@ impl TabulaRuntime {
             executed: &executed,
         })
     }
+
+    fn validate_prove_input_state(&self, input: &ProveInput<'_>) -> Result<State, RuntimeError> {
+        let normalized = normalize_state(input.state).map_err(RuntimeError::InvalidState)?;
+        validate_proof_state_surface(self.proof_program(), &normalized)?;
+        validate_prove_input_prestate(&normalized, &input.executed.state_before)?;
+        Ok(normalized)
+    }
 }
 
 impl std::fmt::Debug for TabulaRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TabulaRuntime")
-            .field("resolved_program", &self.resolved_program)
-            .field("proof_recipes", &self.proof_recipes.len())
+            .field("runtime_program", &self.runtime_program)
             .field("machine", &self.machine)
             .field("precompiles_registered", &!self.precompiles.is_empty())
             .field(
@@ -303,12 +311,66 @@ const _: () = {
 
 #[cfg(test)]
 mod tests {
+    use tabula_artifact::{State, StateEntry};
     use tabula_machine::MachineProofInput;
     use tabula_testing::assertions::assert_statement_matches_artifact;
     use tabula_testing::fixtures::examples::transfer_example_compiled_case;
+    use tabula_types::u64_portable;
 
     use super::*;
     use crate::proving;
+
+    fn state_with_extra_surface_cell(mut state: State) -> State {
+        state.cells.push(StateEntry {
+            table: 99,
+            row: 0,
+            col: 0,
+            value: Some(u64_portable(9)),
+        });
+        state
+    }
+
+    fn state_with_modified_declared_value(mut state: State) -> State {
+        let first = state
+            .cells
+            .first_mut()
+            .expect("state has at least one cell");
+        first.value = Some(u64_portable(999));
+        state
+    }
+
+    #[test]
+    fn runtime_exposes_split_resolved_contracts() {
+        let case = transfer_example_compiled_case();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .build()
+            .expect("runtime");
+        let tx_type = runtime
+            .program()
+            .all_types()
+            .first()
+            .expect("at least one tx type")
+            .id;
+        let first_column = runtime
+            .proof_program()
+            .proof_plan()
+            .column_slots()
+            .first()
+            .expect("at least one proof column");
+
+        assert!(runtime.execution_program().tx_definition(tx_type).is_ok());
+        assert_eq!(
+            runtime.proof_program().proof_plan().column_slots().len(),
+            runtime.machine().setup().proof_setups().columns.len()
+        );
+        assert!(
+            runtime
+                .runtime_program()
+                .execution()
+                .column_layout(first_column.table, first_column.col,)
+                .is_ok()
+        );
+    }
 
     #[test]
     fn runtime_prove_and_verify_smoke() {
@@ -334,6 +396,109 @@ mod tests {
     }
 
     #[test]
+    fn runtime_execute_rejects_state_outside_declared_surface() {
+        let case = transfer_example_compiled_case();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .build()
+            .expect("runtime");
+        let invalid_state = state_with_extra_surface_cell(case.state.clone());
+
+        let err = runtime
+            .execute(&invalid_state, &case.batch)
+            .expect_err("state outside execution surface must fail");
+
+        match err {
+            RuntimeError::ValidationFailed { detail } => {
+                assert!(detail.contains("outside the declared program state surface"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn build_execution_statement_rejects_state_outside_declared_surface() {
+        let case = transfer_example_compiled_case();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .build()
+            .expect("runtime");
+        let executed = runtime
+            .execute(&case.state, &case.batch)
+            .expect("execution succeeds");
+        let invalid_state = state_with_extra_surface_cell(case.state.clone());
+
+        let err = runtime
+            .build_execution_statement(&ProveInput {
+                state: &invalid_state,
+                batch: &case.batch,
+                executed: &executed,
+            })
+            .expect_err("proof input state outside declared surface must fail");
+
+        match err {
+            RuntimeError::ValidationFailed { detail } => {
+                assert!(detail.contains("outside the declared program state surface"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn prove_rejects_state_mismatching_executed_pre_state() {
+        let case = transfer_example_compiled_case();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .build()
+            .expect("runtime");
+        let executed = runtime
+            .execute(&case.state, &case.batch)
+            .expect("execution succeeds");
+        let mismatched_state = state_with_modified_declared_value(case.state.clone());
+
+        let err = runtime
+            .prove(&ProveInput {
+                state: &mismatched_state,
+                batch: &case.batch,
+                executed: &executed,
+            })
+            .err()
+            .expect("mismatched prove input state must fail");
+
+        match err {
+            RuntimeError::ValidationFailed { detail } => {
+                assert!(detail.contains("does not match the executed batch pre-state"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn prove_and_verify_rejects_state_mismatching_executed_pre_state() {
+        let case = transfer_example_compiled_case();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .build()
+            .expect("runtime");
+        let executed = runtime
+            .execute(&case.state, &case.batch)
+            .expect("execution succeeds");
+        let mismatched_state = state_with_modified_declared_value(case.state.clone());
+
+        let err = runtime
+            .prove_and_verify(&ProveInput {
+                state: &mismatched_state,
+                batch: &case.batch,
+                executed: &executed,
+            })
+            .err()
+            .expect("mismatched prove input state must fail");
+
+        match err {
+            RuntimeError::ValidationFailed { detail } => {
+                assert!(detail.contains("does not match the executed batch pre-state"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
     fn machine_backend_proves_from_prepared_traces() {
         let case = transfer_example_compiled_case();
         let runtime = TabulaRuntime::builder(case.compiled_program)
@@ -342,17 +507,21 @@ mod tests {
         let executed = runtime
             .execute(&case.state, &case.batch)
             .expect("execution succeeds");
-        let mut prepared = proving::prepare_proof_batch(
-            runtime.resolved_program(),
-            runtime.proof_recipes(),
-            runtime.precompile_recipes(),
-            &case.state,
-            &case.batch,
-            &executed,
-        )
-        .expect("prepared proof batch");
+        let batch =
+            proving::convert_batch(&case.batch, runtime.type_runtimes()).expect("convert batch");
+        let static_tables = InMemoryStaticTables::new();
+        let journal = proving::build_proof_journal(proving::JournalInput {
+            resolved_program: runtime.proof_program(),
+            state: &case.state,
+            batch: &batch,
+            execution_journal: executed.execution_journal(),
+            static_tables: &static_tables,
+        })
+        .expect("prepared batch journal");
+        let mut prepared = proving::prepare_proof_artifacts(runtime.proof_program(), journal)
+            .expect("prepared proof artifacts");
         let statement = proving::build_execution_statement(
-            runtime.resolved_program(),
+            runtime.proof_program(),
             &case.state,
             &case.batch,
             &executed.state_after,

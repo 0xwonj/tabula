@@ -17,15 +17,16 @@ use tabula_core::{
 };
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::property::PropertyQueryRegistry;
+use tabula_executor::{ExecutionJournal, ResolvedExecutionProgram, derive_batch_report};
 use tabula_ir::Program;
 use tabula_stark::air::interaction::core_buses;
 use tabula_stark::trace::{TraceMap, WitnessStore, build_all_traces, debug_validate_trace_map};
 use tabula_types::{EncodingRuntime, EncodingRuntimeRegistry, TypeRuntimeRegistry};
 use tabula_witness::stark::{
-    LowerProgramBatchInput, LoweringOutput, SharedStoreBuilder, SharedStoreContext,
-    lower_program_batch,
+    LowerSuccessfulTxInput, LoweringOutput, LoweringPrecompileCall, LoweringPropertyRead,
+    SharedStoreBuilder, SharedStoreContext, TxLoweringOutput, lower_successful_tx,
 };
-use tabula_witness::{ExecutionInputPreparer, PreparedExecutionColumns};
+use tabula_witness::{AccessEvent, ColumnWrite};
 
 use tabula_chips::ir_hash::{IR_HASH_BUS, IR_HASH_CHIP_ID, IrHashChip};
 
@@ -37,7 +38,8 @@ type EncodedWrites = Vec<(RowKey, Option<Vec<KoalaBear>>)>;
 pub struct StarkTraceHarness {
     pub program: Program,
     pub batch: Batch,
-    pub result: tabula_core::BatchResult,
+    pub execution_journal: ExecutionJournal,
+    pub result: tabula_core::BatchReport,
     pub column_root_bindings: Vec<ColumnRootBinding>,
     pub old_state_root: NativeDigest,
     pub new_state_root: NativeDigest,
@@ -76,24 +78,6 @@ pub fn compile_execute_context(
     compile_execute_context_impl(source, initial_cells, transactions)
 }
 
-pub fn prepare_execution_inputs(
-    harness: &StarkTraceHarness,
-) -> Result<PreparedExecutionColumns, TabulaError> {
-    let planned_columns: Vec<(TableId, ColId)> = harness
-        .schemas_by_id
-        .iter()
-        .flat_map(|(table, schema)| schema.columns.iter().map(move |column| (*table, column.id)))
-        .collect();
-    ExecutionInputPreparer::new().prepare_execution_inputs(
-        &harness.result,
-        &harness.schemas_by_id,
-        harness.program.profile_catalog(),
-        &harness.type_runtimes,
-        &harness.encoding_runtimes,
-        planned_columns.iter(),
-    )
-}
-
 fn compile_execute_context_impl(
     source: &str,
     initial_cells: &[(TableId, ColId, RowKey, PortableValue)],
@@ -120,29 +104,17 @@ fn compile_execute_context_impl(
         committed_state: None,
         property_queries: &property_queries,
     };
-    let result = execute_batch(&batch, &program, &snapshot, &env, &BTreeMap::new())
-        .expect("batch execution");
+    let resolved = ResolvedExecutionProgram::from_program(&program).expect("resolved program");
+    let journal = execute_batch(&batch, &resolved, &snapshot, &env, &BTreeMap::new())
+        .expect("journal execution");
+    let result = derive_batch_report(&journal, &type_runtimes).expect("batch result projection");
 
     let schemas_by_id: BTreeMap<TableId, TableSchema> = compiled_schemas
         .iter()
         .cloned()
         .map(|schema| (schema.id, schema))
         .collect();
-    let planned_columns: Vec<(TableId, ColId)> = schemas_by_id
-        .iter()
-        .flat_map(|(table, schema)| schema.columns.iter().map(move |column| (*table, column.id)))
-        .collect();
-    let preparer = ExecutionInputPreparer::new();
-    let prepared = preparer
-        .prepare_execution_inputs(
-            &result,
-            &schemas_by_id,
-            program.profile_catalog(),
-            &type_runtimes,
-            &encoding_runtimes,
-            planned_columns.iter(),
-        )
-        .expect("prepared execution inputs");
+    let writes_by_column = group_column_writes(&journal);
 
     let mut entries_by_col: PortableColumnEntries = BTreeMap::new();
     for (table, col, row, value) in initial_cells {
@@ -160,13 +132,6 @@ fn compile_execute_context_impl(
                 .profile_catalog()
                 .resolve_column_profile(column.column_profile_id)
                 .expect("resolve column profile");
-            let prepared_column = prepared
-                .columns
-                .iter()
-                .find(|prepared_column| {
-                    prepared_column.table == schema.id && prepared_column.col == column.id
-                })
-                .expect("prepared column");
             let entries = entries_by_col
                 .remove(&(schema.id, column.id))
                 .unwrap_or_default();
@@ -200,8 +165,12 @@ fn compile_execute_context_impl(
                     .collect(),
             )
             .expect("commit old state");
-            let encoded_writes = encode_writes(encoding_runtime.as_ref(), &prepared_column.writes)
-                .expect("encode writes");
+            let writes = writes_by_column
+                .get(&(schema.id, column.id))
+                .cloned()
+                .unwrap_or_default();
+            let encoded_writes =
+                encode_writes(encoding_runtime.as_ref(), &writes).expect("encode writes");
             root_bindings.push(build_ssmc_root_binding(
                 &hasher,
                 (schema.id, column.id),
@@ -209,7 +178,7 @@ fn compile_execute_context_impl(
                 resolved.column_profile.profile_hash,
                 &old_state,
                 &encoded_writes,
-                prepared_column.is_touched(),
+                !writes.is_empty(),
             ));
         }
     }
@@ -220,6 +189,7 @@ fn compile_execute_context_impl(
     StarkTraceHarness {
         program,
         batch: Batch { transactions },
+        execution_journal: journal,
         result,
         column_root_bindings: root_bindings,
         old_state_root,
@@ -233,17 +203,83 @@ fn compile_execute_context_impl(
 pub fn lower_program_batch_for_harness<const WIDTH: usize>(
     harness: &StarkTraceHarness,
 ) -> LoweringOutput {
-    lower_program_batch::<WIDTH>(LowerProgramBatchInput {
-        program: &harness.program,
-        batch: &harness.batch,
-        result: &harness.result,
-        schemas: &harness.schemas_by_id,
-        type_runtimes: &harness.type_runtimes,
-        encoding_runtimes: &harness.encoding_runtimes,
-        static_tables: &InMemoryStaticTables::new(),
-        empty_columns: &harness.empty_columns(),
-    })
-    .expect("IR lowering")
+    let profile_map = build_profile_map(
+        &harness.schemas_by_id,
+        harness.program.profile_catalog(),
+        &harness.type_runtimes,
+        &harness.encoding_runtimes,
+    )
+    .expect("profile map");
+    let empty_columns = harness.empty_columns();
+    let mut instruction_records = Vec::new();
+    let mut static_rows: BTreeMap<
+        (u32, u16, u64),
+        tabula_chips::static_table::trace::StaticTableRow,
+    > = BTreeMap::new();
+    let mut ir_hash_calls = Vec::new();
+
+    for success in harness.execution_journal.successful_txs() {
+        let tx = harness
+            .batch
+            .transactions
+            .get(success.tx_index as usize)
+            .expect("batch transaction");
+        let tx_def = harness
+            .program
+            .resolve(tx.tx_type)
+            .expect("resolved tx definition");
+        let access_trace = success
+            .access_effects
+            .iter()
+            .map(|effect| witness_access_event(success.tx_index, effect, &harness.type_runtimes))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("access trace");
+        let precompile_calls = success
+            .precompile_calls
+            .iter()
+            .map(|effect| LoweringPrecompileCall {
+                instruction_index: effect.instruction_index,
+                precompile_id: effect.precompile_id,
+                inputs: effect.inputs.clone(),
+                outputs: effect.outputs.clone(),
+            })
+            .collect::<Vec<_>>();
+        let property_reads = success
+            .property_reads
+            .iter()
+            .map(|effect| LoweringPropertyRead {
+                instruction_index: effect.instruction_index,
+                result: effect.result.clone(),
+            })
+            .collect::<Vec<_>>();
+        let lowering = lower_successful_tx::<WIDTH>(LowerSuccessfulTxInput {
+            tx_index: success.tx_index,
+            tx,
+            tx_def,
+            profile_map: &profile_map,
+            type_runtimes: &harness.type_runtimes,
+            encoding_runtimes: &harness.encoding_runtimes,
+            static_tables: &InMemoryStaticTables::new(),
+            empty_columns: &empty_columns,
+            precompile_signatures: harness.program.precompiles(),
+            access_trace: &access_trace,
+            precompile_calls: &precompile_calls,
+            property_reads: &property_reads,
+        })
+        .expect("lower successful tx");
+        merge_tx_lowering(
+            lowering,
+            &mut instruction_records,
+            &mut static_rows,
+            &mut ir_hash_calls,
+        );
+    }
+
+    LoweringOutput {
+        instruction_records,
+        static_table_rows: static_rows.into_values().collect(),
+        ir_hash_calls,
+    }
 }
 
 pub fn prepare_witness_store<const WIDTH: usize>(
@@ -346,4 +382,90 @@ fn encode_writes(
             ))
         })
         .collect()
+}
+
+fn group_column_writes(journal: &ExecutionJournal) -> BTreeMap<(TableId, ColId), Vec<ColumnWrite>> {
+    let mut grouped = BTreeMap::new();
+    for entry in &journal.state_summary.write_set_final {
+        grouped
+            .entry((entry.key.table, entry.key.col))
+            .or_insert_with(Vec::new)
+            .push(ColumnWrite {
+                row: entry.key.row,
+                value: entry.value.clone(),
+            });
+    }
+    for writes in grouped.values_mut() {
+        writes.sort_by_key(|write| write.row);
+    }
+    grouped
+}
+
+fn build_profile_map(
+    schemas: &BTreeMap<TableId, TableSchema>,
+    profile_catalog: &tabula_profile::ProfileCatalog,
+    type_runtimes: &TypeRuntimeRegistry,
+    encoding_runtimes: &EncodingRuntimeRegistry,
+) -> Result<BTreeMap<(TableId, ColId), tabula_witness::ColumnValueProfile>, TabulaError> {
+    let mut profile_map = BTreeMap::new();
+    for (&table_id, schema) in schemas {
+        for col in &schema.columns {
+            let resolved = profile_catalog
+                .resolve_column_profile(col.column_profile_id)
+                .map_err(|err| TabulaError::ProofError {
+                    phase: "testing_witness",
+                    detail: format!(
+                        "column profile {} for table {} col {} is invalid: {err}",
+                        col.column_profile_id.0, table_id.0, col.id.0,
+                    ),
+                })?;
+            type_runtimes.resolve(resolved.type_descriptor.type_id)?;
+            encoding_runtimes.resolve(resolved.encoding_profile.encoding_profile_id)?;
+            profile_map.insert(
+                (table_id, col.id),
+                tabula_witness::ColumnValueProfile {
+                    type_id: resolved.type_descriptor.type_id,
+                    encoding_profile_id: resolved.encoding_profile.encoding_profile_id,
+                },
+            );
+        }
+    }
+    Ok(profile_map)
+}
+
+fn witness_access_event(
+    tx_index: u32,
+    effect: &tabula_executor::TypedAccessEffect,
+    type_runtimes: &TypeRuntimeRegistry,
+) -> Result<AccessEvent, TabulaError> {
+    let value = match &effect.value {
+        Some(value) => value.clone(),
+        None => type_runtimes.zero_of(effect.type_id)?,
+    };
+    Ok(AccessEvent {
+        key: effect.key,
+        time: effect.logical_time,
+        is_write: effect.op == tabula_core::OpKind::Write,
+        value,
+        is_null: effect.value.is_none(),
+        tx_index,
+        effect_ordinal_in_tx: effect.effect_ordinal_in_tx,
+    })
+}
+
+fn merge_tx_lowering(
+    lowering: TxLoweringOutput,
+    instruction_records: &mut Vec<tabula_chips::execution::trace::InstructionRecord>,
+    static_rows: &mut BTreeMap<(u32, u16, u64), tabula_chips::static_table::trace::StaticTableRow>,
+    ir_hash_calls: &mut Vec<tabula_chips::ir_hash::IrHashCall>,
+) {
+    instruction_records.extend(lowering.instruction_records);
+    ir_hash_calls.extend(lowering.ir_hash_calls);
+    for row in lowering.static_table_rows {
+        let key = (row.table_id, row.col_id, row.row_key);
+        static_rows
+            .entry(key)
+            .and_modify(|existing| existing.lookup_mult += row.lookup_mult)
+            .or_insert(row);
+    }
 }

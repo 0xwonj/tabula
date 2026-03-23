@@ -18,14 +18,19 @@ pub(super) fn lower_read<const W: usize>(
     let row_key = ctx.resolve_row(row)?;
 
     let event = ctx.find_event(instr_idx)?;
+    if event.is_write {
+        return Err(TabulaError::ProofError {
+            phase: "trace_lowering",
+            detail: format!(
+                "stored write event encountered for read at tx={} instruction {}",
+                ctx.tx_index, instr_idx,
+            ),
+        });
+    }
     let effect_ordinal = ctx.effect_ordinal;
     ctx.effect_ordinal += 1;
 
-    let slot_value = if event.val_is_null {
-        ctx.zero_for_column(table, col)?
-    } else {
-        ctx.decode_column_portable(table, col, &event.value)?
-    };
+    let slot_value = event.value.clone();
     let encoded = ctx.encode_padded(&slot_value)?;
 
     let slot = dst_val as usize;
@@ -39,7 +44,7 @@ pub(super) fn lower_read<const W: usize>(
     // Update slot state.
     ctx.slots[slot] = Some(slot_value);
     ctx.slot_fes[slot] = encoded.clone();
-    ctx.slot_nulls[slot] = event.val_is_null;
+    ctx.slot_nulls[slot] = event.is_null;
     ctx.slot_initialized[slot] = true;
     if slot >= ctx.max_slot {
         ctx.max_slot = slot + 1;
@@ -54,8 +59,8 @@ pub(super) fn lower_read<const W: usize>(
     rec.access_c = Some(col.0);
     rec.access_r = Some(row_key.0);
     rec.access_val = Some(encoded.clone());
-    rec.access_is_null = Some(event.val_is_null);
-    rec.writes.push((slot, encoded, event.val_is_null));
+    rec.access_is_null = Some(event.is_null);
+    rec.writes.push((slot, encoded, event.is_null));
     rec.is_empty_col = is_empty;
     ctx.push_record(rec);
 
@@ -75,13 +80,22 @@ pub(super) fn lower_write<const W: usize>(
     let value_encoded = ctx.encode_padded(&value)?;
 
     let event = ctx.find_event(instr_idx)?;
+    if !event.is_write {
+        return Err(TabulaError::ProofError {
+            phase: "trace_lowering",
+            detail: format!(
+                "stored read event encountered for write at tx={} instruction {}",
+                ctx.tx_index, instr_idx,
+            ),
+        });
+    }
     let effect_ordinal = ctx.effect_ordinal;
     ctx.effect_ordinal += 1;
 
     let src1_idx = ctx.resolve_slot_idx(
         src_val,
         &value_encoded,
-        event.val_is_null,
+        event.is_null,
         &[], // Write has no written slot
     )?;
 
@@ -93,7 +107,7 @@ pub(super) fn lower_write<const W: usize>(
     rec.access_c = Some(col.0);
     rec.access_r = Some(row_key.0);
     rec.access_val = Some(value_encoded);
-    rec.access_is_null = Some(event.val_is_null);
+    rec.access_is_null = Some(event.is_null);
     ctx.push_record(rec);
 
     Ok(())

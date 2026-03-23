@@ -32,7 +32,7 @@ mod tests {
     };
     use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedColumnEntry, u64_typed};
 
-    use crate::schemes::{SmtScheme, SsmcScheme};
+    use super::{SmtScheme, SsmcScheme};
 
     fn catalog_with_column(scheme_profile_id: SchemeProfileId) -> ProfileCatalog {
         let mut catalog = builtin_catalog().expect("built-in catalog");

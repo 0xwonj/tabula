@@ -18,16 +18,16 @@ use tabula_machine::backend::AnyRap;
 use tabula_machine::backend::extension::ExecutionTierExtension;
 use tabula_machine::{TabulaMachine, TabulaProof};
 
-use crate::error::RuntimeError;
-use crate::host::HostEnvironment;
-use crate::machine_config::MachineConfig;
-use crate::program::{Binding, binding_from_artifact};
-use crate::setup::materialize::{
+use crate::bootstrap::MachineConfig;
+use crate::bootstrap::materialize::{
     materialize_column_backends, materialize_precompile_verifier_systems,
 };
-use crate::setup::validation::{
+use crate::bootstrap::validation::{
     validate_compiler_owned_profiles, validate_precompile_requirements, validate_statement_binding,
 };
+use crate::error::RuntimeError;
+use crate::host::HostEnvironment;
+use crate::program::{Binding, binding_from_artifact};
 
 /// Verify a proof against an expected program binding and low-level machine verifier.
 pub(crate) fn verify_with_binding(
@@ -116,8 +116,10 @@ impl VerifierBuilder {
         let resolved_columns = materialize_column_backends(
             &compiled_program,
             self.host_environment.schemes().factories(),
-            self.host_environment.type_runtimes().type_runtimes(),
-            self.host_environment.type_runtimes().encoding_runtimes(),
+            self.host_environment.runtime_registries().type_runtimes(),
+            self.host_environment
+                .runtime_registries()
+                .encoding_runtimes(),
             self.machine_config.supported_root_binding_families(),
         )?;
         let precompile_systems = materialize_precompile_verifier_systems(
@@ -271,7 +273,7 @@ mod tests {
 
     use super::Verifier;
     #[cfg(feature = "verify")]
-    use crate::host::{HostEnvironment, HostTypeRuntimes};
+    use crate::host::{HostEnvironment, RuntimeRegistries};
     #[cfg(feature = "verify")]
     use crate::testing::schemes::{
         EmptySchemeFactory, custom_scheme_profile, set_artifact_column_scheme,
@@ -313,7 +315,7 @@ mod tests {
         let mut artifact = compiled.into_artifact();
         set_artifact_column_scheme(&mut artifact, 0, custom_scheme_profile(SchemeId(0x1000)));
         let host_environment = HostEnvironment::empty()
-            .with_type_runtimes(HostTypeRuntimes::standard())
+            .with_runtime_registries(RuntimeRegistries::standard())
             .with_column_backend_bundle(ColumnBackendFactoryBundle::new(EmptySchemeFactory))
             .expect("register custom backend bundle");
         let verifier = Verifier::builder(artifact)

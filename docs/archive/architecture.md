@@ -34,7 +34,7 @@ source / JSON
   -> tabula-compiler
   -> tabula-runtime (execute)
   -> tabula-executor
-  -> ExecutedBatch / state diff / events
+  -> ExecutionEnvelope / state diff / events
   -> tabula-runtime --features verify|prove
   -> tabula-commitment + tabula-witness + tabula-chips + tabula-stark + tabula-machine
   -> proof / receipt / verification result

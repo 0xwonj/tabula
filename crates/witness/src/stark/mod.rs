@@ -9,5 +9,8 @@ pub mod shared_store;
 
 pub(crate) use rows::{AccessRow, InitRow};
 
-pub use lowering::{LowerProgramBatchInput, LoweringOutput, lower_program_batch};
+pub use lowering::{
+    LowerSuccessfulTxInput, LoweringOutput, LoweringPrecompileCall, LoweringPropertyRead,
+    TxLoweringOutput, lower_successful_tx,
+};
 pub use shared_store::{SharedStoreBuilder, SharedStoreContext};

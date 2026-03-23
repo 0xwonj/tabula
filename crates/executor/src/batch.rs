@@ -1,19 +1,22 @@
-//! Batch executor: iterates transactions, orchestrates interpretation
-//! with per-tx rollback on failure.
+//! Canonical batch executor.
 
 use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateView, StaticTableProvider};
-use tabula_core::{Batch, BatchResult, PortableValue, TxResult};
-
-use tabula_ir::{ParamDef, Program};
+use tabula_core::{Batch, PortableValue, TxTypeId};
+use tabula_ir::ParamDef;
 use tabula_types::{TypeRuntimeRegistry, TypedValue};
 
-use crate::interpreter;
+use crate::interpreter::{self, ExecContext};
+use crate::journal::{
+    ExecutionJournal, ExecutionStateSummary, FailedTxExecution, TxExecutionOutcome,
+    TxJournalBuilder,
+};
 use crate::overlay::Overlay;
 use crate::precompile::PrecompileRegistry;
 use crate::property::{CommittedStateProvider, PropertyQueryRegistry};
+use crate::resolved_program::{ResolvedExecutionProgram, ResolvedTxDefinition};
 
 /// Validate transaction parameters against the schema definition.
 fn validate_params(
@@ -62,126 +65,161 @@ pub struct BatchEnv<'a> {
     pub property_queries: &'a PropertyQueryRegistry,
 }
 
-/// Execute a batch of transactions against a state.
-///
-/// Returns a `BatchResult` containing the read set, write set, and per-tx results
-/// (each carrying its own access trace and emitted events).
-pub fn execute_batch<S: StateView>(
-    batch: &Batch,
-    program: &Program,
-    snapshot: &S,
-    env: &BatchEnv<'_>,
-    initial_nonces: &BTreeMap<[u8; 32], u64>,
-) -> Result<BatchResult, TabulaError> {
-    let mut overlay = Overlay::new(snapshot, env.type_runtimes);
-    let mut txs: Vec<TxResult> = Vec::new();
-    let mut nonces: BTreeMap<[u8; 32], u64> = initial_nonces.clone();
+/// Canonical batch executor over the resolved execution contract.
+pub(crate) struct BatchExecutor<'a, S: StateView> {
+    batch: &'a Batch,
+    program: &'a ResolvedExecutionProgram,
+    snapshot: &'a S,
+    env: &'a BatchEnv<'a>,
+    initial_nonces: &'a BTreeMap<[u8; 32], u64>,
+}
 
-    let ctx = interpreter::ExecContext {
-        hasher: env.hasher,
-        static_tables: env.static_tables,
-        type_runtimes: env.type_runtimes,
-        schemas: program.schemas(),
-        profile_catalog: program.profile_catalog(),
-        precompiles: env.precompiles,
-        committed_state: env.committed_state,
-        property_queries: env.property_queries,
-    };
+impl<'a, S: StateView> BatchExecutor<'a, S> {
+    pub(crate) fn new(
+        batch: &'a Batch,
+        program: &'a ResolvedExecutionProgram,
+        snapshot: &'a S,
+        env: &'a BatchEnv<'a>,
+        initial_nonces: &'a BTreeMap<[u8; 32], u64>,
+    ) -> Self {
+        Self {
+            batch,
+            program,
+            snapshot,
+            env,
+            initial_nonces,
+        }
+    }
 
-    for (tx_idx, tx) in batch.transactions.iter().enumerate() {
-        overlay.set_tx_index(tx_idx as u32);
-        // Resolve tx type
-        let tx_def = match program.resolve(tx.tx_type) {
-            Ok(def) => def,
-            Err(e) => {
-                txs.push(TxResult::Failed {
-                    reason: e.to_string(),
-                    partial_events: vec![],
-                    failed_instruction: None,
-                });
-                continue;
-            }
+    pub(crate) fn execute(self) -> Result<ExecutionJournal, TabulaError> {
+        let mut overlay = Overlay::new(self.snapshot, self.env.type_runtimes);
+        let mut txs = Vec::with_capacity(self.batch.transactions.len());
+        let mut nonces: BTreeMap<[u8; 32], u64> = self.initial_nonces.clone();
+        let mut next_logical_time = 0;
+
+        let ctx = ExecContext {
+            hasher: self.env.hasher,
+            static_tables: self.env.static_tables,
+            type_runtimes: self.env.type_runtimes,
+            execution_program: self.program,
+            precompiles: self.env.precompiles,
+            committed_state: self.env.committed_state,
+            property_queries: self.env.property_queries,
         };
 
-        // Validate param count and types against schema
-        let decoded_params =
-            match validate_params(&tx.params, &tx_def.param_schema, env.type_runtimes) {
-                Ok(decoded) => decoded,
-                Err(e) => {
-                    txs.push(TxResult::Failed {
-                        reason: e.to_string(),
-                        partial_events: vec![],
-                        failed_instruction: None,
-                    });
+        for (tx_idx, tx) in self.batch.transactions.iter().enumerate() {
+            let tx_index = tx_idx as u32;
+            let tx_def = match self.resolve_tx_definition(tx.tx_type) {
+                Ok(def) => def,
+                Err(error) => {
+                    txs.push(TxExecutionOutcome::Failed(pre_execution_failure(
+                        tx_index, &error,
+                    )));
                     continue;
                 }
             };
 
-        // Verify signature (message excludes the signature field itself)
-        let msg = tx.signable_bytes()?;
-        if let Err(e) = env.sig_verifier.verify(&tx.sender, &msg, &tx.signature) {
-            txs.push(TxResult::Failed {
-                reason: e.to_string(),
-                partial_events: vec![],
-                failed_instruction: None,
-            });
-            continue;
-        }
+            let decoded_params =
+                match validate_params(&tx.params, &tx_def.param_schema, self.env.type_runtimes) {
+                    Ok(decoded) => decoded,
+                    Err(error) => {
+                        txs.push(TxExecutionOutcome::Failed(pre_execution_failure(
+                            tx_index, &error,
+                        )));
+                        continue;
+                    }
+                };
 
-        // Verify nonce
-        let current_nonce = *nonces.get(&tx.sender).unwrap_or(&0);
-        if let Err(e) = env
-            .nonce_policy
-            .validate(&tx.sender, tx.nonce, current_nonce)
-        {
-            txs.push(TxResult::Failed {
-                reason: e.to_string(),
-                partial_events: vec![],
-                failed_instruction: None,
-            });
-            continue;
-        }
-
-        // Checkpoint before execution
-        let events_before = overlay.events_len();
-        overlay.checkpoint();
-
-        // Execute
-        match interpreter::execute(
-            tx_idx as u32,
-            &tx_def.body,
-            &decoded_params,
-            &mut overlay,
-            &ctx,
-        ) {
-            Ok(output) => {
-                overlay.discard_checkpoint();
-                let next = env.nonce_policy.next_nonce(&tx.sender, current_nonce);
-                nonces.insert(tx.sender, next);
-                let access_trace = overlay.events_since(events_before);
-                txs.push(TxResult::Success {
-                    emitted: output.emitted,
-                    access_trace,
-                    precompile_events: output.precompile_events,
-                    property_reads: output.property_reads,
-                });
+            let msg = tx.signable_bytes()?;
+            if let Err(error) = self
+                .env
+                .sig_verifier
+                .verify(&tx.sender, &msg, &tx.signature)
+            {
+                txs.push(TxExecutionOutcome::Failed(pre_execution_failure(
+                    tx_index, &error,
+                )));
+                continue;
             }
-            Err(interp_err) => {
-                let partial_events = overlay.events_since(events_before);
-                overlay.rollback();
-                txs.push(TxResult::Failed {
-                    reason: interp_err.error.to_string(),
-                    partial_events,
-                    failed_instruction: Some(interp_err.instruction_index),
-                });
+
+            let current_nonce = *nonces.get(&tx.sender).unwrap_or(&0);
+            if let Err(error) = self
+                .env
+                .nonce_policy
+                .validate(&tx.sender, tx.nonce, current_nonce)
+            {
+                txs.push(TxExecutionOutcome::Failed(pre_execution_failure(
+                    tx_index, &error,
+                )));
+                continue;
+            }
+
+            overlay.checkpoint();
+            let mut journal = TxJournalBuilder::new(tx_index, next_logical_time);
+
+            match interpreter::execute_with_journal(
+                tx_index,
+                &tx_def.body,
+                &decoded_params,
+                &mut overlay,
+                &ctx,
+                &mut journal,
+            ) {
+                Ok(()) => {
+                    overlay.discard_checkpoint();
+                    let next = self.env.nonce_policy.next_nonce(&tx.sender, current_nonce);
+                    nonces.insert(tx.sender, next);
+                    // The canonical batch logical clock advances only for
+                    // successful semantic access effects. Failed transaction
+                    // access observations are diagnostic-only and therefore do
+                    // not consume canonical time.
+                    next_logical_time += journal.access_effect_count() as u64;
+                    txs.push(TxExecutionOutcome::Success(journal.into_success()));
+                }
+                Err(error) => {
+                    overlay.rollback();
+                    txs.push(TxExecutionOutcome::Failed(journal.into_failure(
+                        error.error.to_string(),
+                        Some(error.instruction_index),
+                    )));
+                }
             }
         }
+
+        let result = overlay.into_result()?;
+        Ok(ExecutionJournal {
+            state_summary: ExecutionStateSummary {
+                read_set_old: result.read_set_old,
+                write_set_final: result.write_set_final,
+            },
+            txs,
+        })
     }
 
-    let result = overlay.into_result()?;
-    Ok(BatchResult {
-        read_set_old: result.read_set_old,
-        write_set_final: result.write_set_final,
-        txs,
-    })
+    fn resolve_tx_definition(
+        &self,
+        tx_type: TxTypeId,
+    ) -> Result<&ResolvedTxDefinition, TabulaError> {
+        self.program.tx_definition(tx_type)
+    }
+}
+
+fn pre_execution_failure(tx_index: u32, error: &TabulaError) -> FailedTxExecution {
+    FailedTxExecution {
+        tx_index,
+        reason: error.to_string(),
+        partial_accesses: vec![],
+        failed_instruction: None,
+    }
+}
+
+/// Execute a batch against the canonical resolved execution contract.
+pub fn execute_batch<S: StateView>(
+    batch: &Batch,
+    program: &ResolvedExecutionProgram,
+    snapshot: &S,
+    env: &BatchEnv<'_>,
+    initial_nonces: &BTreeMap<[u8; 32], u64>,
+) -> Result<ExecutionJournal, TabulaError> {
+    BatchExecutor::new(batch, program, snapshot, env, initial_nonces).execute()
 }

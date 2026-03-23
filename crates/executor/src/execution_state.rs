@@ -7,15 +7,17 @@ use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
-use tabula_core::{CellKey, PortableValue};
+use tabula_core::{CellKey, TypeId};
 use tabula_types::{TypeRuntimeRegistry, TypedValue};
+
+use crate::journal::{TypedStateSnapshot, TypedStateWrite};
 
 /// An undo-log entry for reverting a single mutation.
 pub(crate) enum UndoEntry {
     /// A write_buffer mutation: key had `prev` value (None = key was absent in buffer).
     Write {
         key: CellKey,
-        prev: Option<Option<TypedValue>>,
+        prev: Option<TypedCellValue>,
     },
     /// A read_cache fill: key was absent before this tx.
     ReadCacheFill { key: CellKey },
@@ -26,7 +28,11 @@ pub(crate) struct StateCheckpoint {
     pub(crate) undo_len: usize,
 }
 
-pub(crate) type PortableCellEntries = Vec<(CellKey, Option<PortableValue>)>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TypedCellValue {
+    pub(crate) type_id: TypeId,
+    pub(crate) value: Option<TypedValue>,
+}
 
 /// State management sub-component of `Overlay`.
 ///
@@ -34,8 +40,8 @@ pub(crate) type PortableCellEntries = Vec<(CellKey, Option<PortableValue>)>;
 /// checkpoint/rollback. Does NOT record events.
 pub(crate) struct ExecutionState<'a, S: StateView> {
     pub(crate) snapshot: &'a S,
-    pub(crate) write_buffer: BTreeMap<CellKey, Option<TypedValue>>,
-    pub(crate) read_cache: BTreeMap<CellKey, Option<TypedValue>>,
+    pub(crate) write_buffer: BTreeMap<CellKey, TypedCellValue>,
+    pub(crate) read_cache: BTreeMap<CellKey, TypedCellValue>,
     pub(crate) undo_log: Vec<UndoEntry>,
     pub(crate) checkpoints: Vec<StateCheckpoint>,
 }
@@ -52,12 +58,12 @@ impl<'a, S: StateView> ExecutionState<'a, S> {
     }
 
     /// Check the write buffer for a key. Returns `None` if not in buffer.
-    pub(crate) fn read_from_buffer(&self, key: &CellKey) -> Option<&Option<TypedValue>> {
+    pub(crate) fn read_from_buffer(&self, key: &CellKey) -> Option<&TypedCellValue> {
         self.write_buffer.get(key)
     }
 
     /// Check the read cache for a key. Returns `None` if not cached.
-    pub(crate) fn read_from_cache(&self, key: &CellKey) -> Option<&Option<TypedValue>> {
+    pub(crate) fn read_from_cache(&self, key: &CellKey) -> Option<&TypedCellValue> {
         self.read_cache.get(key)
     }
 
@@ -65,27 +71,46 @@ impl<'a, S: StateView> ExecutionState<'a, S> {
     pub(crate) fn read_from_snapshot(
         &mut self,
         key: &CellKey,
+        type_id: TypeId,
         type_runtimes: &TypeRuntimeRegistry,
-    ) -> Result<Option<TypedValue>, TabulaError> {
+    ) -> Result<TypedCellValue, TabulaError> {
         let opt = self
             .snapshot
             .read(key)?
-            .map(|value| type_runtimes.decode_portable(&value))
+            .map(|value| {
+                if value.type_id() != type_id {
+                    return Err(TabulaError::TypeMismatch {
+                        expected: format!("type_id {}", type_id.0),
+                        actual: format!("type_id {}", value.type_id().0),
+                    });
+                }
+                type_runtimes.decode_portable(&value)
+            })
             .transpose()?;
-        self.read_cache.insert(*key, opt.clone());
+        let cell_value = TypedCellValue {
+            type_id,
+            value: opt,
+        };
+        self.read_cache.insert(*key, cell_value.clone());
         if !self.checkpoints.is_empty() {
             self.undo_log.push(UndoEntry::ReadCacheFill { key: *key });
         }
-        Ok(opt)
+        Ok(cell_value)
     }
 
     /// Buffer a write, recording the previous value in the undo log.
-    pub(crate) fn write_buffered(&mut self, key: &CellKey, value: Option<TypedValue>) {
+    pub(crate) fn write_buffered(
+        &mut self,
+        key: &CellKey,
+        type_id: TypeId,
+        value: Option<TypedValue>,
+    ) {
         if !self.checkpoints.is_empty() {
             let prev = self.write_buffer.get(key).cloned();
             self.undo_log.push(UndoEntry::Write { key: *key, prev });
         }
-        self.write_buffer.insert(*key, value);
+        self.write_buffer
+            .insert(*key, TypedCellValue { type_id, value });
     }
 
     pub(crate) fn checkpoint(&mut self) {
@@ -124,30 +149,26 @@ impl<'a, S: StateView> ExecutionState<'a, S> {
     /// Consume into (read_set_old, write_set_final).
     pub(crate) fn into_sets(
         self,
-        type_runtimes: &TypeRuntimeRegistry,
-    ) -> Result<(PortableCellEntries, PortableCellEntries), TabulaError> {
+        _type_runtimes: &TypeRuntimeRegistry,
+    ) -> Result<(Vec<TypedStateSnapshot>, Vec<TypedStateWrite>), TabulaError> {
         let read_set_old = self
             .read_cache
             .into_iter()
-            .map(|(key, value)| {
-                let portable = value
-                    .as_ref()
-                    .map(|typed| type_runtimes.encode_typed(typed))
-                    .transpose()?;
-                Ok((key, portable))
+            .map(|(key, value)| TypedStateSnapshot {
+                key,
+                type_id: value.type_id,
+                value: value.value,
             })
-            .collect::<Result<Vec<_>, TabulaError>>()?;
+            .collect();
         let write_set_final = self
             .write_buffer
             .into_iter()
-            .map(|(key, value)| {
-                let portable = value
-                    .as_ref()
-                    .map(|typed| type_runtimes.encode_typed(typed))
-                    .transpose()?;
-                Ok((key, portable))
+            .map(|(key, value)| TypedStateWrite {
+                key,
+                type_id: value.type_id,
+                value: value.value,
             })
-            .collect::<Result<Vec<_>, TabulaError>>()?;
+            .collect();
         Ok((read_set_old, write_set_final))
     }
 }

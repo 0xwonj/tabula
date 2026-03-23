@@ -59,6 +59,13 @@ fn read_workspace_file(rel: &str) -> String {
     fs::read_to_string(workspace_root().join(rel)).expect("read workspace file")
 }
 
+fn read_workspace_files(rels: &[&str]) -> String {
+    rels.iter()
+        .map(|rel| read_workspace_file(rel))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn rust_sources_under(rel: &str) -> Vec<String> {
     fn walk(dir: &Path, files: &mut Vec<String>) {
         for entry in fs::read_dir(dir).expect("read dir") {
@@ -161,16 +168,25 @@ fn stark_root_does_not_export_public_gadgets_module() {
 
 #[test]
 fn shared_prove_path_does_not_depend_on_old_witness_or_layout_dispatch() {
-    let prepare_rs = read_workspace_file("crates/runtime/src/proving/prepare.rs");
+    let proving_journal_rs = read_workspace_files(&[
+        "crates/runtime/src/proving/journal/mod.rs",
+        "crates/runtime/src/proving/journal/types.rs",
+        "crates/runtime/src/proving/journal/state.rs",
+        "crates/runtime/src/proving/journal/tx.rs",
+        "crates/runtime/src/proving/journal/reduce.rs",
+        "crates/runtime/src/proving/journal/digest.rs",
+    ]);
+    let proving_artifacts_rs = read_workspace_file("crates/runtime/src/proving/artifacts.rs");
     let traces_rs = read_workspace_file("crates/runtime/src/proving/traces.rs");
-    let materialize_rs = read_workspace_file("crates/runtime/src/setup/materialize.rs");
-    let runtime_program_rs = read_workspace_file("crates/runtime/src/program/resolved_program.rs");
+    let materialize_rs = read_workspace_file("crates/runtime/src/bootstrap/materialize.rs");
+    let runtime_program_rs = read_workspace_file("crates/runtime/src/program/contract.rs");
 
     for (name, source) in [
-        ("proving/prepare.rs", prepare_rs.as_str()),
+        ("proving/journal/", proving_journal_rs.as_str()),
+        ("proving/artifacts.rs", proving_artifacts_rs.as_str()),
         ("proving/traces.rs", traces_rs.as_str()),
-        ("setup/materialize.rs", materialize_rs.as_str()),
-        ("program/resolved_program.rs", runtime_program_rs.as_str()),
+        ("bootstrap/materialize.rs", materialize_rs.as_str()),
+        ("program/contract.rs", runtime_program_rs.as_str()),
     ] {
         assert!(
             !source.contains("tabula_witness::legacy::ColumnWitness")
@@ -268,8 +284,7 @@ fn execution_carrier_cutover_keeps_migrated_paths_old_carrier_free() {
         "crates/executor/src/precompile.rs",
         "crates/executor/src/property.rs",
         "crates/executor/src/resolve.rs",
-        "crates/executor/src/trace_recorder.rs",
-        "crates/runtime/src/program/snapshot_state_view.rs",
+        "crates/runtime/src/execute/snapshot_view.rs",
         "crates/ext/src/scheme.rs",
         "crates/ir/src/instruction.rs",
     ];
@@ -307,7 +322,7 @@ fn phase_two_proof_paths_stay_old_carrier_free() {
 
     let production_paths = [
         "crates/runtime/src/proving",
-        "crates/runtime/src/schemes",
+        "crates/runtime/src/host",
         "crates/witness/src",
     ];
     let forbidden = [
@@ -394,9 +409,10 @@ fn phase_one_non_proof_paths_do_not_import_old_helper_surface() {
         "crates/executor/src/precompile.rs",
         "crates/executor/src/property.rs",
         "crates/executor/src/resolve.rs",
-        "crates/executor/src/trace_recorder.rs",
-        "crates/runtime/src/host.rs",
-        "crates/runtime/src/builder.rs",
+        "crates/runtime/src/host/environment.rs",
+        "crates/runtime/src/host/installed.rs",
+        "crates/runtime/src/host/registries.rs",
+        "crates/runtime/src/bootstrap/builder.rs",
         "crates/runtime/src/verifier.rs",
         "crates/sdk/src/sdk.rs",
         "crates/types/src/lib.rs",
@@ -429,7 +445,14 @@ fn phase_three_precompile_contract_is_explicit_and_signature_driven() {
     let lang_lower_expr = read_workspace_file("crates/lang/src/lower/expr.rs");
     let lang_lower_mod = read_workspace_file("crates/lang/src/lower/mod.rs");
     let lang_lower_stmt = read_workspace_file("crates/lang/src/lower/stmt.rs");
-    let runtime_prepare = read_workspace_file("crates/runtime/src/proving/prepare.rs");
+    let runtime_journal = read_workspace_files(&[
+        "crates/runtime/src/proving/journal/mod.rs",
+        "crates/runtime/src/proving/journal/types.rs",
+        "crates/runtime/src/proving/journal/state.rs",
+        "crates/runtime/src/proving/journal/tx.rs",
+        "crates/runtime/src/proving/journal/reduce.rs",
+    ]);
+    let runtime_artifacts = read_workspace_file("crates/runtime/src/proving/artifacts.rs");
     let witness_lower_precompile =
         read_workspace_file("crates/witness/src/stark/lowering/precompile.rs");
     let transcript_chip = read_workspace_file("crates/chips/src/precompile_transcript.rs");
@@ -450,7 +473,8 @@ fn phase_three_precompile_contract_is_explicit_and_signature_driven() {
         "compiler precompile descriptor registration must validate encoding/type compatibility and execution width",
     );
     for (name, source) in [
-        ("runtime proving prep", runtime_prepare.as_str()),
+        ("runtime proving journal", runtime_journal.as_str()),
+        ("runtime proof artifacts", runtime_artifacts.as_str()),
         (
             "witness precompile lowering",
             witness_lower_precompile.as_str(),
@@ -494,8 +518,13 @@ fn phase_three_production_code_does_not_use_label_only_precompile_descriptors() 
     for rel in [
         "crates/artifact/src/program.rs",
         "crates/ext/src/backend/precompile.rs",
-        "crates/runtime/src/setup/materialize.rs",
-        "crates/runtime/src/proving/prepare.rs",
+        "crates/runtime/src/bootstrap/materialize.rs",
+        "crates/runtime/src/proving/journal/mod.rs",
+        "crates/runtime/src/proving/journal/types.rs",
+        "crates/runtime/src/proving/journal/state.rs",
+        "crates/runtime/src/proving/journal/tx.rs",
+        "crates/runtime/src/proving/journal/reduce.rs",
+        "crates/runtime/src/proving/artifacts.rs",
         "crates/witness/src/stark/lowering/precompile.rs",
         "crates/sdk/src/sdk.rs",
     ] {
@@ -568,7 +597,7 @@ fn raw_backend_extension_surface_stays_backend_only() {
     let machine_backend_extension = read_workspace_file("crates/machine/src/backend/extension.rs");
     let machine_backend_mod = read_workspace_file("crates/machine/src/backend/mod.rs");
     let machine_backend_prelude = read_workspace_file("crates/machine/src/backend/prelude.rs");
-    let runtime_builder = read_workspace_file("crates/runtime/src/builder.rs");
+    let runtime_builder = read_workspace_file("crates/runtime/src/bootstrap/builder.rs");
     let runtime_verifier = read_workspace_file("crates/runtime/src/verifier.rs");
     let sdk_ext_mod = read_workspace_file("crates/sdk/src/ext/mod.rs");
     let ext_lib = read_workspace_file("crates/ext/src/lib.rs");
@@ -674,7 +703,12 @@ fn precompile_redesign_removes_old_id_only_and_digest_slot_paths() {
         "crates/compiler/src/register.rs",
         "crates/compiler/src/program.rs",
         "crates/artifact/src/program.rs",
-        "crates/runtime/src/proving/prepare.rs",
+        "crates/runtime/src/proving/journal/mod.rs",
+        "crates/runtime/src/proving/journal/types.rs",
+        "crates/runtime/src/proving/journal/state.rs",
+        "crates/runtime/src/proving/journal/tx.rs",
+        "crates/runtime/src/proving/journal/reduce.rs",
+        "crates/runtime/src/proving/artifacts.rs",
         "crates/witness/src/stark/lowering/precompile.rs",
         "crates/chips/src/execution/buses.rs",
         "crates/chips/src/execution/ops/precompile.rs",
@@ -737,14 +771,24 @@ fn old_runtime_installation_modules_are_removed() {
 
 #[test]
 fn canonical_renamed_phase_objects_do_not_regress() {
+    assert!(
+        !workspace_root()
+            .join("crates/witness/src/prepare.rs")
+            .exists(),
+        "crates/witness/src/prepare.rs must stay deleted after Stage 4"
+    );
     for rel in [
         "crates/witness/src/lib.rs",
-        "crates/witness/src/prepare.rs",
-        "crates/runtime/src/setup/materialize.rs",
+        "crates/runtime/src/bootstrap/materialize.rs",
         "crates/runtime/src/runtime.rs",
-        "crates/runtime/src/proving/prepare.rs",
+        "crates/runtime/src/proving/journal/mod.rs",
+        "crates/runtime/src/proving/journal/types.rs",
+        "crates/runtime/src/proving/journal/state.rs",
+        "crates/runtime/src/proving/journal/tx.rs",
+        "crates/runtime/src/proving/journal/reduce.rs",
+        "crates/runtime/src/proving/artifacts.rs",
         "crates/runtime/src/proving/traces.rs",
-        "crates/runtime/src/builder.rs",
+        "crates/runtime/src/bootstrap/builder.rs",
         "crates/testing/src/witness.rs",
     ] {
         let source = read_workspace_file(rel);
@@ -757,8 +801,6 @@ fn canonical_renamed_phase_objects_do_not_regress() {
             "Vec<PreparedColumnTier>",
             "PreparedColumnTier {",
             "resolve_proof_columns_with_factories",
-            ".proof_slots(",
-            " proof_slots:",
         ] {
             assert!(
                 !source.contains(forbidden),
@@ -770,18 +812,26 @@ fn canonical_renamed_phase_objects_do_not_regress() {
 
 #[test]
 fn renamed_internal_symbols_do_not_reappear() {
+    assert!(
+        !workspace_root()
+            .join("crates/witness/src/prepare.rs")
+            .exists(),
+        "crates/witness/src/prepare.rs must stay deleted after Stage 4"
+    );
     for rel in [
         "crates/core/src/traits/state.rs",
-        "crates/runtime/src/program/resolved_program.rs",
-        "crates/witness/src/prepare.rs",
-        "crates/runtime/src/setup/materialize.rs",
-        "crates/runtime/src/proving/prepare.rs",
+        "crates/runtime/src/program/contract.rs",
+        "crates/runtime/src/bootstrap/materialize.rs",
+        "crates/runtime/src/proving/journal/mod.rs",
+        "crates/runtime/src/proving/journal/types.rs",
+        "crates/runtime/src/proving/journal/reduce.rs",
+        "crates/runtime/src/proving/artifacts.rs",
     ] {
         let source = read_workspace_file(rel);
         for forbidden in [
             "trait StateSnapshot",
-            "struct RuntimeProgram",
-            "pub struct RuntimeProgram",
+            "struct ResolvedRuntimeProgram",
+            "pub struct ResolvedRuntimeProgram",
             "struct ColumnPlan",
             "pub struct ColumnPlan",
             "struct BatchInputPreparer",
@@ -794,6 +844,16 @@ fn renamed_internal_symbols_do_not_reappear() {
             "pub(crate) struct PreparedColumnTierInput",
             "struct PlannedColumnProof {",
             "type PlannedColumnProof =",
+            "struct PreparedBatchJournal",
+            "pub(crate) struct PreparedBatchJournal",
+            "struct PreparedProofArtifacts",
+            "pub(crate) struct PreparedProofArtifacts",
+            "struct PreparedColumnSlot",
+            "pub(crate) struct PreparedColumnSlot",
+            "struct ProofJournalInput",
+            "pub(crate) struct ProofJournalInput",
+            "struct TxProofShard",
+            "pub(crate) struct TxProofShard",
         ] {
             assert!(
                 !source.contains(forbidden),
@@ -801,6 +861,270 @@ fn renamed_internal_symbols_do_not_reappear() {
             );
         }
     }
+}
+
+#[test]
+fn stage1_runtime_contract_split_is_enforced() {
+    let runtime_rs = read_workspace_file("crates/runtime/src/runtime.rs");
+    let runtime_lib_rs = read_workspace_file("crates/runtime/src/lib.rs");
+    let builder_rs = read_workspace_file("crates/runtime/src/bootstrap/builder.rs");
+    let proving_journal_rs = read_workspace_files(&[
+        "crates/runtime/src/proving/journal/mod.rs",
+        "crates/runtime/src/proving/journal/types.rs",
+        "crates/runtime/src/proving/journal/reduce.rs",
+    ]);
+    let proving_artifacts_rs = read_workspace_file("crates/runtime/src/proving/artifacts.rs");
+    let executor_lib_rs = read_workspace_file("crates/executor/src/lib.rs");
+    let executor_resolved_rs = read_workspace_file("crates/executor/src/resolved_program.rs");
+    let executor_journal_rs = read_workspace_file("crates/executor/src/journal.rs");
+
+    assert!(
+        !runtime_lib_rs.contains("pub use program::ResolvedProgram;"),
+        "runtime root must not re-export ResolvedProgram after Stage 1"
+    );
+    assert!(
+        runtime_lib_rs.contains("RuntimeProgram")
+            && runtime_lib_rs.contains("ResolvedProofProgram")
+            && runtime_lib_rs.contains("ProofPlan"),
+        "runtime root must export the canonical Stage 1 runtime/proof contract nouns"
+    );
+    assert!(
+        runtime_rs.contains("runtime_program: RuntimeProgram"),
+        "TabulaRuntime must own RuntimeProgram as its root contract"
+    );
+    for forbidden in ["proof_recipes:", "precompile_recipes:"] {
+        assert!(
+            !runtime_rs.contains(forbidden),
+            "TabulaRuntime must not own standalone recipe vectors ({forbidden})"
+        );
+    }
+    assert!(
+        runtime_rs.contains("pub fn runtime_program(&self)")
+            && runtime_rs.contains("pub fn execution_program(&self)")
+            && runtime_rs.contains("pub fn proof_program(&self)"),
+        "TabulaRuntime must expose split contract accessors"
+    );
+    assert!(
+        builder_rs.contains("RuntimeProgram::from_compiled_program")
+            && builder_rs.contains("ProofPlan::new("),
+        "runtime builder must materialize the split runtime/proof contracts"
+    );
+    assert!(
+        proving_journal_rs.contains("resolved_program: &'a ResolvedProofProgram")
+            && proving_artifacts_rs.contains("resolved_program: &ResolvedProofProgram"),
+        "runtime proving stages must consume ResolvedProofProgram directly"
+    );
+    assert!(
+        !executor_lib_rs.contains("execute_batch_resolved")
+            && executor_lib_rs.contains("execute_batch")
+            && executor_lib_rs.contains("ResolvedExecutionProgram")
+            && executor_lib_rs.contains("ExecutionJournal")
+            && executor_lib_rs.contains("SuccessfulTxExecution"),
+        "executor root must expose the canonical Stage 1 execution nouns"
+    );
+    assert!(
+        executor_resolved_rs.contains("pub struct ResolvedExecutionProgram"),
+        "executor must own the canonical resolved execution contract"
+    );
+    assert!(
+        executor_journal_rs.contains("pub struct ExecutionJournal")
+            && executor_journal_rs.contains("pub struct SuccessfulTxExecution"),
+        "executor must define the canonical execution journal anchors"
+    );
+}
+
+#[test]
+fn stage2_executor_journal_cutover_is_enforced() {
+    let executor_batch_rs = read_workspace_file("crates/executor/src/batch.rs");
+    let executor_journal_rs = read_workspace_file("crates/executor/src/journal.rs");
+    let executor_overlay_rs = read_workspace_file("crates/executor/src/overlay.rs");
+    let executor_lib_rs = read_workspace_file("crates/executor/src/lib.rs");
+    let runtime_execute_rs = read_workspace_files(&[
+        "crates/runtime/src/execute/envelope.rs",
+        "crates/runtime/src/execute/pipeline.rs",
+    ]);
+
+    assert!(
+        !workspace_root()
+            .join("crates/executor/src/trace_recorder.rs")
+            .exists(),
+        "TraceRecorder must stay deleted after Stage 2"
+    );
+    assert!(
+        executor_batch_rs.contains("-> Result<ExecutionJournal, TabulaError>")
+            && !executor_batch_rs.contains("Result<BatchReport"),
+        "executor batch API must return ExecutionJournal, not BatchReport"
+    );
+    assert!(
+        !executor_batch_rs.contains("execute_batch_resolved")
+            && !executor_batch_rs.contains("&Program"),
+        "executor canonical path must not reintroduce raw-program or resolved-wrapper entrypoints"
+    );
+    for forbidden in ["TraceRecorder", "events_since", "set_tx_index", "fn time("] {
+        assert!(
+            !executor_overlay_rs.contains(forbidden),
+            "Overlay must stay state-only after Stage 2 ({forbidden})"
+        );
+    }
+    assert!(
+        executor_lib_rs.contains("ExecutionJournal")
+            && executor_lib_rs.contains("ExecutionStateSummary")
+            && executor_lib_rs.contains("FailedAccessObservation")
+            && executor_lib_rs.contains("derive_batch_report")
+            && executor_lib_rs.contains("derive_portable_state_summary")
+            && executor_lib_rs.contains("derive_consistency_status"),
+        "executor root must expose the journal-first Stage 2 surface"
+    );
+    assert!(
+        executor_journal_rs.contains("pub struct ExecutionJournal")
+            && executor_journal_rs.contains("pub state_summary: ExecutionStateSummary")
+            && executor_journal_rs.contains("pub struct ExecutionStateSummary")
+            && executor_journal_rs.contains("pub partial_accesses: Vec<FailedAccessObservation>")
+            && !executor_journal_rs.contains("partial_access_effects"),
+        "ExecutionJournal must nest state_summary and keep failed diagnostics distinct from canonical access effects"
+    );
+    assert!(
+        runtime_execute_rs.contains("execution_journal: ExecutionJournal")
+            && runtime_execute_rs.contains("batch_report: BatchReport")
+            && runtime_execute_rs.contains("pub fn execution_journal(&self) -> &ExecutionJournal")
+            && runtime_execute_rs.contains("derive_portable_state_summary(")
+            && !runtime_execute_rs.contains(
+                "merge_output_state_entries(&normalized.cells, &batch_report.write_set_final)"
+            ),
+        "runtime execution envelope must store ExecutionJournal as primary and BatchReport as derived view"
+    );
+}
+
+#[test]
+fn stage3_runtime_proving_is_journal_first() {
+    let proving_mod_rs = read_workspace_file("crates/runtime/src/proving/mod.rs");
+    let proving_journal_rs = read_workspace_files(&[
+        "crates/runtime/src/proving/journal/mod.rs",
+        "crates/runtime/src/proving/journal/types.rs",
+        "crates/runtime/src/proving/journal/state.rs",
+        "crates/runtime/src/proving/journal/tx.rs",
+        "crates/runtime/src/proving/journal/reduce.rs",
+    ]);
+    let proving_artifacts_rs = read_workspace_file("crates/runtime/src/proving/artifacts.rs");
+    let proving_traces_rs = read_workspace_file("crates/runtime/src/proving/traces.rs");
+    let runtime_rs = read_workspace_file("crates/runtime/src/runtime.rs");
+
+    for (name, source) in [
+        ("proving/mod.rs", proving_mod_rs.as_str()),
+        ("proving/journal/", proving_journal_rs.as_str()),
+        ("proving/artifacts.rs", proving_artifacts_rs.as_str()),
+        ("proving/traces.rs", proving_traces_rs.as_str()),
+    ] {
+        for forbidden in [
+            "BatchReport",
+            "ExecutionInputPreparer",
+            "lower_program_batch",
+            "LowerProgramBatchInput",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{name} must not depend on removed Stage 2 prove-path helper '{forbidden}'"
+            );
+        }
+    }
+    for forbidden in [
+        "AccessEvent as PortableAccessEvent",
+        "PropertyReadResult",
+        "portable_access_event(",
+        "portable_property_read(",
+        "use tabula_core::{Batch, ColId, OpKind, PortableValue, PrecompileEvent",
+    ] {
+        assert!(
+            !proving_journal_rs.contains(forbidden),
+            "proving/journal/ must not reintroduce a portable lowering seam '{forbidden}'"
+        );
+    }
+    assert!(
+        !proving_journal_rs.contains("compute_precompile_call_header("),
+        "proving/journal/ must not reconstruct precompile transcript headers through a duplicate encoding path"
+    );
+
+    assert!(
+        proving_mod_rs.contains("prepare_proof_artifacts")
+            && proving_mod_rs.contains("build_proof_journal"),
+        "proving module must expose the Stage 3 journal/artifact split"
+    );
+    assert!(
+        proving_journal_rs.contains("pub(crate) struct ProofJournal")
+            && proving_journal_rs.contains("pub(crate) struct ProofColumnSlot")
+            && !proving_journal_rs.contains("shared_store: WitnessStore")
+            && !proving_journal_rs.contains("air_statement: PublicStatement"),
+        "ProofJournal must stay a proof-input journal rather than a machine-ready artifact bundle"
+    );
+    assert!(
+        proving_artifacts_rs.contains("pub(crate) struct ProofArtifacts")
+            && proving_artifacts_rs.contains("shared_store: WitnessStore")
+            && proving_artifacts_rs.contains("air_statement: PublicStatement"),
+        "ProofArtifacts must own the machine-ready store and AIR statement"
+    );
+    assert!(
+        runtime_rs.contains("build_proof_journal(proving::JournalInput")
+            && runtime_rs.contains("prepare_proof_artifacts(self.proof_program(), journal)")
+            && !runtime_rs.contains("prepare_proof_batch("),
+        "runtime proving entrypoints must reduce ExecutionJournal into a prepared proof journal before backend artifact preparation"
+    );
+}
+
+#[test]
+fn runtime_state_surface_validation_is_shared_and_fail_closed() {
+    let execute_rs = read_workspace_file("crates/runtime/src/execute/pipeline.rs");
+    let runtime_rs = read_workspace_file("crates/runtime/src/runtime.rs");
+    let state_validation_rs = read_workspace_file("crates/runtime/src/policy/surface.rs");
+    let proving_journal_rs = read_workspace_file("crates/runtime/src/proving/journal/reduce.rs");
+    let runtime_lib_rs = read_workspace_file("crates/runtime/src/lib.rs");
+
+    assert!(
+        state_validation_rs.contains("validate_execution_state_surface")
+            && state_validation_rs.contains("validate_proof_state_surface")
+            && state_validation_rs.contains("validate_prove_input_prestate"),
+        "runtime policy surface module must own shared execution/proof state-surface validators"
+    );
+    assert!(
+        execute_rs.contains("validate_execution_state_surface(program, &normalized)?"),
+        "execute pipeline must validate normalized state against the execution surface"
+    );
+    assert!(
+        !execute_rs.contains("crate::setup::validation"),
+        "execute pipeline must not depend on prove/verify-gated setup validation"
+    );
+    assert!(
+        runtime_rs
+            .contains("validate_execution_state_surface(self.execution_program(), &normalized)?")
+            && runtime_rs
+                .contains("validate_proof_state_surface(self.proof_program(), &normalized)?")
+            && runtime_rs.contains("validate_prove_input_prestate("),
+        "runtime prove entrypoints must fail closed on state-surface mismatch and prove-input pre-state mismatch"
+    );
+    assert!(
+        proving_journal_rs
+            .contains("validate_proof_state_surface(input.resolved_program, &normalized_state)?"),
+        "direct proof-journal reduction must validate state against the proof surface"
+    );
+    assert!(
+        runtime_lib_rs.contains("mod policy;"),
+        "runtime root must include an ungated policy module"
+    );
+}
+
+#[test]
+fn runtime_host_surface_is_gated_to_verify_and_prove() {
+    let runtime_lib_rs = read_workspace_file("crates/runtime/src/lib.rs");
+
+    assert!(
+        runtime_lib_rs
+            .contains("#[cfg(any(feature = \"prove\", feature = \"verify\"))]\nmod host;")
+            && runtime_lib_rs.contains("pub use host::{")
+            && runtime_lib_rs.contains("HostEnvironment")
+            && runtime_lib_rs.contains("RuntimeRegistries")
+            && runtime_lib_rs.contains("InstalledPrecompiles")
+            && runtime_lib_rs.contains("InstalledSchemes"),
+        "runtime host surface must be gated to verify/prove builds"
+    );
 }
 
 #[test]
@@ -839,7 +1163,7 @@ fn sealed_profile_surface_stays_old_surface_free() {
     let ir_tx = read_workspace_file("crates/ir/src/tx.rs");
     let compiler_lib = read_workspace_file("crates/compiler/src/lib.rs");
     let profile_lib = read_workspace_file("crates/profile/src/lib.rs");
-    let runtime_planning = read_workspace_file("crates/runtime/src/setup/planning.rs");
+    let runtime_materialize = read_workspace_file("crates/runtime/src/bootstrap/materialize.rs");
 
     assert!(
         !artifact_program.contains("pub column_proof_plan:"),
@@ -863,8 +1187,8 @@ fn sealed_profile_surface_stays_old_surface_free() {
         "profile root must not re-export compat helpers as canonical surface"
     );
     assert!(
-        !runtime_planning.contains("projected_column_proof_plan")
-            && !runtime_planning.contains("column_proof_plan"),
+        !runtime_materialize.contains("projected_column_proof_plan")
+            && !runtime_materialize.contains("column_proof_plan"),
         "runtime planning must derive compat plans from resolved profiles, not artifact-stored proof plans"
     );
 }
@@ -915,7 +1239,7 @@ fn workspace_uses_tabula_ext_and_not_backend_ext() {
 #[test]
 fn runtime_code_avoids_stale_artifact_builder_and_replacement_wording() {
     for rel in [
-        "crates/runtime/src/builder.rs",
+        "crates/runtime/src/bootstrap/builder.rs",
         "crates/runtime/src/testing/schemes.rs",
     ] {
         let source = read_workspace_file(rel);
@@ -947,12 +1271,17 @@ fn witness_root_surface_stays_minimal_and_namespaced() {
         );
     }
 
-    assert!(
-        lib_rs.contains(
-            "pub use prepare::{ExecutionInputPreparer, PreparedExecutionColumn, PreparedExecutionColumns};"
-        ),
-        "witness root must expose the minimal preparation seam"
-    );
+    for forbidden in [
+        "pub mod prepare;",
+        "ExecutionInputPreparer",
+        "PreparedExecutionColumn",
+        "PreparedExecutionColumns",
+    ] {
+        assert!(
+            !lib_rs.contains(forbidden),
+            "witness root must not expose removed proof-orchestration surface '{forbidden}'"
+        );
+    }
     for required in [
         "pub use types::{",
         "AccessEvent",
@@ -976,8 +1305,8 @@ fn witness_root_surface_stays_minimal_and_namespaced() {
 #[test]
 fn runtime_builtin_schemes_do_not_own_low_level_stark_witness_assembly() {
     for rel in [
-        "crates/runtime/src/schemes/ssmc.rs",
-        "crates/runtime/src/schemes/smt.rs",
+        "crates/runtime/src/host/builtins/ssmc.rs",
+        "crates/runtime/src/host/builtins/smt.rs",
     ] {
         let source = read_workspace_file(rel);
         for forbidden in [
@@ -1009,6 +1338,8 @@ fn witness_stark_namespace_does_not_reexport_logical_prep_types() {
     for forbidden in [
         "pub use crate::CommittedEntry;",
         "pub use crate::PropertyReadClaim;",
+        "lower_program_batch",
+        "LowerProgramBatchInput",
     ] {
         assert!(
             !stark_mod.contains(forbidden),
@@ -1019,7 +1350,7 @@ fn witness_stark_namespace_does_not_reexport_logical_prep_types() {
 
 #[test]
 fn materialize_helpers_consume_prederived_column_plans() {
-    let materialize_rs = read_workspace_file("crates/runtime/src/setup/materialize.rs");
+    let materialize_rs = read_workspace_file("crates/runtime/src/bootstrap/materialize.rs");
     assert!(
         !materialize_rs.contains("derive_column_plans("),
         "materialization helpers must consume prederived column plans rather than deriving them internally"

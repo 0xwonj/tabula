@@ -6,7 +6,9 @@ use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, PortableValue, RowKey, TableId};
-use tabula_executor::interpreter::{ExecContext, execute};
+use tabula_executor::execute;
+use tabula_executor::execute_tx;
+use tabula_executor::interpreter::ExecContext;
 use tabula_executor::overlay::Overlay;
 use tabula_executor::property::{
     CommittedStateProvider, PropertyQueryHandler, PropertyQueryRegistry,
@@ -109,13 +111,12 @@ fn execute_and_get_slots(
 ) -> Vec<TypedValue> {
     let snap = TestSnapshot(BTreeMap::new());
     let mut ov = Overlay::new(&snap, type_runtimes());
-    let (schemas, profile_catalog) = test_schema_bundle();
+    let execution_program = test_execution_program();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         type_runtimes: type_runtimes(),
-        schemas: &schemas,
-        profile_catalog: &profile_catalog,
+        execution_program: &execution_program,
         precompiles: None,
         committed_state: Some(committed),
         property_queries: registry,
@@ -130,8 +131,9 @@ fn execute_and_get_slots(
             src_is_null: lit(bool_portable(false)),
         });
     }
-    execute(0, &full, &[], &mut ov, &ctx).unwrap();
+    execute_tx(0, &full, &[], &mut ov, &ctx).unwrap();
     let result = ov.into_result().unwrap();
+    let portable_writes = portable_write_set(&result);
 
     (0..num_slots)
         .map(|i| {
@@ -140,8 +142,7 @@ fn execute_and_get_slots(
                 col: ColId(0),
                 row: RowKey(1000 + i as u64),
             };
-            result
-                .write_set_final
+            portable_writes
                 .iter()
                 .find(|(k, _)| *k == key)
                 .and_then(|(_, v)| v.clone())
@@ -249,14 +250,13 @@ fn property_read_maximum() {
 fn property_read_no_provider_error() {
     let snap = TestSnapshot(BTreeMap::new());
     let mut ov = Overlay::new(&snap, type_runtimes());
-    let (schemas, profile_catalog) = test_schema_bundle();
+    let execution_program = test_execution_program();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         type_runtimes: type_runtimes(),
-        schemas: &schemas,
-        profile_catalog: &profile_catalog,
+        execution_program: &execution_program,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,
@@ -288,13 +288,12 @@ fn property_read_result_usable_in_assert() {
 
     let snap = TestSnapshot(BTreeMap::new());
     let mut ov = Overlay::new(&snap, type_runtimes());
-    let (schemas, profile_catalog) = test_schema_bundle();
+    let execution_program = test_execution_program();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         type_runtimes: type_runtimes(),
-        schemas: &schemas,
-        profile_catalog: &profile_catalog,
+        execution_program: &execution_program,
         precompiles: None,
         committed_state: Some(&committed),
         property_queries: &registry,

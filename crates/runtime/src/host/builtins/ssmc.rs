@@ -20,7 +20,9 @@ use tabula_machine::SetupError;
 use tabula_machine::backend::{AnyRap, ColumnChipSet, ProofColumn};
 use tabula_stark::chips::ChipIdAllocator;
 use tabula_stark::trace::DynChip;
-use tabula_types::{EncodingRuntime, TypeRuntime, TypedColumnEntry, TypedPropertyQueryResult};
+#[cfg(feature = "prove")]
+use tabula_types::EncodingRuntime;
+use tabula_types::{TypeRuntime, TypedColumnEntry, TypedPropertyQueryResult};
 #[cfg(feature = "prove")]
 use tabula_witness::stark::schemes::ssmc::{PreparedSsmcProof, SsmcProofInput, prepare_ssmc_proof};
 /// SSMC commitment scheme factory.

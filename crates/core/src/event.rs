@@ -43,7 +43,7 @@ pub enum OpKind {
 /// A single state-access event (read or write) recorded during execution.
 ///
 /// The tx index is implicit — determined by the event's position within
-/// `TxResult::Success { access_trace }` inside `BatchResult.txs`.
+/// `TxResult::Success { access_trace }` inside `BatchReport.txs`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct AccessEvent {
     /// The cell being accessed.
@@ -182,11 +182,14 @@ pub enum ExecutionConsistencyStatus {
 
 /// The output of deterministic batch execution.
 ///
-/// This is the handoff point between Phase A (execution) and Phase B (commitment).
-/// Per-transaction data (access trace, emitted events, failure info) lives in
-/// [`TxResult`] variants, eliminating the need for post-hoc repartitioning.
+/// This is a public reporting and boundary projection of execution.
+///
+/// Internally, the runtime is moving toward a canonical typed execution journal
+/// as the semantic source of truth for proving. `BatchReport` remains the
+/// stable public view that exposes base-state reads, final writes, and
+/// per-transaction outcomes in a portable form.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BatchResult {
+pub struct BatchReport {
     /// Cells read from committed state (not from overlay). Deduplicated.
     /// `None` = cell was absent.
     pub read_set_old: Vec<(CellKey, Option<PortableValue>)>,
@@ -197,7 +200,7 @@ pub struct BatchResult {
     pub txs: Vec<TxResult>,
 }
 
-impl BatchResult {
+impl BatchReport {
     /// Iterate access events from all successful transactions, preserving order.
     pub fn successful_events(&self) -> impl Iterator<Item = &AccessEvent> + '_ {
         self.txs

@@ -44,12 +44,17 @@ fn root_surface_does_not_reexport_old_witness_types() {
             "broad convenience re-export '{forbidden}' must not remain at crate root"
         );
     }
-    assert!(
-        lib.contains(
-            "pub use prepare::{ExecutionInputPreparer, PreparedExecutionColumn, PreparedExecutionColumns};"
-        ),
-        "root must expose the minimal preparation seam"
-    );
+    for forbidden in [
+        "pub mod prepare;",
+        "ExecutionInputPreparer",
+        "PreparedExecutionColumn",
+        "PreparedExecutionColumns",
+    ] {
+        assert!(
+            !lib.contains(forbidden),
+            "legacy proof-orchestration surface must not remain at witness root: {forbidden}"
+        );
+    }
     for required in [
         "pub use types::{",
         "AccessEvent",
@@ -141,6 +146,8 @@ fn stark_module_keeps_low_level_memory_helpers_internal() {
     for forbidden in [
         "pub use crate::CommittedEntry;",
         "pub use crate::PropertyReadClaim;",
+        "lower_program_batch",
+        "LowerProgramBatchInput",
     ] {
         assert!(
             !stark_mod.contains(forbidden),

@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, PortableValue, RowKey, TableId};
+use tabula_executor::execute_tx;
 use tabula_executor::interpreter::ExecContext;
 use tabula_executor::overlay::Overlay;
 use tabula_executor::precompile::{PrecompileHandler, PrecompileRegistry};
@@ -154,20 +155,19 @@ fn run_with_precompiles(
 {
     let snap = TestSnapshot(BTreeMap::new());
     let mut ov = Overlay::new(&snap, type_runtimes());
-    let (schemas, profile_catalog) = test_schema_bundle();
+    let execution_program = test_execution_program();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         type_runtimes: type_runtimes(),
-        schemas: &schemas,
-        profile_catalog: &profile_catalog,
+        execution_program: &execution_program,
         precompiles: Some(registry),
         committed_state: None,
         property_queries: &property_queries,
     };
     let typed_params: Vec<_> = params.iter().cloned().map(typed).collect();
-    tabula_executor::interpreter::execute(0, instrs, &typed_params, &mut ov, &ctx)?;
+    execute_tx(0, instrs, &typed_params, &mut ov, &ctx)?;
     Ok(ov.into_result().unwrap())
 }
 
@@ -199,7 +199,7 @@ fn precompile_identity_round_trip() {
     .unwrap();
 
     assert_eq!(
-        result.write_set_final,
+        portable_write_set(&result),
         vec![(cell(1, 0, 0), opt(u64_portable(42)))]
     );
 }
@@ -230,7 +230,7 @@ fn precompile_multi_input() {
     .unwrap();
 
     assert_eq!(
-        result.write_set_final,
+        portable_write_set(&result),
         vec![(cell(1, 0, 0), opt(u64_portable(30)))]
     );
 }
@@ -268,7 +268,7 @@ fn precompile_multi_output() {
     .unwrap();
 
     assert_eq!(
-        result.write_set_final,
+        portable_write_set(&result),
         vec![
             (cell(1, 0, 0), opt(u64_portable(100))),
             (cell(1, 1, 0), opt(u64_portable(101))),
@@ -397,7 +397,7 @@ fn precompile_with_param_input() {
     .unwrap();
 
     assert_eq!(
-        result.write_set_final,
+        portable_write_set(&result),
         vec![(cell(1, 0, 0), opt(u64_portable(999)))]
     );
 }

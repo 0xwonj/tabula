@@ -1,37 +1,25 @@
-//! Reference interpreter for the Tabula IR instruction set.
+//! Thin transaction machine over the Tabula IR instruction set.
 //!
-//! Walks `&[Instruction]` against an `Overlay`, maintaining a `Vec<TypedValue>` slot
-//! environment. Records execution events and emitted events.
+//! The interpreter is intentionally journal-first: state mutation goes through
+//! the overlay, while semantic effects are recorded through
+//! [`TxJournalBuilder`](crate::journal::TxJournalBuilder).
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::{Hasher, StateView, StaticTableProvider};
-use tabula_core::{
-    CellKey, ColId, EmittedEvent, PrecompileEvent, PropertyReadResult, TableId, TableSchema, TypeId,
-};
+use tabula_core::{CellKey, EmittedEvent, OpKind};
 use tabula_ir::{Instruction, Slot};
-use tabula_profile::ProfileCatalog;
 use tabula_types::{
     ArithmeticOp, TypeRuntimeRegistry, TypedValue, bool_typed, bytes32_typed, typed_bool, u64_typed,
 };
 
+use crate::journal::{SuccessfulTxExecution, TxJournalBuilder};
 use crate::overlay::Overlay;
 use crate::precompile::PrecompileRegistry;
 use crate::property::{CommittedStateProvider, PropertyQueryRegistry};
 use crate::resolve::{resolve_row_expr, resolve_value_expr};
-
-/// Output of executing a single transaction's instruction body.
-#[derive(Debug, Clone)]
-pub struct TxExecutionOutput {
-    /// Application events emitted during execution.
-    pub emitted: Vec<EmittedEvent>,
-    /// Precompile events recorded during execution.
-    pub precompile_events: Vec<PrecompileEvent>,
-    /// Property read results recorded during execution.
-    pub property_reads: Vec<PropertyReadResult>,
-}
+use crate::resolved_program::ResolvedExecutionProgram;
 
 /// Error produced by the interpreter, wrapping the underlying error with
 /// the instruction index at which execution failed.
@@ -54,10 +42,8 @@ pub struct ExecContext<'a> {
     pub static_tables: &'a dyn StaticTableProvider,
     /// Runtime type registry used for typed execution.
     pub type_runtimes: &'a TypeRuntimeRegistry,
-    /// Table schemas for column type resolution.
-    pub schemas: &'a BTreeMap<TableId, TableSchema>,
-    /// Canonical profile catalog for type resolution from sealed column profiles.
-    pub profile_catalog: &'a ProfileCatalog,
+    /// Canonical resolved execution contract.
+    pub execution_program: &'a ResolvedExecutionProgram,
     /// Optional precompile handlers for custom instructions.
     pub precompiles: Option<&'a PrecompileRegistry>,
     /// Optional committed state for PropertyRead instructions.
@@ -66,355 +52,442 @@ pub struct ExecContext<'a> {
     pub property_queries: &'a PropertyQueryRegistry,
 }
 
-/// Execute a transaction body against an overlay.
-///
-/// # Arguments
-/// - `instructions`: the Tabula IR body of the transaction type
-/// - `params`: concrete parameter values for this transaction
-/// - `overlay`: the mutable overlay for state reads/writes
-/// - `ctx`: read-only execution context (hasher, static tables, schemas)
-pub fn execute<S: StateView>(
-    tx_index: u32,
-    instructions: &[Instruction],
-    params: &[TypedValue],
-    overlay: &mut Overlay<'_, S>,
-    ctx: &ExecContext<'_>,
-) -> Result<TxExecutionOutput, InterpreterError> {
-    let mut slots: Vec<TypedValue> = Vec::new();
-    let mut emitted: Vec<EmittedEvent> = Vec::new();
-    let mut precompile_events: Vec<PrecompileEvent> = Vec::new();
-    let mut property_reads: Vec<PropertyReadResult> = Vec::new();
+/// Transaction-local execution machine.
+pub(crate) struct TxMachine<'instr, 'params, 'snapshot, 'ctx, 'borrow, S: StateView> {
+    instructions: &'instr [Instruction],
+    params: &'params [TypedValue],
+    overlay: &'borrow mut Overlay<'snapshot, S>,
+    ctx: &'ctx ExecContext<'ctx>,
+    journal: &'borrow mut TxJournalBuilder,
+    slots: Vec<TypedValue>,
+}
 
-    for (idx, instr) in instructions.iter().enumerate() {
-        let step: Result<(), TabulaError> = (|| {
-            match instr {
-                Instruction::Read {
-                    dst_val,
-                    dst_is_null,
-                    table,
-                    col,
-                    row,
-                } => {
-                    let row_key = resolve_row_expr(row, &slots, params, ctx.type_runtimes)?;
-                    let key = CellKey {
-                        table: *table,
-                        col: *col,
-                        row: row_key,
-                    };
-                    let col_type = lookup_col_type(ctx.schemas, ctx.profile_catalog, *table, *col)?;
-                    let opt = overlay.read(&key, col_type)?;
-                    match opt {
-                        Some(v) => {
-                            set_slot(&mut slots, *dst_val, v)?;
-                            set_slot(&mut slots, *dst_is_null, bool_typed(false))?;
-                        }
-                        None => {
-                            set_slot(&mut slots, *dst_val, ctx.type_runtimes.zero_of(col_type)?)?;
-                            set_slot(&mut slots, *dst_is_null, bool_typed(true))?;
-                        }
+impl<'instr, 'params, 'snapshot, 'ctx, 'borrow, S: StateView>
+    TxMachine<'instr, 'params, 'snapshot, 'ctx, 'borrow, S>
+{
+    pub(crate) fn new(
+        instructions: &'instr [Instruction],
+        params: &'params [TypedValue],
+        overlay: &'borrow mut Overlay<'snapshot, S>,
+        ctx: &'ctx ExecContext<'ctx>,
+        journal: &'borrow mut TxJournalBuilder,
+    ) -> Self {
+        Self {
+            instructions,
+            params,
+            overlay,
+            ctx,
+            journal,
+            slots: Vec::new(),
+        }
+    }
+
+    pub(crate) fn execute(&mut self) -> Result<(), InterpreterError> {
+        for (idx, instr) in self.instructions.iter().enumerate() {
+            self.execute_instruction(idx, instr)
+                .map_err(|error| InterpreterError {
+                    error,
+                    instruction_index: idx,
+                })?;
+        }
+        Ok(())
+    }
+
+    fn execute_instruction(
+        &mut self,
+        instruction_index: usize,
+        instr: &Instruction,
+    ) -> Result<(), TabulaError> {
+        match instr {
+            Instruction::Read {
+                dst_val,
+                dst_is_null,
+                table,
+                col,
+                row,
+            } => {
+                let row_key =
+                    resolve_row_expr(row, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let key = CellKey {
+                    table: *table,
+                    col: *col,
+                    row: row_key,
+                };
+                let col_type = self
+                    .ctx
+                    .execution_program
+                    .column_layout(*table, *col)?
+                    .type_id;
+                let opt = self.overlay.read(&key, col_type)?;
+                self.journal
+                    .record_access(key, col_type, OpKind::Read, opt.clone());
+                match opt {
+                    Some(value) => {
+                        set_slot(&mut self.slots, *dst_val, value)?;
+                        set_slot(&mut self.slots, *dst_is_null, bool_typed(false))?;
+                    }
+                    None => {
+                        set_slot(
+                            &mut self.slots,
+                            *dst_val,
+                            self.ctx.type_runtimes.zero_of(col_type)?,
+                        )?;
+                        set_slot(&mut self.slots, *dst_is_null, bool_typed(true))?;
                     }
                 }
+            }
 
-                Instruction::Write {
-                    table,
-                    col,
-                    row,
-                    src_val,
+            Instruction::Write {
+                table,
+                col,
+                row,
+                src_val,
+                src_is_null,
+            } => {
+                let row_key =
+                    resolve_row_expr(row, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let value =
+                    resolve_value_expr(src_val, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let is_null = resolve_value_expr(
                     src_is_null,
-                } => {
-                    let row_key = resolve_row_expr(row, &slots, params, ctx.type_runtimes)?;
-                    let value = resolve_value_expr(src_val, &slots, params, ctx.type_runtimes)?;
-                    let is_null =
-                        resolve_value_expr(src_is_null, &slots, params, ctx.type_runtimes)?;
-                    let key = CellKey {
-                        table: *table,
-                        col: *col,
-                        row: row_key,
-                    };
-                    let col_type = lookup_col_type(ctx.schemas, ctx.profile_catalog, *table, *col)?;
-                    let opt = if typed_bool(&is_null, ctx.type_runtimes)? {
-                        None
-                    } else {
-                        Some(value)
-                    };
-                    overlay.write(&key, opt, col_type)?;
-                }
+                    &self.slots,
+                    self.params,
+                    self.ctx.type_runtimes,
+                )?;
+                let key = CellKey {
+                    table: *table,
+                    col: *col,
+                    row: row_key,
+                };
+                let col_type = self
+                    .ctx
+                    .execution_program
+                    .column_layout(*table, *col)?
+                    .type_id;
+                let opt = if typed_bool(&is_null, self.ctx.type_runtimes)? {
+                    None
+                } else {
+                    Some(value)
+                };
+                self.journal
+                    .record_access(key, col_type, OpKind::Write, opt.clone());
+                self.overlay.write(&key, opt, col_type)?;
+            }
 
-                Instruction::Lookup {
-                    dst,
-                    static_table,
-                    col,
-                    row,
-                } => {
-                    let row_key = resolve_row_expr(row, &slots, params, ctx.type_runtimes)?;
-                    let value = ctx
+            Instruction::Lookup {
+                dst,
+                static_table,
+                col,
+                row,
+            } => {
+                let row_key =
+                    resolve_row_expr(row, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let value =
+                    self.ctx
                         .type_runtimes
-                        .decode_portable(&ctx.static_tables.lookup(
+                        .decode_portable(&self.ctx.static_tables.lookup(
                             *static_table,
                             row_key,
                             *col,
                         )?)?;
-                    set_slot(&mut slots, *dst, value)?;
-                }
+                set_slot(&mut self.slots, *dst, value)?;
+            }
 
-                Instruction::Arith { dst, op, lhs, rhs } => {
-                    let l = resolve_value_expr(lhs, &slots, params, ctx.type_runtimes)?;
-                    let r = resolve_value_expr(rhs, &slots, params, ctx.type_runtimes)?;
-                    let runtime = ctx.type_runtimes.resolve(l.type_id())?;
-                    let op = match op {
-                        tabula_ir::ArithOp::Add => ArithmeticOp::Add,
-                        tabula_ir::ArithOp::Sub => ArithmeticOp::Sub,
-                        tabula_ir::ArithOp::Mul => ArithmeticOp::Mul,
-                    };
-                    set_slot(&mut slots, *dst, runtime.apply_arithmetic(op, &l, &r)?)?;
-                }
+            Instruction::Arith { dst, op, lhs, rhs } => {
+                let l = resolve_value_expr(lhs, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let r = resolve_value_expr(rhs, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let runtime = self.ctx.type_runtimes.resolve(l.type_id())?;
+                let arithmetic = match op {
+                    tabula_ir::ArithOp::Add => ArithmeticOp::Add,
+                    tabula_ir::ArithOp::Sub => ArithmeticOp::Sub,
+                    tabula_ir::ArithOp::Mul => ArithmeticOp::Mul,
+                };
+                set_slot(
+                    &mut self.slots,
+                    *dst,
+                    runtime.apply_arithmetic(arithmetic, &l, &r)?,
+                )?;
+            }
 
-                Instruction::DivMod {
-                    dst_q,
-                    dst_r,
-                    lhs,
-                    rhs,
-                } => {
-                    let l = resolve_value_expr(lhs, &slots, params, ctx.type_runtimes)?;
-                    let r = resolve_value_expr(rhs, &slots, params, ctx.type_runtimes)?;
-                    let runtime = ctx.type_runtimes.resolve(l.type_id())?;
-                    let (q, rem) = runtime.divmod(&l, &r)?;
-                    set_slot(&mut slots, *dst_q, q)?;
-                    set_slot(&mut slots, *dst_r, rem)?;
-                }
+            Instruction::DivMod {
+                dst_q,
+                dst_r,
+                lhs,
+                rhs,
+            } => {
+                let l = resolve_value_expr(lhs, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let r = resolve_value_expr(rhs, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let runtime = self.ctx.type_runtimes.resolve(l.type_id())?;
+                let (q, rem) = runtime.divmod(&l, &r)?;
+                set_slot(&mut self.slots, *dst_q, q)?;
+                set_slot(&mut self.slots, *dst_r, rem)?;
+            }
 
-                Instruction::Cmp { dst, op, lhs, rhs } => {
-                    let l = resolve_value_expr(lhs, &slots, params, ctx.type_runtimes)?;
-                    let r = resolve_value_expr(rhs, &slots, params, ctx.type_runtimes)?;
-                    let runtime = ctx.type_runtimes.resolve(l.type_id())?;
-                    let result = match op {
-                        tabula_ir::CmpOp::Eq => runtime.eq_value(&l, &r)?,
-                        tabula_ir::CmpOp::Ne => !runtime.eq_value(&l, &r)?,
-                        tabula_ir::CmpOp::Lt => runtime.cmp_value(&l, &r)? == Ordering::Less,
-                        tabula_ir::CmpOp::Lte => runtime.cmp_value(&l, &r)? != Ordering::Greater,
-                        tabula_ir::CmpOp::Gt => runtime.cmp_value(&l, &r)? == Ordering::Greater,
-                        tabula_ir::CmpOp::Gte => runtime.cmp_value(&l, &r)? != Ordering::Less,
-                    };
-                    set_slot(&mut slots, *dst, bool_typed(result))?;
-                }
+            Instruction::Cmp { dst, op, lhs, rhs } => {
+                let l = resolve_value_expr(lhs, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let r = resolve_value_expr(rhs, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let runtime = self.ctx.type_runtimes.resolve(l.type_id())?;
+                let result = match op {
+                    tabula_ir::CmpOp::Eq => runtime.eq_value(&l, &r)?,
+                    tabula_ir::CmpOp::Ne => !runtime.eq_value(&l, &r)?,
+                    tabula_ir::CmpOp::Lt => runtime.cmp_value(&l, &r)? == Ordering::Less,
+                    tabula_ir::CmpOp::Lte => runtime.cmp_value(&l, &r)? != Ordering::Greater,
+                    tabula_ir::CmpOp::Gt => runtime.cmp_value(&l, &r)? == Ordering::Greater,
+                    tabula_ir::CmpOp::Gte => runtime.cmp_value(&l, &r)? != Ordering::Less,
+                };
+                set_slot(&mut self.slots, *dst, bool_typed(result))?;
+            }
 
-                Instruction::Not { dst, src } => {
-                    let v = resolve_value_expr(src, &slots, params, ctx.type_runtimes)?;
-                    set_slot(
-                        &mut slots,
-                        *dst,
-                        bool_typed(!typed_bool(&v, ctx.type_runtimes)?),
-                    )?;
-                }
+            Instruction::Not { dst, src } => {
+                let value =
+                    resolve_value_expr(src, &self.slots, self.params, self.ctx.type_runtimes)?;
+                set_slot(
+                    &mut self.slots,
+                    *dst,
+                    bool_typed(!typed_bool(&value, self.ctx.type_runtimes)?),
+                )?;
+            }
 
-                Instruction::And { dst, lhs, rhs } => {
-                    let l = resolve_value_expr(lhs, &slots, params, ctx.type_runtimes)?;
-                    let r = resolve_value_expr(rhs, &slots, params, ctx.type_runtimes)?;
-                    set_slot(
-                        &mut slots,
-                        *dst,
-                        bool_typed(
-                            typed_bool(&l, ctx.type_runtimes)?
-                                && typed_bool(&r, ctx.type_runtimes)?,
-                        ),
-                    )?;
-                }
+            Instruction::And { dst, lhs, rhs } => {
+                let l = resolve_value_expr(lhs, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let r = resolve_value_expr(rhs, &self.slots, self.params, self.ctx.type_runtimes)?;
+                set_slot(
+                    &mut self.slots,
+                    *dst,
+                    bool_typed(
+                        typed_bool(&l, self.ctx.type_runtimes)?
+                            && typed_bool(&r, self.ctx.type_runtimes)?,
+                    ),
+                )?;
+            }
 
-                Instruction::Or { dst, lhs, rhs } => {
-                    let l = resolve_value_expr(lhs, &slots, params, ctx.type_runtimes)?;
-                    let r = resolve_value_expr(rhs, &slots, params, ctx.type_runtimes)?;
-                    set_slot(
-                        &mut slots,
-                        *dst,
-                        bool_typed(
-                            typed_bool(&l, ctx.type_runtimes)?
-                                || typed_bool(&r, ctx.type_runtimes)?,
-                        ),
-                    )?;
-                }
+            Instruction::Or { dst, lhs, rhs } => {
+                let l = resolve_value_expr(lhs, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let r = resolve_value_expr(rhs, &self.slots, self.params, self.ctx.type_runtimes)?;
+                set_slot(
+                    &mut self.slots,
+                    *dst,
+                    bool_typed(
+                        typed_bool(&l, self.ctx.type_runtimes)?
+                            || typed_bool(&r, self.ctx.type_runtimes)?,
+                    ),
+                )?;
+            }
 
-                Instruction::Assert { cond } => {
-                    let v = resolve_value_expr(cond, &slots, params, ctx.type_runtimes)?;
-                    if !typed_bool(&v, ctx.type_runtimes)? {
-                        return Err(TabulaError::AssertionFailed(format!("{cond:?}")));
-                    }
-                }
-
-                Instruction::Hash { dst, inputs } => {
-                    let values = inputs
-                        .iter()
-                        .map(|input| resolve_value_expr(input, &slots, params, ctx.type_runtimes))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let encoded = values
-                        .iter()
-                        .map(|value| ctx.type_runtimes.encode_typed(value))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let digest = ctx.hasher.hash_ir(&encoded);
-                    set_slot(&mut slots, *dst, bytes32_typed(digest))?;
-                }
-
-                Instruction::Select {
-                    dst,
-                    cond,
-                    if_true,
-                    if_false,
-                } => {
-                    let c = resolve_value_expr(cond, &slots, params, ctx.type_runtimes)?;
-                    let t = resolve_value_expr(if_true, &slots, params, ctx.type_runtimes)?;
-                    let f = resolve_value_expr(if_false, &slots, params, ctx.type_runtimes)?;
-                    let selected = if typed_bool(&c, ctx.type_runtimes)? {
-                        t
-                    } else {
-                        f
-                    };
-                    set_slot(&mut slots, *dst, selected)?;
-                }
-
-                Instruction::Emit { topic, data } => {
-                    let mut values = Vec::new();
-                    for d in data {
-                        let value = resolve_value_expr(d, &slots, params, ctx.type_runtimes)?;
-                        values.push(ctx.type_runtimes.encode_typed(&value)?);
-                    }
-                    emitted.push(EmittedEvent {
-                        topic: topic.clone(),
-                        data: values,
-                    });
-                }
-
-                Instruction::Precompile {
-                    id,
-                    dst_slots,
-                    inputs,
-                } => {
-                    let registry = ctx.precompiles.ok_or_else(|| {
-                        TabulaError::InvalidIr(
-                            "precompile instruction encountered but no PrecompileRegistry provided"
-                                .into(),
-                        )
-                    })?;
-                    let handler = registry.get(*id)?;
-                    let signature = handler.signature();
-                    let args = inputs
-                        .iter()
-                        .map(|inp| resolve_value_expr(inp, &slots, params, ctx.type_runtimes))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    if args.len() != signature.inputs.len() {
-                        return Err(TabulaError::InvalidIr(format!(
-                            "precompile 0x{:04x} expects {} inputs but IR provided {}",
-                            id.0,
-                            signature.inputs.len(),
-                            args.len(),
-                        )));
-                    }
-                    for (idx, (arg, expected)) in args.iter().zip(&signature.inputs).enumerate() {
-                        if arg.type_id() != expected.type_id {
-                            return Err(TabulaError::InvalidIr(format!(
-                                "precompile 0x{:04x} input {} expects type {} but got {}",
-                                id.0,
-                                idx,
-                                expected.type_id.0,
-                                arg.type_id().0,
-                            )));
-                        }
-                    }
-                    let results = handler.execute(&args)?;
-                    if results.len() != signature.outputs.len() {
-                        return Err(TabulaError::InvalidIr(format!(
-                            "precompile 0x{:04x} returned {} values but signature declares {} outputs",
-                            id.0,
-                            results.len(),
-                            signature.outputs.len(),
-                        )));
-                    }
-                    if results.len() != dst_slots.len() {
-                        return Err(TabulaError::InvalidIr(format!(
-                            "precompile 0x{:04x} signature declares {} outputs but IR has {} dst_slots",
-                            id.0,
-                            results.len(),
-                            dst_slots.len(),
-                        )));
-                    }
-                    for (idx, (value, expected)) in
-                        results.iter().zip(&signature.outputs).enumerate()
-                    {
-                        if value.type_id() != expected.type_id {
-                            return Err(TabulaError::InvalidIr(format!(
-                                "precompile 0x{:04x} output {} expects type {} but handler returned {}",
-                                id.0,
-                                idx,
-                                expected.type_id.0,
-                                value.type_id().0,
-                            )));
-                        }
-                    }
-                    precompile_events.push(PrecompileEvent {
-                        tx_index: tx_index as usize,
-                        instruction_index: idx,
-                        precompile_id: id.0,
-                        inputs: args
-                            .iter()
-                            .map(|value| ctx.type_runtimes.encode_typed(value))
-                            .collect::<Result<Vec<_>, _>>()?,
-                        outputs: results
-                            .iter()
-                            .map(|value| ctx.type_runtimes.encode_typed(value))
-                            .collect::<Result<Vec<_>, _>>()?,
-                    });
-                    for (dst, val) in dst_slots.iter().zip(results.into_iter()) {
-                        set_slot(&mut slots, *dst, val)?;
-                    }
-                }
-
-                Instruction::PropertyRead {
-                    dst_val,
-                    dst_key,
-                    dst_is_null,
-                    table,
-                    col,
-                    query,
-                } => {
-                    let provider = ctx.committed_state.ok_or_else(|| {
-                        TabulaError::InvalidIr(
-                            "PropertyRead encountered but no CommittedStateProvider".into(),
-                        )
-                    })?;
-                    let result = ctx
-                        .property_queries
-                        .resolve(*table, *col, query, provider)?;
-                    property_reads.push(PropertyReadResult {
-                        instruction_index: idx,
-                        value: ctx.type_runtimes.encode_typed(&result.value)?,
-                        key: result.key,
-                        is_null: result.is_null,
-                    });
-                    set_slot(&mut slots, *dst_val, result.value)?;
-                    set_slot(
-                        &mut slots,
-                        *dst_key,
-                        u64_typed(result.key.map_or(0, |k| k.0)),
-                    )?;
-                    set_slot(&mut slots, *dst_is_null, bool_typed(result.is_null))?;
+            Instruction::Assert { cond } => {
+                let value =
+                    resolve_value_expr(cond, &self.slots, self.params, self.ctx.type_runtimes)?;
+                if !typed_bool(&value, self.ctx.type_runtimes)? {
+                    return Err(TabulaError::AssertionFailed(format!("{cond:?}")));
                 }
             }
-            Ok(())
-        })();
-        step.map_err(|error| InterpreterError {
-            error,
-            instruction_index: idx,
-        })?;
-    }
 
-    Ok(TxExecutionOutput {
-        emitted,
-        precompile_events,
-        property_reads,
-    })
+            Instruction::Hash { dst, inputs } => {
+                let typed_inputs = inputs
+                    .iter()
+                    .map(|expr| {
+                        resolve_value_expr(expr, &self.slots, self.params, self.ctx.type_runtimes)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let portable_inputs = typed_inputs
+                    .iter()
+                    .map(|value| self.ctx.type_runtimes.encode_typed(value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let digest = self.ctx.hasher.hash_ir(&portable_inputs);
+                let digest_typed = bytes32_typed(digest);
+                self.journal.record_ir_hash(
+                    instruction_index,
+                    portable_inputs,
+                    self.ctx.type_runtimes.encode_typed(&digest_typed)?,
+                );
+                set_slot(&mut self.slots, *dst, digest_typed)?;
+            }
+
+            Instruction::Select {
+                dst,
+                cond,
+                if_true,
+                if_false,
+            } => {
+                let c = resolve_value_expr(cond, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let t =
+                    resolve_value_expr(if_true, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let f =
+                    resolve_value_expr(if_false, &self.slots, self.params, self.ctx.type_runtimes)?;
+                let selected = if typed_bool(&c, self.ctx.type_runtimes)? {
+                    t
+                } else {
+                    f
+                };
+                set_slot(&mut self.slots, *dst, selected)?;
+            }
+
+            Instruction::Emit { topic, data } => {
+                let values = data
+                    .iter()
+                    .map(|expr| {
+                        resolve_value_expr(expr, &self.slots, self.params, self.ctx.type_runtimes)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .iter()
+                    .map(|value| self.ctx.type_runtimes.encode_typed(value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.journal.record_emitted(EmittedEvent {
+                    topic: topic.clone(),
+                    data: values,
+                });
+            }
+
+            Instruction::Precompile {
+                id,
+                dst_slots,
+                inputs,
+            } => {
+                let registry = self.ctx.precompiles.ok_or_else(|| {
+                    TabulaError::InvalidIr(
+                        "precompile instruction encountered but no PrecompileRegistry provided"
+                            .into(),
+                    )
+                })?;
+                let handler = registry.get(*id)?;
+                let signature = handler.signature();
+                let args = inputs
+                    .iter()
+                    .map(|expr| {
+                        resolve_value_expr(expr, &self.slots, self.params, self.ctx.type_runtimes)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if args.len() != signature.inputs.len() {
+                    return Err(TabulaError::InvalidIr(format!(
+                        "precompile 0x{:04x} expects {} inputs but IR provided {}",
+                        id.0,
+                        signature.inputs.len(),
+                        args.len(),
+                    )));
+                }
+                for (arg_idx, (arg, expected)) in args.iter().zip(&signature.inputs).enumerate() {
+                    if arg.type_id() != expected.type_id {
+                        return Err(TabulaError::InvalidIr(format!(
+                            "precompile 0x{:04x} input {} expects type {} but got {}",
+                            id.0,
+                            arg_idx,
+                            expected.type_id.0,
+                            arg.type_id().0,
+                        )));
+                    }
+                }
+                let results = handler.execute(&args)?;
+                if results.len() != signature.outputs.len() {
+                    return Err(TabulaError::InvalidIr(format!(
+                        "precompile 0x{:04x} returned {} values but signature declares {} outputs",
+                        id.0,
+                        results.len(),
+                        signature.outputs.len(),
+                    )));
+                }
+                if results.len() != dst_slots.len() {
+                    return Err(TabulaError::InvalidIr(format!(
+                        "precompile 0x{:04x} signature declares {} outputs but IR has {} dst_slots",
+                        id.0,
+                        results.len(),
+                        dst_slots.len(),
+                    )));
+                }
+                for (output_idx, (value, expected)) in
+                    results.iter().zip(&signature.outputs).enumerate()
+                {
+                    if value.type_id() != expected.type_id {
+                        return Err(TabulaError::InvalidIr(format!(
+                            "precompile 0x{:04x} output {} expects type {} but handler returned {}",
+                            id.0,
+                            output_idx,
+                            expected.type_id.0,
+                            value.type_id().0,
+                        )));
+                    }
+                }
+                self.journal
+                    .record_precompile_call(instruction_index, *id, args, results.clone());
+                for (dst, value) in dst_slots.iter().zip(results.into_iter()) {
+                    set_slot(&mut self.slots, *dst, value)?;
+                }
+            }
+
+            Instruction::PropertyRead {
+                dst_val,
+                dst_key,
+                dst_is_null,
+                table,
+                col,
+                query,
+            } => {
+                let provider = self.ctx.committed_state.ok_or_else(|| {
+                    TabulaError::InvalidIr(
+                        "PropertyRead encountered but no CommittedStateProvider".into(),
+                    )
+                })?;
+                let result = self
+                    .ctx
+                    .property_queries
+                    .resolve(*table, *col, query, provider)?;
+                self.journal
+                    .record_property_read(instruction_index, result.clone());
+                set_slot(&mut self.slots, *dst_val, result.value)?;
+                set_slot(
+                    &mut self.slots,
+                    *dst_key,
+                    u64_typed(result.key.map_or(0, |key| key.0)),
+                )?;
+                set_slot(&mut self.slots, *dst_is_null, bool_typed(result.is_null))?;
+            }
+        }
+        Ok(())
+    }
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
+/// Execute a transaction body against an overlay and return the successful tx shard.
+///
+/// This is a test-oriented thin wrapper around [`TxMachine`]. Production batch
+/// execution constructs the journal builder directly in `batch.rs`.
+pub(crate) fn execute_with_journal<'instr, 'params, 'snapshot, 'ctx, S: StateView>(
+    tx_index: u32,
+    instructions: &'instr [Instruction],
+    params: &'params [TypedValue],
+    overlay: &mut Overlay<'snapshot, S>,
+    ctx: &'ctx ExecContext<'ctx>,
+    journal: &mut TxJournalBuilder,
+) -> Result<(), InterpreterError> {
+    let _ = tx_index;
+    TxMachine::new(instructions, params, overlay, ctx, journal).execute()
+}
+
+/// Execute a transaction body against an overlay.
+///
+/// This public helper is intended for tests and harnesses that need the
+/// interpreter semantics without constructing a full batch executor.
+pub fn execute<'instr, 'params, 'snapshot, 'ctx, S: StateView>(
+    tx_index: u32,
+    instructions: &'instr [Instruction],
+    params: &'params [TypedValue],
+    overlay: &mut Overlay<'snapshot, S>,
+    ctx: &'ctx ExecContext<'ctx>,
+) -> Result<(), InterpreterError> {
+    let mut journal = TxJournalBuilder::new(tx_index, 0);
+    execute_with_journal(tx_index, instructions, params, overlay, ctx, &mut journal)
+}
+
+/// Convenience wrapper for tests that need the successful shard directly.
+pub fn execute_tx<'instr, 'params, 'snapshot, 'ctx, S: StateView>(
+    tx_index: u32,
+    instructions: &'instr [Instruction],
+    params: &'params [TypedValue],
+    overlay: &mut Overlay<'snapshot, S>,
+    ctx: &'ctx ExecContext<'ctx>,
+) -> Result<SuccessfulTxExecution, InterpreterError> {
+    let mut journal = TxJournalBuilder::new(tx_index, 0);
+    execute_with_journal(tx_index, instructions, params, overlay, ctx, &mut journal)?;
+    Ok(journal.into_success())
+}
 
 fn set_slot(slots: &mut Vec<TypedValue>, idx: Slot, value: TypedValue) -> Result<(), TabulaError> {
     let i = idx as usize;
@@ -429,35 +502,4 @@ fn set_slot(slots: &mut Vec<TypedValue>, idx: Slot, value: TypedValue) -> Result
         )));
     }
     Ok(())
-}
-
-fn lookup_col_type(
-    schemas: &BTreeMap<TableId, TableSchema>,
-    profile_catalog: &ProfileCatalog,
-    table: TableId,
-    col: ColId,
-) -> Result<TypeId, TabulaError> {
-    let schema = schemas
-        .get(&table)
-        .ok_or(TabulaError::TableNotFound(table))?;
-    schema
-        .columns
-        .iter()
-        .find(|c| c.id == col)
-        .ok_or_else(|| {
-            TabulaError::InvalidIr(format!(
-                "column {col:?} not found in schema for table {table:?}"
-            ))
-        })
-        .and_then(|column| {
-            let resolved = profile_catalog
-                .resolve_column_profile(column.column_profile_id)
-                .map_err(|err| {
-                    TabulaError::InvalidIr(format!(
-                        "column profile {} for table {:?} col {:?} is invalid: {err}",
-                        column.column_profile_id.0, table, col
-                    ))
-                })?;
-            Ok(resolved.type_descriptor.type_id)
-        })
 }

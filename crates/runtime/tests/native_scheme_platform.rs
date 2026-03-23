@@ -16,7 +16,7 @@ use tabula_profile::{
     VerifierDigestFormat, WidthConstraint, builtin_semantic_registry,
 };
 use tabula_runtime::{
-    HostEnvironment, HostTypeRuntimes, ProveInput, SmtScheme, SsmcScheme, TabulaRuntime, Verifier,
+    HostEnvironment, ProveInput, RuntimeRegistries, SmtScheme, SsmcScheme, TabulaRuntime, Verifier,
 };
 use tabula_testing::exec::{artifact_from_source_with_registry, compiled_program_from_artifact};
 use tabula_testing::fixtures::batch::single_tx_batch;
@@ -187,7 +187,7 @@ fn native_platform_proves_and_verifies_custom_sparse_scheme() {
     let batch = single_tx_batch(0, vec![u64_portable(5)]);
 
     let host_environment = HostEnvironment::empty()
-        .with_type_runtimes(HostTypeRuntimes::standard())
+        .with_runtime_registries(RuntimeRegistries::standard())
         .with_column_backend_bundle(ColumnBackendFactoryBundle::new(SparseNativeBackend))
         .expect("register sparse backend");
 
@@ -218,7 +218,7 @@ fn native_platform_exposes_ordered_property_queries_for_custom_backend() {
     let artifact = orderbook_artifact();
     let compiled = compiled_program_from_artifact(&artifact);
     let host_environment = HostEnvironment::empty()
-        .with_type_runtimes(HostTypeRuntimes::standard())
+        .with_runtime_registries(RuntimeRegistries::standard())
         .with_column_backend_bundle(ColumnBackendFactoryBundle::new(OrderedNativeBackend))
         .expect("register ordered backend");
 
@@ -228,7 +228,7 @@ fn native_platform_exposes_ordered_property_queries_for_custom_backend() {
         .expect("runtime");
 
     let column = runtime
-        .resolved_program()
+        .proof_program()
         .runtime_columns()
         .get(&(TableId(0), ColId(0)))
         .expect("runtime column");
@@ -276,7 +276,7 @@ fn native_platform_proves_custom_ordered_backend() {
     let batch = single_tx_batch(0, vec![u64_portable(1)]);
 
     let host_environment = HostEnvironment::empty()
-        .with_type_runtimes(HostTypeRuntimes::standard())
+        .with_runtime_registries(RuntimeRegistries::standard())
         .with_column_backend_bundle(ColumnBackendFactoryBundle::new(OrderedNativeBackend))
         .expect("register ordered backend");
 

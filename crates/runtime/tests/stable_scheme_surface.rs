@@ -11,7 +11,7 @@ use tabula_profile::{
     EncodingRequirements, FieldFamily, SchemeProfile, SemanticRegistry, TranscriptSerialization,
     VerifierDigestFormat, WidthConstraint, builtin_semantic_registry,
 };
-use tabula_runtime::{HostEnvironment, HostTypeRuntimes, SsmcScheme, TabulaRuntime, Verifier};
+use tabula_runtime::{HostEnvironment, RuntimeRegistries, SsmcScheme, TabulaRuntime, Verifier};
 use tabula_testing::exec::{artifact_from_source_with_registry, compiled_program_from_artifact};
 
 const STABLE_ONLY_SCHEME_ID: SchemeId = SchemeId(0x7101);
@@ -106,7 +106,7 @@ fn stable_scheme_surface_uses_only_canonical_backend_registration() {
     );
 
     let host_environment = HostEnvironment::empty()
-        .with_type_runtimes(HostTypeRuntimes::standard())
+        .with_runtime_registries(RuntimeRegistries::standard())
         .with_column_backend_bundle(ColumnBackendFactoryBundle::new(StableOnlyBackend))
         .expect("register stable backend");
 
@@ -114,7 +114,7 @@ fn stable_scheme_surface_uses_only_canonical_backend_registration() {
         .with_host_environment(host_environment.clone())
         .build()
         .expect("runtime");
-    assert_eq!(runtime.resolved_program().runtime_columns().len(), 1);
+    assert_eq!(runtime.proof_program().runtime_columns().len(), 1);
 
     let verifier = Verifier::builder(artifact)
         .with_host_environment(host_environment)

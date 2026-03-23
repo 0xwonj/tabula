@@ -5,9 +5,7 @@ use p3_koala_bear::KoalaBear;
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StaticTableProvider;
-use tabula_core::{
-    AccessEvent, ColId, PortableValue, PrecompileEvent, PropertyReadResult, RowKey, TableId,
-};
+use tabula_core::{ColId, PortableValue, RowKey, TableId};
 use tabula_ir::{PrecompileId, PrecompileSignature, RowExpr, ValueExpr};
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue, typed_row_key};
 
@@ -16,7 +14,9 @@ use tabula_chips::execution::trace::{InstructionRecord, Opcode};
 use tabula_chips::ir_hash::IrHashCall;
 use tabula_chips::static_table::trace::StaticTableRow;
 
-use crate::ColumnValueProfile;
+use crate::{AccessEvent, ColumnValueProfile};
+
+use super::{LoweringPrecompileCall, LoweringPropertyRead};
 
 /// Mutable lowering context threaded through per-opcode lowering functions.
 pub(super) struct LoweringContext<'a, const W: usize> {
@@ -41,9 +41,9 @@ pub(super) struct LoweringContext<'a, const W: usize> {
     pub(super) empty_columns: &'a BTreeSet<(TableId, ColId)>,
     pub(super) params: &'a [PortableValue],
     pub(super) precompile_signatures: &'a BTreeMap<PrecompileId, PrecompileSignature>,
-    pub(super) precompile_events_by_instruction: BTreeMap<usize, &'a PrecompileEvent>,
+    pub(super) precompile_events_by_instruction: BTreeMap<usize, &'a LoweringPrecompileCall>,
     pub(super) matched_precompile_instructions: BTreeSet<usize>,
-    pub(super) property_reads_stored: &'a [PropertyReadResult],
+    pub(super) property_reads_stored: &'a [LoweringPropertyRead],
     pub(super) property_read_idx: usize,
 }
 
@@ -60,8 +60,8 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
         params: &'a [PortableValue],
         precompile_signatures: &'a BTreeMap<PrecompileId, PrecompileSignature>,
         num_instructions: usize,
-        precompile_events: &'a [PrecompileEvent],
-        property_reads_stored: &'a [PropertyReadResult],
+        precompile_events: &'a [LoweringPrecompileCall],
+        property_reads_stored: &'a [LoweringPropertyRead],
     ) -> Result<Self, TabulaError> {
         Ok(Self {
             slots: vec![None; MAX_SLOTS],
@@ -103,37 +103,6 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
                 phase: "trace_lowering",
                 detail: format!("missing sealed column profile for ({table:?}, {col:?})"),
             })
-    }
-
-    pub(super) fn zero_for_column(
-        &self,
-        table: TableId,
-        col: ColId,
-    ) -> Result<TypedValue, TabulaError> {
-        let profile = self.column_profile(table, col)?;
-        self.type_runtimes.zero_of(profile.type_id)
-    }
-
-    pub(super) fn decode_column_portable(
-        &self,
-        table: TableId,
-        col: ColId,
-        value: &PortableValue,
-    ) -> Result<TypedValue, TabulaError> {
-        let profile = self.column_profile(table, col)?;
-        if value.type_id() != profile.type_id {
-            return Err(TabulaError::ProofError {
-                phase: "trace_lowering",
-                detail: format!(
-                    "portable value type {} does not match sealed column type {} for ({}, {})",
-                    value.type_id().0,
-                    profile.type_id.0,
-                    table.0,
-                    col.0,
-                ),
-            });
-        }
-        self.type_runtimes.decode_portable(value)
     }
 
     pub(super) fn resolve_row(&self, expr: &RowExpr) -> Result<RowKey, TabulaError> {
@@ -324,7 +293,7 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
     pub(super) fn precompile_event(
         &mut self,
         instruction_index: usize,
-    ) -> Result<&'a PrecompileEvent, TabulaError> {
+    ) -> Result<&'a LoweringPrecompileCall, TabulaError> {
         let event = self
             .precompile_events_by_instruction
             .get(&instruction_index)
@@ -397,19 +366,10 @@ impl<'a, const W: usize> LoweringContext<'a, W> {
 
 fn build_precompile_event_map(
     tx_index: u32,
-    events: &[PrecompileEvent],
-) -> Result<BTreeMap<usize, &PrecompileEvent>, TabulaError> {
+    events: &[LoweringPrecompileCall],
+) -> Result<BTreeMap<usize, &LoweringPrecompileCall>, TabulaError> {
     let mut map = BTreeMap::new();
     for event in events {
-        if event.tx_index != tx_index as usize {
-            return Err(TabulaError::ProofError {
-                phase: "trace_lowering",
-                detail: format!(
-                    "stored precompile event tx_index={} does not match lowering tx_index={}",
-                    event.tx_index, tx_index
-                ),
-            });
-        }
         if map.insert(event.instruction_index, event).is_some() {
             return Err(TabulaError::ProofError {
                 phase: "trace_lowering",

@@ -25,9 +25,12 @@ pub use tabula_types::{
     u64_portable, u64_typed,
 };
 
-use tabula_executor::interpreter::{ExecContext, InterpreterError, TxExecutionOutput};
+use tabula_executor::interpreter::{ExecContext, InterpreterError};
 use tabula_executor::overlay::{Overlay, OverlayResult};
 use tabula_executor::property::PropertyQueryRegistry;
+use tabula_executor::{
+    ResolvedColumnLayout, ResolvedExecutionProgram, SuccessfulTxExecution, execute_tx,
+};
 
 // ── StateView impls ─────────────────────────────────────────────────
 
@@ -196,6 +199,40 @@ pub fn opt(value: PortableValue) -> Option<PortableValue> {
     Some(portable(value))
 }
 
+pub fn portable_read_set(result: &OverlayResult) -> Vec<(CellKey, Option<PortableValue>)> {
+    result
+        .read_set_old
+        .iter()
+        .map(|entry| {
+            (
+                entry.key,
+                entry.value.as_ref().map(|value| {
+                    type_runtimes()
+                        .encode_typed(value)
+                        .expect("encode read set value")
+                }),
+            )
+        })
+        .collect()
+}
+
+pub fn portable_write_set(result: &OverlayResult) -> Vec<(CellKey, Option<PortableValue>)> {
+    result
+        .write_set_final
+        .iter()
+        .map(|entry| {
+            (
+                entry.key,
+                entry.value.as_ref().map(|value| {
+                    type_runtimes()
+                        .encode_typed(value)
+                        .expect("encode write set value")
+                }),
+            )
+        })
+        .collect()
+}
+
 pub fn type_runtimes() -> &'static TypeRuntimeRegistry {
     static TYPE_RUNTIMES: OnceLock<TypeRuntimeRegistry> = OnceLock::new();
     TYPE_RUNTIMES.get_or_init(|| TypeRuntimeRegistry::seeded().expect("seeded type runtimes"))
@@ -273,6 +310,17 @@ pub fn test_schema_bundle() -> (BTreeMap<TableId, TableSchema>, ProfileCatalog) 
     (m, catalog)
 }
 
+pub fn test_execution_program() -> ResolvedExecutionProgram {
+    let mut columns = BTreeMap::new();
+    columns.insert(
+        (TableId(1), ColId(0)),
+        ResolvedColumnLayout {
+            type_id: TYPE_U64_ID,
+        },
+    );
+    ResolvedExecutionProgram::new(BTreeMap::new(), columns)
+}
+
 fn make_snapshot(entries: Vec<(CellKey, PortableValue)>) -> TestSnapshot {
     TestSnapshot(entries.into_iter().collect())
 }
@@ -282,7 +330,7 @@ pub fn snapshot(data: BTreeMap<CellKey, PortableValue>) -> TestSnapshot {
 }
 
 /// Execute instructions with empty params and empty snapshot.
-pub fn run(instrs: Vec<Instruction>) -> (TxExecutionOutput, OverlayResult) {
+pub fn run(instrs: Vec<Instruction>) -> (SuccessfulTxExecution, OverlayResult) {
     run_with(instrs, &[], vec![])
 }
 
@@ -292,24 +340,22 @@ pub fn run_with(
     instrs: Vec<Instruction>,
     params: &[PortableValue],
     entries: Vec<(CellKey, PortableValue)>,
-) -> (TxExecutionOutput, OverlayResult) {
+) -> (SuccessfulTxExecution, OverlayResult) {
     let snap = make_snapshot(entries);
     let mut ov = Overlay::new(&snap, type_runtimes());
-    let (schemas, profile_catalog) = test_schema_bundle();
+    let execution_program = test_execution_program();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         type_runtimes: type_runtimes(),
-        schemas: &schemas,
-        profile_catalog: &profile_catalog,
+        execution_program: &execution_program,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,
     };
     let typed_params: Vec<_> = params.iter().cloned().map(typed).collect();
-    let out =
-        tabula_executor::interpreter::execute(0, &instrs, &typed_params, &mut ov, &ctx).unwrap();
+    let out = execute_tx(0, &instrs, &typed_params, &mut ov, &ctx).unwrap();
     (out, ov.into_result().unwrap())
 }
 
@@ -327,14 +373,13 @@ pub fn run_err_with(
 ) -> InterpreterError {
     let snap = make_snapshot(entries);
     let mut ov = Overlay::new(&snap, type_runtimes());
-    let (schemas, profile_catalog) = test_schema_bundle();
+    let execution_program = test_execution_program();
     let property_queries = PropertyQueryRegistry::new();
     let ctx = ExecContext {
         hasher: &XorHasher,
         static_tables: &TestStaticTables,
         type_runtimes: type_runtimes(),
-        schemas: &schemas,
-        profile_catalog: &profile_catalog,
+        execution_program: &execution_program,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,

@@ -55,7 +55,11 @@ fn write_coalescing() {
 
     let result = ov.into_result().unwrap();
     assert_eq!(result.write_set_final.len(), 1);
-    assert_eq!(result.write_set_final[0], (k, opt(u64_portable(2))));
+    assert_eq!(result.write_set_final[0].key, k);
+    assert_eq!(
+        result.write_set_final[0].value,
+        Some(typed(u64_portable(2)))
+    );
 }
 
 #[test]
@@ -65,7 +69,6 @@ fn empty_overlay() {
     let result = ov.into_result().unwrap();
     assert!(result.read_set_old.is_empty());
     assert!(result.write_set_final.is_empty());
-    assert!(result.events.is_empty());
 }
 
 #[test]
@@ -76,11 +79,6 @@ fn read_absent_cell() {
 
     let v = ov.read(&k, TY).unwrap();
     assert_eq!(v, None);
-
-    let result = ov.into_result().unwrap();
-    assert_eq!(result.events.len(), 1);
-    assert!(result.events[0].val_is_null);
-    assert_eq!(result.events[0].value, portable(u64_portable(0)));
 }
 
 #[test]
@@ -99,7 +97,8 @@ fn read_set_old_excludes_written_before_read() {
 
     let result = ov.into_result().unwrap();
     assert_eq!(result.read_set_old.len(), 1);
-    assert_eq!(result.read_set_old[0], (k2, opt(u64_portable(200))));
+    assert_eq!(result.read_set_old[0].key, k2);
+    assert_eq!(result.read_set_old[0].value, Some(typed(u64_portable(200))));
 }
 
 #[test]
@@ -191,8 +190,6 @@ fn undo_events_truncated() {
     ov.write(&k, Some(typed(u64_portable(2))), TY).unwrap();
     ov.write(&k, Some(typed(u64_portable(3))), TY).unwrap();
     ov.rollback();
-
-    assert_eq!(ov.into_result().unwrap().events.len(), 1);
 }
 
 #[test]
