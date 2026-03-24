@@ -45,12 +45,12 @@ pub fn assert_transaction_batch_semantically_eq(lhs: &TransactionBatch, rhs: &Tr
     let lhs_projection: Vec<_> = lhs
         .transactions
         .iter()
-        .map(|tx| (tx.tx_type, tx.params.clone(), tx.sender.clone(), tx.nonce))
+        .map(|tx| (tx.tx_type, tx.params.clone()))
         .collect();
     let rhs_projection: Vec<_> = rhs
         .transactions
         .iter()
-        .map(|tx| (tx.tx_type, tx.params.clone(), tx.sender.clone(), tx.nonce))
+        .map(|tx| (tx.tx_type, tx.params.clone()))
         .collect();
     assert_eq!(lhs_projection, rhs_projection, "transaction batches differ");
 }

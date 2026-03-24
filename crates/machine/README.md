@@ -17,7 +17,8 @@ or runtime policy.
 ## Owns
 
 - immutable backend setup and configuration
-- backend prover and verifier construction
+- backend trace construction from typed prepared inputs
+- backend proof generation and verification
 - the proof object and related backend proof types
 - explicit backend extension seams
 - validation that backend inputs are structurally acceptable for proving
@@ -44,6 +45,8 @@ or runtime policy.
 - This crate consumes prepared backend inputs; it is not a semantic authority.
 - Higher-layer policy should arrive here as explicit prepared data, not as
   runtime registries or semantic catalogs.
+- The stable handoff is typed prepared input (execution tier, ordered
+  per-column stores, and root tier), not raw setup or trace internals.
 - Proof shape may evolve, but the ownership boundary should stay: backend proof
   assembly lives here, while semantic and runtime policy lives above.
 - Extension points should remain explicit and mechanically validated.
@@ -72,7 +75,7 @@ Start with:
 
 Preserve the behaviors that prove this crate still owns the backend boundary:
 
-- prepared inputs can be turned into proofs and verified
+- prepared inputs can be turned into traces, proofs, and verification checks
 - structurally invalid backend inputs are rejected clearly
 - extension registration remains explicit and validated
 

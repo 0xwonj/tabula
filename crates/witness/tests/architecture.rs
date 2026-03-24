@@ -124,6 +124,24 @@ fn stark_module_keeps_low_level_memory_helpers_internal() {
         fs::read_to_string(crate_root().join("src/stark/mod.rs")).expect("read stark mod.rs");
 
     assert!(
+        stark_mod.contains("pub mod execution_store;")
+            && stark_mod.contains("pub mod root_store;")
+            && !stark_mod.contains("pub mod shared_store;"),
+        "witness::stark must expose split execution/root store kernels and must not retain a shared_store module"
+    );
+    assert!(
+        stark_mod.contains("pub use execution_store::prepare_execution_store;")
+            && stark_mod
+                .contains("pub use root_store::{SmtRootStoreContext, prepare_smt_root_store};"),
+        "witness::stark must expose function-shaped execution/root store kernels"
+    );
+    for forbidden in ["ExecutionStoreBuilder", "SmtRootStoreBuilder"] {
+        assert!(
+            !stark_mod.contains(forbidden),
+            "builder-shaped witness kernels must not remain in witness::stark: {forbidden}"
+        );
+    }
+    assert!(
         stark_mod.contains("pub mod schemes;"),
         "family-specific STARK witness helpers should be grouped under stark::schemes"
     );

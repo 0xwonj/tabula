@@ -10,7 +10,7 @@
 //! - [`derive_batch_report`] / [`derive_portable_state_summary`] /
 //!   [`derive_consistency_status`] — explicit
 //!   reporting projections from the canonical journal
-//! - [`BatchEnv`] — environment (hasher, sig verifier, nonce policy, static tables)
+//! - [`BatchEnv`] — execution environment (hasher, static tables, type runtimes, optional services)
 //! - [`execute_tx`] — execute a single transaction body for tests and harnesses
 //! - [`Overlay`] / [`OverlayResult`] — per-tx state overlay
 

@@ -1,18 +1,15 @@
 //! Root-tier proof composition.
 
 use tabula_chips::smt_path::{SmtColPathChip, SmtTablePathChip};
-use tabula_core::{RootProfileId, RootProofFamilyId};
-use tabula_stark::air::interaction::BusId;
+use tabula_core::RootProfileId;
 use tabula_stark::trace::DynChip;
 
 use crate::backend::AnyRap;
 
-/// How column commitments are aggregated into a state root.
-pub trait RootProof: Send + Sync {
-    /// Root proof backend family selected during machine setup.
-    fn proof_family_id(&self) -> RootProofFamilyId {
-        RootProofFamilyId::SMT_V1
-    }
+/// Proof-side backend for aggregating column commitments into a root tier proof.
+pub trait RootProofBackend: Send + Sync {
+    /// Human-readable proof-side root backend name.
+    fn name(&self) -> &str;
 
     /// Root binding families this backend can aggregate.
     fn supported_root_binding_families(&self) -> &'static [RootProfileId] {
@@ -24,20 +21,15 @@ pub trait RootProof: Send + Sync {
 
     /// Produce the chip(s) that implement this root proof (for trace building and debug validation).
     fn dyn_chips(&self) -> Vec<Box<dyn DynChip>>;
-
-    /// Buses this root proof's chips interact with.
-    fn buses(&self) -> Vec<BusId> {
-        vec![]
-    }
 }
 
 /// SMT root proof (standard per-tier architecture).
 #[derive(Debug)]
-pub struct SmtRootProof;
+pub struct SmtRootProofBackend;
 
-impl RootProof for SmtRootProof {
-    fn proof_family_id(&self) -> RootProofFamilyId {
-        RootProofFamilyId::SMT_V1
+impl RootProofBackend for SmtRootProofBackend {
+    fn name(&self) -> &str {
+        "smt_root_proof"
     }
 
     fn airs(&self) -> Vec<Box<dyn AnyRap>> {

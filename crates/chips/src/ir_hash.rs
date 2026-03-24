@@ -133,6 +133,10 @@ impl<F> BaseAir<F> for IrHashChip {
     fn width(&self) -> usize {
         ir_hash_width()
     }
+
+    fn preprocessed_next_row_columns(&self) -> Vec<usize> {
+        vec![]
+    }
 }
 
 impl<AB: InteractionAirBuilder> Air<AB> for IrHashChip {

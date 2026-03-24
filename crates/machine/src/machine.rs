@@ -5,25 +5,27 @@
 //!
 //! ```ignore
 //! let machine = TabulaMachine::new(columns)?;
-//! let prover = machine.prover();
-//! let verifier = machine.verifier();
-//! let traces = prepared_traces();
-//! let proof = prover.prove(crate::MachineProofInput {
-//!     traces,
+//! let proof = machine.prove(crate::PreparedMachineInput {
+//!     execution,
+//!     columns,
+//!     root,
 //!     statement,
 //!     statement_digest: [0u8; 32],
 //! })?;
-//! verifier.verify(&proof)?;
+//! machine.verify(&proof)?;
 //! ```
 
 use std::fmt;
+use std::sync::Arc;
 
 use crate::backend::ProofColumn;
 use crate::config::TabulaStarkConfig;
-use crate::setup::MachineSetup;
+use crate::input::PreparedMachineInput;
+use crate::proof::errors::{ProveError, VerificationError};
+use crate::proof::model::TabulaProof;
+use crate::setup::MachineTopology;
 use crate::setup::builder::MachineBuilder;
 use crate::setup::registry::SetupError;
-use std::sync::Arc;
 
 /// A configured STARK machine for multi-proof proving and verification.
 ///
@@ -31,7 +33,7 @@ use std::sync::Arc;
 /// architecture. Created from column configuration, then used to build
 /// traces, generate proofs, and verify proofs.
 pub struct TabulaMachine {
-    setup: MachineSetup,
+    pub(crate) topology: MachineTopology,
 }
 
 impl fmt::Debug for TabulaMachine {
@@ -39,9 +41,9 @@ impl fmt::Debug for TabulaMachine {
         f.debug_struct("TabulaMachine")
             .field(
                 "exec_chips",
-                &self.setup.proof_setups().execution.registry.chip_ids(),
+                &self.topology.proof_topology().execution.registry.chip_ids(),
             )
-            .field("num_columns", &self.setup.proof_setups().columns.len())
+            .field("num_columns", &self.topology.proof_topology().columns.len())
             .finish_non_exhaustive()
     }
 }
@@ -80,12 +82,17 @@ impl TabulaMachine {
 
     /// Construct from pre-built backend setup.
     #[must_use]
-    pub fn from_setup(setup: MachineSetup) -> Self {
-        Self { setup }
+    pub(crate) fn from_topology(topology: MachineTopology) -> Self {
+        Self { topology }
     }
 
-    /// The immutable backend setup owned by this machine.
-    pub fn setup(&self) -> &MachineSetup {
-        &self.setup
+    /// Build traces and generate a proof from prepared backend input.
+    pub fn prove(&self, input: PreparedMachineInput) -> Result<TabulaProof, ProveError> {
+        crate::proof::prover::Prover::new(&self.topology).prove(input)
+    }
+
+    /// Verify a proof against this machine's configured backend setup.
+    pub fn verify(&self, proof: &TabulaProof) -> Result<(), VerificationError> {
+        crate::proof::verifier::Verifier::new(&self.topology).verify(proof)
     }
 }

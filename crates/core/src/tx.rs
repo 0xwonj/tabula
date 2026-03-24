@@ -12,24 +12,6 @@ pub struct Transaction {
     pub tx_type: TxTypeId,
     /// Concrete parameter values.
     pub params: Vec<PortableValue>,
-    /// Sender's public key.
-    pub sender: [u8; 32],
-    /// Replay-protection nonce.
-    pub nonce: u64,
-    /// Cryptographic signature over the transaction.
-    pub signature: Vec<u8>,
-}
-
-impl Transaction {
-    /// Serialize the signable portion of the transaction (excludes signature).
-    ///
-    /// This is the message that should be signed and verified.
-    pub fn signable_bytes(&self) -> Result<Vec<u8>, crate::error::TabulaError> {
-        // Serialize (tx_type, params, sender, nonce) — NOT signature
-        let signable = (self.tx_type, &self.params, self.sender, self.nonce);
-        borsh::to_vec(&signable)
-            .map_err(|e| crate::error::TabulaError::BorshEncodingError(e.to_string()))
-    }
 }
 
 /// Program-level resource budgets for DoS prevention.

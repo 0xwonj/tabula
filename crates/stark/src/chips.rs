@@ -144,11 +144,6 @@ pub trait ChipSpec: Send + Sync {
         core_chips::name(&self.chip_id()).unwrap_or("Unknown")
     }
 
-    /// Number of public values consumed by this chip (default: 0).
-    fn num_public_values(&self) -> usize {
-        0
-    }
-
     /// Width of preprocessed trace columns (default: 0 = no preprocessed).
     ///
     /// A nonzero value indicates this chip has a preprocessed trace.

@@ -151,10 +151,9 @@ fn execute_journal(
     program: &tabula_ir::Program,
     snapshot: &impl tabula_core::traits::StateView,
     env: &tabula_executor::batch::BatchEnv<'_>,
-    initial_nonces: &BTreeMap<[u8; 32], u64>,
 ) -> ExecutionJournal {
     let resolved = ResolvedExecutionProgram::from_program(program).expect("resolved program");
-    execute_batch(batch, &resolved, snapshot, env, initial_nonces).expect("execute batch")
+    execute_batch(batch, &resolved, snapshot, env).expect("execute batch")
 }
 
 fn execute_report(
@@ -162,9 +161,8 @@ fn execute_report(
     program: &tabula_ir::Program,
     snapshot: &impl tabula_core::traits::StateView,
     env: &tabula_executor::batch::BatchEnv<'_>,
-    initial_nonces: &BTreeMap<[u8; 32], u64>,
 ) -> BatchReport {
-    let journal = execute_journal(batch, program, snapshot, env, initial_nonces);
+    let journal = execute_journal(batch, program, snapshot, env);
     derive_batch_report(&journal, env.type_runtimes).expect("derive batch result")
 }
 
@@ -240,20 +238,14 @@ impl PropertyQueryHandler for MinimumResolver {
 #[test]
 fn single_successful_tx() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(
-            1,
-            vec![u64_portable(0), u64_portable(42)],
-            sender,
-            0,
-        )],
+        transactions: vec![make_tx(1, vec![u64_portable(0), u64_portable(42)])],
     };
     let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let env = test_env();
-    let result = execute_report(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_report(&batch, &prog, &snap, &env);
     assert_eq!(result.txs.len(), 1);
     assert_tx_outcomes(&result, &[ExpectedTxOutcome::Success]);
     assert_write_set_cell(
@@ -268,20 +260,14 @@ fn single_successful_tx() {
 #[test]
 fn simple_write_projection_matches_journal_shape() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(
-            1,
-            vec![u64_portable(0), u64_portable(42)],
-            sender,
-            0,
-        )],
+        transactions: vec![make_tx(1, vec![u64_portable(0), u64_portable(42)])],
     };
     let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let env = test_env();
-    let journal = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let journal = execute_journal(&batch, &prog, &snap, &env);
     let result = derive_batch_report(&journal, env.type_runtimes).expect("derive batch result");
     assert_eq!(
         journal.state_summary.read_set_old,
@@ -312,11 +298,10 @@ fn simple_write_projection_matches_journal_shape() {
 #[test]
 fn inter_tx_read_your_writes() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
         transactions: vec![
-            make_tx(1, vec![u64_portable(0), u64_portable(100)], sender, 0),
-            make_tx(3, vec![], sender, 1),
+            make_tx(1, vec![u64_portable(0), u64_portable(100)]),
+            make_tx(3, vec![]),
         ],
     };
     let mut prog = test_program();
@@ -345,7 +330,7 @@ fn inter_tx_read_your_writes() {
     .unwrap();
 
     let env = test_env();
-    let result = execute_report(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_report(&batch, &prog, &snap, &env);
     assert_eq!(result.txs.len(), 2);
     assert_tx_outcomes(
         &result,
@@ -366,20 +351,18 @@ fn failed_tx_rollback() {
     data.insert(cell(1, 0, 0), u64_portable(50));
     data.insert(cell(1, 1, 0), u64_portable(50));
     let snap = snapshot(data);
-    let sender = [1u8; 32];
-
     let batch = Batch {
         transactions: vec![
-            make_tx(2, vec![u64_portable(30)], sender, 0),
-            make_tx(2, vec![u64_portable(100)], sender, 1),
-            make_tx(2, vec![u64_portable(10)], sender, 1),
+            make_tx(2, vec![u64_portable(30)]),
+            make_tx(2, vec![u64_portable(100)]),
+            make_tx(2, vec![u64_portable(10)]),
         ],
     };
     let mut prog = test_program();
     prog.register(transfer_tx_def()).unwrap();
 
     let env = test_env();
-    let result = execute_report(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_report(&batch, &prog, &snap, &env);
     assert_tx_outcomes(
         &result,
         &[
@@ -410,19 +393,18 @@ fn failed_tx_rollback_projection_matches_journal_shape() {
     data.insert(cell(1, 0, 0), u64_portable(50));
     data.insert(cell(1, 1, 0), u64_portable(50));
     let snap = snapshot(data);
-    let sender = [1u8; 32];
     let batch = Batch {
         transactions: vec![
-            make_tx(2, vec![u64_portable(30)], sender, 0),
-            make_tx(2, vec![u64_portable(100)], sender, 1),
-            make_tx(2, vec![u64_portable(10)], sender, 1),
+            make_tx(2, vec![u64_portable(30)]),
+            make_tx(2, vec![u64_portable(100)]),
+            make_tx(2, vec![u64_portable(10)]),
         ],
     };
     let mut prog = test_program();
     prog.register(transfer_tx_def()).unwrap();
 
     let env = test_env();
-    let journal = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let journal = execute_journal(&batch, &prog, &snap, &env);
     let result = derive_batch_report(&journal, env.type_runtimes).expect("derive batch result");
     assert_eq!(
         result,
@@ -475,15 +457,14 @@ fn failed_tx_rollback_projection_matches_journal_shape() {
 #[test]
 fn hash_instruction_projection_matches_journal_shape() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(4, vec![], sender, 0)],
+        transactions: vec![make_tx(4, vec![])],
     };
     let mut prog = test_program();
     prog.register(hash_tx_def()).unwrap();
 
     let env = test_env();
-    let journal = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let journal = execute_journal(&batch, &prog, &snap, &env);
     let shard = journal.successful_txs().next().expect("successful tx");
     assert_eq!(shard.ir_hash_calls.len(), 1);
     assert_eq!(shard.ir_hash_calls[0].instruction_index, 0);
@@ -511,9 +492,8 @@ fn hash_instruction_projection_matches_journal_shape() {
 #[test]
 fn property_read_projection_matches_journal_shape() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(5, vec![], sender, 0)],
+        transactions: vec![make_tx(5, vec![])],
     };
     let mut prog = test_program();
     prog.register(property_read_tx_def()).unwrap();
@@ -545,7 +525,7 @@ fn property_read_projection_matches_journal_shape() {
         ..test_env()
     };
 
-    let journal = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let journal = execute_journal(&batch, &prog, &snap, &env);
     let result = derive_batch_report(&journal, env.type_runtimes).expect("derive batch result");
     assert_eq!(
         result,
@@ -570,9 +550,8 @@ fn property_read_projection_matches_journal_shape() {
 #[test]
 fn precompile_projection_matches_journal_shape() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(1, vec![], sender, 0)],
+        transactions: vec![make_tx(1, vec![])],
     };
     let prog = compiled_precompile_requirement_program().program().clone();
 
@@ -585,7 +564,7 @@ fn precompile_projection_matches_journal_shape() {
         ..test_env()
     };
 
-    let journal = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let journal = execute_journal(&batch, &prog, &snap, &env);
     let result = derive_batch_report(&journal, env.type_runtimes).expect("derive batch result");
     assert_eq!(
         result,
@@ -609,47 +588,6 @@ fn precompile_projection_matches_journal_shape() {
 }
 
 #[test]
-fn invalid_signature() {
-    let snap = TestSnapshot(BTreeMap::new());
-    let batch = Batch {
-        transactions: vec![make_tx(
-            1,
-            vec![u64_portable(0), u64_portable(1)],
-            [1u8; 32],
-            0,
-        )],
-    };
-    let mut prog = test_program();
-    prog.register(write_tx_def()).unwrap();
-
-    let env = tabula_executor::batch::BatchEnv {
-        sig_verifier: &AlwaysInvalidSig,
-        ..test_env()
-    };
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
-    assert!(matches!(result.txs[0], TxExecutionOutcome::Failed(_)));
-}
-
-#[test]
-fn invalid_nonce() {
-    let snap = TestSnapshot(BTreeMap::new());
-    let batch = Batch {
-        transactions: vec![make_tx(
-            1,
-            vec![u64_portable(0), u64_portable(1)],
-            [1u8; 32],
-            999,
-        )],
-    };
-    let mut prog = test_program();
-    prog.register(write_tx_def()).unwrap();
-
-    let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
-    assert!(matches!(result.txs[0], TxExecutionOutcome::Failed(_)));
-}
-
-#[test]
 fn empty_batch() {
     let snap = TestSnapshot(BTreeMap::new());
     let batch = Batch {
@@ -658,7 +596,7 @@ fn empty_batch() {
     let prog = tabula_ir::Program::new();
 
     let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_journal(&batch, &prog, &snap, &env);
     assert!(result.txs.is_empty());
     assert!(result.state_summary.read_set_old.is_empty());
     assert!(result.state_summary.write_set_final.is_empty());
@@ -667,34 +605,32 @@ fn empty_batch() {
 #[test]
 fn tx_outcomes_len_matches_batch() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
         transactions: vec![
-            make_tx(1, vec![u64_portable(0), u64_portable(1)], sender, 0),
-            make_tx(1, vec![u64_portable(1), u64_portable(2)], sender, 1),
-            make_tx(1, vec![u64_portable(2), u64_portable(3)], sender, 2),
+            make_tx(1, vec![u64_portable(0), u64_portable(1)]),
+            make_tx(1, vec![u64_portable(1), u64_portable(2)]),
+            make_tx(1, vec![u64_portable(2), u64_portable(3)]),
         ],
     };
     let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_journal(&batch, &prog, &snap, &env);
     assert_eq!(result.txs.len(), batch.transactions.len());
 }
 
 #[test]
 fn param_count_mismatch_fails() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(1, vec![u64_portable(0)], sender, 0)],
+        transactions: vec![make_tx(1, vec![u64_portable(0)])],
     };
     let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_journal(&batch, &prog, &snap, &env);
     assert!(
         matches!(&result.txs[0], TxExecutionOutcome::Failed(failure) if failure.reason.contains("expected 2 params"))
     );
@@ -703,20 +639,14 @@ fn param_count_mismatch_fails() {
 #[test]
 fn param_type_mismatch_fails() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(
-            1,
-            vec![u64_portable(0), bool_portable(true)],
-            sender,
-            0,
-        )],
+        transactions: vec![make_tx(1, vec![u64_portable(0), bool_portable(true)])],
     };
     let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_journal(&batch, &prog, &snap, &env);
     assert!(
         matches!(&result.txs[0], TxExecutionOutcome::Failed(failure) if failure.reason.contains("param 1"))
     );
@@ -725,19 +655,18 @@ fn param_type_mismatch_fails() {
 #[test]
 fn events_carry_correct_tx_index() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
         transactions: vec![
-            make_tx(1, vec![u64_portable(0), u64_portable(10)], sender, 0),
-            make_tx(1, vec![u64_portable(1), u64_portable(20)], sender, 1),
-            make_tx(1, vec![u64_portable(2), u64_portable(30)], sender, 2),
+            make_tx(1, vec![u64_portable(0), u64_portable(10)]),
+            make_tx(1, vec![u64_portable(1), u64_portable(20)]),
+            make_tx(1, vec![u64_portable(2), u64_portable(30)]),
         ],
     };
     let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_journal(&batch, &prog, &snap, &env);
     let indices: Vec<u32> = result
         .successful_access_effects_with_tx()
         .map(|(tx_idx, _)| tx_idx)
@@ -751,16 +680,14 @@ fn failed_tx_partial_events() {
     data.insert(cell(1, 0, 0), u64_portable(10));
     data.insert(cell(1, 1, 0), u64_portable(50));
     let snap = snapshot(data);
-    let sender = [1u8; 32];
-
     let batch = Batch {
-        transactions: vec![make_tx(2, vec![u64_portable(100)], sender, 0)],
+        transactions: vec![make_tx(2, vec![u64_portable(100)])],
     };
     let mut prog = test_program();
     prog.register(transfer_tx_def()).unwrap();
 
     let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_journal(&batch, &prog, &snap, &env);
     match &result.txs[0] {
         TxExecutionOutcome::Failed(failure) => {
             assert_eq!(failure.partial_accesses.len(), 2);
@@ -777,15 +704,14 @@ fn failed_tx_partial_events() {
 #[test]
 fn precheck_failure_empty_partial() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(1, vec![u64_portable(0)], sender, 0)],
+        transactions: vec![make_tx(1, vec![u64_portable(0)])],
     };
     let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_journal(&batch, &prog, &snap, &env);
     match &result.txs[0] {
         TxExecutionOutcome::Failed(failure) => {
             assert!(failure.partial_accesses.is_empty());
@@ -796,23 +722,21 @@ fn precheck_failure_empty_partial() {
 }
 
 #[test]
-fn multi_sender_independent_nonces() {
+fn multiple_transactions_execute_in_batch_order() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender_a = [1u8; 32];
-    let sender_b = [2u8; 32];
     let batch = Batch {
         transactions: vec![
-            make_tx(1, vec![u64_portable(0), u64_portable(10)], sender_a, 0),
-            make_tx(1, vec![u64_portable(1), u64_portable(20)], sender_b, 0),
-            make_tx(1, vec![u64_portable(2), u64_portable(30)], sender_a, 1),
-            make_tx(1, vec![u64_portable(3), u64_portable(40)], sender_b, 1),
+            make_tx(1, vec![u64_portable(0), u64_portable(10)]),
+            make_tx(1, vec![u64_portable(1), u64_portable(20)]),
+            make_tx(1, vec![u64_portable(2), u64_portable(30)]),
+            make_tx(1, vec![u64_portable(3), u64_portable(40)]),
         ],
     };
     let mut prog = test_program();
     prog.register(write_tx_def()).unwrap();
 
     let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_journal(&batch, &prog, &snap, &env);
     assert_eq!(result.txs.len(), 4);
     assert!(result.txs.iter().all(|record| record.success().is_some()));
 }
@@ -823,19 +747,17 @@ fn failed_tx_reads_not_in_read_set() {
     data.insert(cell(1, 0, 0), u64_portable(50));
     data.insert(cell(1, 1, 0), u64_portable(50));
     let snap = snapshot(data);
-    let sender = [1u8; 32];
-
     let batch = Batch {
         transactions: vec![
-            make_tx(2, vec![u64_portable(10)], sender, 0),
-            make_tx(2, vec![u64_portable(999)], sender, 1),
+            make_tx(2, vec![u64_portable(10)]),
+            make_tx(2, vec![u64_portable(999)]),
         ],
     };
     let mut prog = test_program();
     prog.register(transfer_tx_def()).unwrap();
 
     let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_journal(&batch, &prog, &snap, &env);
     assert!(result.txs[0].success().is_some());
     assert!(matches!(result.txs[1], TxExecutionOutcome::Failed(_)));
 
@@ -858,8 +780,6 @@ fn failed_tx_reads_not_in_read_set() {
 #[test]
 fn emitted_events_accumulate_across_txs() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
-
     let emit_def = TxTypeDef {
         id: TxTypeId(10),
         name: "emit_test".into(),
@@ -872,16 +792,16 @@ fn emitted_events_accumulate_across_txs() {
 
     let batch = Batch {
         transactions: vec![
-            make_tx(10, vec![u64_portable(1)], sender, 0),
-            make_tx(10, vec![u64_portable(2)], sender, 1),
-            make_tx(10, vec![u64_portable(3)], sender, 2),
+            make_tx(10, vec![u64_portable(1)]),
+            make_tx(10, vec![u64_portable(2)]),
+            make_tx(10, vec![u64_portable(3)]),
         ],
     };
     let mut prog = tabula_ir::Program::new();
     prog.register(emit_def).unwrap();
 
     let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_journal(&batch, &prog, &snap, &env);
     let emitted: Vec<_> = result.successful_emitted().collect();
     assert_eq!(emitted.len(), 3);
     assert_eq!(emitted[0].data, vec![portable(u64_portable(1))]);
@@ -892,7 +812,6 @@ fn emitted_events_accumulate_across_txs() {
 #[test]
 fn emitted_event_projection_matches_journal_exactly() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let emit_def = TxTypeDef {
         id: TxTypeId(10),
         name: "emit_test".into(),
@@ -903,13 +822,13 @@ fn emitted_event_projection_matches_journal_exactly() {
         }],
     };
     let batch = Batch {
-        transactions: vec![make_tx(10, vec![u64_portable(7)], sender, 0)],
+        transactions: vec![make_tx(10, vec![u64_portable(7)])],
     };
     let mut prog = tabula_ir::Program::new();
     prog.register(emit_def).unwrap();
 
     let env = test_env();
-    let journal = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let journal = execute_journal(&batch, &prog, &snap, &env);
     let result = derive_batch_report(&journal, env.type_runtimes).expect("derive batch result");
     assert_eq!(
         result,
@@ -935,19 +854,18 @@ fn successful_logical_time_remains_monotonic_across_failures() {
     data.insert(cell(1, 0, 0), u64_portable(50));
     data.insert(cell(1, 1, 0), u64_portable(50));
     let snap = snapshot(data);
-    let sender = [1u8; 32];
     let batch = Batch {
         transactions: vec![
-            make_tx(2, vec![u64_portable(30)], sender, 0),
-            make_tx(2, vec![u64_portable(100)], sender, 1),
-            make_tx(2, vec![u64_portable(10)], sender, 1),
+            make_tx(2, vec![u64_portable(30)]),
+            make_tx(2, vec![u64_portable(100)]),
+            make_tx(2, vec![u64_portable(10)]),
         ],
     };
     let mut prog = test_program();
     prog.register(transfer_tx_def()).unwrap();
 
     let env = test_env();
-    let journal = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let journal = execute_journal(&batch, &prog, &snap, &env);
     let logical_times: Vec<_> = journal
         .successful_access_effects()
         .map(|effect| effect.logical_time)
@@ -969,13 +887,12 @@ fn successful_logical_time_remains_monotonic_across_failures() {
 #[test]
 fn unknown_tx_type_fails() {
     let snap = TestSnapshot(BTreeMap::new());
-    let sender = [1u8; 32];
     let batch = Batch {
-        transactions: vec![make_tx(999, vec![], sender, 0)],
+        transactions: vec![make_tx(999, vec![])],
     };
     let prog = tabula_ir::Program::new();
 
     let env = test_env();
-    let result = execute_journal(&batch, &prog, &snap, &env, &BTreeMap::new());
+    let result = execute_journal(&batch, &prog, &snap, &env);
     assert!(matches!(result.txs[0], TxExecutionOutcome::Failed(_)));
 }

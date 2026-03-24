@@ -1,4 +1,4 @@
-//! Cryptographic trait abstractions: hashing, signatures, program membership, batch digests.
+//! Cryptographic trait abstractions: hashing, program membership, batch digests.
 
 use crate::error::TabulaError;
 use crate::{Batch, Digest, PortableValue};
@@ -50,17 +50,6 @@ fn encode_value_ir(buf: &mut Vec<u8>, v: &PortableValue) {
     buf.extend_from_slice(&v.type_id().0.to_le_bytes());
     buf.extend_from_slice(&(v.payload().len() as u32).to_le_bytes());
     buf.extend_from_slice(v.payload());
-}
-
-/// Signature verification abstraction.
-pub trait SigVerifier: Send + Sync {
-    /// Verify a signature. Returns `Ok(())` on success, `Err` on failure.
-    fn verify(
-        &self,
-        sender: &[u8; 32],
-        message: &[u8],
-        signature: &[u8],
-    ) -> Result<(), TabulaError>;
 }
 
 /// Proves that an item is a member of the committed program (`programRoot`).

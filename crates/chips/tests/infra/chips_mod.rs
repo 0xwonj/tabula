@@ -1,3 +1,4 @@
+use p3_air::BaseAir;
 use tabula_chips::execution::ExecutionChip;
 use tabula_chips::poseidon::PoseidonChip;
 use tabula_chips::range_check::RangeCheckChip;
@@ -32,10 +33,16 @@ fn core_dyn_chips_ids_match() {
 fn chip_meta_public_values() {
     use tabula_chips::smt_path::SmtTablePathChip;
     let smt = SmtTablePathChip;
-    assert_eq!(smt.num_public_values(), 16); // old_root[8] + new_root[8]
+    assert_eq!(
+        BaseAir::<p3_koala_bear::KoalaBear>::num_public_values(&smt),
+        16
+    ); // old_root[8] + new_root[8]
 
     let exec = ExecutionChip::<3>;
-    assert_eq!(exec.num_public_values(), 0);
+    assert_eq!(
+        BaseAir::<p3_koala_bear::KoalaBear>::num_public_values(&exec),
+        0
+    );
 }
 
 #[test]

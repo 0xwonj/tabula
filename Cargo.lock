@@ -2801,6 +2801,7 @@ dependencies = [
  "p3-koala-bear",
  "p3-matrix",
  "tabula-artifact",
+ "tabula-chips",
  "tabula-commitment",
  "tabula-contract",
  "tabula-core",

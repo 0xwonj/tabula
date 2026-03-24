@@ -1,10 +1,10 @@
-//! Tests for the machine builder.
+//! Tests for the stable machine builder surface.
 
 mod common;
 
 use common::dummy_proof_column;
-use tabula_machine::{SetupError, SmtRootProof, TabulaMachine};
-use tabula_stark::chips::core_chips;
+use std::sync::Arc;
+use tabula_machine::{SetupError, SmtRootProofBackend, TabulaMachine};
 
 #[test]
 fn builder_creates_valid_machine() {
@@ -13,53 +13,44 @@ fn builder_creates_valid_machine() {
         .build()
         .expect("builder should create a valid machine");
 
-    let setups = machine.setup().proof_setups();
-    assert_eq!(setups.execution.registry.chip_ids().len(), 3);
-    assert_eq!(setups.columns.len(), 1);
-    assert_eq!(setups.root.registry.chip_ids().len(), 4);
+    let debug = format!("{machine:?}");
+    assert!(debug.contains("TabulaMachine"));
+    assert!(debug.contains("num_columns"));
 }
 
 #[test]
 fn builder_with_config() {
     let config = tabula_machine::default_config();
-    let machine = TabulaMachine::builder()
+    TabulaMachine::builder()
         .with_columns(vec![dummy_proof_column(0, 0)])
         .with_config(config)
         .build()
         .expect("builder with config");
-
-    assert_eq!(
-        machine
-            .setup()
-            .proof_setups()
-            .execution
-            .registry
-            .chip_ids()
-            .len(),
-        3
-    );
 }
 
 #[test]
 fn builder_with_custom_root_proof() {
-    let machine = TabulaMachine::builder()
+    TabulaMachine::builder()
         .with_columns(vec![dummy_proof_column(0, 0)])
-        .with_root_proof(SmtRootProof)
+        .with_root_proof_backend(SmtRootProofBackend)
         .build()
         .expect("builder with custom root proof");
+}
 
-    let root_ids = machine.setup().proof_setups().root.registry.chip_ids();
-    assert!(root_ids.contains(&core_chips::SMT_COL_PATH));
-    assert!(root_ids.contains(&core_chips::SMT_TABLE_PATH));
+#[test]
+fn builder_with_shared_root_proof_backend_arc() {
+    TabulaMachine::builder()
+        .with_columns(vec![dummy_proof_column(0, 0)])
+        .with_root_proof_backend_arc(Arc::new(SmtRootProofBackend))
+        .build()
+        .expect("builder with shared root proof backend");
 }
 
 #[test]
 fn builder_no_columns() {
-    let machine = TabulaMachine::builder()
+    TabulaMachine::builder()
         .build()
         .expect("builder with no columns");
-
-    assert_eq!(machine.setup().proof_setups().columns.len(), 0);
 }
 
 #[test]
@@ -72,33 +63,7 @@ fn direct_constructor_matches_builder() {
         .build()
         .expect("builder");
 
-    assert_eq!(
-        direct.setup().proof_setups().execution.registry.chip_ids(),
-        built.setup().proof_setups().execution.registry.chip_ids()
-    );
-    assert_eq!(
-        direct.setup().proof_setups().columns.len(),
-        built.setup().proof_setups().columns.len()
-    );
-    assert_eq!(
-        direct.setup().proof_setups().root.registry.chip_ids(),
-        built.setup().proof_setups().root.registry.chip_ids()
-    );
-}
-
-#[test]
-fn build_setup_round_trips_through_machine() {
-    let setup = TabulaMachine::builder()
-        .with_columns(vec![dummy_proof_column(0, 0)])
-        .build_setup()
-        .expect("machine setup");
-
-    let machine = TabulaMachine::from_setup(setup);
-    let setups = machine.setup().proof_setups();
-
-    assert_eq!(setups.execution.registry.chip_ids().len(), 3);
-    assert_eq!(setups.columns.len(), 1);
-    assert_eq!(setups.root.registry.chip_ids().len(), 4);
+    assert_eq!(format!("{direct:?}"), format!("{built:?}"));
 }
 
 mod test_extension {
@@ -166,20 +131,13 @@ mod test_extension {
 }
 
 #[test]
-fn builder_with_extension_registers_chip() {
-    use test_extension::{DUMMY_CHIP_ID, DummyExtension};
+fn builder_with_extension_builds_machine() {
+    use test_extension::DummyExtension;
 
-    let machine = TabulaMachine::builder()
+    TabulaMachine::builder()
         .with_backend_execution_extension(DummyExtension)
         .build()
         .expect("builder with extension");
-
-    let exec_ids = machine.setup().proof_setups().execution.registry.chip_ids();
-    assert!(exec_ids.contains(&core_chips::EXECUTION));
-    assert!(exec_ids.contains(&core_chips::STATIC_TABLE));
-    assert!(exec_ids.contains(&core_chips::RANGE_CHECK));
-    assert!(exec_ids.contains(&DUMMY_CHIP_ID));
-    assert_eq!(exec_ids.len(), 4);
 }
 
 #[test]

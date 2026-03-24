@@ -1,49 +1,34 @@
 use std::collections::BTreeMap;
 
 use rayon::prelude::*;
-use tabula_core::{ColId, TableId};
 
-use crate::machine::TabulaMachine;
+use crate::input::ColumnSlotKey;
+use crate::proof::errors::VerificationError;
+use crate::proof::model::{TabulaProof, check_cross_proof_bus_balance};
 use crate::proof::transcript::MachineTranscript;
-use crate::proof::types::{TabulaProof, VerificationError, check_cross_proof_bus_balance};
-use crate::setup::keys::TabulaVerifyingKey;
+use crate::setup::metadata::TierVerificationMetadata;
 use crate::setup::registry::ChipRegistry;
-use crate::setup::types::MachineSetup;
+use crate::setup::topology::MachineTopology;
 
 /// Borrowed verification facade over a configured [`TabulaMachine`].
-///
-/// This view exposes verification-only operations while sharing the machine's
-/// immutable setup and configuration.
 #[derive(Clone, Copy, Debug)]
-pub struct Verifier<'a> {
-    setup: &'a MachineSetup,
-}
-
-impl TabulaMachine {
-    /// Create a borrowed verification view over this machine.
-    #[must_use]
-    pub fn verifier(&self) -> Verifier<'_> {
-        self.setup().verifier()
-    }
-}
-
-impl MachineSetup {
-    /// Create a borrowed verification view over this setup.
-    #[must_use]
-    pub fn verifier(&self) -> Verifier<'_> {
-        Verifier { setup: self }
-    }
+pub(crate) struct Verifier<'a> {
+    topology: &'a MachineTopology,
 }
 
 impl Verifier<'_> {
+    pub(crate) fn new(topology: &MachineTopology) -> Verifier<'_> {
+        Verifier { topology }
+    }
+
     /// Verify a multi-proof against this machine's verifier state.
-    pub fn verify(&self, proof: &TabulaProof) -> Result<(), VerificationError> {
+    pub fn verify(self, proof: &TabulaProof) -> Result<(), VerificationError> {
         self.verify_inner(proof)
     }
 
     fn verify_inner(self, proof: &TabulaProof) -> Result<(), VerificationError> {
-        let config = self.setup.config();
-        let proof_setups = self.setup.proof_setups();
+        let config = self.topology.config();
+        let proof_topology = self.topology.proof_topology();
 
         let mut transcript = MachineTranscript::new(config);
         transcript.observe_statement_binding(&proof.statement, &proof.statement_digest);
@@ -55,53 +40,60 @@ impl Verifier<'_> {
 
         let logup_challenges = transcript.sample_logup_challenges();
 
-        let setup_index: BTreeMap<_, _> = proof_setups
+        let setup_index: BTreeMap<_, _> = proof_topology
             .columns
             .iter()
             .enumerate()
-            .map(|(i, ((table_id, col_id), _))| ((*table_id, *col_id), i))
+            .map(|(i, ((table_id, col_id), _))| {
+                (
+                    ColumnSlotKey {
+                        table: *table_id,
+                        col: *col_id,
+                    },
+                    i,
+                )
+            })
             .collect();
 
-        let mut verify_tasks: Vec<(&ChipRegistry, &TabulaVerifyingKey, _)> =
+        let mut verify_tasks: Vec<(&ChipRegistry, &TierVerificationMetadata, _)> =
             Vec::with_capacity(2 + proof.columns.len());
 
         verify_tasks.push((
-            &proof_setups.execution.registry,
-            &proof_setups.execution.verifying_key,
+            &proof_topology.execution.registry,
+            &proof_topology.execution.verification_metadata,
             &proof.execution,
         ));
 
         for (index, column) in proof.columns.iter().enumerate() {
-            let key = (
-                TableId(column.identity.table_id),
-                ColId(column.identity.col_id),
-            );
             let setup_idx =
                 setup_index
-                    .get(&key)
-                    .ok_or(VerificationError::ColumnIdentityMismatch {
+                    .get(&column.key)
+                    .ok_or(VerificationError::ColumnKeyMismatch {
                         index,
-                        proof_table: column.identity.table_id,
-                        proof_col: column.identity.col_id,
+                        proof_key: column.key,
                     })?;
-            let setup = &proof_setups.columns[*setup_idx].1;
-            verify_tasks.push((&setup.registry, &setup.verifying_key, &column.proof));
+            let topology = &proof_topology.columns[*setup_idx].1;
+            verify_tasks.push((
+                &topology.registry,
+                &topology.verification_metadata,
+                &column.proof,
+            ));
         }
 
         verify_tasks.push((
-            &proof_setups.root.registry,
-            &proof_setups.root.verifying_key,
+            &proof_topology.root.registry,
+            &proof_topology.root.verification_metadata,
             &proof.root,
         ));
 
         verify_tasks
             .par_iter()
-            .try_for_each(|(registry, verifying_key, envelope)| {
+            .try_for_each(|(registry, verification_metadata, envelope)| {
                 let mut challenger = transcript.fork();
                 crate::proof::subproof::verify_sub_proof_with_challenges(
                     config,
                     registry,
-                    verifying_key,
+                    verification_metadata,
                     &envelope.chip_openings,
                     envelope.preprocessed_commitment.clone(),
                     envelope.main_commitment.clone(),

@@ -13,18 +13,20 @@ use tabula_stark::trace::column_commitment::BusConsumer;
 use crate::backend::extension::ExecutionTierExtension;
 use crate::backend::{AnyRap, ProofColumn};
 use crate::config::{TabulaStarkConfig, default_config};
-use crate::setup::build::{column_tier_setup, execution_tier_setup, root_tier_setup};
 use crate::setup::execution::execution_dyn_chips;
-use crate::setup::keys::{TabulaProvingKey, TabulaVerifyingKey};
+use crate::setup::recipes::{
+    TierRecipe, column_tier_topology, execution_tier_topology, finalize_tier_topology,
+    root_tier_topology,
+};
 use crate::setup::registry::{ChipRegistry, SetupError};
-use crate::setup::root::{RootProof, SmtRootProof};
-use crate::setup::types::{MachineSetup, ProofSetups, TierSetup};
+use crate::setup::root::{RootProofBackend, SmtRootProofBackend};
+use crate::setup::topology::{MachineTopology, ProofTopology, TierTopology};
 
 /// Fluent builder for [`TabulaMachine`] construction.
 pub struct MachineBuilder {
     columns: Vec<Arc<dyn ProofColumn>>,
     config: TabulaStarkConfig,
-    root_proof: Box<dyn RootProof>,
+    root_proof_backend: Arc<dyn RootProofBackend>,
     extensions: Vec<Box<dyn ExecutionTierExtension>>,
 }
 
@@ -34,7 +36,7 @@ impl MachineBuilder {
         Self {
             columns: Vec::new(),
             config: default_config(),
-            root_proof: Box::new(SmtRootProof),
+            root_proof_backend: Arc::new(SmtRootProofBackend),
             extensions: Vec::new(),
         }
     }
@@ -51,13 +53,19 @@ impl MachineBuilder {
         self
     }
 
-    /// Override the root proof scheme.
-    pub fn with_root_proof(mut self, root: impl RootProof + 'static) -> Self {
-        self.root_proof = Box::new(root);
+    /// Override the proof-side root backend.
+    pub fn with_root_proof_backend(mut self, root: impl RootProofBackend + 'static) -> Self {
+        self.root_proof_backend = Arc::new(root);
         self
     }
 
-    /// Register a backend execution-tier extension.
+    /// Override the proof-side root backend using a shared backend object.
+    pub fn with_root_proof_backend_arc(mut self, root: Arc<dyn RootProofBackend>) -> Self {
+        self.root_proof_backend = root;
+        self
+    }
+
+    /// Register a machine-only backend execution-tier extension.
     pub fn with_backend_execution_extension(
         mut self,
         ext: impl ExecutionTierExtension + 'static,
@@ -66,7 +74,7 @@ impl MachineBuilder {
         self
     }
 
-    /// Register a boxed backend execution-tier extension.
+    /// Register a boxed machine-only backend execution-tier extension.
     pub fn with_backend_execution_extension_boxed(
         mut self,
         ext: Box<dyn ExecutionTierExtension>,
@@ -75,42 +83,41 @@ impl MachineBuilder {
         self
     }
 
-    /// Build the machine from execution/root setup and column instances.
+    /// Build the machine from execution/root topology and column instances.
     pub fn build(self) -> Result<crate::TabulaMachine, SetupError> {
-        let setup = self.build_setup()?;
-        Ok(crate::TabulaMachine::from_setup(setup))
+        let topology = self.build_topology()?;
+        Ok(crate::machine::TabulaMachine::from_topology(topology))
     }
 
-    /// Build the immutable backend setup without wrapping it in [`crate::TabulaMachine`].
-    pub fn build_setup(self) -> Result<MachineSetup, SetupError> {
-        let setups = self.create_setups()?;
-        Ok(MachineSetup::new(self.config, setups))
+    fn build_topology(self) -> Result<MachineTopology, SetupError> {
+        let proof_topology = self.create_proof_topology()?;
+        Ok(MachineTopology::new(self.config, proof_topology))
     }
 
-    fn create_setups(&self) -> Result<ProofSetups, SetupError> {
-        let execution = self.build_execution_tier()?;
+    fn create_proof_topology(&self) -> Result<ProofTopology, SetupError> {
+        let execution = self.build_execution_tier_topology()?;
 
         let columns = self
             .columns
             .iter()
             .map(|column| {
-                let setup = column_tier_setup(column.as_ref())?;
-                Ok(((column.table_id(), column.col_id()), setup))
+                let topology = column_tier_topology(column.as_ref())?;
+                Ok(((column.table_id(), column.col_id()), topology))
             })
             .collect::<Result<Vec<_>, SetupError>>()?;
 
-        let root = root_tier_setup(self.root_proof.as_ref())?;
+        let root = root_tier_topology(self.root_proof_backend.as_ref())?;
 
-        Ok(ProofSetups {
+        Ok(ProofTopology {
             execution,
             columns,
             root,
         })
     }
 
-    fn build_execution_tier(&self) -> Result<TierSetup, SetupError> {
+    fn build_execution_tier_topology(&self) -> Result<TierTopology, SetupError> {
         if self.extensions.is_empty() {
-            return execution_tier_setup();
+            return execution_tier_topology();
         }
 
         let mut registry = ChipRegistry::new();
@@ -124,7 +131,6 @@ impl MachineBuilder {
         }
 
         registry.register(RangeCheckChip);
-        registry.validate()?;
 
         let mut dyn_chips: Vec<Box<dyn DynChip>> = execution_dyn_chips();
         for ext in &self.extensions {
@@ -137,13 +143,8 @@ impl MachineBuilder {
             bus_consumers.extend(ext.bus_consumers());
         }
 
-        let proving_key = TabulaProvingKey::from_registry(&registry);
-        let verifying_key = TabulaVerifyingKey::from_proving_key(&proving_key);
-
-        Ok(TierSetup {
+        finalize_tier_topology(TierRecipe {
             registry,
-            proving_key,
-            verifying_key,
             dyn_chips,
             bus_consumers,
         })

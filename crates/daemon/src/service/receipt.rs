@@ -10,8 +10,8 @@ use super::error::{ServiceError, ServiceResult};
 use super::types::ExecutionReceipt;
 use crate::protocol::error::ErrorCode;
 
-const RECEIPT_VERSION: u32 = 2;
-const RECEIPT_SCHEME: &str = "execution_receipt_v2";
+const RECEIPT_VERSION: u32 = 3;
+const RECEIPT_SCHEME: &str = "execution_receipt_v3";
 /// Verification result from receipt comparison.
 #[derive(Debug, Clone)]
 pub struct ReceiptVerification {

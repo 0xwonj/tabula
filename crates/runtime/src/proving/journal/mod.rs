@@ -121,21 +121,9 @@ mod tests {
                 .expect("runtime");
         let state: State = three_account_balances(1000, 500, 200);
         let batch_file = multi_tx_batch(vec![
-            (
-                0,
-                vec![u64_portable(0), u64_portable(1), u64_portable(300)],
-                0,
-            ),
-            (
-                0,
-                vec![u64_portable(0), u64_portable(2), u64_portable(800)],
-                1,
-            ),
-            (
-                0,
-                vec![u64_portable(1), u64_portable(2), u64_portable(100)],
-                1,
-            ),
+            (0, vec![u64_portable(0), u64_portable(1), u64_portable(300)]),
+            (0, vec![u64_portable(0), u64_portable(2), u64_portable(800)]),
+            (0, vec![u64_portable(1), u64_portable(2), u64_portable(100)]),
         ]);
         let executed = runtime
             .execute(&state, &batch_file)

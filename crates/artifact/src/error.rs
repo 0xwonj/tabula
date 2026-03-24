@@ -5,14 +5,6 @@ use thiserror::Error;
 /// Artifact-layer error.
 #[derive(Debug, Error)]
 pub enum ArtifactError {
-    /// Invalid hex sender format.
-    #[error("invalid sender hex ({context}): {detail}")]
-    InvalidSenderHex {
-        /// What went wrong (e.g., "length", "encoding", "hex digit").
-        context: &'static str,
-        /// Human-readable detail.
-        detail: String,
-    },
     /// Missing state value for a required cell.
     #[error("state cell is missing value (table={table}, row={row}, col={col})")]
     MissingStateValue {

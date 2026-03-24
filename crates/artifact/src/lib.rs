@@ -19,7 +19,7 @@ pub use program::{Artifact, PrecompileDescriptor};
 pub use state::{State, StateEntry, merge_output_state_entries, normalize_state};
 
 // Batch
-pub use batch::{TransactionBatch, TransactionInput, parse_hex_32};
+pub use batch::{TransactionBatch, TransactionInput};
 
 // Statement
 pub use receipt::Statement;

@@ -25,9 +25,11 @@ use crate::config::{
     Challenger, EF4, PcsCommitment, PcsOpeningProof, TabulaPcs, TabulaStarkConfig,
 };
 use crate::proof::chip_ref::ChipRef;
+use crate::proof::errors::ProveError;
+use crate::proof::model::ChipOpening;
+use crate::proof::opening_shape::{preprocessed_opening_points, transition_opening_points};
 use crate::proof::quotient;
-use crate::proof::types::{ChipOpening, ProveError};
-use crate::setup::keys::TabulaProvingKey;
+use crate::setup::metadata::{TierProvingMetadata, rap_constraint_count};
 use crate::setup::registry::ChipRegistry;
 use tabula_stark::permutation::generate_permutation_trace_from_interactions;
 
@@ -110,10 +112,10 @@ impl<'a> ProofInstance<'a> {
     pub fn new(
         config: &'a TabulaStarkConfig,
         registry: &'a ChipRegistry,
-        pk: &TabulaProvingKey,
+        proving_metadata: &TierProvingMetadata,
         mut traces: TraceMap,
     ) -> Result<Self, ProveError> {
-        let mut chip_infos = collect_chip_infos(registry, pk, &mut traces)?;
+        let mut chip_infos = collect_chip_infos(registry, proving_metadata, &mut traces)?;
         if chip_infos.is_empty() {
             return Err(ProveError::NoChips);
         }
@@ -216,9 +218,10 @@ impl<'a> ProofInstance<'a> {
 
     /// Phase 5: Generate permutation traces from recorded interactions.
     ///
-    /// Returns the total cumulative sum across all chips in this instance.
-    /// The orchestrator checks that the sum across all instances is zero.
-    pub fn build_perm_traces(&mut self, challenges: [EF4; 2]) -> Result<EF4, ProveError> {
+    pub fn build_perm_traces(
+        &mut self,
+        challenges: [EF4; 2],
+    ) -> Result<BTreeMap<BusId, EF4>, ProveError> {
         self.logup_challenges = Some(challenges);
 
         // Parallelize per-chip perm trace generation (each chip is independent).
@@ -241,28 +244,14 @@ impl<'a> ProofInstance<'a> {
                 Ok(())
             })?;
 
-        // Aggregate cumsums sequentially (cheap summation).
-        let cumsum_total = self
-            .chip_infos
-            .iter()
-            .map(|info| info.cumsum)
-            .fold(EF4::ZERO, |acc, c| acc + c);
-
-        Ok(cumsum_total)
-    }
-
-    /// Per-bus cumulative sums aggregated across all chips in this instance.
-    ///
-    /// Available after [`build_perm_traces()`]. Used by the sharded prover to
-    /// classify internal (must be zero) vs external (exported) bus cumsums.
-    pub fn cumsums_by_bus(&self) -> BTreeMap<BusId, EF4> {
-        let mut totals: BTreeMap<BusId, EF4> = BTreeMap::new();
+        let mut cumsums_by_bus: BTreeMap<BusId, EF4> = BTreeMap::new();
         for info in &self.chip_infos {
             for (&bus, &cs) in &info.cumsums_by_bus {
-                *totals.entry(bus).or_insert(EF4::ZERO) += cs;
+                *cumsums_by_bus.entry(bus).or_insert(EF4::ZERO) += cs;
             }
         }
-        totals
+
+        Ok(cumsums_by_bus)
     }
 
     /// Phases 6-11: Commit perm traces, compute quotients, open all.
@@ -406,6 +395,7 @@ struct ChipProveInfo<'a> {
     main_trace: Option<RowMajorMatrix<KoalaBear>>,
     public_values: Vec<KoalaBear>,
     preprocessed: Option<RowMajorMatrix<KoalaBear>>,
+    preprocessed_uses_next_row: bool,
     degree_bits: usize,
     main_width: usize,
     interactions_per_row: usize,
@@ -430,7 +420,7 @@ struct ChipProveInfo<'a> {
 /// matrices into `ChipProveInfo` without cloning.
 fn collect_chip_infos<'a>(
     registry: &'a ChipRegistry,
-    pk: &TabulaProvingKey,
+    proving_metadata: &TierProvingMetadata,
     traces: &mut TraceMap,
 ) -> Result<Vec<ChipProveInfo<'a>>, ProveError> {
     let mut infos = Vec::new();
@@ -449,24 +439,68 @@ fn collect_chip_infos<'a>(
             return Err(ProveError::InvalidTraceHeight { chip_id, height });
         }
 
-        let keygen = pk
+        let keygen = proving_metadata
             .get(chip_id)
             .ok_or(ProveError::MissingKeygenInfo { chip_id })?;
         let degree_bits = height.trailing_zeros() as usize;
         let main_width = entry.main.width();
+        if main_width != keygen.main_width {
+            return Err(ProveError::InvalidProofInput {
+                detail: format!(
+                    "chip '{}' main trace width {} does not match metadata width {}",
+                    chip_id, main_width, keygen.main_width
+                ),
+            });
+        }
+
+        match entry.preprocessed.as_ref() {
+            Some(pp) if pp.width() != keygen.preprocessed_width => {
+                return Err(ProveError::InvalidProofInput {
+                    detail: format!(
+                        "chip '{}' preprocessed trace width {} does not match metadata width {}",
+                        chip_id,
+                        pp.width(),
+                        keygen.preprocessed_width
+                    ),
+                });
+            }
+            None if keygen.preprocessed_width > 0 => {
+                return Err(ProveError::InvalidProofInput {
+                    detail: format!(
+                        "chip '{}' requires a preprocessed trace of width {}",
+                        chip_id, keygen.preprocessed_width
+                    ),
+                });
+            }
+            Some(_) if keygen.preprocessed_width == 0 => {
+                return Err(ProveError::InvalidProofInput {
+                    detail: format!("chip '{chip_id}' provided an unexpected preprocessed trace"),
+                });
+            }
+            _ => {}
+        }
         let interactions_per_row =
             keygen.interactions.num_sends_per_row + keygen.interactions.num_receives_per_row;
+        let num_public_values = entry.public_values.len();
+        if num_public_values != keygen.num_public_values {
+            return Err(ProveError::InvalidProofInput {
+                detail: format!(
+                    "chip '{}' public values length {} does not match metadata length {}",
+                    chip_id, num_public_values, keygen.num_public_values
+                ),
+            });
+        }
 
         let layout = AirLayout {
             preprocessed_width: keygen.preprocessed_width,
             main_width,
-            num_public_values: entry.public_values.len(),
+            num_public_values: keygen.num_public_values,
             ..Default::default()
         };
         let inner_constraint_count =
             get_symbolic_constraints(&ChipRef::new(chip.air()), layout).len();
         let rap_count = if interactions_per_row > 0 {
-            crate::setup::keys::rap_constraint_count(interactions_per_row)
+            rap_constraint_count(interactions_per_row)
         } else {
             0
         };
@@ -479,17 +513,13 @@ fn collect_chip_infos<'a>(
             inner_log
         };
 
-        let mut cr = ChipRef::new(chip.air());
-        if let Some(ref pp) = entry.preprocessed {
-            cr = cr.with_preprocessed(pp.clone());
-        }
-
         infos.push(ChipProveInfo {
-            chip_ref: cr,
+            chip_ref: ChipRef::new(chip.air()),
             chip_id,
             main_trace: Some(entry.main),
             public_values: entry.public_values,
             preprocessed: entry.preprocessed,
+            preprocessed_uses_next_row: !keygen.preprocessed_next_row_columns.is_empty(),
             degree_bits,
             main_width,
             interactions_per_row,
@@ -642,20 +672,12 @@ fn open_and_extract(
 
     // ── Phase 10: Build opening rounds & open all commitments ───────────
 
-    let zeta_pair = |degree_bits: usize| -> Vec<EF4> {
-        let domain = <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << degree_bits);
-        let zeta_next = domain
-            .next_point(zeta)
-            .expect("domain has no next point for zeta");
-        vec![zeta, zeta_next]
-    };
-
     let mut rounds = Vec::new();
 
     // Round 0: main traces — each matrix opened at [zeta, zeta_next]
     let main_points: Vec<Vec<EF4>> = chip_infos
         .iter()
-        .map(|i| zeta_pair(i.degree_bits))
+        .map(|info| transition_opening_points(pcs, info.degree_bits, zeta).into())
         .collect();
     rounds.push((ctx.main_data, main_points));
 
@@ -668,17 +690,24 @@ fn open_and_extract(
         let pts: Vec<Vec<EF4>> = ctx
             .rap_chip_indices
             .iter()
-            .map(|&i| zeta_pair(chip_infos[i].degree_bits))
+            .map(|&i| transition_opening_points(pcs, chip_infos[i].degree_bits, zeta).into())
             .collect();
         rounds.push((perm_d, pts));
     }
 
-    // Round 3: preprocessed traces — each matrix opened at [zeta, zeta_next]
+    // Round 3: preprocessed traces — each matrix opened at [zeta] or [zeta, zeta_next]
     if let Some(pp_d) = ctx.preprocessed_data {
         let pts: Vec<Vec<EF4>> = ctx
             .pp_chip_indices
             .iter()
-            .map(|&i| zeta_pair(chip_infos[i].degree_bits))
+            .map(|&i| {
+                preprocessed_opening_points(
+                    pcs,
+                    chip_infos[i].degree_bits,
+                    zeta,
+                    chip_infos[i].preprocessed_uses_next_row,
+                )
+            })
             .collect();
         rounds.push((pp_d, pts));
     }
@@ -712,10 +741,15 @@ fn open_and_extract(
                 _ => (vec![], vec![]),
             };
             let (preprocessed_local, preprocessed_next) = match (ctx.pp_idx_map[i], pp_round_idx) {
-                (Some(idx), Some(r)) => (
-                    Some(opened_values[r][idx][0].clone()),
-                    Some(opened_values[r][idx][1].clone()),
-                ),
+                (Some(idx), Some(r)) => {
+                    let local = Some(opened_values[r][idx][0].clone());
+                    let next = if info.preprocessed_uses_next_row {
+                        Some(opened_values[r][idx][1].clone())
+                    } else {
+                        None
+                    };
+                    (local, next)
+                }
                 _ => (None, None),
             };
             let (q_start, q_count) = quotient_chunk_map[i];
@@ -741,4 +775,117 @@ fn open_and_extract(
         .collect();
 
     (chip_openings, opening_proof)
+}
+
+#[cfg(test)]
+mod tests {
+    use p3_air::BaseAir;
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
+    use tabula_chips::poseidon::PoseidonChip;
+    use tabula_chips::smt_path::{SMT_TABLE_PATH_NUM_PUBLIC_VALUES, SmtTablePathChip};
+    use tabula_stark::chips::{ChipSpec, core_chips};
+    use tabula_stark::trace::TraceMap;
+
+    use super::ProofInstance;
+    use crate::config::default_config;
+    use crate::proof::errors::ProveError;
+    use crate::setup::metadata::TierProvingMetadata;
+    use crate::setup::registry::ChipRegistry;
+
+    fn poseidon_main_trace() -> RowMajorMatrix<KoalaBear> {
+        let width = BaseAir::<KoalaBear>::width(&PoseidonChip);
+        RowMajorMatrix::new(vec![KoalaBear::ZERO; width * 2], width)
+    }
+
+    fn poseidon_preprocessed(width: usize) -> RowMajorMatrix<KoalaBear> {
+        RowMajorMatrix::new(vec![KoalaBear::ZERO; width * 2], width)
+    }
+
+    fn poseidon_registry_and_metadata() -> (ChipRegistry, TierProvingMetadata) {
+        let mut registry = ChipRegistry::new();
+        registry.register(PoseidonChip);
+        let proving_metadata = TierProvingMetadata::from_registry(&registry);
+        (registry, proving_metadata)
+    }
+
+    fn smt_table_main_trace() -> RowMajorMatrix<KoalaBear> {
+        let width = BaseAir::<KoalaBear>::width(&SmtTablePathChip);
+        RowMajorMatrix::new(vec![KoalaBear::ZERO; width * 2], width)
+    }
+
+    fn smt_table_registry_and_metadata() -> (ChipRegistry, TierProvingMetadata) {
+        let mut registry = ChipRegistry::new();
+        registry.register(SmtTablePathChip);
+        let proving_metadata = TierProvingMetadata::from_registry(&registry);
+        (registry, proving_metadata)
+    }
+
+    #[test]
+    fn proving_rejects_missing_preprocessed_trace_when_metadata_requires_it() {
+        let config = default_config();
+        let (registry, proving_metadata) = poseidon_registry_and_metadata();
+        let mut traces = TraceMap::new();
+        traces.insert(core_chips::POSEIDON, poseidon_main_trace());
+
+        let err = ProofInstance::new(&config, &registry, &proving_metadata, traces)
+            .err()
+            .expect("missing preprocessed trace must fail");
+
+        match err {
+            ProveError::InvalidProofInput { detail } => {
+                assert!(detail.contains("requires a preprocessed trace"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn proving_rejects_preprocessed_width_mismatch() {
+        let config = default_config();
+        let (registry, proving_metadata) = poseidon_registry_and_metadata();
+        let mut traces = TraceMap::new();
+        traces.insert_with_preprocessed(
+            core_chips::POSEIDON,
+            poseidon_main_trace(),
+            poseidon_preprocessed(ChipSpec::preprocessed_width(&PoseidonChip) - 1),
+        );
+
+        let err = ProofInstance::new(&config, &registry, &proving_metadata, traces)
+            .err()
+            .expect("width mismatch must fail");
+
+        match err {
+            ProveError::InvalidProofInput { detail } => {
+                assert!(detail.contains("preprocessed trace width"));
+                assert!(detail.contains("metadata width"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn proving_rejects_public_value_length_mismatch() {
+        let config = default_config();
+        let (registry, proving_metadata) = smt_table_registry_and_metadata();
+        let mut traces = TraceMap::new();
+        traces.insert(core_chips::SMT_TABLE_PATH, smt_table_main_trace());
+        traces.set_public_values(
+            core_chips::SMT_TABLE_PATH,
+            vec![KoalaBear::ZERO; SMT_TABLE_PATH_NUM_PUBLIC_VALUES - 1],
+        );
+
+        let err = ProofInstance::new(&config, &registry, &proving_metadata, traces)
+            .err()
+            .expect("public value length mismatch must fail");
+
+        match err {
+            ProveError::InvalidProofInput { detail } => {
+                assert!(detail.contains("public values length"));
+                assert!(detail.contains("metadata length"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
 }

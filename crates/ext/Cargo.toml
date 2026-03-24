@@ -9,6 +9,7 @@ default = ["prove"]
 verify = [
     "dep:tabula-machine",
     "dep:tabula-stark",
+    "dep:tabula-chips",
     "dep:tabula-commitment",
     "dep:p3-air",
     "dep:p3-field",
@@ -30,6 +31,7 @@ tabula-core = { workspace = true }
 tabula-types = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-profile = { workspace = true }
+tabula-chips = { workspace = true, optional = true }
 tabula-machine = { workspace = true, optional = true }
 tabula-stark = { workspace = true, optional = true }
 tabula-executor = { workspace = true, optional = true }

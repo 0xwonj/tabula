@@ -22,6 +22,55 @@ maps them onto the current code.
 6. Treat `Artifact` as the sealed portable form of a program.
 7. Treat `HostEnvironment` as the canonical bootstrap seam.
 
+## Naming Grammar
+
+These words are not interchangeable. They describe different layers of
+ownership.
+
+- `Descriptor`
+  - One reusable semantic definition.
+  - Use when the type answers: "what is this thing?"
+  - A descriptor defines identity, typed shape, and compatibility-relevant
+    contract for one item.
+  - Good fits: `TypeDescriptor`, `PrecompileDescriptor`,
+    future `RelationDescriptor`.
+- `Catalog`
+  - Canonical reusable collection of descriptors.
+  - Use when the collection is registry-like, reusable across programs, and
+    not itself a program-owned sealed inclusion set.
+  - Good fit: `ProfileCatalog`.
+- `Manifest`
+  - One sealed inclusion set owned by a program, artifact, or statement scope.
+  - Use when the collection answers: "which exact items are present or
+    required in this sealed scope?"
+  - A manifest is typically ordered, unique, and binding-relevant.
+  - Good fit: `precompile_manifest`.
+- `Binding`
+  - Exact identity or commitment for one semantic scope.
+  - Use when the type answers: "what exact artifact / program / relation set
+    is this proof or verifier context bound to?"
+  - A binding is stronger than a descriptor. It pins one concrete sealed
+    identity.
+  - Good fits: `Binding`, `ColumnRootBinding`, future `RelationBinding`.
+- `Entry`
+  - One value-bearing item inside a pool or manifest.
+  - Use when the item is primarily data, not a reusable semantic contract.
+  - Good fit: future `ConstantEntry`.
+- `Pool`
+  - Canonical owned collection of value-bearing entries.
+  - Use when the collection is a program-owned immutable value store rather
+    than a descriptor inventory.
+  - Good fit: future `ConstantPool`.
+
+### Naming Rule of Thumb
+
+- If the type defines semantics, use `Descriptor`.
+- If the type stores reusable definitions, use `Catalog`.
+- If the type seals "which items exist here", use `Manifest`.
+- If the type seals "what exact identity is this bound to", use `Binding`.
+- If the type mostly carries raw immutable data, prefer `Entry` or `Pool`
+  over `Descriptor`.
+
 ## System Elements
 
 ### 1. Authoring and Language
@@ -32,9 +81,35 @@ maps them onto the current code.
 - `AST`
   - Parsed syntax tree.
   - Internal authoring representation.
+- `HIR`
+  - High-level semantic source IR.
+  - Use for the first compiler-owned representation that preserves source-level
+    program structure and semantic categories after parsing.
+- `MIR`
+  - Mid-level compiler IR.
+  - Use for normalized compiler-facing bodies after name resolution, typing,
+    sugar removal, and effect classification, but before lowering to the
+    canonical execution/proof contract.
 - `IR`
-  - Executable instruction-level form.
+  - Canonical execution and proof instruction-level form.
+  - This is the small, stable runtime-facing contract, not a generic label for
+    every intermediate form.
   - Owned by `tabula-ir`.
+- `EffectSummary`
+  - Compiler-owned summary of a callable or body's semantic effects.
+  - Intended primarily for MIR and middle-end checking.
+  - Should distinguish world effects, proof-observable semantic effects, and
+    failure or checked behavior.
+- `WorldEffect`
+  - Static effect category for interaction with mutable program state or
+    externally visible world surfaces.
+- `ProofEffect`
+  - Static effect category for semantically important operations that remain
+    visible to journaling and proof preparation even when they do not mutate
+    state.
+- `MayFail`
+  - Static marker for checked or partial behavior that may fail and therefore
+    matters for guarded lowering and callable legality.
 
 ### 2. Semantic Program Model
 
@@ -172,6 +247,61 @@ Builders and SDK surfaces are facades over this host-owned model.
   - Host-installed backend family for one exact precompile descriptor.
   - Current type: `tabula_ext::PrecompileBackendFactory`.
 
+### 7.1 Reserved Vocabulary for Relations and Constants
+
+These names are not fully implemented yet, but they are the intended canonical
+terms for future relation and constant support.
+
+- `RelationDescriptor`
+  - Canonical semantic definition of one immutable relation family.
+  - Use for relation identity, arity, typing, and semantic class such as
+    functional vs membership-only.
+- `RelationManifest`
+  - Program-owned sealed inclusion set of referenced relation families.
+  - Use when the program artifact must declare which exact relations are part
+    of its semantic contract.
+- `RelationBinding`
+  - Exact binding for one concrete relation universe or committed relation set.
+  - Use when verifier-visible identity must distinguish not only relation
+    shape, but also exact committed contents or version.
+- `ConstantEntry`
+  - One immutable program-owned value in a sealed constant store.
+  - Prefer `Entry` rather than `Descriptor` because constants are primarily
+    data, not reusable semantic definitions.
+- `ConstantPool`
+  - Program-owned immutable store of sealed constant entries.
+  - Prefer `Pool` rather than `Manifest` for the in-program constant store.
+- `ConstantManifest`
+  - Reserved for the rare case where a verifier-visible or artifact-exported
+    sealed inventory of constants is needed.
+  - Do not use this name for the normal in-program constant store; prefer
+    `ConstantPool`.
+
+### 7.2 Relation vs Constant
+
+- `Relation`
+  - Immutable allowed structure over one tuple of values.
+  - A relation is about membership or functional evaluation.
+  - Use relation vocabulary for range checks, decomposition constraints,
+    fixed maps, and other tuple-level semantic contracts.
+- `Constant`
+  - Immutable data value owned by the program or proof instance.
+  - A constant is about loading fixed data, not asserting allowed tuple
+    structure.
+  - Use constant vocabulary for domain separators, config thresholds, fixed
+    blobs, and sealed value vectors.
+
+### 7.3 Reserved Relation Operations
+
+- `AssertRelation`
+  - Membership assertion against one `RelationDescriptor`.
+- `EvalRelation`
+  - Functional relation evaluation against one `RelationDescriptor`.
+
+These are the preferred future semantic IR primitives. Backend techniques such
+as lookup arguments are lower-level realizations, not the canonical public
+vocabulary.
+
 ### 8. Commitment Contract
 
 - `ColumnRootBinding`
@@ -243,6 +373,11 @@ These are delivery surfaces, not core semantic concepts.
 | `ColumnProfile` | Sealed per-column semantic/proof contract | `tabula_profile::ColumnProfile` |
 | `PrecompileSignature` | Sealed typed precompile I/O contract | `tabula_ext::PrecompileSignature` |
 | `ColumnRootBinding` | Canonical committed-column binding contract | `tabula_commitment::ColumnRootBinding` |
+| `RelationDescriptor` | Reserved future semantic relation definition | planned vocabulary |
+| `RelationManifest` | Reserved future sealed relation inclusion set | planned vocabulary |
+| `RelationBinding` | Reserved future exact relation-universe identity | planned vocabulary |
+| `ConstantEntry` | Reserved future immutable program-owned constant item | planned vocabulary |
+| `ConstantPool` | Reserved future immutable program-owned constant store | planned vocabulary |
 | `Backend` | Raw proving machinery below the SDK surface | `machine`, `stark`, `chips`, `witness` |
 
 ## Current Internal Vocabulary

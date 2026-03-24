@@ -44,7 +44,7 @@ pub fn touch_trace_case() -> TraceCase {
     TraceCase {
         source: touch_accounts_source(),
         initial_cells: vec![(TableId(0), ColId(0), RowKey(10), u64_portable(50))],
-        transactions: vec![core_tx(0, vec![u64_portable(10)], 0)],
+        transactions: vec![core_tx(0, vec![u64_portable(10)])],
     }
 }
 
@@ -52,7 +52,7 @@ pub fn arith_add_sub_trace_case() -> TraceCase {
     TraceCase {
         source: arith_add_sub_source(),
         initial_cells: vec![(TableId(0), ColId(0), RowKey(10), u64_portable(100))],
-        transactions: vec![core_tx(0, vec![u64_portable(10)], 0)],
+        transactions: vec![core_tx(0, vec![u64_portable(10)])],
     }
 }
 
@@ -60,7 +60,7 @@ pub fn cmp_assert_trace_case() -> TraceCase {
     TraceCase {
         source: cmp_assert_source(),
         initial_cells: vec![(TableId(0), ColId(0), RowKey(5), u64_portable(100))],
-        transactions: vec![core_tx(0, vec![u64_portable(5)], 0)],
+        transactions: vec![core_tx(0, vec![u64_portable(5)])],
     }
 }
 
@@ -74,7 +74,6 @@ pub fn single_transfer_trace_case() -> TraceCase {
         transactions: vec![core_tx(
             0,
             vec![u64_portable(0), u64_portable(1), u64_portable(300)],
-            0,
         )],
     }
 }
@@ -88,21 +87,9 @@ pub fn mixed_outcome_transfer_trace_case() -> TraceCase {
             (TableId(0), ColId(0), RowKey(2), u64_portable(200)),
         ],
         transactions: vec![
-            core_tx(
-                0,
-                vec![u64_portable(0), u64_portable(1), u64_portable(300)],
-                0,
-            ),
-            core_tx(
-                0,
-                vec![u64_portable(0), u64_portable(2), u64_portable(800)],
-                1,
-            ),
-            core_tx(
-                0,
-                vec![u64_portable(1), u64_portable(2), u64_portable(100)],
-                1,
-            ),
+            core_tx(0, vec![u64_portable(0), u64_portable(1), u64_portable(300)]),
+            core_tx(0, vec![u64_portable(0), u64_portable(2), u64_portable(800)]),
+            core_tx(0, vec![u64_portable(1), u64_portable(2), u64_portable(100)]),
         ],
     }
 }

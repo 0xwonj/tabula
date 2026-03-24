@@ -1,17 +1,61 @@
 use std::sync::Arc;
 
 use tabula_core::RootProfileId;
-use tabula_machine::{MachineBuilder, RootProof, SmtRootProof, TabulaStarkConfig};
+use tabula_ext::backend::ExecutionBackend;
+use tabula_ext::backend::execution::{
+    IrHashExecutionBackend, PrecompileTranscriptExecutionBackend,
+};
+use tabula_ir::{Instruction, Program};
+use tabula_machine::backend::extension::ExecutionTierExtension;
+use tabula_machine::{MachineBuilder, RootProofBackend, TabulaStarkConfig};
 
-struct SharedRootProof(Arc<dyn RootProof>);
+pub(crate) fn supported_root_binding_families(
+    root_proof_backend: &Arc<dyn RootProofBackend>,
+) -> &[RootProfileId] {
+    root_proof_backend.supported_root_binding_families()
+}
 
-impl RootProof for SharedRootProof {
-    fn proof_family_id(&self) -> tabula_core::RootProofFamilyId {
-        self.0.proof_family_id()
+pub(crate) fn build_machine_builder(
+    config: &TabulaStarkConfig,
+    root_proof_backend: Arc<dyn RootProofBackend>,
+) -> MachineBuilder {
+    MachineBuilder::new()
+        .with_config(config.clone())
+        .with_root_proof_backend_arc(root_proof_backend)
+}
+
+pub(crate) fn attach_execution_backend<B>(
+    builder: MachineBuilder,
+    backend: Arc<B>,
+) -> MachineBuilder
+where
+    B: ExecutionBackend + ?Sized + 'static,
+{
+    builder.with_backend_execution_extension(SharedExecutionBackend(backend))
+}
+
+pub(crate) fn attach_builtin_execution_backends(
+    mut builder: MachineBuilder,
+    program: &Program,
+    has_precompile_manifest: bool,
+) -> MachineBuilder {
+    if program_uses_ir_hash(program) {
+        builder = attach_execution_backend(builder, Arc::new(IrHashExecutionBackend));
     }
+    if has_precompile_manifest {
+        builder = attach_execution_backend(builder, Arc::new(PrecompileTranscriptExecutionBackend));
+    }
+    builder
+}
 
-    fn supported_root_binding_families(&self) -> &'static [RootProfileId] {
-        self.0.supported_root_binding_families()
+struct SharedExecutionBackend<B: ExecutionBackend + ?Sized>(Arc<B>);
+
+impl<B> ExecutionTierExtension for SharedExecutionBackend<B>
+where
+    B: ExecutionBackend + ?Sized + 'static,
+{
+    fn name(&self) -> &str {
+        self.0.name()
     }
 
     fn airs(&self) -> Vec<Box<dyn tabula_machine::backend::AnyRap>> {
@@ -22,52 +66,15 @@ impl RootProof for SharedRootProof {
         self.0.dyn_chips()
     }
 
-    fn buses(&self) -> Vec<tabula_stark::air::interaction::BusId> {
-        self.0.buses()
+    fn bus_consumers(&self) -> Vec<Box<dyn tabula_stark::trace::column_commitment::BusConsumer>> {
+        self.0.bus_consumers()
     }
 }
 
-/// Machine-side proving and verification configuration shared by runtime and verifier builders.
-#[derive(Clone)]
-pub struct MachineConfig {
-    config: TabulaStarkConfig,
-    root_proof: Arc<dyn RootProof>,
-}
-
-impl MachineConfig {
-    /// Build the standard machine configuration.
-    pub fn standard() -> Self {
-        Self {
-            config: tabula_machine::default_config(),
-            root_proof: Arc::new(SmtRootProof),
-        }
-    }
-
-    /// Override the root proof backend.
-    pub fn with_root_proof(mut self, root: impl RootProof + 'static) -> Self {
-        self.root_proof = Arc::new(root);
-        self
-    }
-
-    /// Override the STARK configuration.
-    pub fn with_config(mut self, config: TabulaStarkConfig) -> Self {
-        self.config = config;
-        self
-    }
-
-    pub(crate) fn supported_root_binding_families(&self) -> &[RootProfileId] {
-        self.root_proof.supported_root_binding_families()
-    }
-
-    pub(crate) fn build_machine_builder(&self) -> MachineBuilder {
-        MachineBuilder::new()
-            .with_config(self.config.clone())
-            .with_root_proof(SharedRootProof(Arc::clone(&self.root_proof)))
-    }
-}
-
-impl Default for MachineConfig {
-    fn default() -> Self {
-        Self::standard()
-    }
+fn program_uses_ir_hash(program: &Program) -> bool {
+    program
+        .all_types()
+        .iter()
+        .flat_map(|tx| tx.body.iter())
+        .any(|instruction| matches!(instruction, Instruction::Hash { .. }))
 }

@@ -80,13 +80,9 @@ fn render_schema_batch(
             let tx_type_options = tx_type_options.clone();
 
             let tx_type_val = tx.tx_type;
-            let sender_val = tx.sender.clone();
-            let nonce_val = tx.nonce;
             let param_values: Vec<String> = tx.params.iter().map(format_value).collect();
 
             let persist_type = persist.clone();
-            let persist_nonce = persist.clone();
-            let persist_sender = persist.clone();
             let persist_remove = persist.clone();
 
             view! {
@@ -166,43 +162,6 @@ fn render_schema_batch(
                             })
                             .collect_view()}
                     </div>
-                    <div class="tx-meta">
-                        <label>
-                            <span>"sender"</span>
-                            <input
-                                type="text"
-                                class="sender-input"
-                                prop:value=sender_val
-                                on:change=move |ev| {
-                                    if let Ok(mut b) = parse_batch(&batch_json.get()) {
-                                        if let Some(target) = b.transactions.get_mut(idx) {
-                                            target.sender = event_target_value(&ev);
-                                        }
-                                        set_batch_json.set(pretty_json_value(&json!(b)));
-                                        persist_sender();
-                                    }
-                                }
-                            />
-                        </label>
-                        <label>
-                            <span>"nonce"</span>
-                            <input
-                                type="number"
-                                prop:value=nonce_val
-                                on:change=move |ev| {
-                                    if let Ok(mut b) = parse_batch(&batch_json.get()) {
-                                        if let Some(target) = b.transactions.get_mut(idx)
-                                            && let Ok(next) = event_target_value(&ev).parse::<u64>()
-                                        {
-                                            target.nonce = next;
-                                        }
-                                        set_batch_json.set(pretty_json_value(&json!(b)));
-                                        persist_nonce();
-                                    }
-                                }
-                            />
-                        </label>
-                    </div>
                 </div>
             }
         })
@@ -228,8 +187,6 @@ fn render_flat_batch(
                     <tr>
                         <th>"#"</th>
                         <th>"tx_type"</th>
-                        <th>"nonce"</th>
-                        <th>"sender"</th>
                         <th>"params"</th>
                         <th>""</th>
                     </tr>
@@ -241,13 +198,9 @@ fn render_flat_batch(
                         .enumerate()
                         .map(|(idx, tx)| {
                             let persist_t = persist.clone();
-                            let persist_n = persist.clone();
-                            let persist_s = persist.clone();
                             let persist_p = persist.clone();
                             let persist_x = persist.clone();
                             let tx_type_val = tx.tx_type;
-                            let nonce_val = tx.nonce;
-                            let sender_val = tx.sender.clone();
                             let params_val = pretty_json_inline(&tx.params);
 
                             view! {
@@ -264,34 +217,6 @@ fn render_flat_batch(
                                                     }
                                                     set_batch_json.set(pretty_json_value(&json!(b)));
                                                     persist_t();
-                                                }
-                                            }
-                                        />
-                                    </td>
-                                    <td>
-                                        <input type="number" prop:value=nonce_val
-                                            on:input=move |ev| {
-                                                if let Ok(mut b) = parse_batch(&batch_json.get()) {
-                                                    if let Some(target) = b.transactions.get_mut(idx)
-                                                        && let Ok(next) = event_target_value(&ev).parse::<u64>()
-                                                    {
-                                                        target.nonce = next;
-                                                    }
-                                                    set_batch_json.set(pretty_json_value(&json!(b)));
-                                                    persist_n();
-                                                }
-                                            }
-                                        />
-                                    </td>
-                                    <td>
-                                        <input type="text" prop:value=sender_val
-                                            on:input=move |ev| {
-                                                if let Ok(mut b) = parse_batch(&batch_json.get()) {
-                                                    if let Some(target) = b.transactions.get_mut(idx) {
-                                                        target.sender = event_target_value(&ev);
-                                                    }
-                                                    set_batch_json.set(pretty_json_value(&json!(b)));
-                                                    persist_s();
                                                 }
                                             }
                                         />

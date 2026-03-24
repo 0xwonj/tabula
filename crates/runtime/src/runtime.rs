@@ -6,11 +6,11 @@
 
 use tabula_artifact::{State, Statement, TransactionBatch, normalize_state};
 use tabula_commitment::PoseidonHasher;
-use tabula_core::InMemoryStaticTables;
 use tabula_executor::precompile::PrecompileRegistry;
 use tabula_executor::property::PropertyQueryRegistry;
+use tabula_ext::root::RootBackendBundle;
 use tabula_ir::Program;
-use tabula_machine::{MachineProofInput, TabulaMachine, TabulaProof};
+use tabula_machine::{TabulaMachine, TabulaProof};
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 
 use crate::bootstrap::RuntimeBuilder;
@@ -20,7 +20,9 @@ use crate::policy::{
     validate_execution_state_surface, validate_proof_state_surface, validate_prove_input_prestate,
 };
 use crate::program::RuntimeProgram;
-use crate::proving::{self, ProofSummary, ProveInput, ProveResult, VerifiedResult};
+use crate::proving::{
+    self, PreparedProofRequest, ProofSummary, ProveInput, ProveResult, VerifiedResult,
+};
 use crate::verifier::verify_with_binding;
 
 /// Unified runtime owning execution and proving infrastructure.
@@ -48,6 +50,7 @@ use crate::verifier::verify_with_binding;
 /// - **PropertyQueryRegistry** — executor-side property query handlers
 pub struct TabulaRuntime {
     runtime_program: RuntimeProgram,
+    root_backend_bundle: RootBackendBundle,
     machine: TabulaMachine,
     precompiles: PrecompileRegistry,
     property_queries: PropertyQueryRegistry,
@@ -62,12 +65,14 @@ impl TabulaRuntime {
     /// Construct from pre-built parts (used by [`RuntimeBuilder`]).
     pub(crate) fn from_parts(
         runtime_program: RuntimeProgram,
+        root_backend_bundle: RootBackendBundle,
         machine: TabulaMachine,
         precompiles: PrecompileRegistry,
         property_queries: PropertyQueryRegistry,
     ) -> Self {
         Self {
             runtime_program,
+            root_backend_bundle,
             machine,
             precompiles,
             property_queries,
@@ -119,6 +124,11 @@ impl TabulaRuntime {
         &self.machine
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn root_backend_bundle(&self) -> &RootBackendBundle {
+        &self.root_backend_bundle
+    }
+
     /// Execute a batch using the runtime's owned resources.
     ///
     /// Unlike the free function [`run_batch()`](crate::run_batch), this method:
@@ -158,24 +168,8 @@ impl TabulaRuntime {
         input: &ProveInput<'_>,
     ) -> Result<Statement, RuntimeError> {
         let normalized_state = self.validate_prove_input_state(input)?;
-        let batch = proving::convert_batch(input.batch, self.type_runtimes())?;
-        let static_tables = InMemoryStaticTables::new();
-        let journal = proving::build_proof_journal(proving::JournalInput {
-            resolved_program: self.proof_program(),
-            state: &normalized_state,
-            batch: &batch,
-            execution_journal: input.executed.execution_journal(),
-            static_tables: &static_tables,
-        })?;
-        let artifacts = proving::prepare_proof_artifacts(self.proof_program(), journal)?;
-
-        proving::build_execution_statement(
-            self.proof_program(),
-            &normalized_state,
-            input.batch,
-            &input.executed.state_after,
-            &artifacts.air_statement,
-        )
+        self.prepare_proof_request(&normalized_state, input)
+            .map(|request| request.statement)
     }
 
     /// Generate a STARK proof from an executed batch.
@@ -184,34 +178,15 @@ impl TabulaRuntime {
     #[tracing::instrument(skip_all, name = "prove")]
     pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, RuntimeError> {
         let normalized_state = self.validate_prove_input_state(input)?;
-        let batch = proving::convert_batch(input.batch, self.type_runtimes())?;
-        let static_tables = InMemoryStaticTables::new();
-        let journal = proving::build_proof_journal(proving::JournalInput {
-            resolved_program: self.proof_program(),
-            state: &normalized_state,
-            batch: &batch,
-            execution_journal: input.executed.execution_journal(),
-            static_tables: &static_tables,
-        })?;
-        let mut artifacts = proving::prepare_proof_artifacts(self.proof_program(), journal)?;
-        let statement = proving::build_execution_statement(
-            self.proof_program(),
-            &normalized_state,
-            input.batch,
-            &input.executed.state_after,
-            &artifacts.air_statement,
-        )?;
+        let PreparedProofRequest {
+            statement,
+            machine_input,
+        } = self.prepare_proof_request(&normalized_state, input)?;
 
         let proof = {
             let _span = tracing::info_span!("stark_prove").entered();
-            let traces = proving::build_traces(&self.machine, &mut artifacts)?;
             self.machine
-                .prover()
-                .prove(MachineProofInput {
-                    traces,
-                    statement: artifacts.air_statement,
-                    statement_digest: statement.statement_hash_bytes(),
-                })
+                .prove(machine_input)
                 .map_err(RuntimeError::Proving)?
         };
 
@@ -277,6 +252,22 @@ impl TabulaRuntime {
         })
     }
 
+    fn prepare_proof_request(
+        &self,
+        normalized_state: &State,
+        input: &ProveInput<'_>,
+    ) -> Result<PreparedProofRequest, RuntimeError> {
+        proving::prepare_proof_request(
+            self.proof_program(),
+            self.type_runtimes(),
+            &self.root_backend_bundle,
+            normalized_state,
+            input.batch,
+            &input.executed.state_after,
+            input.executed.execution_journal(),
+        )
+    }
+
     fn validate_prove_input_state(&self, input: &ProveInput<'_>) -> Result<State, RuntimeError> {
         let normalized = normalize_state(input.state).map_err(RuntimeError::InvalidState)?;
         validate_proof_state_surface(self.proof_program(), &normalized)?;
@@ -289,6 +280,7 @@ impl std::fmt::Debug for TabulaRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TabulaRuntime")
             .field("runtime_program", &self.runtime_program)
+            .field("root_backend_bundle", &self.root_backend_bundle.name())
             .field("machine", &self.machine)
             .field("precompiles_registered", &!self.precompiles.is_empty())
             .field(
@@ -311,14 +303,116 @@ const _: () = {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     use tabula_artifact::{State, StateEntry};
-    use tabula_machine::MachineProofInput;
+    use tabula_ext::root::{
+        PreparedRootWitness, RootBackend, RootBackendBundle, RootWitnessContext,
+        RootWitnessPreparer, SmtRootWitnessPreparer,
+    };
     use tabula_testing::assertions::assert_statement_matches_artifact;
+    use tabula_testing::fixtures::compiled::compiled_hash_only_case;
     use tabula_testing::fixtures::examples::transfer_example_compiled_case;
     use tabula_types::u64_portable;
 
     use super::*;
-    use crate::proving;
+
+    #[derive(Clone, Copy, Debug)]
+    struct DelegatingRootProofBackend;
+
+    impl tabula_machine::RootProofBackend for DelegatingRootProofBackend {
+        fn name(&self) -> &str {
+            "delegating_root_proof"
+        }
+
+        fn supported_root_binding_families(&self) -> &'static [tabula_core::RootProfileId] {
+            tabula_machine::SmtRootProofBackend.supported_root_binding_families()
+        }
+
+        fn airs(&self) -> Vec<Box<dyn tabula_machine::backend::AnyRap>> {
+            tabula_machine::SmtRootProofBackend.airs()
+        }
+
+        fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
+            tabula_machine::SmtRootProofBackend.dyn_chips()
+        }
+    }
+
+    #[derive(Debug)]
+    struct CountingRootWitnessPreparer {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl RootWitnessPreparer for CountingRootWitnessPreparer {
+        fn name(&self) -> &str {
+            "counting_root"
+        }
+
+        fn prepare_root_witness(
+            &self,
+            context: RootWitnessContext<'_>,
+        ) -> tabula_ext::ExtResult<PreparedRootWitness> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            SmtRootWitnessPreparer.prepare_root_witness(context)
+        }
+    }
+
+    #[derive(Debug)]
+    struct FailingRootWitnessPreparer;
+
+    impl RootWitnessPreparer for FailingRootWitnessPreparer {
+        fn name(&self) -> &str {
+            "failing_root"
+        }
+
+        fn prepare_root_witness(
+            &self,
+            _context: RootWitnessContext<'_>,
+        ) -> tabula_ext::ExtResult<PreparedRootWitness> {
+            Err(tabula_ext::ExtError::validation("intentional root failure"))
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct CountingRootBackend {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl RootBackend for CountingRootBackend {
+        fn name(&self) -> &str {
+            "counting_root_backend"
+        }
+
+        fn proof_backend(&self) -> Arc<dyn tabula_machine::RootProofBackend> {
+            Arc::new(DelegatingRootProofBackend)
+        }
+
+        fn witness_preparer(&self) -> Arc<dyn RootWitnessPreparer> {
+            Arc::new(CountingRootWitnessPreparer {
+                calls: Arc::clone(&self.calls),
+            })
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct FailingRootBackend;
+
+    impl RootBackend for FailingRootBackend {
+        fn name(&self) -> &str {
+            "failing_root_backend"
+        }
+
+        fn proof_backend(&self) -> Arc<dyn tabula_machine::RootProofBackend> {
+            Arc::new(DelegatingRootProofBackend)
+        }
+
+        fn witness_preparer(&self) -> Arc<dyn RootWitnessPreparer> {
+            Arc::new(FailingRootWitnessPreparer)
+        }
+    }
 
     fn state_with_extra_surface_cell(mut state: State) -> State {
         state.cells.push(StateEntry {
@@ -359,9 +453,12 @@ mod tests {
             .expect("at least one proof column");
 
         assert!(runtime.execution_program().tx_definition(tx_type).is_ok());
-        assert_eq!(
-            runtime.proof_program().proof_plan().column_slots().len(),
-            runtime.machine().setup().proof_setups().columns.len()
+        assert!(
+            !runtime
+                .proof_program()
+                .proof_plan()
+                .column_slots()
+                .is_empty()
         );
         assert!(
             runtime
@@ -392,6 +489,28 @@ mod tests {
 
         assert!(verified.verified);
         assert!(!verified.proof.columns.is_empty());
+        assert_statement_matches_artifact(&verified.statement, &artifact);
+    }
+
+    #[test]
+    fn runtime_prove_and_verify_hash_only_program_uses_builtin_ir_hash_backend() {
+        let case = compiled_hash_only_case();
+        let artifact = case.compiled_program.as_artifact();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .build()
+            .expect("runtime");
+        let executed = runtime
+            .execute(&case.state, &case.batch)
+            .expect("execution succeeds");
+        let verified = runtime
+            .prove_and_verify(&ProveInput {
+                state: &case.state,
+                batch: &case.batch,
+                executed: &executed,
+            })
+            .expect("prove and verify hash-only program");
+
+        assert!(verified.verified);
         assert_statement_matches_artifact(&verified.statement, &artifact);
     }
 
@@ -499,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn machine_backend_proves_from_prepared_traces() {
+    fn machine_backend_proves_from_prepared_input() {
         let case = transfer_example_compiled_case();
         let runtime = TabulaRuntime::builder(case.compiled_program)
             .build()
@@ -507,43 +626,111 @@ mod tests {
         let executed = runtime
             .execute(&case.state, &case.batch)
             .expect("execution succeeds");
-        let batch =
-            proving::convert_batch(&case.batch, runtime.type_runtimes()).expect("convert batch");
-        let static_tables = InMemoryStaticTables::new();
-        let journal = proving::build_proof_journal(proving::JournalInput {
-            resolved_program: runtime.proof_program(),
+        let input = ProveInput {
             state: &case.state,
-            batch: &batch,
-            execution_journal: executed.execution_journal(),
-            static_tables: &static_tables,
-        })
-        .expect("prepared batch journal");
-        let mut prepared = proving::prepare_proof_artifacts(runtime.proof_program(), journal)
-            .expect("prepared proof artifacts");
-        let statement = proving::build_execution_statement(
-            runtime.proof_program(),
-            &case.state,
-            &case.batch,
-            &executed.state_after,
-            &prepared.air_statement,
-        )
-        .expect("execution statement");
-        let traces = proving::build_traces(runtime.machine(), &mut prepared).expect("proof traces");
+            batch: &case.batch,
+            executed: &executed,
+        };
+        let normalized_state = runtime
+            .validate_prove_input_state(&input)
+            .expect("normalized prove state");
+        let prepared = runtime
+            .prepare_proof_request(&normalized_state, &input)
+            .expect("prepared proof request");
 
         let proof = runtime
             .machine()
-            .prover()
-            .prove(MachineProofInput {
-                traces,
-                statement: prepared.air_statement,
-                statement_digest: statement.statement_hash_bytes(),
-            })
+            .prove(prepared.machine_input)
             .expect("machine prove");
 
-        runtime
-            .machine()
-            .verifier()
-            .verify(&proof)
-            .expect("machine verify");
+        runtime.machine().verify(&proof).expect("machine verify");
+    }
+
+    #[test]
+    fn build_execution_statement_and_prove_share_prepared_request_path() {
+        let case = transfer_example_compiled_case();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .build()
+            .expect("runtime");
+        let executed = runtime
+            .execute(&case.state, &case.batch)
+            .expect("execution succeeds");
+        let input = ProveInput {
+            state: &case.state,
+            batch: &case.batch,
+            executed: &executed,
+        };
+        let normalized_state = runtime
+            .validate_prove_input_state(&input)
+            .expect("normalized prove state");
+        let prepared = runtime
+            .prepare_proof_request(&normalized_state, &input)
+            .expect("prepared proof request");
+
+        let statement = runtime
+            .build_execution_statement(&input)
+            .expect("execution statement");
+        let prove_result = runtime.prove(&input).expect("prove result");
+
+        assert_eq!(prepared.statement, statement);
+        assert_eq!(prove_result.statement, statement);
+        assert_eq!(
+            prepared.machine_input.statement_digest,
+            statement.statement_hash_bytes()
+        );
+    }
+
+    #[test]
+    fn runtime_prove_invokes_custom_root_witness_preparer() {
+        let case = transfer_example_compiled_case();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .with_root_backend_bundle(RootBackendBundle::new(CountingRootBackend {
+                calls: Arc::clone(&calls),
+            }))
+            .build()
+            .expect("runtime");
+        let executed = runtime
+            .execute(&case.state, &case.batch)
+            .expect("execution succeeds");
+
+        let proved = runtime
+            .prove_and_verify(&ProveInput {
+                state: &case.state,
+                batch: &case.batch,
+                executed: &executed,
+            })
+            .expect("prove and verify");
+
+        assert!(proved.verified);
+        assert!(calls.load(Ordering::SeqCst) > 0);
+    }
+
+    #[test]
+    fn runtime_prove_fails_when_root_witness_preparer_fails() {
+        let case = transfer_example_compiled_case();
+        let runtime = TabulaRuntime::builder(case.compiled_program)
+            .with_root_backend_bundle(RootBackendBundle::new(FailingRootBackend))
+            .build()
+            .expect("runtime");
+        let executed = runtime
+            .execute(&case.state, &case.batch)
+            .expect("execution succeeds");
+
+        let err = runtime
+            .prove(&ProveInput {
+                state: &case.state,
+                batch: &case.batch,
+                executed: &executed,
+            })
+            .err()
+            .expect("failing root preparer must fail proving");
+
+        match err {
+            RuntimeError::WitnessGeneration { detail } => {
+                assert!(detail.contains("failing_root"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
 }

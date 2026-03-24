@@ -1,5 +1,8 @@
 //! Advanced backend-facing support types for extension authors.
 
+/// Backend-facing execution-tier extension contracts.
+#[cfg(feature = "verify")]
+pub mod execution;
 /// Backend-facing semantic precompile proof authoring contracts.
 #[cfg(feature = "verify")]
 pub mod precompile;
@@ -7,6 +10,8 @@ pub mod precompile;
 #[cfg(feature = "verify")]
 pub mod scheme;
 
+#[cfg(feature = "verify")]
+pub use execution::ExecutionBackend;
 #[cfg(feature = "verify")]
 pub use tabula_machine::SetupError;
 #[cfg(feature = "verify")]

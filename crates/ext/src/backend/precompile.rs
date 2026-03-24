@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 pub use tabula_contract::ProgramBinding;
-use tabula_stark::trace::{BusConsumer, DynChip};
 
-use crate::backend::AnyRap;
+use crate::backend::ExecutionBackend;
 use crate::error::{ExtError, ExtResult};
 use crate::precompile::{PrecompileDescriptor, PrecompileId};
 #[cfg(feature = "prove")]
@@ -44,23 +43,9 @@ pub struct ResolvedPrecompileCall {
 }
 
 /// Domain-specific execution-tier proof system for one precompile family.
-pub trait PrecompileProofSystem: Send + Sync {
-    /// Human-readable precompile name.
-    fn name(&self) -> &str;
-
+pub trait PrecompileProofSystem: ExecutionBackend + Send + Sync {
     /// Sealed descriptor for this precompile proof system.
     fn descriptor(&self) -> PrecompileDescriptor;
-
-    /// AIR implementations for proving and verification.
-    fn airs(&self) -> Vec<Box<dyn AnyRap>>;
-
-    /// Dynamic chips for trace generation.
-    fn dyn_chips(&self) -> Vec<Box<dyn DynChip>>;
-
-    /// Optional dependent bus consumers.
-    fn bus_consumers(&self) -> Vec<Box<dyn BusConsumer>> {
-        vec![]
-    }
 }
 
 /// Backend-neutral precompile proof preparation context.

@@ -1,9 +1,7 @@
 //! Canonical batch executor.
 
-use std::collections::BTreeMap;
-
 use tabula_core::error::TabulaError;
-use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateView, StaticTableProvider};
+use tabula_core::traits::{Hasher, StateView, StaticTableProvider};
 use tabula_core::{Batch, PortableValue, TxTypeId};
 use tabula_ir::ParamDef;
 use tabula_types::{TypeRuntimeRegistry, TypedValue};
@@ -49,10 +47,6 @@ fn validate_params(
 pub struct BatchEnv<'a> {
     /// Cryptographic hash function.
     pub hasher: &'a dyn Hasher,
-    /// Signature verification.
-    pub sig_verifier: &'a dyn SigVerifier,
-    /// Nonce validation and advancement.
-    pub nonce_policy: &'a dyn NoncePolicy,
     /// Static (read-only) table lookups.
     pub static_tables: &'a dyn StaticTableProvider,
     /// Runtime type registry used for portable/typed boundary decoding.
@@ -71,7 +65,6 @@ pub(crate) struct BatchExecutor<'a, S: StateView> {
     program: &'a ResolvedExecutionProgram,
     snapshot: &'a S,
     env: &'a BatchEnv<'a>,
-    initial_nonces: &'a BTreeMap<[u8; 32], u64>,
 }
 
 impl<'a, S: StateView> BatchExecutor<'a, S> {
@@ -80,21 +73,18 @@ impl<'a, S: StateView> BatchExecutor<'a, S> {
         program: &'a ResolvedExecutionProgram,
         snapshot: &'a S,
         env: &'a BatchEnv<'a>,
-        initial_nonces: &'a BTreeMap<[u8; 32], u64>,
     ) -> Self {
         Self {
             batch,
             program,
             snapshot,
             env,
-            initial_nonces,
         }
     }
 
     pub(crate) fn execute(self) -> Result<ExecutionJournal, TabulaError> {
         let mut overlay = Overlay::new(self.snapshot, self.env.type_runtimes);
         let mut txs = Vec::with_capacity(self.batch.transactions.len());
-        let mut nonces: BTreeMap<[u8; 32], u64> = self.initial_nonces.clone();
         let mut next_logical_time = 0;
 
         let ctx = ExecContext {
@@ -130,30 +120,6 @@ impl<'a, S: StateView> BatchExecutor<'a, S> {
                     }
                 };
 
-            let msg = tx.signable_bytes()?;
-            if let Err(error) = self
-                .env
-                .sig_verifier
-                .verify(&tx.sender, &msg, &tx.signature)
-            {
-                txs.push(TxExecutionOutcome::Failed(pre_execution_failure(
-                    tx_index, &error,
-                )));
-                continue;
-            }
-
-            let current_nonce = *nonces.get(&tx.sender).unwrap_or(&0);
-            if let Err(error) = self
-                .env
-                .nonce_policy
-                .validate(&tx.sender, tx.nonce, current_nonce)
-            {
-                txs.push(TxExecutionOutcome::Failed(pre_execution_failure(
-                    tx_index, &error,
-                )));
-                continue;
-            }
-
             overlay.checkpoint();
             let mut journal = TxJournalBuilder::new(tx_index, next_logical_time);
 
@@ -167,8 +133,6 @@ impl<'a, S: StateView> BatchExecutor<'a, S> {
             ) {
                 Ok(()) => {
                     overlay.discard_checkpoint();
-                    let next = self.env.nonce_policy.next_nonce(&tx.sender, current_nonce);
-                    nonces.insert(tx.sender, next);
                     // The canonical batch logical clock advances only for
                     // successful semantic access effects. Failed transaction
                     // access observations are diagnostic-only and therefore do
@@ -219,7 +183,6 @@ pub fn execute_batch<S: StateView>(
     program: &ResolvedExecutionProgram,
     snapshot: &S,
     env: &BatchEnv<'_>,
-    initial_nonces: &BTreeMap<[u8; 32], u64>,
 ) -> Result<ExecutionJournal, TabulaError> {
-    BatchExecutor::new(batch, program, snapshot, env, initial_nonces).execute()
+    BatchExecutor::new(batch, program, snapshot, env).execute()
 }

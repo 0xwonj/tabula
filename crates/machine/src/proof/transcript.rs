@@ -12,7 +12,7 @@ use tabula_stark::air::statement::PublicStatement;
 
 use crate::config::{Challenger, EF4, TabulaStarkConfig};
 use crate::proof::instance::MainCommitment;
-use crate::proof::types::SubProofEnvelope;
+use crate::proof::model::SubProofEnvelope;
 
 /// Transcript wrapper for machine-level proving and verification orchestration.
 ///

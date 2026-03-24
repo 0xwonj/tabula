@@ -96,9 +96,6 @@ impl ChipSpec for SmtTablePathChip {
     fn chip_id(&self) -> ChipId {
         core_chips::SMT_TABLE_PATH
     }
-    fn num_public_values(&self) -> usize {
-        smt_path::air::SMT_TABLE_PATH_NUM_PUBLIC_VALUES
-    }
 }
 
 // ── Dynamic chip dispatch ───────────────────────────────────────────────────

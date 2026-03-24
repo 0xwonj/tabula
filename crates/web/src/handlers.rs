@@ -417,8 +417,6 @@ pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
             transactions: vec![],
         });
 
-        let next_nonce = batch.transactions.len() as u64;
-
         if let Some(ref art) = artifact {
             if let Some(tx_def) = art.tx_types.first() {
                 let params: Vec<CoreValue> = tx_def
@@ -429,16 +427,12 @@ pub(crate) fn add_tx_row(s: AppSignals) -> impl Fn(web_sys::MouseEvent) + Clone 
                 batch.transactions.push(TransactionInput {
                     tx_type: tx_def.id.0,
                     params,
-                    sender: "01".repeat(32),
-                    nonce: next_nonce,
                 });
             }
         } else {
             batch.transactions.push(TransactionInput {
                 tx_type: 0,
                 params: vec![u64_portable(0)],
-                sender: "01".repeat(32),
-                nonce: next_nonce,
             });
         }
 

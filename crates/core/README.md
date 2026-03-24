@@ -20,7 +20,7 @@ traits live here.
 - shared identifiers, schemas, portable boundary values, and transaction model types
 - execution result and event vocabulary
 - core error types used across the workspace
-- low-level traits for hashing, codecs, state access, signatures, and nonce policy
+- low-level traits for hashing, codecs, state access, and batch/program commitments
 - small default implementations that satisfy those traits without defining higher-level policy
 
 ## Does Not Own

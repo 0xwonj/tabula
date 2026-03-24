@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use sha2::{Digest as _, Sha256};
 use tabula_core::error::TabulaError;
-use tabula_ext::backend::WitnessStore;
 use tabula_ext::backend::precompile::{
     PrecompileBackendFactory, PrecompileProofContext, PrecompileProofPreparer,
     PrecompileProofSystem, PreparedPrecompileProof, ResolvedPrecompile, ResolvedPrecompileCall,
@@ -14,6 +13,7 @@ use tabula_ext::backend::prelude::{
     KoalaBear, PrimeCharacteristicRing, RowMajorMatrix, TraceContributor, TraceMap, TracePhase,
     WindowAccess, borrow_cols, borrow_cols_mut, core_buses, expr_from_u32,
 };
+use tabula_ext::backend::{ExecutionBackend, WitnessStore};
 use tabula_ext::precompile::PrecompileHandler;
 use tabula_ext::{
     ExtError, PrecompileDescriptor, PrecompileId, PrecompileSignature, PrecompileValueProfile,
@@ -433,13 +433,9 @@ impl FixedOutputsPrecompileProofSystem {
     }
 }
 
-impl PrecompileProofSystem for FixedOutputsPrecompileProofSystem {
+impl ExecutionBackend for FixedOutputsPrecompileProofSystem {
     fn name(&self) -> &str {
         self.name
-    }
-
-    fn descriptor(&self) -> PrecompileDescriptor {
-        self.descriptor.clone()
     }
 
     fn airs(&self) -> Vec<Box<dyn AnyRap>> {
@@ -452,6 +448,12 @@ impl PrecompileProofSystem for FixedOutputsPrecompileProofSystem {
 
     fn bus_consumers(&self) -> Vec<Box<dyn BusConsumer>> {
         vec![]
+    }
+}
+
+impl PrecompileProofSystem for FixedOutputsPrecompileProofSystem {
+    fn descriptor(&self) -> PrecompileDescriptor {
+        self.descriptor.clone()
     }
 }
 
@@ -523,13 +525,9 @@ impl ConstantOnePrecompileProofSystem {
     }
 }
 
-impl PrecompileProofSystem for ConstantOnePrecompileProofSystem {
+impl ExecutionBackend for ConstantOnePrecompileProofSystem {
     fn name(&self) -> &str {
         self.0.name()
-    }
-
-    fn descriptor(&self) -> PrecompileDescriptor {
-        self.0.descriptor()
     }
 
     fn airs(&self) -> Vec<Box<dyn AnyRap>> {
@@ -542,6 +540,12 @@ impl PrecompileProofSystem for ConstantOnePrecompileProofSystem {
 
     fn bus_consumers(&self) -> Vec<Box<dyn BusConsumer>> {
         self.0.bus_consumers()
+    }
+}
+
+impl PrecompileProofSystem for ConstantOnePrecompileProofSystem {
+    fn descriptor(&self) -> PrecompileDescriptor {
+        self.0.descriptor()
     }
 }
 

@@ -8,6 +8,7 @@
 > [canonical-vocabulary.md](canonical-vocabulary.md),
 > [executor-proof-codesign-architecture.md](executor-proof-codesign-architecture.md),
 > [execution-proof-redesign-workplan.md](execution-proof-redesign-workplan.md),
+> [witness-partition-and-batch-proof-plan-architecture.md](witness-partition-and-batch-proof-plan-architecture.md),
 > [proof-hierarchy-and-grouping.md](proof-hierarchy-and-grouping.md),
 > [../research/symbolic-air-compilation.md](../research/symbolic-air-compilation.md)
 
@@ -232,8 +233,16 @@ preparation.
 It contains:
 
 - AIR public statement data,
-- merged shared witness stores,
-- ordered per-column trace inputs.
+- execution-tier prepared witness input,
+- ordered per-column prepared inputs,
+- root-tier prepared witness input.
+
+For the built-in path, runtime reaches this bundle by combining:
+
+- `ProofJournal`,
+- `BatchProofPlan`,
+- per-slot backend preparation,
+- and the configured root backend bundle.
 
 ---
 
@@ -303,7 +312,7 @@ parallelism where semantics allow it and to avoid oversubscription.
 
 Transaction execution remains sequential in the current model because:
 
-- nonce evolution is ordered,
+- tx order is ordered,
 - overlay state transitions are ordered,
 - transaction failure and rollback semantics are ordered.
 

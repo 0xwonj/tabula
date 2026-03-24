@@ -8,7 +8,7 @@ use crate::traits::{BatchDigester, Hasher, MembershipScheme};
 use crate::{Batch, Digest};
 
 // Re-export commonly used test utilities from the crate root.
-pub use crate::{InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce};
+pub use crate::{InMemoryState, InMemoryStaticTables};
 
 // ---------------------------------------------------------------------------
 // Blake3Hasher
@@ -161,9 +161,6 @@ mod tests {
             transactions: vec![Transaction {
                 tx_type: TxTypeId(1),
                 params: vec![portable_u64(42)],
-                sender: [1u8; 32],
-                nonce: 0,
-                signature: vec![],
             }],
         };
         let d1 = digester.digest(&batch).unwrap();

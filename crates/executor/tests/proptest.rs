@@ -203,14 +203,10 @@ proptest! {
             ],
         }).unwrap();
 
-        let sender = [1u8; 32];
-        let txs: Vec<Transaction> = amounts.iter().enumerate()
-            .map(|(i, &amt)| Transaction {
+        let txs: Vec<Transaction> = amounts.iter()
+            .map(|&amt| Transaction {
                 tx_type: TxTypeId(1),
                 params: vec![u64_portable(amt)],
-                sender,
-                nonce: i as u64,
-                signature: vec![],
             })
             .collect();
         let batch = Batch { transactions: txs };
@@ -218,8 +214,6 @@ proptest! {
         let property_queries = PropertyQueryRegistry::new();
         let env = tabula_executor::batch::BatchEnv {
             hasher: &XorHasher,
-            sig_verifier: &AlwaysValidSig,
-            nonce_policy: &SeqNonce,
             static_tables: &EmptyStaticTables,
             precompiles: None,
             committed_state: None,
@@ -227,7 +221,7 @@ proptest! {
             type_runtimes: type_runtimes(),
         };
         let resolved = ResolvedExecutionProgram::from_program(&prog).unwrap();
-        let result = execute_batch(&batch, &resolved, &snap, &env, &BTreeMap::new()).unwrap();
+        let result = execute_batch(&batch, &resolved, &snap, &env).unwrap();
         let check = check_journal_consistency(&result);
         prop_assert!(check.is_ok(), "consistency check failed: {:?}", check.err());
     }

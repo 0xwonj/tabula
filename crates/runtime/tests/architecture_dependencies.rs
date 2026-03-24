@@ -177,14 +177,14 @@ fn shared_prove_path_does_not_depend_on_old_witness_or_layout_dispatch() {
         "crates/runtime/src/proving/journal/digest.rs",
     ]);
     let proving_artifacts_rs = read_workspace_file("crates/runtime/src/proving/artifacts.rs");
-    let traces_rs = read_workspace_file("crates/runtime/src/proving/traces.rs");
+    let proving_mod_rs = read_workspace_file("crates/runtime/src/proving/mod.rs");
     let materialize_rs = read_workspace_file("crates/runtime/src/bootstrap/materialize.rs");
     let runtime_program_rs = read_workspace_file("crates/runtime/src/program/contract.rs");
 
     for (name, source) in [
         ("proving/journal/", proving_journal_rs.as_str()),
         ("proving/artifacts.rs", proving_artifacts_rs.as_str()),
-        ("proving/traces.rs", traces_rs.as_str()),
+        ("proving/mod.rs", proving_mod_rs.as_str()),
         ("bootstrap/materialize.rs", materialize_rs.as_str()),
         ("program/contract.rs", runtime_program_rs.as_str()),
     ] {
@@ -597,11 +597,14 @@ fn raw_backend_extension_surface_stays_backend_only() {
     let machine_backend_extension = read_workspace_file("crates/machine/src/backend/extension.rs");
     let machine_backend_mod = read_workspace_file("crates/machine/src/backend/mod.rs");
     let machine_backend_prelude = read_workspace_file("crates/machine/src/backend/prelude.rs");
+    let runtime_bootstrap_machine = read_workspace_file("crates/runtime/src/bootstrap/machine.rs");
     let runtime_builder = read_workspace_file("crates/runtime/src/bootstrap/builder.rs");
     let runtime_verifier = read_workspace_file("crates/runtime/src/verifier.rs");
     let sdk_ext_mod = read_workspace_file("crates/sdk/src/ext/mod.rs");
     let ext_lib = read_workspace_file("crates/ext/src/lib.rs");
     let ext_backend = read_workspace_file("crates/ext/src/backend/mod.rs");
+    let ext_backend_execution = read_workspace_file("crates/ext/src/backend/execution.rs");
+    let ext_backend_precompile = read_workspace_file("crates/ext/src/backend/precompile.rs");
 
     assert!(
         machine_lib.contains("pub mod backend;"),
@@ -633,9 +636,30 @@ fn raw_backend_extension_surface_stays_backend_only() {
         "runtime builder must not expose raw machine extensions"
     );
     assert!(
+        !runtime_builder.contains("ExecutionTierExtension")
+            && !runtime_builder.contains("InternalPrecompileExtension")
+            && !runtime_builder.contains("InternalIrHashExtension")
+            && !runtime_builder.contains("InternalPrecompileTranscriptExtension")
+            && !runtime_builder.contains("program_uses_ir_hash"),
+        "runtime builder must not hand-roll machine execution extensions after Stage 4"
+    );
+    assert!(
         !runtime_verifier.contains("pub fn with_extension(")
             && !runtime_verifier.contains("pub fn with_execution_extension("),
         "runtime verifier builder must not expose raw machine extensions"
+    );
+    assert!(
+        !runtime_verifier.contains("ExecutionTierExtension")
+            && !runtime_verifier.contains("InternalPrecompileExtension")
+            && !runtime_verifier.contains("InternalIrHashExtension")
+            && !runtime_verifier.contains("InternalPrecompileTranscriptExtension")
+            && !runtime_verifier.contains("program_uses_ir_hash"),
+        "runtime verifier must not hand-roll machine execution extensions after Stage 4"
+    );
+    assert!(
+        runtime_bootstrap_machine.contains("attach_builtin_execution_backends")
+            && runtime_bootstrap_machine.contains("program_uses_ir_hash"),
+        "runtime bootstrap machine bridge must own shared built-in execution backend attachment"
     );
     for forbidden in [
         "AnyRap",
@@ -669,6 +693,8 @@ fn raw_backend_extension_surface_stays_backend_only() {
         "tabula-ext root must expose the curated precompile backend factory trait"
     );
     for required in [
+        "pub mod execution;",
+        "pub use execution::ExecutionBackend;",
         "pub use tabula_machine::backend::{AnyRap, ColumnChipSet, ProofColumn};",
         "pub use tabula_stark::trace::{BusConsumer, DynChip, WitnessStore};",
         "pub mod prelude {",
@@ -681,6 +707,16 @@ fn raw_backend_extension_surface_stays_backend_only() {
     assert!(
         machine_backend_extension.contains("pub trait ExecutionTierExtension"),
         "backend extension module must expose the renamed execution-tier trait"
+    );
+    assert!(
+        ext_backend_execution.contains("pub trait ExecutionBackend")
+            && ext_backend_execution.contains("pub struct IrHashExecutionBackend")
+            && ext_backend_execution.contains("pub struct PrecompileTranscriptExecutionBackend"),
+        "tabula-ext::backend::execution must own the stable execution backend contract and built-ins"
+    );
+    assert!(
+        ext_backend_precompile.contains("pub trait PrecompileProofSystem: ExecutionBackend"),
+        "precompile proof systems must be execution backends after Stage 4"
     );
     assert!(
         !machine_backend_extension.contains("ExtensionContext"),
@@ -787,7 +823,7 @@ fn canonical_renamed_phase_objects_do_not_regress() {
         "crates/runtime/src/proving/journal/tx.rs",
         "crates/runtime/src/proving/journal/reduce.rs",
         "crates/runtime/src/proving/artifacts.rs",
-        "crates/runtime/src/proving/traces.rs",
+        "crates/runtime/src/proving/mod.rs",
         "crates/runtime/src/bootstrap/builder.rs",
         "crates/testing/src/witness.rs",
     ] {
@@ -1006,14 +1042,13 @@ fn stage3_runtime_proving_is_journal_first() {
         "crates/runtime/src/proving/journal/reduce.rs",
     ]);
     let proving_artifacts_rs = read_workspace_file("crates/runtime/src/proving/artifacts.rs");
-    let proving_traces_rs = read_workspace_file("crates/runtime/src/proving/traces.rs");
     let runtime_rs = read_workspace_file("crates/runtime/src/runtime.rs");
 
     for (name, source) in [
         ("proving/mod.rs", proving_mod_rs.as_str()),
         ("proving/journal/", proving_journal_rs.as_str()),
         ("proving/artifacts.rs", proving_artifacts_rs.as_str()),
-        ("proving/traces.rs", proving_traces_rs.as_str()),
+        ("runtime.rs", runtime_rs.as_str()),
     ] {
         for forbidden in [
             "BatchReport",
@@ -1045,9 +1080,15 @@ fn stage3_runtime_proving_is_journal_first() {
     );
 
     assert!(
-        proving_mod_rs.contains("prepare_proof_artifacts")
-            && proving_mod_rs.contains("build_proof_journal"),
-        "proving module must expose the Stage 3 journal/artifact split"
+        proving_mod_rs.contains("prepare_proof_request")
+            && proving_mod_rs.contains("build_batch_proof_plan")
+            && proving_mod_rs.contains("build_proof_journal")
+            && proving_mod_rs.contains("PreparedProofRequest")
+            && !proving_mod_rs.contains("pub(crate) use artifacts::{ProofArtifacts")
+            && !proving_mod_rs.contains("RuntimeProofConfig")
+            && !proving_mod_rs.contains("mod traces;")
+            && !proving_mod_rs.contains("build_traces"),
+        "proving module must expose the consolidated journal/plan/prepared-request split"
     );
     assert!(
         proving_journal_rs.contains("pub(crate) struct ProofJournal")
@@ -1057,16 +1098,46 @@ fn stage3_runtime_proving_is_journal_first() {
         "ProofJournal must stay a proof-input journal rather than a machine-ready artifact bundle"
     );
     assert!(
-        proving_artifacts_rs.contains("pub(crate) struct ProofArtifacts")
-            && proving_artifacts_rs.contains("shared_store: WitnessStore")
-            && proving_artifacts_rs.contains("air_statement: PublicStatement"),
-        "ProofArtifacts must own the machine-ready store and AIR statement"
+        proving_artifacts_rs.contains("pub(super) struct ProofArtifacts")
+            && proving_artifacts_rs.contains("execution: PreparedTierInput")
+            && proving_artifacts_rs.contains("root: PreparedTierInput")
+            && proving_artifacts_rs.contains("air_statement: PublicStatement")
+            && !proving_artifacts_rs.contains("PreparedTierArtifacts")
+            && !proving_artifacts_rs.contains("RootWitnessContract")
+            && !proving_artifacts_rs.contains("ExecutionStoreBuilder")
+            && !proving_artifacts_rs.contains("SmtRootStoreBuilder")
+            && !proving_artifacts_rs.contains("compute_state_roots_from_bindings"),
+        "ProofArtifacts must stay a proving-internal artifact carrier built directly from machine input types"
     );
     assert!(
-        runtime_rs.contains("build_proof_journal(proving::JournalInput")
-            && runtime_rs.contains("prepare_proof_artifacts(self.proof_program(), journal)")
-            && !runtime_rs.contains("prepare_proof_batch("),
-        "runtime proving entrypoints must reduce ExecutionJournal into a prepared proof journal before backend artifact preparation"
+        runtime_rs.contains("prepare_proof_request(")
+            && runtime_rs.contains("PreparedProofRequest")
+            && runtime_rs.contains("machine_input")
+            && runtime_rs.contains(".prove(")
+            && !runtime_rs.contains("RuntimeProofConfig")
+            && !runtime_rs.contains("build_traces(")
+            && !runtime_rs.contains("prepare_proof_batch(")
+            && !runtime_rs.contains("prepare_backend_artifacts("),
+        "runtime proving entrypoints must delegate to one consolidated prepared-request helper before machine.prove()"
+    );
+}
+
+#[test]
+fn stage_five_metadata_and_kernel_surfaces_stay_consolidated() {
+    let stark_chips_rs = read_workspace_file("crates/stark/src/chips.rs");
+    let witness_stark_mod_rs = read_workspace_file("crates/witness/src/stark/mod.rs");
+
+    assert!(
+        !stark_chips_rs.contains("fn num_public_values(")
+            && !stark_chips_rs.contains("fn preprocessed_next_row_columns("),
+        "ChipSpec must remain a backend-mechanics-only surface after Stage 5"
+    );
+    assert!(
+        witness_stark_mod_rs.contains("prepare_execution_store")
+            && witness_stark_mod_rs.contains("prepare_smt_root_store")
+            && !witness_stark_mod_rs.contains("ExecutionStoreBuilder")
+            && !witness_stark_mod_rs.contains("SmtRootStoreBuilder"),
+        "witness::stark must expose function-shaped kernels rather than builder wrappers"
     );
 }
 
@@ -1108,6 +1179,44 @@ fn runtime_state_surface_validation_is_shared_and_fail_closed() {
     assert!(
         runtime_lib_rs.contains("mod policy;"),
         "runtime root must include an ungated policy module"
+    );
+}
+
+#[test]
+fn root_backend_authority_surface_stays_bundle_shaped() {
+    let runtime_builder_rs = read_workspace_file("crates/runtime/src/bootstrap/builder.rs");
+    let verifier_rs = read_workspace_file("crates/runtime/src/verifier.rs");
+    let runtime_lib_rs = read_workspace_file("crates/runtime/src/lib.rs");
+    let sdk_rs = read_workspace_file("crates/sdk/src/sdk.rs");
+    let ext_root_rs = read_workspace_file("crates/ext/src/root.rs");
+
+    assert!(
+        runtime_builder_rs.contains("with_root_backend_bundle")
+            && runtime_builder_rs.contains("with_machine_stark_config")
+            && !runtime_builder_rs.contains("with_machine_backend_config"),
+        "runtime prove builder must accept a root backend bundle and STARK config, not a split machine backend config"
+    );
+    assert!(
+        verifier_rs.contains("with_root_proof_backend(")
+            && verifier_rs.contains("with_root_proof_backend_arc(")
+            && verifier_rs.contains("with_machine_stark_config")
+            && !verifier_rs.contains("with_root_backend_bundle"),
+        "verifier builder must stay proof-side only and must not accept runtime root bundles"
+    );
+    assert!(
+        !runtime_lib_rs.contains("MachineBackendConfig"),
+        "tabula-runtime must not re-export the removed MachineBackendConfig surface"
+    );
+    assert!(
+        !sdk_rs.contains("with_machine_backend_config"),
+        "sdk surface must not expose the removed split machine backend config on the prove path"
+    );
+    assert!(
+        ext_root_rs.contains("pub trait RootBackend")
+            && ext_root_rs.contains("backend: Arc<dyn RootBackend>")
+            && ext_root_rs.contains("pub fn proof_backend(&self)")
+            && ext_root_rs.contains("pub fn witness_preparer(&self)"),
+        "tabula-ext root surface must expose a coherent root backend family object and bundle wrapper"
     );
 }
 

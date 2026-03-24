@@ -1,25 +1,23 @@
 //! Fluent builder for [`TabulaRuntime`](crate::TabulaRuntime) construction.
 //!
 //! The runtime consumes compiler-owned semantic artifacts plus host-installed
-//! capabilities and machine-side proving configuration. Stable extension
+//! capabilities and machine-side proving inputs. Stable extension
 //! authoring lives in `tabula-ext`; the runtime only materializes those
 //! contracts during `build()`.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use tabula_chips::ir_hash::IrHashChip;
-use tabula_chips::poseidon::PoseidonChip;
-use tabula_chips::precompile_transcript::PrecompileTranscriptChip;
 use tabula_compiler::SealedProgram;
 use tabula_core::TableId;
 use tabula_executor::precompile::PrecompileHandler;
-use tabula_ext::backend::precompile::PrecompileProofSystem;
-use tabula_ir::Instruction;
-use tabula_machine::backend::AnyRap;
-use tabula_machine::backend::extension::ExecutionTierExtension;
+use tabula_ext::root::RootBackendBundle;
+use tabula_machine::TabulaStarkConfig;
 
-use crate::bootstrap::machine::MachineConfig;
+use crate::bootstrap::machine::{
+    attach_builtin_execution_backends, attach_execution_backend, build_machine_builder,
+    supported_root_binding_families,
+};
 use crate::bootstrap::materialize::{
     materialize_column_backends, materialize_precompile_runtime_backends,
 };
@@ -36,7 +34,8 @@ use crate::runtime::TabulaRuntime;
 pub struct RuntimeBuilder {
     compiled_program: SealedProgram,
     host_environment: HostEnvironment,
-    machine_config: MachineConfig,
+    machine_stark_config: TabulaStarkConfig,
+    root_backend_bundle: RootBackendBundle,
 }
 
 impl RuntimeBuilder {
@@ -45,7 +44,8 @@ impl RuntimeBuilder {
         Self {
             compiled_program,
             host_environment: HostEnvironment::standard(),
-            machine_config: MachineConfig::standard(),
+            machine_stark_config: tabula_machine::default_config(),
+            root_backend_bundle: RootBackendBundle::standard(),
         }
     }
 
@@ -55,9 +55,15 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Replace the machine-side proving and verification configuration.
-    pub fn with_machine_config(mut self, machine_config: MachineConfig) -> Self {
-        self.machine_config = machine_config;
+    /// Override the STARK configuration used by the machine backend.
+    pub fn with_machine_stark_config(mut self, machine_stark_config: TabulaStarkConfig) -> Self {
+        self.machine_stark_config = machine_stark_config;
+        self
+    }
+
+    /// Replace the runtime proving root backend bundle.
+    pub fn with_root_backend_bundle(mut self, bundle: RootBackendBundle) -> Self {
+        self.root_backend_bundle = bundle;
         self
     }
 
@@ -65,6 +71,7 @@ impl RuntimeBuilder {
     pub fn build(self) -> Result<TabulaRuntime, RuntimeError> {
         self.validate()?;
 
+        let root_proof_backend = self.root_backend_bundle.proof_backend();
         let resolved_runtime = materialize_column_backends(
             &self.compiled_program,
             self.host_environment.schemes().factories(),
@@ -72,7 +79,7 @@ impl RuntimeBuilder {
             self.host_environment
                 .runtime_registries()
                 .encoding_runtimes(),
-            self.machine_config.supported_root_binding_families(),
+            supported_root_binding_families(&root_proof_backend),
         )?;
         let proof_columns: Vec<_> = resolved_runtime
             .column_backends
@@ -95,19 +102,14 @@ impl RuntimeBuilder {
                 .runtime_registries()
                 .encoding_runtimes(),
         )?;
-        let mut machine_builder = self
-            .machine_config
-            .build_machine_builder()
-            .with_columns(proof_columns);
-        if program_uses_ir_hash(self.compiled_program.program()) {
-            machine_builder = machine_builder
-                .with_backend_execution_extension_boxed(Box::new(InternalIrHashExtension));
-        }
-        if !self.compiled_program.precompile_manifest().is_empty() {
-            machine_builder = machine_builder.with_backend_execution_extension_boxed(Box::new(
-                InternalPrecompileTranscriptExtension,
-            ));
-        }
+        let mut machine_builder =
+            build_machine_builder(&self.machine_stark_config, Arc::clone(&root_proof_backend))
+                .with_columns(proof_columns);
+        machine_builder = attach_builtin_execution_backends(
+            machine_builder,
+            self.compiled_program.program(),
+            !self.compiled_program.precompile_manifest().is_empty(),
+        );
         let mut precompile_handlers = Vec::with_capacity(precompile_slots.len());
         let mut precompile_proof_slots = Vec::with_capacity(precompile_slots.len());
         for slot in precompile_slots {
@@ -116,11 +118,7 @@ impl RuntimeBuilder {
                 descriptor: slot.descriptor,
                 preparer: slot.preparer,
             });
-            machine_builder = machine_builder.with_backend_execution_extension_boxed(Box::new(
-                InternalPrecompileExtension {
-                    system: slot.system,
-                },
-            ));
+            machine_builder = attach_execution_backend(machine_builder, slot.system);
         }
         let proof_plan = ProofPlan::new(proof_slots, precompile_proof_slots);
         let runtime_program = RuntimeProgram::from_compiled_program(
@@ -148,6 +146,7 @@ impl RuntimeBuilder {
 
         Ok(TabulaRuntime::from_parts(
             runtime_program,
+            self.root_backend_bundle,
             machine,
             precompiles,
             property_queries,
@@ -232,82 +231,21 @@ impl PrecompileHandler for SharedPrecompileHandler {
     }
 }
 
-struct InternalPrecompileExtension {
-    system: Arc<dyn PrecompileProofSystem>,
-}
-
-struct InternalIrHashExtension;
-
-struct InternalPrecompileTranscriptExtension;
-
-impl ExecutionTierExtension for InternalPrecompileExtension {
-    fn name(&self) -> &str {
-        self.system.name()
-    }
-
-    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
-        self.system.airs()
-    }
-
-    fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
-        self.system.dyn_chips()
-    }
-
-    fn bus_consumers(&self) -> Vec<Box<dyn tabula_stark::trace::column_commitment::BusConsumer>> {
-        self.system.bus_consumers()
-    }
-}
-
-impl ExecutionTierExtension for InternalIrHashExtension {
-    fn name(&self) -> &str {
-        "ir_hash"
-    }
-
-    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
-        vec![Box::new(IrHashChip)]
-    }
-
-    fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
-        vec![Box::new(IrHashChip)]
-    }
-}
-
-impl ExecutionTierExtension for InternalPrecompileTranscriptExtension {
-    fn name(&self) -> &str {
-        "precompile_transcript"
-    }
-
-    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
-        vec![Box::new(PrecompileTranscriptChip), Box::new(PoseidonChip)]
-    }
-
-    fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
-        vec![Box::new(PrecompileTranscriptChip), Box::new(PoseidonChip)]
-    }
-
-    fn bus_consumers(&self) -> Vec<Box<dyn tabula_stark::trace::column_commitment::BusConsumer>> {
-        vec![Box::new(PoseidonChip)]
-    }
-}
-
-fn program_uses_ir_hash(program: &tabula_ir::Program) -> bool {
-    program
-        .all_types()
-        .iter()
-        .flat_map(|tx| tx.body.iter())
-        .any(|instruction| matches!(instruction, Instruction::Hash { .. }))
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
+    use p3_field::PrimeCharacteristicRing;
     use tabula_artifact::PrecompileDescriptor;
     use tabula_compiler::CompilerCatalogs;
-    use tabula_ext::backend::AnyRap;
     use tabula_ext::backend::precompile::{
         PrecompileBackendFactory, PrecompileProofContext, PrecompileProofPreparer,
         PrecompileProofSystem, PreparedPrecompileProof, ResolvedPrecompile,
+    };
+    use tabula_ext::backend::{AnyRap, ExecutionBackend};
+    use tabula_ext::root::{
+        PreparedRootWitness, RootBackend, RootBackendBundle, RootWitnessContext,
+        RootWitnessPreparer,
     };
     use tabula_ext::{ColumnBackendFactoryBundle, ExtError, PrecompileBackendFactoryBundle};
     use tabula_ir::{PrecompileId, PrecompileSignature, PrecompileValueProfile, TxTypeDef};
@@ -328,6 +266,8 @@ mod tests {
         unsupported_layout_scheme_profile,
     };
     use tabula_core::{ColId, SchemeId, TableId, TxTypeId};
+    use tabula_machine::{PublicStatement, RootProofBackend, SmtRootProofBackend};
+    use tabula_stark::trace::WitnessStore;
 
     #[derive(Clone)]
     struct DummyPrecompileBackendFactory {
@@ -374,13 +314,9 @@ mod tests {
         descriptor: PrecompileDescriptor,
     }
 
-    impl PrecompileProofSystem for DummyPrecompileProofSystem {
+    impl ExecutionBackend for DummyPrecompileProofSystem {
         fn name(&self) -> &str {
             "dummy_precompile"
-        }
-
-        fn descriptor(&self) -> PrecompileDescriptor {
-            self.descriptor.clone()
         }
 
         fn airs(&self) -> Vec<Box<dyn AnyRap>> {
@@ -389,6 +325,12 @@ mod tests {
 
         fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
             vec![]
+        }
+    }
+
+    impl PrecompileProofSystem for DummyPrecompileProofSystem {
+        fn descriptor(&self) -> PrecompileDescriptor {
+            self.descriptor.clone()
         }
     }
 
@@ -473,6 +415,66 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy, Debug)]
+    struct DelegatingRootProofBackend;
+
+    impl RootProofBackend for DelegatingRootProofBackend {
+        fn name(&self) -> &str {
+            "delegating_root_proof"
+        }
+
+        fn supported_root_binding_families(&self) -> &'static [tabula_core::RootProfileId] {
+            SmtRootProofBackend.supported_root_binding_families()
+        }
+
+        fn airs(&self) -> Vec<Box<dyn tabula_machine::backend::AnyRap>> {
+            SmtRootProofBackend.airs()
+        }
+
+        fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
+            SmtRootProofBackend.dyn_chips()
+        }
+    }
+
+    #[derive(Debug)]
+    struct RecordingRootWitnessPreparer;
+
+    impl RootWitnessPreparer for RecordingRootWitnessPreparer {
+        fn name(&self) -> &str {
+            "recording_root"
+        }
+
+        fn prepare_root_witness(
+            &self,
+            _context: RootWitnessContext<'_>,
+        ) -> Result<PreparedRootWitness, ExtError> {
+            Ok(PreparedRootWitness::new(
+                PublicStatement {
+                    old_root: tabula_commitment::NativeDigest([p3_koala_bear::KoalaBear::ZERO; 8]),
+                    new_root: tabula_commitment::NativeDigest([p3_koala_bear::KoalaBear::ZERO; 8]),
+                },
+                WitnessStore::new(),
+            ))
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct RecordingRootBackend;
+
+    impl RootBackend for RecordingRootBackend {
+        fn name(&self) -> &str {
+            "recording_root_backend"
+        }
+
+        fn proof_backend(&self) -> Arc<dyn RootProofBackend> {
+            Arc::new(DelegatingRootProofBackend)
+        }
+
+        fn witness_preparer(&self) -> Arc<dyn RootWitnessPreparer> {
+            Arc::new(RecordingRootWitnessPreparer)
+        }
+    }
+
     fn compiled_single_column_noop_program() -> tabula_compiler::SealedProgram {
         let schema = single_u64_column_schema(TableId(1), ColId(0), "accounts", "balance");
         let tx = TxTypeDef {
@@ -545,6 +547,27 @@ mod tests {
 
         assert_eq!(runtime.proof_program().runtime_columns().len(), 1);
         assert_eq!(runtime.proof_program().proof_plan().column_slots().len(), 1);
+    }
+
+    #[test]
+    fn runtime_builder_accepts_custom_root_backend_bundle() {
+        let runtime = RuntimeBuilder::new(compiled_single_column_noop_program())
+            .with_root_backend_bundle(RootBackendBundle::new(RecordingRootBackend))
+            .build()
+            .expect("custom root backend bundle");
+
+        assert_eq!(
+            runtime.root_backend_bundle().name(),
+            "recording_root_backend"
+        );
+    }
+
+    #[test]
+    fn runtime_builder_accepts_custom_machine_stark_config() {
+        RuntimeBuilder::new(compiled_single_column_noop_program())
+            .with_machine_stark_config(tabula_machine::default_config())
+            .build()
+            .expect("custom machine stark config");
     }
 
     #[test]

@@ -33,6 +33,10 @@ impl<F> BaseAir<F> for PoseidonChip {
     fn width(&self) -> usize {
         poseidon_width()
     }
+
+    fn preprocessed_next_row_columns(&self) -> Vec<usize> {
+        vec![]
+    }
 }
 
 impl<AB: InteractionAirBuilder> Air<AB> for PoseidonChip {

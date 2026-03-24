@@ -56,21 +56,6 @@ pub enum TabulaError {
         max: u16,
     },
 
-    /// Invalid nonce for the sender.
-    #[error("invalid nonce: expected {expected}, got {actual}")]
-    InvalidNonce {
-        /// The sender's public key.
-        sender: [u8; 32],
-        /// The expected nonce value.
-        expected: u64,
-        /// The actual nonce value.
-        actual: u64,
-    },
-
-    /// Signature verification failed.
-    #[error("signature invalid")]
-    SignatureInvalid,
-
     /// Transaction type not found in program.
     #[error("tx type not found: {0:?}")]
     TxTypeNotFound(crate::TxTypeId),

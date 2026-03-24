@@ -107,10 +107,6 @@ impl ChipSpec for MetaShardChip {
         "MetaShard"
     }
 
-    fn num_public_values(&self) -> usize {
-        0
-    }
-
     fn preprocessed_width(&self) -> usize {
         0
     }

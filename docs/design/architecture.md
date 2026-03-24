@@ -122,7 +122,8 @@ The proof backend is split by responsibility:
 - `tabula-gadgets` provides reusable constraint fragments
 - `tabula-chips` provides concrete chips
 - `tabula-stark` provides chip-independent proving infrastructure
-- `tabula-machine` owns backend proof assembly and verification
+- `tabula-machine` owns typed prepared-input consumption, trace construction,
+  backend proof assembly, and verification
 
 This split is more important than any one concrete proof shape. The exact proof
 layout may change; the responsibility boundaries should stay legible.
@@ -179,6 +180,8 @@ The architecture depends on these rules:
   sealed semantics rather than a second semantic authority
 - `tabula-machine` consumes prepared backend inputs and should stay ignorant of
   compiler policy and runtime registry ownership
+- `tabula-runtime` should prepare machine-facing stores and statements, not
+  inspect machine setup or trace topology directly
 - `tabula-stark` remains chip-independent and should not depend on concrete chip crates
 
 If a change breaks one of those directions, it is probably an architectural

@@ -1,12 +1,11 @@
 #![allow(missing_docs)]
 use tabula_core::traits::{
-    BatchDigester, Hasher, NoncePolicy, SigVerifier, StateView, StaticTableProvider,
+    BatchDigester, Hasher, MembershipScheme, StateView, StaticTableProvider,
 };
 
 fn _assert_hasher_bounds<T: Hasher + Send + Sync>() {}
 fn _assert_state_view_bounds<T: StateView + Send + Sync>() {}
-fn _assert_sig_verifier_bounds<T: SigVerifier + Send + Sync>() {}
-fn _assert_nonce_policy_bounds<T: NoncePolicy + Send + Sync>() {}
+fn _assert_membership_scheme_bounds<T: MembershipScheme + Send + Sync>() {}
 fn _assert_static_table_provider_bounds<T: StaticTableProvider + Send + Sync>() {}
 fn _assert_batch_digester_bounds<T: BatchDigester + Send + Sync>() {}
 

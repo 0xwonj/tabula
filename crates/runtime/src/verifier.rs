@@ -8,17 +8,13 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use tabula_artifact::{Artifact, Statement};
-use tabula_chips::ir_hash::IrHashChip;
-use tabula_chips::poseidon::PoseidonChip;
-use tabula_chips::precompile_transcript::PrecompileTranscriptChip;
 use tabula_compiler::register_artifact;
-use tabula_ext::backend::precompile::PrecompileProofSystem;
-use tabula_ir::Instruction;
-use tabula_machine::backend::AnyRap;
-use tabula_machine::backend::extension::ExecutionTierExtension;
-use tabula_machine::{TabulaMachine, TabulaProof};
+use tabula_machine::{RootProofBackend, SmtRootProofBackend, TabulaMachine, TabulaProof};
 
-use crate::bootstrap::MachineConfig;
+use crate::bootstrap::machine::{
+    attach_builtin_execution_backends, attach_execution_backend, build_machine_builder,
+    supported_root_binding_families,
+};
 use crate::bootstrap::materialize::{
     materialize_column_backends, materialize_precompile_verifier_systems,
 };
@@ -43,10 +39,7 @@ pub(crate) fn verify_with_binding(
         binding.metadata_hash(),
     )?;
 
-    machine
-        .verifier()
-        .verify(proof)
-        .map_err(RuntimeError::Verification)
+    machine.verify(proof).map_err(RuntimeError::Verification)
 }
 
 /// Verifier built once per program binding.
@@ -59,7 +52,8 @@ pub struct Verifier {
 pub struct VerifierBuilder {
     artifact: Artifact,
     host_environment: HostEnvironment,
-    machine_config: MachineConfig,
+    machine_stark_config: tabula_machine::TabulaStarkConfig,
+    root_proof_backend: Arc<dyn RootProofBackend>,
 }
 
 impl Verifier {
@@ -89,7 +83,8 @@ impl VerifierBuilder {
         Self {
             artifact,
             host_environment: HostEnvironment::standard(),
-            machine_config: MachineConfig::standard(),
+            machine_stark_config: tabula_machine::default_config(),
+            root_proof_backend: Arc::new(SmtRootProofBackend),
         }
     }
 
@@ -99,9 +94,30 @@ impl VerifierBuilder {
         self
     }
 
-    /// Replace the machine-side verification configuration.
-    pub fn with_machine_config(mut self, machine_config: MachineConfig) -> Self {
-        self.machine_config = machine_config;
+    /// Override the STARK configuration used by the machine verifier.
+    pub fn with_machine_stark_config(
+        mut self,
+        machine_stark_config: tabula_machine::TabulaStarkConfig,
+    ) -> Self {
+        self.machine_stark_config = machine_stark_config;
+        self
+    }
+
+    /// Override the proof-side root backend.
+    pub fn with_root_proof_backend(
+        mut self,
+        root_proof_backend: impl RootProofBackend + 'static,
+    ) -> Self {
+        self.root_proof_backend = Arc::new(root_proof_backend);
+        self
+    }
+
+    /// Override the proof-side root backend using a shared backend object.
+    pub fn with_root_proof_backend_arc(
+        mut self,
+        root_proof_backend: Arc<dyn RootProofBackend>,
+    ) -> Self {
+        self.root_proof_backend = root_proof_backend;
         self
     }
 
@@ -120,28 +136,23 @@ impl VerifierBuilder {
             self.host_environment
                 .runtime_registries()
                 .encoding_runtimes(),
-            self.machine_config.supported_root_binding_families(),
+            supported_root_binding_families(&self.root_proof_backend),
         )?;
         let precompile_systems = materialize_precompile_verifier_systems(
             &self.artifact.precompile_manifest,
             self.host_environment.precompiles().factories(),
         )?;
-        let mut machine_builder = self.machine_config.build_machine_builder();
-        if program_uses_ir_hash(compiled_program.program()) {
-            machine_builder = machine_builder
-                .with_backend_execution_extension_boxed(Box::new(InternalIrHashExtension));
-        }
-        if !self.artifact.precompile_manifest.is_empty() {
-            machine_builder = machine_builder.with_backend_execution_extension_boxed(Box::new(
-                InternalPrecompileTranscriptExtension,
-            ));
-        }
+        let mut machine_builder = build_machine_builder(
+            &self.machine_stark_config,
+            Arc::clone(&self.root_proof_backend),
+        );
+        machine_builder = attach_builtin_execution_backends(
+            machine_builder,
+            compiled_program.program(),
+            !self.artifact.precompile_manifest.is_empty(),
+        );
         for system in precompile_systems {
-            machine_builder = machine_builder.with_backend_execution_extension_boxed(Box::new(
-                InternalPrecompileExtension {
-                    system: system.system,
-                },
-            ));
+            machine_builder = attach_execution_backend(machine_builder, system.system);
         }
         let machine = machine_builder
             .with_columns(
@@ -173,72 +184,6 @@ impl VerifierBuilder {
     }
 }
 
-struct InternalPrecompileExtension {
-    system: Arc<dyn PrecompileProofSystem>,
-}
-
-struct InternalIrHashExtension;
-
-struct InternalPrecompileTranscriptExtension;
-
-impl ExecutionTierExtension for InternalPrecompileExtension {
-    fn name(&self) -> &str {
-        self.system.name()
-    }
-
-    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
-        self.system.airs()
-    }
-
-    fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
-        self.system.dyn_chips()
-    }
-
-    fn bus_consumers(&self) -> Vec<Box<dyn tabula_stark::trace::column_commitment::BusConsumer>> {
-        self.system.bus_consumers()
-    }
-}
-
-impl ExecutionTierExtension for InternalIrHashExtension {
-    fn name(&self) -> &str {
-        "ir_hash"
-    }
-
-    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
-        vec![Box::new(IrHashChip)]
-    }
-
-    fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
-        vec![Box::new(IrHashChip)]
-    }
-}
-
-impl ExecutionTierExtension for InternalPrecompileTranscriptExtension {
-    fn name(&self) -> &str {
-        "precompile_transcript"
-    }
-
-    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
-        vec![Box::new(PrecompileTranscriptChip), Box::new(PoseidonChip)]
-    }
-
-    fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
-        vec![Box::new(PrecompileTranscriptChip), Box::new(PoseidonChip)]
-    }
-
-    fn bus_consumers(&self) -> Vec<Box<dyn tabula_stark::trace::column_commitment::BusConsumer>> {
-        vec![Box::new(PoseidonChip)]
-    }
-}
-
-fn program_uses_ir_hash(program: &tabula_ir::Program) -> bool {
-    program
-        .all_types()
-        .iter()
-        .flat_map(|tx| tx.body.iter())
-        .any(|instruction| matches!(instruction, Instruction::Hash { .. }))
-}
-
 impl std::fmt::Debug for Verifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Verifier")
@@ -250,20 +195,31 @@ impl std::fmt::Debug for Verifier {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::RuntimeError;
     #[cfg(feature = "verify")]
     use tabula_core::{ColId, SchemeId, TableId, TxTypeId};
+    #[cfg(feature = "prove")]
+    use tabula_ext::root::{
+        PreparedRootWitness, RootBackend, RootBackendBundle, RootWitnessContext,
+        RootWitnessPreparer,
+    };
     #[cfg(feature = "prove")]
     use tabula_testing::assertions::assert_statement_matches_artifact;
     #[cfg(feature = "verify")]
     use tabula_testing::exec::compiled_program_from_definition;
     #[cfg(feature = "verify")]
     use tabula_testing::fixtures::artifacts::precompile_requirement_artifact;
+    #[cfg(feature = "prove")]
+    use tabula_testing::fixtures::compiled::compiled_hash_only_case;
     #[cfg(feature = "verify")]
     use tabula_testing::fixtures::schema::single_u64_column_schema;
 
     #[cfg(feature = "verify")]
     use tabula_ir::TxTypeDef;
+    #[cfg(feature = "verify")]
+    use tabula_machine::{RootProofBackend, SmtRootProofBackend};
     #[cfg(feature = "prove")]
     use tabula_testing::fixtures::examples::{
         transfer_example_artifact_case, transfer_example_compiled_case,
@@ -280,6 +236,66 @@ mod tests {
     };
     #[cfg(feature = "verify")]
     use tabula_ext::ColumnBackendFactoryBundle;
+
+    #[cfg(feature = "verify")]
+    #[derive(Clone, Copy, Debug)]
+    struct DelegatingRootProofBackend;
+
+    #[cfg(feature = "verify")]
+    impl RootProofBackend for DelegatingRootProofBackend {
+        fn name(&self) -> &str {
+            "delegating_root_proof"
+        }
+
+        fn supported_root_binding_families(&self) -> &'static [tabula_core::RootProfileId] {
+            SmtRootProofBackend.supported_root_binding_families()
+        }
+
+        fn airs(&self) -> Vec<Box<dyn tabula_machine::backend::AnyRap>> {
+            SmtRootProofBackend.airs()
+        }
+
+        fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
+            SmtRootProofBackend.dyn_chips()
+        }
+    }
+
+    #[cfg(feature = "prove")]
+    #[derive(Debug)]
+    struct FailingRootWitnessPreparer;
+
+    #[cfg(feature = "prove")]
+    impl RootWitnessPreparer for FailingRootWitnessPreparer {
+        fn name(&self) -> &str {
+            "failing_root"
+        }
+
+        fn prepare_root_witness(
+            &self,
+            _context: RootWitnessContext<'_>,
+        ) -> Result<PreparedRootWitness, tabula_ext::ExtError> {
+            Err(tabula_ext::ExtError::validation("should not be called"))
+        }
+    }
+
+    #[cfg(feature = "prove")]
+    #[derive(Clone, Copy, Debug)]
+    struct FailingRootBackend;
+
+    #[cfg(feature = "prove")]
+    impl RootBackend for FailingRootBackend {
+        fn name(&self) -> &str {
+            "failing_root_backend"
+        }
+
+        fn proof_backend(&self) -> Arc<dyn RootProofBackend> {
+            Arc::new(DelegatingRootProofBackend)
+        }
+
+        fn witness_preparer(&self) -> Arc<dyn RootWitnessPreparer> {
+            Arc::new(FailingRootWitnessPreparer)
+        }
+    }
 
     #[cfg(feature = "verify")]
     fn compiled_single_column_noop_program() -> tabula_compiler::SealedProgram {
@@ -326,6 +342,17 @@ mod tests {
         assert_eq!(verifier.binding().metadata_hash().len(), 64);
     }
 
+    #[cfg(feature = "verify")]
+    #[test]
+    fn program_verifier_allows_custom_root_proof_backend() {
+        let verifier = Verifier::builder(compiled_single_column_noop_program().into_artifact())
+            .with_root_proof_backend(DelegatingRootProofBackend)
+            .build()
+            .expect("verifier should accept custom proof-side root backends");
+
+        assert_eq!(verifier.binding().metadata_hash().len(), 64);
+    }
+
     #[cfg(feature = "prove")]
     #[test]
     fn program_verifier_accepts_runtime_proof() {
@@ -337,6 +364,23 @@ mod tests {
             .expect("program verifier");
 
         assert_statement_matches_artifact(&proved.statement, &case.artifact);
+        verifier
+            .verify(&proved.proof, &proved.statement)
+            .expect("verification succeeds");
+    }
+
+    #[cfg(feature = "prove")]
+    #[test]
+    fn program_verifier_accepts_runtime_proof_for_hash_only_program() {
+        let case = compiled_hash_only_case();
+        let artifact = case.compiled_program.as_artifact();
+        let proved = prove_compiled_case(&case);
+
+        let verifier = Verifier::builder(artifact.clone())
+            .build()
+            .expect("program verifier");
+
+        assert_statement_matches_artifact(&proved.statement, &artifact);
         verifier
             .verify(&proved.proof, &proved.statement)
             .expect("verification succeeds");
@@ -362,5 +406,22 @@ mod tests {
             err.to_string().contains("program hash"),
             "expected program hash mismatch, got: {err}",
         );
+    }
+
+    #[cfg(feature = "prove")]
+    #[test]
+    fn program_verifier_ignores_root_witness_preparer_bundle() {
+        let case = transfer_example_artifact_case();
+        let proved = prove_compiled_case(&transfer_example_compiled_case());
+        let bundle = RootBackendBundle::new(FailingRootBackend);
+
+        let verifier = Verifier::builder(case.artifact.clone())
+            .with_root_proof_backend_arc(bundle.proof_backend())
+            .build()
+            .expect("verifier build should ignore witness preparers");
+
+        verifier
+            .verify(&proved.proof, &proved.statement)
+            .expect("verification succeeds without witness preparation");
     }
 }

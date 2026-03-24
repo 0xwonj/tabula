@@ -1,8 +1,13 @@
-//! Backend-only execution-tier extension framework.
+//! Machine-only execution-tier extension framework.
 //!
 //! [`ExecutionTierExtension`] packages AIR chips, trace generators, and
 //! dependent bus consumers into a unit that the machine builder can attach to
-//! the execution tier. This is an advanced backend API.
+//! the execution tier. This is an advanced backend composition API for direct
+//! machine users.
+//!
+//! Stable execution-tier authoring for runtime / verifier integration lives in
+//! `tabula-ext::backend::execution`; runtime and verifier bridge those ext-owned
+//! backends into this machine-only trait internally.
 //!
 //! # Bus protocol
 //!
@@ -22,7 +27,7 @@ pub trait ExecutionTierExtension: Send + Sync {
 
     /// AIR implementations for proving and verification.
     ///
-    /// Each AIR is registered in the execution tier's [`ChipRegistry`](crate::backend::ChipRegistry).
+    /// Each AIR is registered in the execution tier's internal registry.
     /// Chips must implement [`AnyRap`] (satisfied automatically via blanket impl
     /// for any type implementing `ChipSpec + BaseAir + Air<...>`).
     fn airs(&self) -> Vec<Box<dyn AnyRap>>;

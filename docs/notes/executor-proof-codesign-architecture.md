@@ -503,8 +503,8 @@ The ideal co-designed system uses coarse-grained deterministic parallelism.
 
 ### 10.1 Sequential where semantics require it
 
-Transaction execution remains sequential in the current model because state,
-rollback, and nonce semantics are inherently ordered.
+Transaction execution remains sequential in the current model because state
+transitions, rollback semantics, and effect ordering are inherently ordered.
 
 The ideal design does not force artificial tx-level parallel execution.
 

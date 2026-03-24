@@ -4,9 +4,7 @@ pub mod error;
 mod event;
 #[cfg(any(feature = "test-utils", test))]
 pub mod mock;
-mod nonce;
 mod query;
-mod sig;
 pub mod state;
 pub mod traits;
 mod tx;
@@ -31,6 +29,4 @@ pub use event::{
 pub use query::PropertyQueryKind;
 
 // ── Default implementations ──
-pub use nonce::SequentialNonce;
-pub use sig::NoopSigVerifier;
 pub use state::in_memory::{InMemoryState, InMemoryStaticTables};

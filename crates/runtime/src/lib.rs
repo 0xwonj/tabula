@@ -52,8 +52,6 @@ pub use execute::{
     BatchInput, CompiledBatchInput, ExecutionEnvelope, run_batch, run_compiled_batch,
 };
 
-#[cfg(any(feature = "prove", feature = "verify"))]
-pub use bootstrap::MachineConfig;
 #[cfg(feature = "prove")]
 pub use bootstrap::RuntimeBuilder;
 #[cfg(any(feature = "prove", feature = "verify"))]

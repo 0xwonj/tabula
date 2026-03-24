@@ -12,8 +12,7 @@ use tabula_commitment::{
 };
 use tabula_core::error::TabulaError;
 use tabula_core::{
-    Batch, ColId, InMemoryStaticTables, NoopSigVerifier, PortableValue, RowKey, SequentialNonce,
-    TableId, TableSchema, Transaction,
+    Batch, ColId, InMemoryStaticTables, PortableValue, RowKey, TableId, TableSchema, Transaction,
 };
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::property::PropertyQueryRegistry;
@@ -24,7 +23,8 @@ use tabula_stark::trace::{TraceMap, WitnessStore, build_all_traces, debug_valida
 use tabula_types::{EncodingRuntime, EncodingRuntimeRegistry, TypeRuntimeRegistry};
 use tabula_witness::stark::{
     LowerSuccessfulTxInput, LoweringOutput, LoweringPrecompileCall, LoweringPropertyRead,
-    SharedStoreBuilder, SharedStoreContext, TxLoweringOutput, lower_successful_tx,
+    SmtRootStoreContext, TxLoweringOutput, lower_successful_tx, prepare_execution_store,
+    prepare_smt_root_store,
 };
 use tabula_witness::{AccessEvent, ColumnWrite};
 
@@ -49,12 +49,12 @@ pub struct StarkTraceHarness {
 }
 
 impl StarkTraceHarness {
-    pub fn shared_store_context(&self) -> SharedStoreContext<'_> {
-        SharedStoreContext {
-            column_root_bindings: &self.column_root_bindings,
-            old_state_root: &self.old_state_root,
-            new_state_root: &self.new_state_root,
-        }
+    pub fn smt_root_store_context(&self) -> SmtRootStoreContext<'_> {
+        SmtRootStoreContext::new(
+            &self.column_root_bindings,
+            &self.old_state_root,
+            &self.new_state_root,
+        )
     }
 
     pub fn empty_columns(&self) -> BTreeSet<(TableId, ColId)> {
@@ -97,16 +97,13 @@ fn compile_execute_context_impl(
     let env = BatchEnv {
         hasher: &hasher,
         type_runtimes: &type_runtimes,
-        sig_verifier: &NoopSigVerifier,
-        nonce_policy: &SequentialNonce,
         static_tables: &static_tables,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,
     };
     let resolved = ResolvedExecutionProgram::from_program(&program).expect("resolved program");
-    let journal = execute_batch(&batch, &resolved, &snapshot, &env, &BTreeMap::new())
-        .expect("journal execution");
+    let journal = execute_batch(&batch, &resolved, &snapshot, &env).expect("journal execution");
     let result = derive_batch_report(&journal, &type_runtimes).expect("batch result projection");
 
     let schemas_by_id: BTreeMap<TableId, TableSchema> = compiled_schemas
@@ -286,8 +283,17 @@ pub fn prepare_witness_store<const WIDTH: usize>(
     harness: &StarkTraceHarness,
     lowering: &LoweringOutput,
 ) -> Result<WitnessStore, TabulaError> {
-    SharedStoreBuilder::<PoseidonHasher, WIDTH>::new(harness.shared_store_context())
-        .prepare_witness_store(lowering, PoseidonHasher::new())
+    let mut store = prepare_execution_store(lowering)?;
+    store
+        .merge(prepare_smt_root_store(
+            harness.smt_root_store_context(),
+            PoseidonHasher::new(),
+        )?)
+        .map_err(|detail| TabulaError::ProofError {
+            phase: "store_merge",
+            detail,
+        })?;
+    Ok(store)
 }
 
 pub fn build_trace_map<const WIDTH: usize>(

@@ -12,11 +12,14 @@ use tabula_profile::SemanticRegistry;
 use tabula_runtime::{HostEnvironment, RuntimeRegistries};
 use tabula_types::{EncodingRuntime, TypeRuntime, TypeRuntimeRegistry};
 
-#[cfg(feature = "verify")]
-use tabula_runtime::MachineConfig;
-
+#[cfg(feature = "prove")]
+use tabula_ext::root::RootBackendBundle;
 #[cfg(feature = "verify")]
 use tabula_ext::{ColumnBackendFactoryBundle, PrecompileBackendFactoryBundle};
+#[cfg(feature = "verify")]
+use tabula_machine::TabulaStarkConfig;
+#[cfg(all(feature = "verify", not(feature = "prove")))]
+use tabula_machine::{RootProofBackend, SmtRootProofBackend};
 
 use crate::error::SdkError;
 use crate::program::Program;
@@ -34,14 +37,22 @@ pub struct SdkBuilder {
     compiler_catalogs: CompilerCatalogs,
     host_environment: HostEnvironment,
     #[cfg(feature = "verify")]
-    machine_config: MachineConfig,
+    machine_stark_config: TabulaStarkConfig,
+    #[cfg(feature = "prove")]
+    root_backend_bundle: RootBackendBundle,
+    #[cfg(all(feature = "verify", not(feature = "prove")))]
+    root_proof_backend: Arc<dyn RootProofBackend>,
 }
 
 pub(crate) struct SdkInner {
     pub(crate) compiler_catalogs: CompilerCatalogs,
     pub(crate) host_environment: HostEnvironment,
     #[cfg(feature = "verify")]
-    pub(crate) machine_config: MachineConfig,
+    pub(crate) machine_stark_config: TabulaStarkConfig,
+    #[cfg(feature = "prove")]
+    pub(crate) root_backend_bundle: RootBackendBundle,
+    #[cfg(all(feature = "verify", not(feature = "prove")))]
+    pub(crate) root_proof_backend: Arc<dyn RootProofBackend>,
 }
 
 impl SdkInner {
@@ -95,7 +106,8 @@ impl Sdk {
     ) -> Result<tabula_runtime::TabulaRuntime, SdkError> {
         tabula_runtime::TabulaRuntime::builder(sealed_program.clone())
             .with_host_environment(self.inner.host_environment.clone())
-            .with_machine_config(self.inner.machine_config.clone())
+            .with_machine_stark_config(self.inner.machine_stark_config.clone())
+            .with_root_backend_bundle(self.inner.root_backend_bundle.clone())
             .build()
             .map_err(SdkError::from)
     }
@@ -107,7 +119,17 @@ impl Sdk {
     ) -> Result<tabula_runtime::Verifier, SdkError> {
         tabula_runtime::Verifier::builder(artifact.clone())
             .with_host_environment(self.inner.host_environment.clone())
-            .with_machine_config(self.inner.machine_config.clone())
+            .with_machine_stark_config(self.inner.machine_stark_config.clone())
+            .with_root_proof_backend_arc({
+                #[cfg(feature = "prove")]
+                {
+                    self.inner.root_backend_bundle.proof_backend()
+                }
+                #[cfg(all(feature = "verify", not(feature = "prove")))]
+                {
+                    Arc::clone(&self.inner.root_proof_backend)
+                }
+            })
             .build()
             .map_err(SdkError::from)
     }
@@ -119,7 +141,11 @@ impl SdkBuilder {
             compiler_catalogs: CompilerCatalogs::standard(),
             host_environment: HostEnvironment::standard(),
             #[cfg(feature = "verify")]
-            machine_config: MachineConfig::standard(),
+            machine_stark_config: tabula_machine::default_config(),
+            #[cfg(feature = "prove")]
+            root_backend_bundle: RootBackendBundle::standard(),
+            #[cfg(all(feature = "verify", not(feature = "prove")))]
+            root_proof_backend: Arc::new(SmtRootProofBackend),
         }
     }
 
@@ -132,13 +158,6 @@ impl SdkBuilder {
     /// Replace the host-installed execution/proving environment.
     pub fn with_host_environment(mut self, host_environment: HostEnvironment) -> Self {
         self.host_environment = host_environment;
-        self
-    }
-
-    /// Replace the machine-side proving and verification configuration.
-    #[cfg(feature = "verify")]
-    pub fn with_machine_config(mut self, machine_config: MachineConfig) -> Self {
-        self.machine_config = machine_config;
         self
     }
 
@@ -251,16 +270,36 @@ impl SdkBuilder {
     }
 
     /// Override the root proof backend used by runtime and verifier builders.
-    #[cfg(feature = "verify")]
-    pub fn with_root_proof(mut self, root: impl tabula_machine::RootProof + 'static) -> Self {
-        self.machine_config = self.machine_config.with_root_proof(root);
+    #[cfg(feature = "prove")]
+    pub fn with_root_backend_bundle(mut self, root_backend_bundle: RootBackendBundle) -> Self {
+        self.root_backend_bundle = root_backend_bundle;
+        self
+    }
+
+    /// Override the proof-side root backend used by verifier builders.
+    #[cfg(all(feature = "verify", not(feature = "prove")))]
+    pub fn with_root_proof_backend(
+        mut self,
+        root_proof_backend: impl RootProofBackend + 'static,
+    ) -> Self {
+        self.root_proof_backend = Arc::new(root_proof_backend);
+        self
+    }
+
+    /// Override the proof-side root backend used by verifier builders.
+    #[cfg(all(feature = "verify", not(feature = "prove")))]
+    pub fn with_root_proof_backend_arc(
+        mut self,
+        root_proof_backend: Arc<dyn RootProofBackend>,
+    ) -> Self {
+        self.root_proof_backend = root_proof_backend;
         self
     }
 
     /// Override the STARK configuration used by runtime and verifier builders.
     #[cfg(feature = "verify")]
-    pub fn with_machine_stark_config(mut self, config: tabula_machine::TabulaStarkConfig) -> Self {
-        self.machine_config = self.machine_config.with_config(config);
+    pub fn with_machine_stark_config(mut self, config: TabulaStarkConfig) -> Self {
+        self.machine_stark_config = config;
         self
     }
 
@@ -271,7 +310,11 @@ impl SdkBuilder {
                 compiler_catalogs: self.compiler_catalogs,
                 host_environment: self.host_environment,
                 #[cfg(feature = "verify")]
-                machine_config: self.machine_config,
+                machine_stark_config: self.machine_stark_config,
+                #[cfg(feature = "prove")]
+                root_backend_bundle: self.root_backend_bundle,
+                #[cfg(all(feature = "verify", not(feature = "prove")))]
+                root_proof_backend: self.root_proof_backend,
             }),
         }
     }

@@ -1,7 +1,5 @@
 //! Shared execution-oriented helpers built on public compiler/executor seams.
 
-use std::collections::BTreeMap;
-
 use tabula_artifact::{Artifact, ArtifactError, State as ArtifactState, TransactionBatch};
 use tabula_compiler::{
     CompilerCatalogs, ProgramDefinition, SealedProgram, SourceTableSchema, compile_program_source,
@@ -11,8 +9,8 @@ use tabula_core::error::TabulaError;
 use tabula_core::mock::Blake3Hasher;
 use tabula_core::traits::StateView;
 use tabula_core::{
-    Batch, CellKey, ColId, InMemoryState, InMemoryStaticTables, NoopSigVerifier, PortableValue,
-    RowKey, TableId, Transaction, TxTypeId,
+    Batch, CellKey, ColId, InMemoryState, InMemoryStaticTables, PortableValue, RowKey, TableId,
+    Transaction, TxTypeId,
 };
 use tabula_executor::batch::{BatchEnv, execute_batch};
 use tabula_executor::property::PropertyQueryRegistry;
@@ -166,13 +164,11 @@ pub fn execute_batch_with_defaults<S: StateView>(
     let env = BatchEnv {
         hasher: &Blake3Hasher,
         type_runtimes: &type_runtimes,
-        sig_verifier: &NoopSigVerifier,
-        nonce_policy: &tabula_core::SequentialNonce,
         static_tables: &static_tables,
         precompiles: None,
         committed_state: None,
         property_queries: &property_queries,
     };
-    let journal = execute_batch(batch, &resolved, snapshot, &env, &BTreeMap::new())?;
+    let journal = execute_batch(batch, &resolved, snapshot, &env)?;
     derive_batch_report(&journal, &type_runtimes)
 }

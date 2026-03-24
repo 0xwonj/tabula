@@ -41,6 +41,24 @@ pub fn compiled_property_successor_program_fixture() -> SealedProgram {
     compiled_property_successor_program()
 }
 
+pub fn compiled_hash_only_program() -> SealedProgram {
+    compiled_program_from_definition(
+        vec![],
+        vec![TxTypeDef {
+            id: TxTypeId(1),
+            name: "hash_only".to_string(),
+            param_schema: vec![],
+            body: vec![Instruction::Hash {
+                dst: 0,
+                inputs: vec![
+                    ValueExpr::Literal(u64_portable(7)),
+                    ValueExpr::Literal(u64_portable(11)),
+                ],
+            }],
+        }],
+    )
+}
+
 pub fn compiled_single_write_case() -> CompiledRuntimeCase {
     CompiledRuntimeCase {
         compiled_program: compiled_single_write_program(),
@@ -60,6 +78,14 @@ pub fn compiled_precompile_requirement_case() -> CompiledRuntimeCase {
 pub fn compiled_property_successor_case() -> CompiledRuntimeCase {
     CompiledRuntimeCase {
         compiled_program: compiled_property_successor_program_fixture(),
+        state: empty_state(),
+        batch: no_param_batch(1),
+    }
+}
+
+pub fn compiled_hash_only_case() -> CompiledRuntimeCase {
+    CompiledRuntimeCase {
+        compiled_program: compiled_hash_only_program(),
         state: empty_state(),
         batch: no_param_batch(1),
     }

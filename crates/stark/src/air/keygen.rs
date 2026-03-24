@@ -41,6 +41,8 @@ pub struct ChipKeygenInfo {
     pub main_width: usize,
     /// Width of the preprocessed trace (0 if none).
     pub preprocessed_width: usize,
+    /// Indices of preprocessed columns that require next-row access.
+    pub preprocessed_next_row_columns: Vec<usize>,
     /// Number of public values consumed by this chip.
     pub num_public_values: usize,
     /// Interaction descriptors extracted from column-scanning.
@@ -91,6 +93,7 @@ where
         chip_id,
         main_width,
         preprocessed_width: pp_width,
+        preprocessed_next_row_columns: BaseAir::<KoalaBear>::preprocessed_next_row_columns(chip),
         num_public_values: num_pvs,
         interactions: InteractionDescriptor {
             sends,

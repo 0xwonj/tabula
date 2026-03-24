@@ -10,8 +10,7 @@
 //! - **Tabula chip framework**: `ChipSpec`, `ChipId`, `ChipIdAllocator`,
 //!   `BusId`, `InteractionAirBuilder`, `TraceContributor`, `TracePhase`,
 //!   `WitnessStore`, `DynChip`
-//! - **Machine backend types**: `AnyRap`, `ChipRegistry`, `ColumnChipSet`,
-//!   `ProofColumn`
+//! - **Machine backend types**: `AnyRap`, `ColumnChipSet`, `ProofColumn`
 //!
 //! For bus declarations, use `tabula_stark::define_bus!`.
 
@@ -29,4 +28,4 @@ pub use tabula_stark::trace::column_commitment::BusConsumer;
 pub use tabula_stark::trace::contributor::{TraceContributor, TracePhase, WitnessStore};
 pub use tabula_stark::trace::trace_map::TraceMap;
 
-pub use crate::backend::{AnyRap, ChipRegistry, ColumnChipSet, ProofColumn};
+pub use crate::backend::{AnyRap, ColumnChipSet, ProofColumn};

@@ -1,10 +1,4 @@
 //! STARK verification helpers shared across the proof pipeline.
-//!
-//! Provides per-sub-proof verification: chip manifest validation, PCS
-//! verification, and per-chip constraint evaluation. The top-level
-//! verify entrypoint lives in [`crate::Verifier::verify()`].
-
-use tabula_stark::rap::verifier::RapVerifierFolder;
 
 use std::collections::BTreeSet;
 
@@ -15,31 +9,25 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrixView;
 use p3_matrix::stack::VerticalPair;
 use p3_uni_stark::{StarkGenericConfig, VerifierConstraintFolder};
+use tabula_stark::rap::verifier::RapVerifierFolder;
 
 use crate::config::{
     Challenger, EF4, PcsCommitment, PcsDomain, PcsOpeningProof, TabulaPcs, TabulaStarkConfig,
 };
 use crate::proof::chip_ref::ChipRef;
-use crate::proof::types::{ChipOpening, VerificationError};
-use crate::setup::keys::TabulaVerifyingKey;
+use crate::proof::errors::VerificationError;
+use crate::proof::model::ChipOpening;
+use crate::proof::opening_shape::{preprocessed_opening_points, transition_opening_points};
+use crate::setup::metadata::{ChipVerificationMetadata, TierVerificationMetadata};
 use crate::setup::registry::ChipRegistry;
 
-/// One entry in the PCS verification batch: commitment + per-matrix opening points.
 type PcsRound = (PcsCommitment, Vec<(PcsDomain, Vec<(EF4, Vec<EF4>)>)>);
 
-// ─── Public API ─────────────────────────────────────────────────────────────
-
-/// Verify a sub-proof given pre-computed LogUp challenges.
-///
-/// Used by [`crate::Verifier::verify()`] where challenges are derived from the
-/// global (cross-proof) transcript rather than per-proof.
-///
-/// Does NOT check cross-proof bus balance (caller's responsibility).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn verify_sub_proof_with_challenges(
     config: &TabulaStarkConfig,
     registry: &ChipRegistry,
-    vk: &TabulaVerifyingKey,
+    verification_metadata: &TierVerificationMetadata,
     chip_openings: &[ChipOpening],
     preprocessed_commitment: Option<PcsCommitment>,
     main_commitment: PcsCommitment,
@@ -51,20 +39,18 @@ pub(crate) fn verify_sub_proof_with_challenges(
 ) -> Result<(), VerificationError> {
     let pcs = config.pcs();
 
-    // ── Phase 0: Validate chip manifest ─────────────────────────────────
-    validate_chip_manifest(vk, chip_openings)?;
+    validate_chip_manifest(verification_metadata, chip_openings)?;
 
-    // ── Phase 1: Reconstruct per-proof challenges (alpha, zeta) ──────────
-    if let Some(ref perm_c) = perm_commitment {
-        challenger.observe(perm_c.clone());
+    if let Some(ref perm_commitment) = perm_commitment {
+        challenger.observe(perm_commitment.clone());
     }
     let alpha: EF4 = challenger.sample_algebra_element();
     challenger.observe(quotient_commitment.clone());
     let zeta: EF4 = challenger.sample_algebra_element();
 
-    // ── Phase 2-3: PCS verification ─────────────────────────────────────
     verify_pcs(
         pcs,
+        verification_metadata,
         chip_openings,
         main_commitment,
         perm_commitment,
@@ -75,18 +61,15 @@ pub(crate) fn verify_sub_proof_with_challenges(
         challenger,
     )?;
 
-    // ── Phase 4: Per-chip constraint verification ───────────────────────
     verify_all_chip_constraints(pcs, registry, chip_openings, zeta, alpha, logup_challenges)?;
 
     Ok(())
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Build PCS verification rounds and run FRI verification.
 #[allow(clippy::too_many_arguments)]
 fn verify_pcs(
     pcs: &TabulaPcs,
+    verification_metadata: &TierVerificationMetadata,
     chip_openings: &[ChipOpening],
     main_commitment: PcsCommitment,
     perm_commitment: Option<PcsCommitment>,
@@ -96,8 +79,9 @@ fn verify_pcs(
     zeta: EF4,
     challenger: &mut Challenger,
 ) -> Result<(), VerificationError> {
-    let coms_to_verify = build_verification_rounds(
+    let rounds = build_verification_rounds(
         pcs,
+        verification_metadata,
         chip_openings,
         main_commitment,
         perm_commitment,
@@ -105,16 +89,17 @@ fn verify_pcs(
         quotient_commitment,
         zeta,
     );
-    <TabulaPcs as Pcs<EF4, Challenger>>::verify(pcs, coms_to_verify, opening_proof, challenger)
-        .map_err(|e| VerificationError::PcsVerificationFailed {
-            detail: format!("{e:?}"),
-        })
+    <TabulaPcs as Pcs<EF4, Challenger>>::verify(pcs, rounds, opening_proof, challenger).map_err(
+        |error| VerificationError::PcsVerificationFailed {
+            detail: format!("{error:?}"),
+        },
+    )
 }
 
-/// Build PCS verification rounds (commitments + opening points) for Rounds 0-3.
 #[allow(clippy::too_many_arguments)]
 fn build_verification_rounds(
     pcs: &TabulaPcs,
+    verification_metadata: &TierVerificationMetadata,
     chip_openings: &[ChipOpening],
     main_commitment: PcsCommitment,
     perm_commitment: Option<PcsCommitment>,
@@ -128,116 +113,141 @@ fn build_verification_rounds(
     let rap_indices: Vec<usize> = chip_openings
         .iter()
         .enumerate()
-        .filter(|(_, o)| o.perm_width > 0)
-        .map(|(i, _)| i)
+        .filter(|(_, opening)| opening.perm_width > 0)
+        .map(|(index, _)| index)
         .collect();
     let pp_indices: Vec<usize> = chip_openings
         .iter()
         .enumerate()
-        .filter(|(_, o)| o.preprocessed_local.is_some())
-        .map(|(i, _)| i)
+        .filter(|(_, opening)| opening.preprocessed_local.is_some())
+        .map(|(index, _)| index)
         .collect();
 
-    // Quotient chunk domains per chip.
-    let q_domains: Vec<Vec<PcsDomain>> = chip_openings
+    let quotient_domains: Vec<Vec<PcsDomain>> = chip_openings
         .iter()
-        .map(|o| {
-            let td = <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << o.degree_bits);
-            let n = 1 << o.log_quotient_chunks;
-            let qd = td.create_disjoint_domain(1 << (o.degree_bits + o.log_quotient_chunks));
-            qd.split_domains(n)
+        .map(|opening| {
+            let trace_domain =
+                <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << opening.degree_bits);
+            let num_chunks = 1 << opening.log_quotient_chunks;
+            let quotient_domain = trace_domain
+                .create_disjoint_domain(1 << (opening.degree_bits + opening.log_quotient_chunks));
+            quotient_domain
+                .split_domains(num_chunks)
                 .iter()
-                .map(|d: &PcsDomain| <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, d.size()))
+                .map(|domain: &PcsDomain| {
+                    <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, domain.size())
+                })
                 .collect()
         })
         .collect();
 
     let mut rounds = Vec::with_capacity(4);
 
-    // Round 0: main traces.
     let main_matrices: Vec<_> = chip_openings
         .iter()
-        .map(|o| {
-            let dom = <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << o.degree_bits);
-            let zn = dom
-                .next_point(zeta)
-                .expect("domain must support next_point for OOD evaluation");
+        .map(|opening| {
+            let domain =
+                <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << opening.degree_bits);
+            let [zeta, zeta_next] = transition_opening_points(pcs, opening.degree_bits, zeta);
             (
-                dom,
-                vec![(zeta, o.main_local.clone()), (zn, o.main_next.clone())],
+                domain,
+                vec![
+                    (zeta, opening.main_local.clone()),
+                    (zeta_next, opening.main_next.clone()),
+                ],
             )
         })
         .collect();
     rounds.push((main_commitment, main_matrices));
 
-    // Round 1: quotient chunks.
-    let mut q_matrices = Vec::new();
-    for (i, opening) in chip_openings.iter().enumerate() {
-        for (qi, q_vals) in opening.quotient_chunks.iter().enumerate() {
-            q_matrices.push((q_domains[i][qi], vec![(zeta, q_vals.clone())]));
+    let mut quotient_matrices = Vec::new();
+    for (index, opening) in chip_openings.iter().enumerate() {
+        for (chunk_index, chunk_values) in opening.quotient_chunks.iter().enumerate() {
+            quotient_matrices.push((
+                quotient_domains[index][chunk_index],
+                vec![(zeta, chunk_values.clone())],
+            ));
         }
     }
-    rounds.push((quotient_commitment, q_matrices));
+    rounds.push((quotient_commitment, quotient_matrices));
 
-    // Round 2: perm traces.
-    if let Some(perm_c) = perm_commitment {
+    if let Some(perm_commitment) = perm_commitment {
         let perm_matrices: Vec<_> = rap_indices
             .iter()
-            .map(|&i| {
-                let o = &chip_openings[i];
-                let dom = <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << o.degree_bits);
-                let zn = dom
-                    .next_point(zeta)
-                    .expect("domain must support next_point for perm trace");
+            .map(|&index| {
+                let opening = &chip_openings[index];
+                let domain =
+                    <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << opening.degree_bits);
+                let [zeta, zeta_next] = transition_opening_points(pcs, opening.degree_bits, zeta);
                 (
-                    dom,
-                    vec![(zeta, o.perm_local.clone()), (zn, o.perm_next.clone())],
+                    domain,
+                    vec![
+                        (zeta, opening.perm_local.clone()),
+                        (zeta_next, opening.perm_next.clone()),
+                    ],
                 )
             })
             .collect();
-        rounds.push((perm_c, perm_matrices));
+        rounds.push((perm_commitment, perm_matrices));
     }
 
-    // Round 3: preprocessed.
-    if let Some(pp_c) = preprocessed_commitment {
-        let pp_matrices: Vec<_> = pp_indices
+    if let Some(preprocessed_commitment) = preprocessed_commitment {
+        let preprocessed_matrices: Vec<_> = pp_indices
             .iter()
-            .map(|&i| {
-                let o = &chip_openings[i];
-                let dom = <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << o.degree_bits);
-                let zn = dom
-                    .next_point(zeta)
-                    .expect("domain must support next_point for preprocessed trace");
-                let pp_loc = o
-                    .preprocessed_local
-                    .clone()
-                    .expect("preprocessed_local must exist for pp chip");
-                let pp_nxt = o
-                    .preprocessed_next
-                    .clone()
-                    .expect("preprocessed_next must exist for pp chip");
-                (dom, vec![(zeta, pp_loc), (zn, pp_nxt)])
+            .map(|&index| {
+                let opening = &chip_openings[index];
+                let metadata = verification_metadata
+                    .get(opening.chip_id)
+                    .expect("validated chip metadata");
+                let domain =
+                    <P as Pcs<EF4, C>>::natural_domain_for_degree(pcs, 1 << opening.degree_bits);
+                let points = preprocessed_opening_points(
+                    pcs,
+                    opening.degree_bits,
+                    zeta,
+                    !metadata.preprocessed_next_row_columns.is_empty(),
+                );
+                let mut point_values = vec![(
+                    points[0],
+                    opening
+                        .preprocessed_local
+                        .clone()
+                        .expect("validated preprocessed opening"),
+                )];
+                if points.len() == 2 {
+                    point_values.push((
+                        points[1],
+                        opening
+                            .preprocessed_next
+                            .clone()
+                            .expect("validated preprocessed next opening"),
+                    ));
+                }
+                (domain, point_values)
             })
             .collect();
-        rounds.push((pp_c, pp_matrices));
+        rounds.push((preprocessed_commitment, preprocessed_matrices));
     }
 
     rounds
 }
 
-/// Check that the chip openings contain exactly the expected set of chips.
 pub(crate) fn validate_chip_manifest(
-    vk: &TabulaVerifyingKey,
+    verification_metadata: &TierVerificationMetadata,
     chip_openings: &[ChipOpening],
 ) -> Result<(), VerificationError> {
-    let proof_chips: BTreeSet<_> = chip_openings.iter().map(|o| o.chip_id).collect();
-    let expected: BTreeSet<_> = vk.chip_ids().into_iter().collect();
+    let proof_chips: BTreeSet<_> = chip_openings
+        .iter()
+        .map(|opening| opening.chip_id)
+        .collect();
+    let expected: BTreeSet<_> = verification_metadata.chip_ids().into_iter().collect();
 
     if proof_chips.len() != chip_openings.len() {
         return Err(VerificationError::InvalidChipManifest {
             detail: "duplicate chip IDs in proof".to_string(),
         });
     }
+
     let missing: Vec<_> = expected.difference(&proof_chips).copied().collect();
     let extra: Vec<_> = proof_chips.difference(&expected).copied().collect();
     if !missing.is_empty() || !extra.is_empty() {
@@ -245,10 +255,125 @@ pub(crate) fn validate_chip_manifest(
             detail: format!("missing: {missing:?}, unexpected: {extra:?}"),
         });
     }
+
+    for opening in chip_openings {
+        let metadata = verification_metadata
+            .get(opening.chip_id)
+            .expect("chip presence already checked");
+        validate_opening_shapes(opening, metadata)?;
+    }
+
     Ok(())
 }
 
-/// Verify all chip constraints at the OOD point.
+fn validate_opening_shapes(
+    opening: &ChipOpening,
+    metadata: &ChipVerificationMetadata,
+) -> Result<(), VerificationError> {
+    if opening.main_width != metadata.main_width {
+        return Err(VerificationError::InvalidChipManifest {
+            detail: format!(
+                "chip '{}' main width {} does not match metadata width {}",
+                opening.chip_id, opening.main_width, metadata.main_width
+            ),
+        });
+    }
+    if opening.main_local.len() != metadata.main_width
+        || opening.main_next.len() != metadata.main_width
+    {
+        return Err(VerificationError::InvalidChipManifest {
+            detail: format!(
+                "chip '{}' main opening lengths do not match metadata width {}",
+                opening.chip_id, metadata.main_width
+            ),
+        });
+    }
+    if opening.public_values.len() != metadata.num_public_values {
+        return Err(VerificationError::InvalidChipManifest {
+            detail: format!(
+                "chip '{}' public values length {} does not match metadata length {}",
+                opening.chip_id,
+                opening.public_values.len(),
+                metadata.num_public_values
+            ),
+        });
+    }
+
+    let expected_perm_width = if metadata.interactions_per_row == 0 {
+        0
+    } else {
+        4 * (metadata.interactions_per_row + 1)
+    };
+    if opening.perm_width != expected_perm_width
+        || opening.perm_local.len() != expected_perm_width
+        || opening.perm_next.len() != expected_perm_width
+    {
+        return Err(VerificationError::InvalidChipManifest {
+            detail: format!(
+                "chip '{}' permutation opening widths do not match metadata width {}",
+                opening.chip_id, expected_perm_width
+            ),
+        });
+    }
+
+    if metadata.preprocessed_width == 0 {
+        if opening.preprocessed_local.is_some() || opening.preprocessed_next.is_some() {
+            return Err(VerificationError::InvalidChipManifest {
+                detail: format!(
+                    "chip '{}' provided unexpected preprocessed openings",
+                    opening.chip_id
+                ),
+            });
+        }
+        return Ok(());
+    }
+
+    let local = opening.preprocessed_local.as_ref().ok_or_else(|| {
+        VerificationError::InvalidChipManifest {
+            detail: format!(
+                "chip '{}' is missing required preprocessed local openings",
+                opening.chip_id
+            ),
+        }
+    })?;
+    if local.len() != metadata.preprocessed_width {
+        return Err(VerificationError::InvalidChipManifest {
+            detail: format!(
+                "chip '{}' preprocessed local width {} does not match metadata width {}",
+                opening.chip_id,
+                local.len(),
+                metadata.preprocessed_width
+            ),
+        });
+    }
+
+    let expects_next = !metadata.preprocessed_next_row_columns.is_empty();
+    match (expects_next, opening.preprocessed_next.as_ref()) {
+        (true, Some(next)) if next.len() == metadata.preprocessed_width => Ok(()),
+        (true, Some(next)) => Err(VerificationError::InvalidChipManifest {
+            detail: format!(
+                "chip '{}' preprocessed next width {} does not match metadata width {}",
+                opening.chip_id,
+                next.len(),
+                metadata.preprocessed_width
+            ),
+        }),
+        (true, None) => Err(VerificationError::InvalidChipManifest {
+            detail: format!(
+                "chip '{}' is missing required preprocessed next-row openings",
+                opening.chip_id
+            ),
+        }),
+        (false, Some(_)) => Err(VerificationError::InvalidChipManifest {
+            detail: format!(
+                "chip '{}' provided unexpected preprocessed next-row openings",
+                opening.chip_id
+            ),
+        }),
+        (false, None) => Ok(()),
+    }
+}
+
 fn verify_all_chip_constraints(
     pcs: &TabulaPcs,
     registry: &ChipRegistry,
@@ -269,10 +394,10 @@ fn verify_all_chip_constraints(
             1 << opening.degree_bits,
         );
         let num_q_chunks = 1 << opening.log_quotient_chunks;
-        let q_domain = trace_domain
+        let quotient_domain = trace_domain
             .create_disjoint_domain(1 << (opening.degree_bits + opening.log_quotient_chunks));
-        let sub_domains = q_domain.split_domains(num_q_chunks);
-        let quotient = recompose_quotient(&sub_domains, &opening.quotient_chunks, zeta);
+        let quotient_chunk_domains = quotient_domain.split_domains(num_q_chunks);
+        let quotient = recompose_quotient(&quotient_chunk_domains, &opening.quotient_chunks, zeta);
 
         verify_chip_constraints(
             &chip_ref,
@@ -291,7 +416,6 @@ fn verify_all_chip_constraints(
     Ok(())
 }
 
-/// Verify constraints at the OOD point for a single chip.
 #[allow(clippy::too_many_arguments)]
 fn verify_chip_constraints(
     chip_ref: &ChipRef<'_>,
@@ -302,12 +426,16 @@ fn verify_chip_constraints(
     quotient: EF4,
     logup_challenges: [EF4; 2],
 ) -> Result<(), String> {
-    let sels = trace_domain.selectors_at_point(zeta);
+    let selectors = trace_domain.selectors_at_point(zeta);
 
     let preprocessed = match (&opening.preprocessed_local, &opening.preprocessed_next) {
         (Some(local), Some(next)) => VerticalPair::new(
             RowMajorMatrixView::new_row(local),
             RowMajorMatrixView::new_row(next),
+        ),
+        (Some(local), None) => VerticalPair::new(
+            RowMajorMatrixView::new_row(local),
+            RowMajorMatrixView::new_row(local),
         ),
         _ => VerticalPair::new(
             RowMajorMatrixView::new(&[], 0),
@@ -329,14 +457,14 @@ fn verify_chip_constraints(
             preprocessed,
             preprocessed_window,
             public_values: &opening.public_values,
-            is_first_row: sels.is_first_row,
-            is_last_row: sels.is_last_row,
-            is_transition: sels.is_transition,
+            is_first_row: selectors.is_first_row,
+            is_last_row: selectors.is_last_row,
+            is_transition: selectors.is_transition,
             alpha,
             accumulator: EF4::ZERO,
         };
         chip_ref.eval(&mut folder);
-        if folder.accumulator * sels.inv_vanishing != quotient {
+        if folder.accumulator * selectors.inv_vanishing != quotient {
             return Err(ood_mismatch.to_string());
         }
     } else {
@@ -353,35 +481,34 @@ fn verify_chip_constraints(
             RowMajorMatrixView::new_row(&full_next),
         );
 
-        // Convert Option<VerticalPair> to Option<RowMajorMatrixView> for RAP folder.
         let preprocessed_opt = match (&opening.preprocessed_local, &opening.preprocessed_next) {
-            (Some(_), Some(_)) => Some(preprocessed),
+            (Some(_), _) => Some(preprocessed),
             _ => None,
         };
 
-        let mut folder1 = VerifierConstraintFolder {
+        let mut folder = VerifierConstraintFolder {
             main: truncated_main,
             preprocessed,
             preprocessed_window,
             public_values: &opening.public_values,
-            is_first_row: sels.is_first_row,
-            is_last_row: sels.is_last_row,
-            is_transition: sels.is_transition,
+            is_first_row: selectors.is_first_row,
+            is_last_row: selectors.is_last_row,
+            is_transition: selectors.is_transition,
             alpha,
             accumulator: EF4::ZERO,
         };
-        chip_ref.eval(&mut folder1);
+        chip_ref.eval(&mut folder);
 
         let mut rap_folder = RapVerifierFolder::new(
             truncated_main,
             full_main,
             preprocessed_opt,
             &opening.public_values,
-            sels.is_first_row,
-            sels.is_last_row,
-            sels.is_transition,
+            selectors.is_first_row,
+            selectors.is_last_row,
+            selectors.is_transition,
             alpha,
-            folder1.accumulator,
+            folder.accumulator,
             logup_challenges,
             opening.main_width,
         );
@@ -390,14 +517,13 @@ fn verify_chip_constraints(
         let coeffs = tabula_stark::rap::ef4::ef4_coeffs(opening.cumsum_final);
         rap_folder.finalize_cumsum(coeffs.map(EF4::from));
 
-        if rap_folder.accumulator() * sels.inv_vanishing != quotient {
+        if rap_folder.accumulator() * selectors.inv_vanishing != quotient {
             return Err(ood_mismatch.to_string());
         }
     }
     Ok(())
 }
 
-/// Recompose quotient polynomial from its chunk evaluations.
 fn recompose_quotient(
     quotient_chunk_domains: &[PcsDomain],
     quotient_chunk_values: &[Vec<EF4>],
@@ -408,4 +534,59 @@ fn recompose_quotient(
         quotient_chunk_values,
         zeta,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
+    use tabula_stark::chips::core_chips;
+
+    use super::validate_opening_shapes;
+    use crate::config::EF4;
+    use crate::proof::model::ChipOpening;
+    use crate::setup::metadata::ChipVerificationMetadata;
+
+    fn base_opening() -> ChipOpening {
+        ChipOpening {
+            chip_id: core_chips::SMT_TABLE_PATH,
+            main_local: vec![EF4::ZERO; 8],
+            main_next: vec![EF4::ZERO; 8],
+            perm_local: vec![],
+            perm_next: vec![],
+            preprocessed_local: None,
+            preprocessed_next: None,
+            quotient_chunks: vec![vec![EF4::ZERO]],
+            degree_bits: 1,
+            main_width: 8,
+            perm_width: 0,
+            cumsum_final: EF4::ZERO,
+            log_quotient_chunks: 0,
+            public_values: vec![KoalaBear::ZERO; 16],
+        }
+    }
+
+    #[test]
+    fn validate_opening_shapes_rejects_public_value_length_mismatch() {
+        let mut opening = base_opening();
+        opening.public_values.truncate(15);
+        let metadata = ChipVerificationMetadata {
+            main_width: 8,
+            preprocessed_width: 0,
+            preprocessed_next_row_columns: vec![],
+            num_public_values: 16,
+            interactions_per_row: 0,
+        };
+
+        let err = validate_opening_shapes(&opening, &metadata)
+            .expect_err("public value length mismatch must fail");
+
+        match err {
+            crate::VerificationError::InvalidChipManifest { detail } => {
+                assert!(detail.contains("public values length"));
+                assert!(detail.contains("metadata length"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
 }

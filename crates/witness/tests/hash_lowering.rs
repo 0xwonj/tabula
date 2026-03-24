@@ -25,9 +25,6 @@ tx h(a: u64, b: u64) {
         vec![tabula_core::Transaction {
             tx_type: TxTypeId(0),
             params: vec![u64_portable(7), u64_portable(9)],
-            sender: [1u8; 32],
-            nonce: 0,
-            signature: vec![],
         }],
     );
     let lowering = lower_program_batch_for_harness::<3>(&setup);

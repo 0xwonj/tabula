@@ -1,16 +1,63 @@
 mod artifacts;
+mod batch_plan;
 mod journal;
 mod statement;
-mod traces;
 
 use serde::{Deserialize, Serialize};
-use tabula_machine::TabulaProof;
+use tabula_artifact::{State, Statement, TransactionBatch};
+use tabula_ext::root::RootBackendBundle;
+use tabula_machine::{PreparedMachineInput, TabulaProof};
+use tabula_types::TypeRuntimeRegistry;
 
-pub(crate) use artifacts::{ProofArtifacts, prepare_proof_artifacts};
+use crate::error::RuntimeError;
+use crate::program::ResolvedProofProgram;
+
+use artifacts::prepare_proof_artifacts;
+pub(crate) use batch_plan::build_batch_proof_plan;
 pub(crate) use journal::{JournalInput, build_proof_journal, convert_batch};
 pub(crate) use statement::build_execution_statement;
 pub use statement::digest_to_hex;
-pub(crate) use traces::build_traces;
+
+/// Final runtime-private proof preparation result before machine proving.
+pub(crate) struct PreparedProofRequest {
+    pub(crate) statement: Statement,
+    pub(crate) machine_input: PreparedMachineInput,
+}
+
+pub(crate) fn prepare_proof_request(
+    resolved_program: &ResolvedProofProgram,
+    type_runtimes: &TypeRuntimeRegistry,
+    root_backend_bundle: &RootBackendBundle,
+    state: &State,
+    batch_file: &TransactionBatch,
+    state_after: &State,
+    execution_journal: &tabula_executor::ExecutionJournal,
+) -> Result<PreparedProofRequest, RuntimeError> {
+    let batch = convert_batch(batch_file, type_runtimes)?;
+    let static_tables = tabula_core::InMemoryStaticTables::new();
+    let journal = build_proof_journal(JournalInput {
+        resolved_program,
+        state,
+        batch: &batch,
+        execution_journal,
+        static_tables: &static_tables,
+    })?;
+    let batch_plan = build_batch_proof_plan(resolved_program, root_backend_bundle)?;
+    let artifacts = prepare_proof_artifacts(resolved_program, &batch_plan, journal)?;
+    let statement = build_execution_statement(
+        resolved_program,
+        state,
+        batch_file,
+        state_after,
+        artifacts.air_statement(),
+    )?;
+    let machine_input = artifacts.into_prepared_machine_input(statement.statement_hash_bytes());
+
+    Ok(PreparedProofRequest {
+        statement,
+        machine_input,
+    })
+}
 
 /// Inputs for the proving pipeline.
 ///

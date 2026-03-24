@@ -371,10 +371,6 @@ html:has(.tabula-app) .site-main {
   flex: 1;
 }
 
-.sender-input {
-  font-size: 10px !important;
-}
-
 /* ── Editor tables (flat fallback) ─────────────────────────────── */
 
 .editor-table-wrap {

@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use tabula_core::error::TabulaError;
-use tabula_core::traits::{Hasher, NoncePolicy, SigVerifier, StateView, StaticTableProvider};
+use tabula_core::traits::{Hasher, StateView, StaticTableProvider};
 use tabula_core::{
     CellKey, ColId, ColumnDef, ColumnProfileId, PortableValue, RowKey, TableId, TableSchema,
     Transaction,
@@ -16,7 +16,7 @@ use tabula_profile::{
     ColumnProfile, CommitmentRole, ENCODING_U64_ID, ProfileCatalog, SCHEME_PROFILE_SSMC_ID,
     TYPE_U64_ID, builtin_catalog,
 };
-use tabula_testing::fixtures::batch::core_tx_with_sender;
+use tabula_testing::fixtures::batch::core_tx;
 use tabula_testing::fixtures::state::cell_key;
 use tabula_types::{TypeRuntimeRegistry, TypedValue};
 #[allow(unused_imports)]
@@ -96,49 +96,6 @@ impl Hasher for XorHasher {
         combined.extend_from_slice(left);
         combined.extend_from_slice(right);
         self.hash(&combined)
-    }
-}
-
-// ── SigVerifier impls ───────────────────────────────────────────────────
-
-/// Always-valid signature verifier.
-pub struct AlwaysValidSig;
-
-impl SigVerifier for AlwaysValidSig {
-    fn verify(&self, _: &[u8; 32], _: &[u8], _: &[u8]) -> Result<(), TabulaError> {
-        Ok(())
-    }
-}
-
-/// Always-invalid signature verifier.
-pub struct AlwaysInvalidSig;
-
-impl SigVerifier for AlwaysInvalidSig {
-    fn verify(&self, _: &[u8; 32], _: &[u8], _: &[u8]) -> Result<(), TabulaError> {
-        Err(TabulaError::SignatureInvalid)
-    }
-}
-
-// ── NoncePolicy ─────────────────────────────────────────────────────────
-
-/// Sequential nonce: `tx_nonce == current`, next = `current + 1`.
-pub struct SeqNonce;
-
-impl NoncePolicy for SeqNonce {
-    fn validate(&self, sender: &[u8; 32], tx_nonce: u64, current: u64) -> Result<(), TabulaError> {
-        if tx_nonce == current {
-            Ok(())
-        } else {
-            Err(TabulaError::InvalidNonce {
-                sender: *sender,
-                expected: current,
-                actual: tx_nonce,
-            })
-        }
-    }
-
-    fn next_nonce(&self, _: &[u8; 32], current: u64) -> u64 {
-        current + 1
     }
 }
 
@@ -238,14 +195,9 @@ pub fn type_runtimes() -> &'static TypeRuntimeRegistry {
     TYPE_RUNTIMES.get_or_init(|| TypeRuntimeRegistry::seeded().expect("seeded type runtimes"))
 }
 
-/// Build a `Transaction` with an empty signature.
-pub fn make_tx(
-    tx_type: u32,
-    params: Vec<PortableValue>,
-    sender: [u8; 32],
-    nonce: u64,
-) -> Transaction {
-    core_tx_with_sender(tx_type, params, sender, nonce)
+/// Build a `Transaction` using the simplified auth-free batch shape.
+pub fn make_tx(tx_type: u32, params: Vec<PortableValue>) -> Transaction {
+    core_tx(tx_type, params)
 }
 
 /// Build a `BatchEnv` using the standard test doubles.
@@ -253,8 +205,6 @@ pub fn test_env() -> tabula_executor::batch::BatchEnv<'static> {
     let property_queries = Box::leak(Box::new(PropertyQueryRegistry::new()));
     tabula_executor::batch::BatchEnv {
         hasher: &XorHasher,
-        sig_verifier: &AlwaysValidSig,
-        nonce_policy: &SeqNonce,
         static_tables: &TestStaticTables,
         precompiles: None,
         committed_state: None,

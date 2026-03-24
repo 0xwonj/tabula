@@ -45,20 +45,14 @@ pub fn built_in_templates() -> Vec<ScenarioTemplate> {
                     TransactionInput {
                         tx_type: 0,
                         params: vec![u64_portable(0), u64_portable(1), u64_portable(300)],
-                        sender: "01".repeat(32),
-                        nonce: 0,
                     },
                     TransactionInput {
                         tx_type: 0,
                         params: vec![u64_portable(1), u64_portable(2), u64_portable(200)],
-                        sender: "01".repeat(32),
-                        nonce: 1,
                     },
                     TransactionInput {
                         tx_type: 0,
                         params: vec![u64_portable(2), u64_portable(0), u64_portable(50)],
-                        sender: "01".repeat(32),
-                        nonce: 2,
                     },
                 ],
             },
@@ -80,8 +74,6 @@ pub fn built_in_templates() -> Vec<ScenarioTemplate> {
                 transactions: vec![TransactionInput {
                     tx_type: 0,
                     params: vec![u64_portable(0), u64_portable(99)],
-                    sender: "01".repeat(32),
-                    nonce: 0,
                 }],
             },
         },

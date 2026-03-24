@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 const STATEMENT_HASH_DOMAIN: &[u8] = b"tabula.execution.statement.v2";
 
 /// Canonical public statement for one execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Statement {
     /// Program artifact hash.

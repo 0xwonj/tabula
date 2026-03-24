@@ -28,8 +28,6 @@ use tabula_types::{
     ArithmeticOp, EncodingRuntime, TypeRuntime, TypedValue, bytes32_typed, u64_typed,
 };
 
-const DEFAULT_SENDER: &str = "0101010101010101010101010101010101010101010101010101010101010101";
-
 const CUSTOM_NUMERIC_TYPE_ID: TypeId = TypeId(0xb101);
 const CUSTOM_NUMERIC_ENCODING_ID: EncodingProfileId = EncodingProfileId(0xb101);
 const CUSTOM_OPAQUE_TYPE_ID: TypeId = TypeId(0xb201);
@@ -253,8 +251,6 @@ fn single_tx_batch(portable: PortableValue) -> TransactionBatch {
         transactions: vec![TransactionInput {
             tx_type: 0,
             params: vec![portable],
-            sender: DEFAULT_SENDER.to_string(),
-            nonce: 0,
         }],
     }
 }
@@ -264,8 +260,6 @@ fn no_param_batch() -> TransactionBatch {
         transactions: vec![TransactionInput {
             tx_type: 0,
             params: vec![],
-            sender: DEFAULT_SENDER.to_string(),
-            nonce: 0,
         }],
     }
 }

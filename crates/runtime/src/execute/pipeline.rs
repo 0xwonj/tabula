@@ -1,8 +1,6 @@
-use std::collections::BTreeMap;
-
 use tabula_artifact::{State, TransactionBatch, merge_output_state_entries, normalize_state};
 use tabula_core::traits::Hasher;
-use tabula_core::{Batch, InMemoryState, InMemoryStaticTables, NoopSigVerifier, SequentialNonce};
+use tabula_core::{Batch, InMemoryState, InMemoryStaticTables};
 use tabula_executor::property::PropertyQueryRegistry;
 use tabula_executor::{
     ResolvedExecutionProgram,
@@ -83,8 +81,6 @@ pub(crate) fn execute_pipeline(
     let env = BatchEnv {
         hasher,
         type_runtimes,
-        sig_verifier: &NoopSigVerifier,
-        nonce_policy: &SequentialNonce,
         static_tables: &st,
         precompiles: resources.precompiles,
         committed_state: resources.committed_state,
@@ -92,7 +88,7 @@ pub(crate) fn execute_pipeline(
     };
 
     let execution_journal =
-        execute_batch(&batch_core, program, &state_store, &env, &BTreeMap::new()).map_err(|e| {
+        execute_batch(&batch_core, program, &state_store, &env).map_err(|e| {
             RuntimeError::Execution {
                 source: e,
                 instruction_index: None,

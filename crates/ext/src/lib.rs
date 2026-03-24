@@ -8,6 +8,8 @@ pub mod backend;
 mod error;
 /// Semantic precompile authoring contracts and backend bundle types.
 pub mod precompile;
+/// Root backend authoring and root witness preparation contracts.
+pub mod root;
 /// Column commitment scheme authoring contracts and bundle types.
 pub mod scheme;
 
