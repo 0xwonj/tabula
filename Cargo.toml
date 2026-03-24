@@ -6,6 +6,7 @@ members = [
     "crates/profile",
     "crates/contract",
     "crates/ir",
+    "crates/ir_next",
     "crates/executor",
     "crates/commitment",
     "crates/stark",
@@ -43,6 +44,7 @@ tabula-types = { path = "crates/types" }
 tabula-profile = { path = "crates/profile" }
 tabula-contract = { path = "crates/contract" }
 tabula-ir = { path = "crates/ir" }
+tabula-ir-next = { path = "crates/ir_next" }
 tabula-executor = { path = "crates/executor" }
 tabula-commitment = { path = "crates/commitment" }
 tabula-stark = { path = "crates/stark" }

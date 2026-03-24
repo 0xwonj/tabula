@@ -18,6 +18,7 @@ pub mod batch;
 pub mod consistency;
 mod execution_state;
 pub mod interpreter;
+pub mod ir_next;
 pub mod journal;
 pub mod overlay;
 pub mod precompile;

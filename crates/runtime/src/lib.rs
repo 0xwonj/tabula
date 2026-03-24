@@ -35,6 +35,7 @@ mod error;
 mod execute;
 #[cfg(any(feature = "prove", feature = "verify"))]
 mod host;
+pub mod ir_next;
 mod policy;
 #[cfg(any(feature = "prove", feature = "verify"))]
 mod program;

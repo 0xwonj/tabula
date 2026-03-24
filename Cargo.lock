@@ -2782,10 +2782,12 @@ dependencies = [
 name = "tabula-executor"
 version = "0.1.0"
 dependencies = [
+ "borsh",
  "criterion",
  "proptest",
  "tabula-core",
  "tabula-ir",
+ "tabula-ir-next",
  "tabula-profile",
  "tabula-testing",
  "tabula-types",
@@ -2829,6 +2831,16 @@ dependencies = [
 
 [[package]]
 name = "tabula-ir"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "serde",
+ "tabula-core",
+ "tabula-profile",
+]
+
+[[package]]
+name = "tabula-ir-next"
 version = "0.1.0"
 dependencies = [
  "borsh",
@@ -2909,6 +2921,7 @@ dependencies = [
  "tabula-executor",
  "tabula-ext",
  "tabula-ir",
+ "tabula-ir-next",
  "tabula-machine",
  "tabula-profile",
  "tabula-stark",
