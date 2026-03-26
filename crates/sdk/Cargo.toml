@@ -5,12 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["prove"]
-verify = [
+default = ["compile", "execute"]
+compile = []
+execute = [
     "dep:tabula-executor",
-    "dep:tabula-ext",
     "dep:tabula-machine",
-    "dep:tabula-stark",
     "tabula-ext/verify",
     "tabula-runtime/verify",
 ]
@@ -19,21 +18,24 @@ prove = [
     "tabula-ext/prove",
     "tabula-runtime/prove",
 ]
+verify = ["execute"]
+advanced = []
 
 [dependencies]
+borsh = { workspace = true }
 blake3 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
-tabula-artifact = { workspace = true }
 tabula-compiler = { workspace = true }
 tabula-core = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-types = { workspace = true }
-tabula-ext = { workspace = true, optional = true, default-features = false }
+tabula-ext = { workspace = true, default-features = false }
 tabula-profile = { workspace = true }
 tabula-runtime = { path = "../runtime", default-features = false }
 tabula-executor = { workspace = true, optional = true }
 tabula-machine = { workspace = true, optional = true }
-tabula-stark = { workspace = true, optional = true }
 
 [dev-dependencies]
 tabula-ext = { workspace = true, features = ["prove"] }
@@ -42,3 +44,11 @@ tabula-testing = { workspace = true }
 
 [lints]
 workspace = true
+
+[[example]]
+name = "dex"
+required-features = ["compile", "execute"]
+
+[[example]]
+name = "membership"
+required-features = ["compile", "execute"]

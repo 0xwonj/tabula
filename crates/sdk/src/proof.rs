@@ -1,13 +1,12 @@
+use tabula_machine::TabulaProof;
+use tabula_runtime::ProofStatement;
 #[cfg(feature = "prove")]
 use tabula_runtime::ProofSummary;
-
-use tabula_artifact::Statement;
-use tabula_machine::TabulaProof;
 
 /// In-memory proof bundle produced by the SDK.
 pub struct Proof {
     pub(crate) proof: TabulaProof,
-    pub(crate) statement: Statement,
+    pub(crate) statement: ProofStatement,
     #[cfg(feature = "prove")]
     pub(crate) summary: ProofSummary,
 }
@@ -22,12 +21,10 @@ impl Proof {
         }
     }
 
-    /// The canonical statement bound into the proof transcript.
-    pub fn statement(&self) -> &Statement {
+    pub fn statement(&self) -> &ProofStatement {
         &self.statement
     }
 
-    /// Per-chip proof summary.
     #[cfg(feature = "prove")]
     pub fn summary(&self) -> &ProofSummary {
         &self.summary

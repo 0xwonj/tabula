@@ -3,12 +3,9 @@ use thiserror::Error;
 /// Errors returned by the Tabula SDK facade.
 #[derive(Debug, Error)]
 pub enum SdkError {
-    /// Compiler or artifact-registration failure.
+    /// Compiler or registration failure.
     #[error(transparent)]
     Compiler(#[from] tabula_compiler::CompilerError),
-    /// Artifact normalization or canonicalization failure.
-    #[error(transparent)]
-    Artifact(#[from] tabula_artifact::ArtifactError),
     /// Runtime execution, setup, prove, or verify failure.
     #[error(transparent)]
     Runtime(#[from] tabula_runtime::RuntimeError),
@@ -24,15 +21,39 @@ pub enum SdkError {
         /// Human-readable validation detail.
         detail: String,
     },
-    /// Invalid or conflicting precompile descriptor registration.
-    #[error("invalid precompile descriptor registration: {detail}")]
-    InvalidPrecompileDescriptorRegistration {
+    /// Invalid or conflicting native capability descriptor registration.
+    #[error("invalid capability descriptor registration: {detail}")]
+    InvalidCapabilityDescriptorRegistration {
         /// Human-readable validation detail.
         detail: String,
     },
-    /// Invalid or conflicting installed precompile backend registration.
-    #[error("invalid precompile backend bundle: {detail}")]
-    InvalidPrecompileBackendBundle {
+    /// Invalid extension bundle or installation request.
+    #[error("invalid extension: {detail}")]
+    InvalidExtension {
+        /// Human-readable validation detail.
+        detail: String,
+    },
+    /// Artifact decoding failure.
+    #[error("invalid artifact payload: {detail}")]
+    ArtifactDecode {
+        /// Human-readable validation detail.
+        detail: String,
+    },
+    /// Schema lookup failed on the default SDK path.
+    #[error("schema lookup failed: {detail}")]
+    SchemaLookup {
+        /// Human-readable validation detail.
+        detail: String,
+    },
+    /// Value encoding failed on the default SDK path.
+    #[error("value encoding failed: {detail}")]
+    ValueEncoding {
+        /// Human-readable validation detail.
+        detail: String,
+    },
+    /// Value decoding failed on the default SDK path.
+    #[error("value decoding failed: {detail}")]
+    ValueDecoding {
         /// Human-readable validation detail.
         detail: String,
     },
@@ -45,6 +66,9 @@ pub enum SdkError {
         detail: String,
     },
     /// The provided execution belongs to a different program artifact.
-    #[error("execution does not belong to this program")]
+    #[error("execution receipt does not belong to this program")]
     ExecutionProgramMismatch,
 }
+
+/// Build/install errors returned by the configurable SDK path.
+pub type InstallError = SdkError;

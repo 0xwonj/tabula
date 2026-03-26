@@ -1,69 +1,34 @@
-//! Proof contract metadata, versioning, and binding policy.
+//! Proof contract metadata, versioning, binding policy, and proof-visible
+//! format schema.
 //!
 //! This module is the M11 "Contract Spine V1" source of truth.
 
 mod binding;
+mod compatibility;
 mod envelope;
-mod policy;
-mod rules;
-
-// Version constants
-/// Current contract schema version.
-pub const CONTRACT_SCHEMA_VERSION_V1: u32 = 1;
-/// Current binding registry version.
-pub const BINDING_VERSION_V1: u32 = 1;
-/// Current execution statement schema version.
-pub const STATEMENT_SCHEMA_VERSION_V1: u32 = 1;
-/// Current verifier profile version.
-pub const VERIFIER_PROFILE_VERSION_V1: u32 = 1;
-/// C10 ReadAccess bus schema version (v2 includes `tx_index`).
-pub const C10_READ_ACCESS_SCHEMA_VERSION_V2: u32 = 2;
-/// C11 WriteAccess bus schema version (v2 includes `tx_index`).
-pub const C11_WRITE_ACCESS_SCHEMA_VERSION_V2: u32 = 2;
-
-/// Validate contract schema version with fail-closed policy.
-pub fn validate_contract_schema_version(version: u32) -> Result<(), ContractValidationError> {
-    if version != CONTRACT_SCHEMA_VERSION_V1 {
-        return Err(ContractValidationError::UnknownContractSchemaVersion { got: version });
-    }
-    Ok(())
-}
-
-/// Validate binding registry version with fail-closed policy.
-pub fn validate_binding_version(version: u32) -> Result<(), ContractValidationError> {
-    if version != BINDING_VERSION_V1 {
-        return Err(ContractValidationError::UnknownBindingVersion { got: version });
-    }
-    Ok(())
-}
-
-/// Validate execution statement schema version with fail-closed policy.
-pub fn validate_statement_schema_version(version: u32) -> Result<(), ContractValidationError> {
-    if version != STATEMENT_SCHEMA_VERSION_V1 {
-        return Err(ContractValidationError::UnknownStatementSchemaVersion { got: version });
-    }
-    Ok(())
-}
-
-/// Validate verifier profile version with fail-closed policy.
-pub fn validate_verifier_profile_version(version: u32) -> Result<(), ContractValidationError> {
-    if version != VERIFIER_PROFILE_VERSION_V1 {
-        return Err(ContractValidationError::UnknownVerifierProfileVersion { got: version });
-    }
-    Ok(())
-}
+pub mod format;
+mod versions;
 
 // Envelope
 pub use envelope::ContractMetadataEnvelope;
 
-// Policy
-pub use policy::{ContractCompatibilityPolicy, ContractValidationError};
+// Compatibility
+pub use compatibility::{
+    CONTRACT_RULES_V1, ContractCompatibilityPolicy, ContractRule, ContractRuleCode,
+    ContractValidationError,
+};
 
 // Binding
 pub use binding::{
     BindingRegistry, BindingStatus, DeferredBinding, DeferredReasonCode, PUBLIC_INPUT_FIELDS,
-    ProgramBinding, PublicInputField, PublicInputs, access_bus_field_names, binding_registry_v1,
+    ProgramBinding, PublicInputField, PublicInputs, access_bus_field_names, binding_registry,
 };
+pub use format::static_tables::{StaticTableArtifact, StaticTableArtifactRow};
+pub use format::typed_tuple::{TupleEncodingDefaults, TupleEncodingSelection};
 
-// Rules
-pub use rules::{CONTRACT_RULES_V1, ContractRule, ContractRuleCode};
+// Versions
+pub use versions::{
+    BINDING_REGISTRY_VERSION, CONTRACT_SCHEMA_VERSION, STATEMENT_SCHEMA_VERSION,
+    VERIFIER_PROFILE_VERSION, validate_binding_registry_version, validate_contract_schema_version,
+    validate_statement_schema_version, validate_verifier_profile_version,
+};

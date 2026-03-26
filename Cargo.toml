@@ -6,7 +6,6 @@ members = [
     "crates/profile",
     "crates/contract",
     "crates/ir",
-    "crates/ir_next",
     "crates/executor",
     "crates/commitment",
     "crates/stark",
@@ -15,14 +14,11 @@ members = [
     "crates/witness",
     "crates/machine",
     "crates/lang",
-    "crates/artifact",
     "crates/runtime",
     "crates/compiler",
     "crates/ext",
     "crates/sdk",
     "crates/cli",
-    "crates/daemon",
-    "crates/web",
     "crates/testing",
 ]
 
@@ -44,7 +40,6 @@ tabula-types = { path = "crates/types" }
 tabula-profile = { path = "crates/profile" }
 tabula-contract = { path = "crates/contract" }
 tabula-ir = { path = "crates/ir" }
-tabula-ir-next = { path = "crates/ir_next" }
 tabula-executor = { path = "crates/executor" }
 tabula-commitment = { path = "crates/commitment" }
 tabula-stark = { path = "crates/stark" }
@@ -53,7 +48,6 @@ tabula-chips = { path = "crates/chips" }
 tabula-witness = { path = "crates/witness" }
 tabula-machine = { path = "crates/machine" }
 tabula-lang = { path = "crates/lang" }
-tabula-artifact = { path = "crates/artifact" }
 tabula-runtime = { path = "crates/runtime" }
 tabula-compiler = { path = "crates/compiler" }
 tabula-ext = { path = "crates/ext", default-features = false }

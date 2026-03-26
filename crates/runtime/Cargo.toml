@@ -8,14 +8,12 @@ license.workspace = true
 borsh = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-serde = { workspace = true, optional = true }
+serde = { workspace = true }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 tabula-core = { workspace = true }
 tabula-types = { workspace = true }
 tabula-ir = { workspace = true }
-tabula-ir-next = { workspace = true }
-tabula-artifact = { workspace = true }
 tabula-contract = { workspace = true }
 tabula-compiler = { workspace = true }
 tabula-profile = { workspace = true }
@@ -40,7 +38,7 @@ verify = [
     "dep:tabula-chips",
     "dep:tabula-stark",
     "dep:tabula-commitment",
-    "dep:serde",
+    "dep:p3-koala-bear",
     "dep:serde_json",
     "dep:sha2",
 ]

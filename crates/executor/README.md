@@ -19,7 +19,7 @@ behavior.
 - transaction and batch execution over validated IR programs
 - deterministic execution outcomes, read/write sets, and access events
 - overlay-based execution state management
-- precompile and property-query execution hooks at the engine boundary
+- capability and property-query execution hooks at the engine boundary
 - consistency checks over execution results
 
 ## Does Not Own

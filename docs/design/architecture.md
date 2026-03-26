@@ -19,7 +19,6 @@ contracts.
 Shared Meaning
   tabula-core
   tabula-contract
-  tabula-artifact
 
 Authoring And Registration
   tabula-lang
@@ -41,6 +40,7 @@ Proof Backend
 Public Package Surfaces
   tabula-ext
   tabula-sdk
+  tabula-cli
 
 Support
   tabula-testing
@@ -82,12 +82,13 @@ The current architecture relies on these principles:
 
 ### Shared Meaning
 
-`tabula-core`, `tabula-contract`, and `tabula-artifact` define the basic things
-the rest of the system must agree on:
+`tabula-core` and `tabula-contract` define the basic things the rest of the
+system must agree on:
 
 - core vocabulary and low-level traits
 - compatibility and binding policy
-- sealed portable models and canonicalization
+- sealed artifact schemas and proof-visible canonical encodings shared across
+  layers
 
 This layer should describe shared meaning, not runtime behavior or proof policy.
 
@@ -134,9 +135,11 @@ Two crates sit above the core architecture rather than inside its lowest
 boundaries:
 
 - `tabula-ext` is the official extension authoring surface for custom schemes
-  and semantic precompiles
+  and semantic capabilities
 - `tabula-sdk` is the intended application-facing package surface above the
-  compiler, artifact, and runtime layers
+  compiler and runtime layers
+- `tabula-cli` is a repo-owned adapter that consumes the canonical
+  compiler/runtime surfaces rather than defining a new semantic boundary
 
 These crates package and expose architecture seams; they should not become new
 semantic or backend authorities.
@@ -155,7 +158,7 @@ authoring input
   -> language front-end
   -> IR
   -> semantic registration
-  -> sealed program / artifact
+  -> registered program
   -> runtime policy and execution
   -> prepared proof inputs
   -> proof backend
@@ -172,7 +175,8 @@ Two distinctions matter more than any exact type names:
 The architecture depends on these rules:
 
 - `tabula-core` stays near the bottom of the dependency graph
-- `tabula-contract` and `tabula-artifact` build on shared meaning, not on runtime or backend crates
+- `tabula-contract` builds on shared meaning and cross-layer proof-visible
+  format rules, not on runtime or backend proof crates
 - `tabula-lang` and `tabula-ir` stay below compiler policy
 - `tabula-compiler` does not depend on runtime or backend proof crates
 - `tabula-executor` does not depend on proof-backend crates

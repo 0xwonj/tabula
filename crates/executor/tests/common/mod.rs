@@ -1,350 +1,636 @@
-#![allow(dead_code)]
-//! Shared test doubles and helpers for executor integration tests.
+#![allow(dead_code, missing_docs)]
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU32, Ordering};
 
+use borsh::to_vec;
+use tabula_core::PortableValue;
+use tabula_core::RowKey;
 use tabula_core::error::TabulaError;
-use tabula_core::traits::{Hasher, StateView, StaticTableProvider};
-use tabula_core::{
-    CellKey, ColId, ColumnDef, ColumnProfileId, PortableValue, RowKey, TableId, TableSchema,
-    Transaction,
-};
-use tabula_ir::{Instruction, RowExpr, ValueExpr};
-use tabula_profile::{
-    ColumnProfile, CommitmentRole, ENCODING_U64_ID, ProfileCatalog, SCHEME_PROFILE_SSMC_ID,
-    TYPE_U64_ID, builtin_catalog,
-};
-use tabula_testing::fixtures::batch::core_tx;
-use tabula_testing::fixtures::state::cell_key;
-use tabula_types::{TypeRuntimeRegistry, TypedValue};
-#[allow(unused_imports)]
-pub use tabula_types::{
-    bool_portable, bool_typed, bytes32_portable, bytes32_typed, i64_portable, i64_typed,
-    u64_portable, u64_typed,
-};
+use tabula_core::traits::Hasher;
+use tabula_executor as exec;
+use tabula_ir as ir;
+use tabula_profile::{TYPE_BOOL_ID, TYPE_BYTES32_ID, TYPE_U64_ID};
+use tabula_types::{TypeRuntimeRegistry, TypedValue, bool_typed, u64_typed};
 
-use tabula_executor::interpreter::{ExecContext, InterpreterError};
-use tabula_executor::overlay::{Overlay, OverlayResult};
-use tabula_executor::property::PropertyQueryRegistry;
-use tabula_executor::{
-    ResolvedColumnLayout, ResolvedExecutionProgram, SuccessfulTxExecution, execute_tx,
-};
-
-// ── StateView impls ─────────────────────────────────────────────────
-
-/// Simple BTreeMap-backed snapshot for tests.
-pub struct TestSnapshot(pub BTreeMap<CellKey, PortableValue>);
-
-impl StateView for TestSnapshot {
-    fn read(&self, key: &CellKey) -> Result<Option<PortableValue>, TabulaError> {
-        Ok(self.0.get(key).cloned())
-    }
-
-    fn table_exists(&self, _: TableId) -> bool {
-        true
-    }
-}
-
-/// Snapshot that tracks how many times `read()` is called.
-pub struct CountingSnapshot {
-    pub data: BTreeMap<CellKey, PortableValue>,
-    pub call_count: AtomicU32,
-}
-
-impl CountingSnapshot {
-    pub fn new(data: BTreeMap<CellKey, PortableValue>) -> Self {
-        Self {
-            data,
-            call_count: AtomicU32::new(0),
-        }
-    }
-
-    pub fn call_count(&self) -> u32 {
-        self.call_count.load(Ordering::Relaxed)
-    }
-}
-
-impl StateView for CountingSnapshot {
-    fn read(&self, key: &CellKey) -> Result<Option<PortableValue>, TabulaError> {
-        self.call_count.fetch_add(1, Ordering::Relaxed);
-        Ok(self.data.get(key).cloned())
-    }
-
-    fn table_exists(&self, _: TableId) -> bool {
-        true
-    }
-}
-
-// ── Hasher ──────────────────────────────────────────────────────────────
-
-/// XOR-based hasher for deterministic testing.
 pub struct XorHasher;
 
 impl Hasher for XorHasher {
-    fn hash(&self, data: &[u8]) -> [u8; 32] {
+    fn hash(&self, data: &[u8]) -> tabula_core::Digest {
         let mut out = [0u8; 32];
-        for (i, b) in data.iter().enumerate() {
-            out[i % 32] ^= b;
+        for (index, byte) in data.iter().enumerate() {
+            out[index % 32] ^= byte;
         }
         out
     }
 
-    fn hash_pair(&self, left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
-        let mut combined = Vec::new();
-        combined.extend_from_slice(left);
-        combined.extend_from_slice(right);
-        self.hash(&combined)
+    fn hash_pair(
+        &self,
+        left: &tabula_core::Digest,
+        right: &tabula_core::Digest,
+    ) -> tabula_core::Digest {
+        let mut data = Vec::new();
+        data.extend_from_slice(left);
+        data.extend_from_slice(right);
+        self.hash(&data)
     }
 }
 
-// ── StaticTableProvider impls ───────────────────────────────────────────
+pub struct AddOneCapability;
 
-/// Static table that returns `u64_portable(row_key)` for any lookup.
-pub struct TestStaticTables;
-
-impl StaticTableProvider for TestStaticTables {
-    fn lookup(&self, _: TableId, key: RowKey, _: ColId) -> Result<PortableValue, TabulaError> {
-        Ok(u64_portable(key.0))
+impl exec::CapabilityHandler for AddOneCapability {
+    fn id(&self) -> ir::CapabilityId {
+        ir::CapabilityId(7)
     }
 
-    fn contains(&self, _: TableId, _: RowKey) -> Result<bool, TabulaError> {
-        Ok(true)
-    }
-}
-
-/// Static table that always returns `TableNotFound`.
-pub struct EmptyStaticTables;
-
-impl StaticTableProvider for EmptyStaticTables {
-    fn lookup(&self, t: TableId, _: RowKey, _: ColId) -> Result<PortableValue, TabulaError> {
-        Err(TabulaError::TableNotFound(t))
-    }
-
-    fn contains(&self, _: TableId, _: RowKey) -> Result<bool, TabulaError> {
-        Ok(false)
+    fn execute(&self, inputs: &[TypedValue]) -> Result<Vec<TypedValue>, TabulaError> {
+        let value = &inputs[0];
+        let portable = PortableValue::new(
+            value.type_id(),
+            to_vec(&(borsh::from_slice::<u64>(value.payload()).unwrap() + 1)).unwrap(),
+        );
+        Ok(vec![
+            TypeRuntimeRegistry::seeded()
+                .unwrap()
+                .decode_portable(&portable)
+                .unwrap(),
+        ])
     }
 }
 
-// ── Helper constructors ─────────────────────────────────────────────────
-
-/// Shorthand for building a `CellKey`.
-pub fn cell(t: u32, r: u64, c: u16) -> CellKey {
-    cell_key(t, r, c)
+pub struct FailOnInputCapability {
+    pub fail_on: u64,
 }
 
-pub fn portable(value: PortableValue) -> PortableValue {
-    value
-}
+impl exec::CapabilityHandler for FailOnInputCapability {
+    fn id(&self) -> ir::CapabilityId {
+        ir::CapabilityId(7)
+    }
 
-pub fn typed(value: PortableValue) -> TypedValue {
-    let type_id = value.type_id();
-    let payload = value.into_payload();
-    type_runtimes()
-        .resolve(type_id)
-        .expect("typed runtime")
-        .decode_portable(&PortableValue::new(type_id, payload))
-        .expect("typed test value")
-}
-
-pub fn lit(value: PortableValue) -> ValueExpr {
-    ValueExpr::Literal(portable(value))
-}
-
-pub fn opt(value: PortableValue) -> Option<PortableValue> {
-    Some(portable(value))
-}
-
-pub fn portable_read_set(result: &OverlayResult) -> Vec<(CellKey, Option<PortableValue>)> {
-    result
-        .read_set_old
-        .iter()
-        .map(|entry| {
-            (
-                entry.key,
-                entry.value.as_ref().map(|value| {
-                    type_runtimes()
-                        .encode_typed(value)
-                        .expect("encode read set value")
-                }),
-            )
-        })
-        .collect()
-}
-
-pub fn portable_write_set(result: &OverlayResult) -> Vec<(CellKey, Option<PortableValue>)> {
-    result
-        .write_set_final
-        .iter()
-        .map(|entry| {
-            (
-                entry.key,
-                entry.value.as_ref().map(|value| {
-                    type_runtimes()
-                        .encode_typed(value)
-                        .expect("encode write set value")
-                }),
-            )
-        })
-        .collect()
-}
-
-pub fn type_runtimes() -> &'static TypeRuntimeRegistry {
-    static TYPE_RUNTIMES: OnceLock<TypeRuntimeRegistry> = OnceLock::new();
-    TYPE_RUNTIMES.get_or_init(|| TypeRuntimeRegistry::seeded().expect("seeded type runtimes"))
-}
-
-/// Build a `Transaction` using the simplified auth-free batch shape.
-pub fn make_tx(tx_type: u32, params: Vec<PortableValue>) -> Transaction {
-    core_tx(tx_type, params)
-}
-
-/// Build a `BatchEnv` using the standard test doubles.
-pub fn test_env() -> tabula_executor::batch::BatchEnv<'static> {
-    let property_queries = Box::leak(Box::new(PropertyQueryRegistry::new()));
-    tabula_executor::batch::BatchEnv {
-        hasher: &XorHasher,
-        static_tables: &TestStaticTables,
-        precompiles: None,
-        committed_state: None,
-        property_queries,
-        type_runtimes: type_runtimes(),
+    fn execute(&self, inputs: &[TypedValue]) -> Result<Vec<TypedValue>, TabulaError> {
+        let raw = borsh::from_slice::<u64>(inputs[0].payload())
+            .map_err(|error| TabulaError::BorshEncodingError(error.to_string()))?;
+        if raw == self.fail_on {
+            return Err(TabulaError::AssertionFailed(format!(
+                "capability rejected input {raw}"
+            )));
+        }
+        Ok(vec![u64_typed(raw + 1)])
     }
 }
 
-// ── Interpreter helpers ─────────────────────────────────────────────────
+pub struct WrongArityCapability;
 
-/// Standard single-table schema bundle for interpreter tests.
-pub fn test_schema_bundle() -> (BTreeMap<TableId, TableSchema>, ProfileCatalog) {
-    let mut catalog = builtin_catalog().expect("built-in catalog");
-    let type_descriptor = catalog
-        .type_descriptor(TYPE_U64_ID)
-        .cloned()
-        .expect("u64 type descriptor");
-    let encoding_profile = catalog
-        .encoding_profile(ENCODING_U64_ID)
-        .cloned()
-        .expect("u64 encoding");
-    let scheme_profile = catalog
-        .scheme_profile(SCHEME_PROFILE_SSMC_ID)
-        .cloned()
-        .expect("ssmc scheme");
-    let column_profile = ColumnProfile::new(
-        ColumnProfileId(0),
-        "test.val",
-        None,
-        &type_descriptor,
-        &encoding_profile,
-        &scheme_profile,
-        CommitmentRole::IncludedInRoot,
-    )
-    .expect("column profile");
-    let column_profile_id = column_profile.column_profile_id;
-    catalog
-        .register_column(column_profile)
-        .expect("register column");
-    let mut m = BTreeMap::new();
-    m.insert(
-        TableId(1),
-        TableSchema {
-            id: TableId(1),
-            name: "test".into(),
-            columns: vec![ColumnDef {
-                id: ColId(0),
-                name: "val".into(),
-                column_profile_id,
+impl exec::CapabilityHandler for WrongArityCapability {
+    fn id(&self) -> ir::CapabilityId {
+        ir::CapabilityId(7)
+    }
+
+    fn execute(&self, _inputs: &[TypedValue]) -> Result<Vec<TypedValue>, TabulaError> {
+        Ok(vec![])
+    }
+}
+
+pub struct WrongTypeCapability;
+
+impl exec::CapabilityHandler for WrongTypeCapability {
+    fn id(&self) -> ir::CapabilityId {
+        ir::CapabilityId(7)
+    }
+
+    fn execute(&self, _inputs: &[TypedValue]) -> Result<Vec<TypedValue>, TabulaError> {
+        Ok(vec![bool_typed(true)])
+    }
+}
+
+pub fn type_runtimes() -> TypeRuntimeRegistry {
+    TypeRuntimeRegistry::seeded().expect("seeded runtimes")
+}
+
+pub fn portable_u64(value: u64) -> PortableValue {
+    PortableValue::new(TYPE_U64_ID, to_vec(&value).unwrap())
+}
+
+pub fn raw_program() -> ir::Program {
+    ir::Program {
+        program_id: ir::ProgramId(0),
+        state: ir::StateSchema {
+            tables: vec![ir::TableSchema {
+                id: ir::TableId(1),
+                symbol: "accounts".into(),
+                key_tys: vec![TYPE_U64_ID],
+                fields: vec![ir::FieldSchema {
+                    id: ir::FieldId(0),
+                    symbol: "balance".into(),
+                    ty: TYPE_U64_ID,
+                }],
             }],
         },
-    );
-    (m, catalog)
-}
-
-pub fn test_execution_program() -> ResolvedExecutionProgram {
-    let mut columns = BTreeMap::new();
-    columns.insert(
-        (TableId(1), ColId(0)),
-        ResolvedColumnLayout {
-            type_id: TYPE_U64_ID,
+        context: ir::ContextSchema {
+            fields: vec![ir::ContextField {
+                id: ir::ContextFieldId(0),
+                symbol: "epoch".into(),
+                ty: TYPE_U64_ID,
+            }],
         },
-    );
-    ResolvedExecutionProgram::new(BTreeMap::new(), columns)
+        const_pool: ir::ConstantPool {
+            entries: vec![ir::ConstantEntry {
+                id: ir::ConstId(0),
+                ty: TYPE_U64_ID,
+                value: portable_u64(5),
+            }],
+        },
+        relation_manifest: ir::RelationManifest {
+            entries: vec![
+                ir::RelationManifestEntry {
+                    id: ir::RelationId(0),
+                    descriptor: ir::RelationDescriptor {
+                        symbol: "AllowedTier".into(),
+                        inputs: vec![TYPE_U64_ID],
+                        outputs: vec![],
+                    },
+                    binding: ir::RelationBinding::EnumSet {
+                        values: vec![portable_u64(1), portable_u64(2)],
+                    },
+                },
+                ir::RelationManifestEntry {
+                    id: ir::RelationId(1),
+                    descriptor: ir::RelationDescriptor {
+                        symbol: "FeeForTier".into(),
+                        inputs: vec![TYPE_U64_ID],
+                        outputs: vec![TYPE_U64_ID],
+                    },
+                    binding: ir::RelationBinding::Map {
+                        rows: vec![
+                            ir::RelationRow {
+                                inputs: vec![portable_u64(1)],
+                                outputs: vec![portable_u64(10)],
+                            },
+                            ir::RelationRow {
+                                inputs: vec![portable_u64(2)],
+                                outputs: vec![portable_u64(20)],
+                            },
+                        ],
+                    },
+                },
+            ],
+        },
+        capability_manifest: ir::CapabilityManifest {
+            entries: vec![ir::CapabilityDescriptor {
+                id: ir::CapabilityId(7),
+                symbol: "add_one".into(),
+                inputs: vec![TYPE_U64_ID],
+                outputs: vec![TYPE_U64_ID],
+                totality: ir::CapabilityTotality::Total,
+                query_policy: ir::CapabilityQueryPolicy::QuerySafe,
+                proof_visibility: ir::CapabilityProofVisibility::Journaled,
+            }],
+        },
+        event_manifest: ir::EventManifest {
+            entries: vec![ir::EventDescriptor {
+                id: ir::EventId(0),
+                symbol: "Transfer".into(),
+                fields: vec![TYPE_U64_ID, TYPE_U64_ID],
+            }],
+        },
+        entries: vec![
+            ir::Entry {
+                id: ir::EntryId(0),
+                symbol: "balance_of".into(),
+                kind: ir::EntryKind::Query,
+                params: vec![ir::ParamDecl {
+                    id: ir::ParamId(0),
+                    symbol: "owner".into(),
+                    ty: TYPE_U64_ID,
+                }],
+                returns: vec![TYPE_U64_ID, TYPE_BYTES32_ID],
+                return_policy: ir::ReturnPolicy::Explicit,
+                body: ir::Body {
+                    locals: vec![
+                        ir::LocalDecl {
+                            id: ir::LocalId(0),
+                            ty: TYPE_U64_ID,
+                        },
+                        ir::LocalDecl {
+                            id: ir::LocalId(1),
+                            ty: TYPE_BOOL_ID,
+                        },
+                        ir::LocalDecl {
+                            id: ir::LocalId(2),
+                            ty: TYPE_BYTES32_ID,
+                        },
+                    ],
+                    ops: vec![
+                        ir::Op::ReadState {
+                            guard: None,
+                            dst_value: ir::LocalId(0),
+                            dst_present: ir::LocalId(1),
+                            table: ir::TableId(1),
+                            key: ir::ValueTupleRef(vec![ir::ValueRef::Param(ir::ParamId(0))]),
+                            field: ir::FieldId(0),
+                        },
+                        ir::Op::Hash {
+                            dst: ir::LocalId(2),
+                            family: ir::HashFamily::Poseidon,
+                            inputs: ir::ValueTupleRef(vec![ir::ValueRef::Local(ir::LocalId(0))]),
+                        },
+                        ir::Op::Return {
+                            values: ir::ValueTupleRef(vec![
+                                ir::ValueRef::Local(ir::LocalId(0)),
+                                ir::ValueRef::Local(ir::LocalId(2)),
+                            ]),
+                        },
+                    ],
+                },
+            },
+            ir::Entry {
+                id: ir::EntryId(1),
+                symbol: "transfer".into(),
+                kind: ir::EntryKind::Tx,
+                params: vec![
+                    ir::ParamDecl {
+                        id: ir::ParamId(0),
+                        symbol: "from".into(),
+                        ty: TYPE_U64_ID,
+                    },
+                    ir::ParamDecl {
+                        id: ir::ParamId(1),
+                        symbol: "to".into(),
+                        ty: TYPE_U64_ID,
+                    },
+                    ir::ParamDecl {
+                        id: ir::ParamId(2),
+                        symbol: "tier".into(),
+                        ty: TYPE_U64_ID,
+                    },
+                ],
+                returns: vec![],
+                return_policy: ir::ReturnPolicy::Unit,
+                body: ir::Body {
+                    locals: vec![
+                        ir::LocalDecl {
+                            id: ir::LocalId(0),
+                            ty: TYPE_U64_ID,
+                        },
+                        ir::LocalDecl {
+                            id: ir::LocalId(1),
+                            ty: TYPE_BOOL_ID,
+                        },
+                        ir::LocalDecl {
+                            id: ir::LocalId(2),
+                            ty: TYPE_U64_ID,
+                        },
+                    ],
+                    ops: vec![
+                        ir::Op::AssertRelation {
+                            guard: None,
+                            relation: ir::RelationId(0),
+                            args: ir::ValueTupleRef(vec![ir::ValueRef::Param(ir::ParamId(2))]),
+                        },
+                        ir::Op::EvalRelation {
+                            guard: None,
+                            relation: ir::RelationId(1),
+                            inputs: ir::ValueTupleRef(vec![ir::ValueRef::Param(ir::ParamId(2))]),
+                            dsts: vec![ir::LocalId(0)],
+                        },
+                        ir::Op::CallCapability {
+                            guard: None,
+                            capability: ir::CapabilityId(7),
+                            inputs: ir::ValueTupleRef(vec![ir::ValueRef::Local(ir::LocalId(0))]),
+                            dsts: vec![ir::LocalId(2)],
+                        },
+                        ir::Op::WriteState {
+                            guard: None,
+                            table: ir::TableId(1),
+                            key: ir::ValueTupleRef(vec![ir::ValueRef::Param(ir::ParamId(1))]),
+                            field: ir::FieldId(0),
+                            value: ir::ValueRef::Local(ir::LocalId(2)),
+                        },
+                        ir::Op::EmitEvent {
+                            guard: None,
+                            event: ir::EventId(0),
+                            args: ir::ValueTupleRef(vec![
+                                ir::ValueRef::Param(ir::ParamId(0)),
+                                ir::ValueRef::Local(ir::LocalId(2)),
+                            ]),
+                        },
+                        ir::Op::Return {
+                            values: ir::ValueTupleRef(vec![]),
+                        },
+                    ],
+                },
+            },
+        ],
+    }
 }
 
-fn make_snapshot(entries: Vec<(CellKey, PortableValue)>) -> TestSnapshot {
-    TestSnapshot(entries.into_iter().collect())
+pub fn validated_program() -> ir::ValidatedProgram {
+    ir::ValidatedProgram::try_from(raw_program()).expect("valid canonical program")
 }
 
-pub fn snapshot(data: BTreeMap<CellKey, PortableValue>) -> TestSnapshot {
-    TestSnapshot(data)
+pub fn resolved_program() -> exec::ResolvedExecutionProgram {
+    exec::ResolvedExecutionProgram::from_validated_program(validated_program())
+        .expect("resolved execution program")
 }
 
-/// Execute instructions with empty params and empty snapshot.
-pub fn run(instrs: Vec<Instruction>) -> (SuccessfulTxExecution, OverlayResult) {
-    run_with(instrs, &[], vec![])
+pub fn resolved_program_with_capability(
+    totality: ir::CapabilityTotality,
+    proof_visibility: ir::CapabilityProofVisibility,
+) -> exec::ResolvedExecutionProgram {
+    let mut raw = raw_program();
+    raw.capability_manifest.entries[0].totality = totality;
+    raw.capability_manifest.entries[0].proof_visibility = proof_visibility;
+    exec::ResolvedExecutionProgram::from_validated_program(
+        ir::ValidatedProgram::try_from(raw).expect("valid modified program"),
+    )
+    .expect("resolved execution program")
 }
 
-/// Execute instructions with custom params and initial state.
-#[allow(clippy::needless_pass_by_value)]
-pub fn run_with(
-    instrs: Vec<Instruction>,
-    params: &[PortableValue],
-    entries: Vec<(CellKey, PortableValue)>,
-) -> (SuccessfulTxExecution, OverlayResult) {
-    let snap = make_snapshot(entries);
-    let mut ov = Overlay::new(&snap, type_runtimes());
-    let execution_program = test_execution_program();
-    let property_queries = PropertyQueryRegistry::new();
-    let ctx = ExecContext {
+pub fn capability_query_program(
+    totality: ir::CapabilityTotality,
+) -> exec::ResolvedExecutionProgram {
+    exec::ResolvedExecutionProgram::from_validated_program(
+        ir::ValidatedProgram::try_from(ir::Program {
+            program_id: ir::ProgramId(2),
+            state: ir::StateSchema { tables: vec![] },
+            context: ir::ContextSchema { fields: vec![] },
+            const_pool: ir::ConstantPool { entries: vec![] },
+            relation_manifest: ir::RelationManifest { entries: vec![] },
+            capability_manifest: ir::CapabilityManifest {
+                entries: vec![ir::CapabilityDescriptor {
+                    id: ir::CapabilityId(7),
+                    symbol: "maybe_fail".into(),
+                    inputs: vec![TYPE_U64_ID],
+                    outputs: vec![TYPE_U64_ID],
+                    totality,
+                    query_policy: ir::CapabilityQueryPolicy::QuerySafe,
+                    proof_visibility: ir::CapabilityProofVisibility::Journaled,
+                }],
+            },
+            event_manifest: ir::EventManifest { entries: vec![] },
+            entries: vec![ir::Entry {
+                id: ir::EntryId(0),
+                symbol: "check".into(),
+                kind: ir::EntryKind::Query,
+                params: vec![ir::ParamDecl {
+                    id: ir::ParamId(0),
+                    symbol: "value".into(),
+                    ty: TYPE_U64_ID,
+                }],
+                returns: vec![TYPE_U64_ID],
+                return_policy: ir::ReturnPolicy::Explicit,
+                body: ir::Body {
+                    locals: vec![ir::LocalDecl {
+                        id: ir::LocalId(0),
+                        ty: TYPE_U64_ID,
+                    }],
+                    ops: vec![
+                        ir::Op::CallCapability {
+                            guard: None,
+                            capability: ir::CapabilityId(7),
+                            inputs: ir::ValueTupleRef(vec![ir::ValueRef::Param(ir::ParamId(0))]),
+                            dsts: vec![ir::LocalId(0)],
+                        },
+                        ir::Op::Return {
+                            values: ir::ValueTupleRef(vec![ir::ValueRef::Local(ir::LocalId(0))]),
+                        },
+                    ],
+                },
+            }],
+        })
+        .expect("valid capability query program"),
+    )
+    .expect("resolved capability query program")
+}
+
+#[derive(Default)]
+pub struct TestPropertyReads {
+    columns: BTreeMap<(ir::TableId, ir::FieldId), Vec<tabula_types::TypedColumnEntry>>,
+}
+
+impl TestPropertyReads {
+    pub fn with_u64_column(
+        mut self,
+        table: ir::TableId,
+        field: ir::FieldId,
+        rows: &[(u64, u64, bool)],
+    ) -> Self {
+        self.columns.insert(
+            (table, field),
+            rows.iter()
+                .map(|(row_key, value, is_null)| tabula_types::TypedColumnEntry {
+                    row_key: RowKey(*row_key),
+                    value: u64_typed(*value),
+                    is_null: *is_null,
+                })
+                .collect(),
+        );
+        self
+    }
+}
+
+impl exec::PropertyReadExecutor for TestPropertyReads {
+    fn execute(
+        &self,
+        request: &exec::PropertyReadRequest,
+        type_runtimes: &TypeRuntimeRegistry,
+    ) -> Result<Vec<TypedValue>, TabulaError> {
+        if request.output_arity != 3 {
+            return Err(TabulaError::InvalidIr(
+                "row-oriented property reads require exactly 3 outputs".into(),
+            ));
+        }
+        if request.key_arity != 1 || request.key_type != TYPE_U64_ID {
+            return Err(TabulaError::InvalidIr(format!(
+                "V1 canonical executor only supports [u64] key schema, table {} declared arity {} with key type {}",
+                request.table.0, request.key_arity, request.key_type.0
+            )));
+        }
+        match &request.query {
+            exec::PropertyReadQuery::Aggregate { .. } => {
+                return Err(TabulaError::InvalidIr(
+                    "ReadStateProperty Aggregate is not yet supported in V1 adapter".into(),
+                ));
+            }
+            exec::PropertyReadQuery::NonExistenceRange { .. } => {
+                return Err(TabulaError::InvalidIr(
+                    "ReadStateProperty NonExistenceRange is not yet supported in V1 adapter".into(),
+                ));
+            }
+            _ => {}
+        }
+        let entries = self
+            .columns
+            .get(&(request.table, request.field))
+            .map(Vec::as_slice)
+            .ok_or_else(|| {
+                TabulaError::InvalidIr(format!(
+                    "missing committed column {}.{}",
+                    request.table.0, request.field.0
+                ))
+            })?;
+        for entry in entries {
+            if entry.value.type_id() != request.field_type {
+                return Err(TabulaError::InvalidIr(format!(
+                    "committed column {}.{} yielded value type {} but field type is {}",
+                    request.table.0,
+                    request.field.0,
+                    entry.value.type_id().0,
+                    request.field_type.0
+                )));
+            }
+        }
+
+        let pick = match &request.query {
+            exec::PropertyReadQuery::Minimum => entries
+                .iter()
+                .filter(|entry| !entry.is_null)
+                .min_by_key(|entry| entry.row_key.0),
+            exec::PropertyReadQuery::Maximum => entries
+                .iter()
+                .filter(|entry| !entry.is_null)
+                .max_by_key(|entry| entry.row_key.0),
+            exec::PropertyReadQuery::Successor { key } => {
+                let pivot = decode_single_row_key(key, type_runtimes)?;
+                entries
+                    .iter()
+                    .filter(|entry| !entry.is_null)
+                    .filter(|entry| entry.row_key.0 > pivot.0)
+                    .min_by_key(|entry| entry.row_key.0)
+            }
+            exec::PropertyReadQuery::Predecessor { key } => {
+                let pivot = decode_single_row_key(key, type_runtimes)?;
+                entries
+                    .iter()
+                    .filter(|entry| !entry.is_null)
+                    .filter(|entry| entry.row_key.0 < pivot.0)
+                    .max_by_key(|entry| entry.row_key.0)
+            }
+            exec::PropertyReadQuery::Aggregate { .. }
+            | exec::PropertyReadQuery::NonExistenceRange { .. } => {
+                unreachable!("unsupported variants return early")
+            }
+        };
+
+        if let Some(entry) = pick {
+            Ok(vec![
+                entry.value.clone(),
+                row_key_typed(entry.row_key, type_runtimes)?,
+                bool_typed(false),
+            ])
+        } else {
+            Ok(vec![
+                type_runtimes.zero_of(request.field_type)?,
+                type_runtimes.zero_of(request.key_type)?,
+                bool_typed(true),
+            ])
+        }
+    }
+}
+
+fn row_key_typed(
+    row: RowKey,
+    type_runtimes: &TypeRuntimeRegistry,
+) -> Result<TypedValue, TabulaError> {
+    type_runtimes.decode_portable(&PortableValue::new(TYPE_U64_ID, to_vec(&row.0).unwrap()))
+}
+
+fn decode_single_row_key(
+    values: &[TypedValue],
+    type_runtimes: &TypeRuntimeRegistry,
+) -> Result<RowKey, TabulaError> {
+    if values.len() != 1 {
+        return Err(TabulaError::InvalidIr(
+            "V1 canonical executor only supports single-component state keys".into(),
+        ));
+    }
+    let value = &values[0];
+    if value.type_id() != TYPE_U64_ID {
+        return Err(TabulaError::InvalidIr(format!(
+            "V1 canonical executor expects state keys to be u64, got {}",
+            value.type_id().0
+        )));
+    }
+    let portable = type_runtimes.encode_typed(value)?;
+    let raw = borsh::from_slice::<u64>(portable.payload())
+        .map_err(|error| TabulaError::BorshEncodingError(error.to_string()))?;
+    Ok(RowKey(raw))
+}
+
+pub fn property_program(
+    query: ir::StatePropertyQuery,
+    key_ty: tabula_core::TypeId,
+) -> exec::ResolvedExecutionProgram {
+    exec::ResolvedExecutionProgram::from_validated_program(
+        ir::ValidatedProgram::try_from(ir::Program {
+            program_id: ir::ProgramId(1),
+            state: ir::StateSchema {
+                tables: vec![ir::TableSchema {
+                    id: ir::TableId(1),
+                    symbol: "accounts".into(),
+                    key_tys: vec![key_ty],
+                    fields: vec![ir::FieldSchema {
+                        id: ir::FieldId(0),
+                        symbol: "balance".into(),
+                        ty: TYPE_U64_ID,
+                    }],
+                }],
+            },
+            context: ir::ContextSchema { fields: vec![] },
+            const_pool: ir::ConstantPool { entries: vec![] },
+            relation_manifest: ir::RelationManifest { entries: vec![] },
+            capability_manifest: ir::CapabilityManifest { entries: vec![] },
+            event_manifest: ir::EventManifest { entries: vec![] },
+            entries: vec![ir::Entry {
+                id: ir::EntryId(0),
+                symbol: "property".into(),
+                kind: ir::EntryKind::Query,
+                params: vec![],
+                returns: vec![TYPE_U64_ID, key_ty, TYPE_BOOL_ID],
+                return_policy: ir::ReturnPolicy::Explicit,
+                body: ir::Body {
+                    locals: vec![
+                        ir::LocalDecl {
+                            id: ir::LocalId(0),
+                            ty: TYPE_U64_ID,
+                        },
+                        ir::LocalDecl {
+                            id: ir::LocalId(1),
+                            ty: key_ty,
+                        },
+                        ir::LocalDecl {
+                            id: ir::LocalId(2),
+                            ty: TYPE_BOOL_ID,
+                        },
+                    ],
+                    ops: vec![
+                        ir::Op::ReadStateProperty {
+                            guard: None,
+                            dsts: vec![ir::LocalId(0), ir::LocalId(1), ir::LocalId(2)],
+                            table: ir::TableId(1),
+                            field: ir::FieldId(0),
+                            query,
+                        },
+                        ir::Op::Return {
+                            values: ir::ValueTupleRef(vec![
+                                ir::ValueRef::Local(ir::LocalId(0)),
+                                ir::ValueRef::Local(ir::LocalId(1)),
+                                ir::ValueRef::Local(ir::LocalId(2)),
+                            ]),
+                        },
+                    ],
+                },
+            }],
+        })
+        .expect("valid property program"),
+    )
+    .expect("resolved property program")
+}
+
+pub fn query_exec_context<'a>(runtimes: &'a TypeRuntimeRegistry) -> exec::ExecContext<'a> {
+    exec::ExecContext {
         hasher: &XorHasher,
-        static_tables: &TestStaticTables,
-        type_runtimes: type_runtimes(),
-        execution_program: &execution_program,
-        precompiles: None,
-        committed_state: None,
-        property_queries: &property_queries,
-    };
-    let typed_params: Vec<_> = params.iter().cloned().map(typed).collect();
-    let out = execute_tx(0, &instrs, &typed_params, &mut ov, &ctx).unwrap();
-    (out, ov.into_result().unwrap())
-}
-
-/// Execute instructions expecting failure. Returns the error.
-pub fn run_err(instrs: Vec<Instruction>) -> InterpreterError {
-    run_err_with(instrs, &[], vec![])
-}
-
-/// Execute instructions with custom params/state, expecting failure.
-#[allow(clippy::needless_pass_by_value)]
-pub fn run_err_with(
-    instrs: Vec<Instruction>,
-    params: &[PortableValue],
-    entries: Vec<(CellKey, PortableValue)>,
-) -> InterpreterError {
-    let snap = make_snapshot(entries);
-    let mut ov = Overlay::new(&snap, type_runtimes());
-    let execution_program = test_execution_program();
-    let property_queries = PropertyQueryRegistry::new();
-    let ctx = ExecContext {
-        hasher: &XorHasher,
-        static_tables: &TestStaticTables,
-        type_runtimes: type_runtimes(),
-        execution_program: &execution_program,
-        precompiles: None,
-        committed_state: None,
-        property_queries: &property_queries,
-    };
-    let typed_params: Vec<_> = params.iter().cloned().map(typed).collect();
-    tabula_executor::interpreter::execute(0, &instrs, &typed_params, &mut ov, &ctx).unwrap_err()
-}
-
-/// Write slot 0 to cell(1,0,0) — append to capture a computed value.
-pub fn write_slot0() -> Instruction {
-    Instruction::Write {
-        table: TableId(1),
-        row: RowExpr::Literal(RowKey(0)),
-        col: ColId(0),
-        src_val: ValueExpr::Slot(0),
-        src_is_null: ValueExpr::Literal(bool_portable(false)),
+        type_runtimes: runtimes,
+        capability_executor: None,
+        property_reads: None,
     }
 }

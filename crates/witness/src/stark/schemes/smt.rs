@@ -17,7 +17,7 @@ use tabula_commitment::{
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, Digest, RootProfileId, RowKey, TableId};
 use tabula_stark::trace::WitnessStore;
-use tabula_types::{EncodingRuntime, TypeRuntime, encode_value_with_null_flag};
+use tabula_types::{EncodingRuntime, TypeRuntime};
 
 use super::super::memory::{
     prepare_memory_shard_rows_from_parts, prepare_meta_shard_row_from_parts,
@@ -115,12 +115,16 @@ pub fn prepare_smt_proof<const W: usize>(
     let meta_row = prepare_meta_shard_row_from_parts(&root_binding, input.access_events, true);
     let shared = SharedColumnWitness {
         memory_rows,
-        meta_row: (meta_row.is_touched || meta_row.empty_read_count > 0).then_some(meta_row),
+        // Untouched non-empty columns still need one real meta row so the
+        // MetaShard receives the old commitment emitted by the SMT state shard.
+        meta_row: (meta_row.is_touched || meta_row.empty_read_count > 0 || !meta_row.is_empty_old)
+            .then_some(meta_row),
     };
     let state_witness = build_smt_state_witness::<W>(&SmtStateWitnessParts {
         column: (input.table, input.col),
         type_runtime: input.type_runtime,
         encoding_runtime: input.encoding_runtime,
+        old_entries: input.old_entries,
         init_cells: input.init_cells,
         writes: input.writes,
         root_binding: &root_binding,
@@ -142,6 +146,7 @@ struct SmtStateWitnessParts<'a> {
     column: (TableId, ColId),
     type_runtime: &'a dyn TypeRuntime,
     encoding_runtime: &'a dyn EncodingRuntime,
+    old_entries: &'a [CommittedEntry],
     init_cells: &'a [InitCell],
     writes: &'a [ColumnWrite],
     root_binding: &'a ColumnRootBinding,
@@ -232,7 +237,7 @@ fn build_smt_state_witness<const W: usize>(
     let old_tree = parts.old_state;
     let new_tree = parts.new_state;
 
-    let init_by_key = collect_init_cells::<W>(
+    let mut init_by_key = collect_init_cells::<W>(
         table,
         col,
         parts.type_runtime,
@@ -249,6 +254,17 @@ fn build_smt_state_witness<const W: usize>(
 
     let mut keys: BTreeSet<_> = init_by_key.keys().copied().collect();
     keys.extend(writes_by_key.keys().copied());
+    if keys.is_empty() && !parts.root_binding.is_empty_old {
+        let (row, value) = fallback_anchor_entry::<W>(
+            table,
+            col,
+            parts.type_runtime,
+            parts.encoding_runtime,
+            parts.old_entries,
+        )?;
+        init_by_key.insert(row, value);
+        keys.insert(row);
+    }
 
     let mut paths = Vec::with_capacity(keys.len());
     let hasher = PoseidonHasher::new();
@@ -322,6 +338,35 @@ fn build_smt_state_witness<const W: usize>(
     })
 }
 
+fn fallback_anchor_entry<const W: usize>(
+    table: TableId,
+    col: ColId,
+    type_runtime: &dyn TypeRuntime,
+    encoding_runtime: &dyn EncodingRuntime,
+    old_entries: &[CommittedEntry],
+) -> Result<(RowKey, ([KoalaBear; W], bool)), TabulaError> {
+    let entry = old_entries
+        .iter()
+        .filter(|entry| !entry.is_null)
+        .min_by_key(|entry| entry.row)
+        .ok_or_else(|| TabulaError::ProofError {
+            phase: "smt_proof",
+            detail: format!(
+                "SMT column ({}, {}) is non-empty but no committed entry is available for an anchor path",
+                table.0, col.0
+            ),
+        })?;
+    let value = encode_array::<W>(type_runtime, encoding_runtime, &entry.value, entry.is_null)
+        .map_err(|_| TabulaError::ProofError {
+            phase: "smt_proof",
+            detail: format!(
+                "anchor entry width mismatch for table {} col {} key {}",
+                table.0, col.0, entry.row.0
+            ),
+        })?;
+    Ok((entry.row, (value, entry.is_null)))
+}
+
 fn collect_init_cells<const W: usize>(
     table: TableId,
     col: ColId,
@@ -376,13 +421,16 @@ fn collect_final_writes<const W: usize>(
 }
 
 fn encode_array<const W: usize>(
-    type_runtime: &dyn TypeRuntime,
+    _type_runtime: &dyn TypeRuntime,
     encoding_runtime: &dyn EncodingRuntime,
     value: &tabula_types::TypedValue,
     is_null: bool,
 ) -> Result<[KoalaBear; W], TabulaError> {
-    let (mut encoded, _) =
-        encode_value_with_null_flag(type_runtime, encoding_runtime, value, is_null)?;
+    let mut encoded = if is_null {
+        Vec::new()
+    } else {
+        encoding_runtime.encode_field_elements(value)?
+    };
     if encoded.len() > W {
         return Err(TabulaError::ProofError {
             phase: "smt_proof",

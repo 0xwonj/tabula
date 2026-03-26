@@ -3,7 +3,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::state::id::TypeId;
+use crate::ids::TypeId;
 
 /// Canonical self-describing value used for serialized/public boundaries.
 ///

@@ -1,30 +1,30 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
+#[cfg(any(feature = "execute", feature = "verify"))]
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use tabula_artifact::{Artifact, PrecompileDescriptor};
-#[cfg(feature = "prove")]
-use tabula_compiler::SealedProgram;
+#[cfg(feature = "compile")]
+use tabula_compiler::compile_and_register_program_source;
 use tabula_compiler::{
-    CompilerCatalogError, CompilerCatalogs, ProgramDefinition,
-    compile_program_source_with_catalogs, register_artifact,
-    register_program_definition_with_catalogs,
+    CompiledProgram, CompilerCatalogError, CompilerCatalogs, register_compiled_program,
 };
 use tabula_profile::SemanticRegistry;
 use tabula_runtime::{HostEnvironment, RuntimeRegistries};
-use tabula_types::{EncodingRuntime, TypeRuntime, TypeRuntimeRegistry};
+use tabula_types::{EncodingRuntime, TypeRuntime};
+
+#[cfg(feature = "execute")]
+use tabula_machine::TabulaStarkConfig;
 
 #[cfg(feature = "prove")]
 use tabula_ext::root::RootBackendBundle;
-#[cfg(feature = "verify")]
-use tabula_ext::{ColumnBackendFactoryBundle, PrecompileBackendFactoryBundle};
-#[cfg(feature = "verify")]
-use tabula_machine::TabulaStarkConfig;
-#[cfg(all(feature = "verify", not(feature = "prove")))]
-use tabula_machine::{RootProofBackend, SmtRootProofBackend};
 
-use crate::error::SdkError;
+use crate::artifact::Artifact;
+use crate::environment::{Environment, EnvironmentInner};
+use crate::error::{InstallError, SdkError};
 use crate::program::Program;
-#[cfg(feature = "verify")]
-use crate::verifier::Verifier;
+
+static NEXT_ENVIRONMENT_FINGERPRINT: AtomicU64 = AtomicU64::new(1);
 
 /// Shared process-level SDK context.
 #[derive(Clone)]
@@ -36,35 +36,26 @@ pub struct Sdk {
 pub struct SdkBuilder {
     compiler_catalogs: CompilerCatalogs,
     host_environment: HostEnvironment,
-    #[cfg(feature = "verify")]
+    #[cfg(feature = "execute")]
     machine_stark_config: TabulaStarkConfig,
     #[cfg(feature = "prove")]
     root_backend_bundle: RootBackendBundle,
-    #[cfg(all(feature = "verify", not(feature = "prove")))]
-    root_proof_backend: Arc<dyn RootProofBackend>,
 }
 
 pub(crate) struct SdkInner {
-    pub(crate) compiler_catalogs: CompilerCatalogs,
-    pub(crate) host_environment: HostEnvironment,
+    pub(crate) environment: Environment,
+    #[cfg(feature = "execute")]
+    pub(crate) runtime_cache: Mutex<BTreeMap<String, Arc<tabula_runtime::TabulaRuntime>>>,
     #[cfg(feature = "verify")]
-    pub(crate) machine_stark_config: TabulaStarkConfig,
-    #[cfg(feature = "prove")]
-    pub(crate) root_backend_bundle: RootBackendBundle,
-    #[cfg(all(feature = "verify", not(feature = "prove")))]
-    pub(crate) root_proof_backend: Arc<dyn RootProofBackend>,
-}
-
-impl SdkInner {
-    pub(crate) fn type_runtimes(&self) -> &TypeRuntimeRegistry {
-        self.host_environment.runtime_registries().type_runtimes()
-    }
+    pub(crate) verifier_cache: Mutex<BTreeMap<String, Arc<tabula_runtime::Verifier>>>,
 }
 
 impl Sdk {
-    /// Build a standard SDK with built-in compiler catalogs, host environment, and machine config.
+    /// Build a standard SDK with built-in compiler catalogs and host environment.
     pub fn standard() -> Self {
-        Self::builder().build()
+        Self::builder()
+            .build()
+            .expect("built-in SDK environment must remain installable")
     }
 
     /// Start a customized SDK builder.
@@ -72,66 +63,127 @@ impl Sdk {
         SdkBuilder::new()
     }
 
-    /// Compile `.tab` source into a reusable SDK program.
-    pub fn compile(&self, source: &str) -> Result<Program, SdkError> {
-        let definition =
-            compile_program_source_with_catalogs(source, &self.inner.compiler_catalogs)?;
-        self.register(&definition)
+    /// Build one SDK from an already prepared environment.
+    pub fn from_environment(environment: Environment) -> Self {
+        Self {
+            inner: Arc::new(SdkInner {
+                environment,
+                #[cfg(feature = "execute")]
+                runtime_cache: Mutex::new(BTreeMap::new()),
+                #[cfg(feature = "verify")]
+                verifier_cache: Mutex::new(BTreeMap::new()),
+            }),
+        }
     }
 
-    /// Register an already-compiled program definition into a reusable SDK program.
-    pub fn register(&self, definition: &ProgramDefinition) -> Result<Program, SdkError> {
-        let compiled =
-            register_program_definition_with_catalogs(definition, &self.inner.compiler_catalogs)?;
-        Program::from_compiled(self.clone(), compiled)
+    /// Borrow the immutable application environment bound to this SDK.
+    pub fn environment(&self) -> &Environment {
+        &self.inner.environment
     }
 
-    /// Open a sealed artifact and validate it eagerly.
+    /// Compile rewritten source into a sealed artifact.
+    #[cfg(feature = "compile")]
+    pub fn compile(&self, source: &str) -> Result<Artifact, SdkError> {
+        let registered = compile_and_register_program_source(
+            source,
+            &self.inner.environment.inner.compiler_catalogs,
+        )?;
+        Artifact::from_registered(registered)
+    }
+
+    /// Load one serialized artifact payload from bytes.
+    pub fn load_artifact(&self, bytes: &[u8]) -> Result<Artifact, SdkError> {
+        serde_json::from_slice(bytes).map_err(|error| SdkError::ArtifactDecode {
+            detail: error.to_string(),
+        })
+    }
+
+    /// Open one artifact into a reusable semantic program handle.
     pub fn open(&self, artifact: Artifact) -> Result<Program, SdkError> {
-        let compiled = register_artifact(&artifact)?;
-        Program::from_artifact(self.clone(), compiled, artifact)
+        Ok(Program::new(self.clone(), artifact))
     }
 
-    /// Create an artifact-bound verifier that reuses this SDK context.
-    #[cfg(feature = "verify")]
-    pub fn verifier(&self, artifact: Artifact) -> Result<Verifier, SdkError> {
-        let _compiled = register_artifact(&artifact)?;
-        Ok(Verifier::new(self.clone(), artifact))
-    }
-
-    #[cfg(feature = "prove")]
-    pub(crate) fn build_runtime(
+    pub(crate) fn register_compiled(
         &self,
-        sealed_program: &SealedProgram,
-    ) -> Result<tabula_runtime::TabulaRuntime, SdkError> {
-        tabula_runtime::TabulaRuntime::builder(sealed_program.clone())
-            .with_host_environment(self.inner.host_environment.clone())
-            .with_machine_stark_config(self.inner.machine_stark_config.clone())
-            .with_root_backend_bundle(self.inner.root_backend_bundle.clone())
-            .build()
-            .map_err(SdkError::from)
+        compiled: CompiledProgram,
+    ) -> Result<Artifact, SdkError> {
+        let registered =
+            register_compiled_program(compiled, &self.inner.environment.inner.compiler_catalogs)?;
+        Artifact::from_registered(registered)
     }
 
-    #[cfg(feature = "verify")]
-    pub(crate) fn build_verifier(
+    #[cfg(feature = "execute")]
+    pub(crate) fn prepare_runtime(
         &self,
         artifact: &Artifact,
-    ) -> Result<tabula_runtime::Verifier, SdkError> {
-        tabula_runtime::Verifier::builder(artifact.clone())
-            .with_host_environment(self.inner.host_environment.clone())
-            .with_machine_stark_config(self.inner.machine_stark_config.clone())
-            .with_root_proof_backend_arc({
-                #[cfg(feature = "prove")]
-                {
-                    self.inner.root_backend_bundle.proof_backend()
-                }
-                #[cfg(all(feature = "verify", not(feature = "prove")))]
-                {
-                    Arc::clone(&self.inner.root_proof_backend)
-                }
-            })
-            .build()
-            .map_err(SdkError::from)
+    ) -> Result<Arc<tabula_runtime::TabulaRuntime>, SdkError> {
+        let key = self.cache_key("runner", artifact);
+        let mut cache = self
+            .inner
+            .runtime_cache
+            .lock()
+            .expect("sdk runtime cache mutex poisoned");
+        if let Some(runtime) = cache.get(&key) {
+            return Ok(Arc::clone(runtime));
+        }
+
+        let built = Arc::new(self.build_runtime(artifact)?);
+        cache.insert(key, Arc::clone(&built));
+        Ok(built)
+    }
+
+    #[cfg(feature = "verify")]
+    pub(crate) fn prepare_verifier(
+        &self,
+        artifact: &Artifact,
+    ) -> Result<Arc<tabula_runtime::Verifier>, SdkError> {
+        let key = self.cache_key("verifier", artifact);
+        let mut cache = self
+            .inner
+            .verifier_cache
+            .lock()
+            .expect("sdk verifier cache mutex poisoned");
+        if let Some(verifier) = cache.get(&key) {
+            return Ok(Arc::clone(verifier));
+        }
+
+        let built = Arc::new(self.build_verifier(artifact)?);
+        cache.insert(key, Arc::clone(&built));
+        Ok(built)
+    }
+
+    #[cfg(feature = "execute")]
+    fn build_runtime(
+        &self,
+        artifact: &Artifact,
+    ) -> Result<tabula_runtime::TabulaRuntime, SdkError> {
+        let builder = tabula_runtime::TabulaRuntime::builder(artifact.registered().clone())
+            .with_host_environment(self.inner.environment.inner.host_environment.clone())
+            .with_machine_stark_config(self.inner.environment.inner.machine_stark_config.clone());
+        #[cfg(feature = "prove")]
+        let builder = builder
+            .with_root_backend_bundle(self.inner.environment.inner.root_backend_bundle.clone());
+        builder.build().map_err(SdkError::from)
+    }
+
+    #[cfg(feature = "verify")]
+    fn build_verifier(&self, artifact: &Artifact) -> Result<tabula_runtime::Verifier, SdkError> {
+        let builder = tabula_runtime::Verifier::builder(artifact.registered().clone())
+            .with_host_environment(self.inner.environment.inner.host_environment.clone())
+            .with_machine_stark_config(self.inner.environment.inner.machine_stark_config.clone());
+        #[cfg(feature = "prove")]
+        let builder = builder
+            .with_root_backend_bundle(self.inner.environment.inner.root_backend_bundle.clone());
+        builder.build().map_err(SdkError::from)
+    }
+
+    fn cache_key(&self, mode: &str, artifact: &Artifact) -> String {
+        format!(
+            "{}:{}:{}",
+            self.inner.environment.inner.fingerprint,
+            artifact.digest(),
+            mode
+        )
     }
 }
 
@@ -140,44 +192,58 @@ impl SdkBuilder {
         Self {
             compiler_catalogs: CompilerCatalogs::standard(),
             host_environment: HostEnvironment::standard(),
-            #[cfg(feature = "verify")]
+            #[cfg(feature = "execute")]
             machine_stark_config: tabula_machine::default_config(),
             #[cfg(feature = "prove")]
             root_backend_bundle: RootBackendBundle::standard(),
-            #[cfg(all(feature = "verify", not(feature = "prove")))]
-            root_proof_backend: Arc::new(SmtRootProofBackend),
         }
     }
 
-    /// Replace the compiler-owned sealing catalogs.
-    pub fn with_compiler_catalogs(mut self, compiler_catalogs: CompilerCatalogs) -> Self {
+    /// Install one extension bundle atomically.
+    pub fn with_extension(mut self, extension: &tabula_ext::Extension) -> Result<Self, SdkError> {
+        self.apply_extension(extension)?;
+        Ok(self)
+    }
+
+    /// Finalize the environment without building an SDK wrapper.
+    pub fn build_environment(self) -> Result<Environment, InstallError> {
+        let fingerprint = NEXT_ENVIRONMENT_FINGERPRINT.fetch_add(1, Ordering::Relaxed);
+        Ok(Environment::new(EnvironmentInner {
+            compiler_catalogs: self.compiler_catalogs,
+            host_environment: self.host_environment,
+            fingerprint,
+            #[cfg(feature = "execute")]
+            machine_stark_config: self.machine_stark_config,
+            #[cfg(feature = "prove")]
+            root_backend_bundle: self.root_backend_bundle,
+        }))
+    }
+
+    /// Finalize the SDK configuration.
+    pub fn build(self) -> Result<Sdk, InstallError> {
+        Ok(Sdk::from_environment(self.build_environment()?))
+    }
+
+    pub(crate) fn with_compiler_catalogs_internal(
+        mut self,
+        compiler_catalogs: CompilerCatalogs,
+    ) -> Self {
         self.compiler_catalogs = compiler_catalogs;
         self
     }
 
-    /// Replace the host-installed execution/proving environment.
-    pub fn with_host_environment(mut self, host_environment: HostEnvironment) -> Self {
+    pub(crate) fn with_host_environment_internal(
+        mut self,
+        host_environment: HostEnvironment,
+    ) -> Self {
         self.host_environment = host_environment;
         self
     }
 
-    /// Register one custom canonical backend bundle.
-    #[cfg(feature = "verify")]
-    pub fn with_column_backend(
+    pub(crate) fn with_semantic_registry_internal(
         mut self,
-        bundle: ColumnBackendFactoryBundle,
+        semantics: SemanticRegistry,
     ) -> Result<Self, SdkError> {
-        self.host_environment = self
-            .host_environment
-            .with_column_backend_bundle(bundle)
-            .map_err(|err| SdkError::InvalidColumnBackendBundle {
-                detail: err.to_string(),
-            })?;
-        Ok(self)
-    }
-
-    /// Replace the source authoring/sealing semantic registry.
-    pub fn with_semantic_registry(mut self, semantics: SemanticRegistry) -> Result<Self, SdkError> {
         self.compiler_catalogs = self
             .compiler_catalogs
             .with_semantic_registry(semantics)
@@ -185,16 +251,25 @@ impl SdkBuilder {
         Ok(self)
     }
 
-    /// Clear all seeded runtime type and encoding implementations.
-    pub fn without_default_types(mut self) -> Self {
+    pub(crate) fn with_capability_descriptor_internal(
+        mut self,
+        descriptor: tabula_compiler::SourceCapabilityDescriptor,
+    ) -> Result<Self, SdkError> {
+        self.compiler_catalogs = self
+            .compiler_catalogs
+            .with_capability_descriptor(descriptor)
+            .map_err(map_compiler_catalog_error)?;
+        Ok(self)
+    }
+
+    pub(crate) fn without_default_types_internal(mut self) -> Self {
         self.host_environment = self
             .host_environment
             .with_runtime_registries(RuntimeRegistries::empty());
         self
     }
 
-    /// Register one custom runtime type implementation.
-    pub fn with_type_runtime(
+    pub(crate) fn with_type_runtime_internal(
         mut self,
         runtime: impl TypeRuntime + 'static,
     ) -> Result<Self, SdkError> {
@@ -207,8 +282,7 @@ impl SdkBuilder {
         Ok(self)
     }
 
-    /// Register one custom runtime encoding implementation.
-    pub fn with_encoding_runtime(
+    pub(crate) fn with_encoding_runtime_internal(
         mut self,
         runtime: impl EncodingRuntime + 'static,
     ) -> Result<Self, SdkError> {
@@ -221,102 +295,132 @@ impl SdkBuilder {
         Ok(self)
     }
 
-    /// Register one precompile descriptor available during source-level sealing.
-    pub fn with_precompile_descriptor(
+    #[cfg(feature = "execute")]
+    pub(crate) fn with_column_backend_internal(
         mut self,
-        descriptor: PrecompileDescriptor,
-    ) -> Result<Self, SdkError> {
-        self.compiler_catalogs = self
-            .compiler_catalogs
-            .with_precompile_descriptor(descriptor)
-            .map_err(map_compiler_catalog_error)?;
-        Ok(self)
-    }
-
-    /// Register one installed precompile backend family.
-    #[cfg(feature = "verify")]
-    pub fn with_precompile_backend(
-        mut self,
-        bundle: PrecompileBackendFactoryBundle,
+        bundle: tabula_ext::scheme::ColumnBackendFactoryBundle,
     ) -> Result<Self, SdkError> {
         self.host_environment = self
             .host_environment
-            .with_precompile_backend_bundle(bundle)
-            .map_err(|err| SdkError::InvalidPrecompileBackendBundle {
+            .with_column_backend_bundle(bundle)
+            .map_err(|err| SdkError::InvalidColumnBackendBundle {
                 detail: err.to_string(),
             })?;
         Ok(self)
     }
 
-    /// Register both the compiler-visible descriptor and the host-installed backend family.
-    #[cfg(feature = "verify")]
-    pub fn with_precompile_support(
-        mut self,
-        descriptor: PrecompileDescriptor,
-        bundle: PrecompileBackendFactoryBundle,
-    ) -> Result<Self, SdkError> {
-        if bundle.precompile_id() != descriptor.precompile_id {
-            return Err(SdkError::InvalidPrecompileBackendBundle {
-                detail: format!(
-                    "precompile support bundle id 0x{:04x} does not match descriptor id 0x{:04x}",
-                    bundle.precompile_id().0,
-                    descriptor.precompile_id.0,
-                ),
-            });
-        }
-        self = self.with_precompile_descriptor(descriptor)?;
-        self = self.with_precompile_backend(bundle)?;
-        Ok(self)
-    }
-
-    /// Override the root proof backend used by runtime and verifier builders.
-    #[cfg(feature = "prove")]
-    pub fn with_root_backend_bundle(mut self, root_backend_bundle: RootBackendBundle) -> Self {
-        self.root_backend_bundle = root_backend_bundle;
-        self
-    }
-
-    /// Override the proof-side root backend used by verifier builders.
-    #[cfg(all(feature = "verify", not(feature = "prove")))]
-    pub fn with_root_proof_backend(
-        mut self,
-        root_proof_backend: impl RootProofBackend + 'static,
-    ) -> Self {
-        self.root_proof_backend = Arc::new(root_proof_backend);
-        self
-    }
-
-    /// Override the proof-side root backend used by verifier builders.
-    #[cfg(all(feature = "verify", not(feature = "prove")))]
-    pub fn with_root_proof_backend_arc(
-        mut self,
-        root_proof_backend: Arc<dyn RootProofBackend>,
-    ) -> Self {
-        self.root_proof_backend = root_proof_backend;
-        self
-    }
-
-    /// Override the STARK configuration used by runtime and verifier builders.
-    #[cfg(feature = "verify")]
-    pub fn with_machine_stark_config(mut self, config: TabulaStarkConfig) -> Self {
+    #[cfg(feature = "execute")]
+    pub(crate) fn with_machine_stark_config_internal(mut self, config: TabulaStarkConfig) -> Self {
         self.machine_stark_config = config;
         self
     }
 
-    /// Finalize the SDK configuration.
-    pub fn build(self) -> Sdk {
-        Sdk {
-            inner: Arc::new(SdkInner {
-                compiler_catalogs: self.compiler_catalogs,
-                host_environment: self.host_environment,
-                #[cfg(feature = "verify")]
-                machine_stark_config: self.machine_stark_config,
-                #[cfg(feature = "prove")]
-                root_backend_bundle: self.root_backend_bundle,
-                #[cfg(all(feature = "verify", not(feature = "prove")))]
-                root_proof_backend: self.root_proof_backend,
-            }),
+    #[cfg(feature = "prove")]
+    pub(crate) fn with_root_backend_bundle_internal(
+        mut self,
+        root_backend_bundle: RootBackendBundle,
+    ) -> Self {
+        self.root_backend_bundle = root_backend_bundle;
+        self
+    }
+
+    fn apply_extension(&mut self, extension: &tabula_ext::Extension) -> Result<(), SdkError> {
+        let mut semantics = self.compiler_catalogs.semantics().clone();
+        for contribution in extension.types() {
+            semantics
+                .register_type_descriptor(contribution.descriptor().clone())
+                .map_err(|error| SdkError::InvalidExtension {
+                    detail: error.to_string(),
+                })?;
+            semantics
+                .register_type_name(
+                    contribution.source_name(),
+                    contribution.descriptor().type_id,
+                )
+                .map_err(|error| SdkError::InvalidExtension {
+                    detail: error.to_string(),
+                })?;
         }
+        for contribution in extension.encodings() {
+            semantics
+                .register_encoding_profile(contribution.profile().clone())
+                .map_err(|error| SdkError::InvalidExtension {
+                    detail: error.to_string(),
+                })?;
+            if let Some(type_id) = contribution.default_for_type() {
+                semantics
+                    .register_default_encoding(type_id, contribution.profile().encoding_profile_id)
+                    .map_err(|error| SdkError::InvalidExtension {
+                        detail: error.to_string(),
+                    })?;
+            }
+        }
+        for contribution in extension.schemes() {
+            semantics
+                .register_scheme_profile(contribution.profile().clone())
+                .map_err(|error| SdkError::InvalidExtension {
+                    detail: error.to_string(),
+                })?;
+            semantics
+                .register_scheme_name(
+                    contribution.source_name(),
+                    contribution.profile().scheme_family_id,
+                )
+                .map_err(|error| SdkError::InvalidExtension {
+                    detail: error.to_string(),
+                })?;
+            for encoding_profile_id in contribution.default_encodings() {
+                semantics
+                    .register_default_scheme_profile(
+                        contribution.profile().scheme_family_id,
+                        *encoding_profile_id,
+                        contribution.profile().scheme_profile_id,
+                    )
+                    .map_err(|error| SdkError::InvalidExtension {
+                        detail: error.to_string(),
+                    })?;
+            }
+        }
+        self.compiler_catalogs = self
+            .compiler_catalogs
+            .clone()
+            .with_semantic_registry(semantics)
+            .map_err(map_compiler_catalog_error)?;
+        for contribution in extension.capabilities() {
+            self.compiler_catalogs = self
+                .compiler_catalogs
+                .clone()
+                .with_capability_descriptor(contribution.descriptor().clone())
+                .map_err(map_compiler_catalog_error)?;
+        }
+
+        let mut host_environment = self.host_environment.clone();
+        for contribution in extension.types() {
+            host_environment = host_environment
+                .with_type_runtime_arc(contribution.runtime())
+                .map_err(SdkError::from)?;
+        }
+        for contribution in extension.encodings() {
+            host_environment = host_environment
+                .with_encoding_runtime_arc(contribution.runtime())
+                .map_err(SdkError::from)?;
+        }
+        #[cfg(feature = "execute")]
+        for contribution in extension.schemes() {
+            host_environment = host_environment
+                .with_column_backend_bundle(contribution.backend_bundle())
+                .map_err(|error| SdkError::InvalidColumnBackendBundle {
+                    detail: error.to_string(),
+                })?;
+        }
+        self.host_environment = host_environment;
+
+        #[cfg(feature = "prove")]
+        if let Some(root_backend_bundle) = extension.root_backend_bundle() {
+            self.root_backend_bundle = root_backend_bundle;
+        }
+
+        Ok(())
     }
 }
 
@@ -334,7 +438,9 @@ impl std::fmt::Debug for SdkBuilder {
 
 impl std::fmt::Debug for Sdk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Sdk").finish_non_exhaustive()
+        f.debug_struct("Sdk")
+            .field("environment", &self.inner.environment)
+            .finish_non_exhaustive()
     }
 }
 
@@ -343,16 +449,13 @@ fn map_compiler_catalog_error(err: CompilerCatalogError) -> SdkError {
         CompilerCatalogError::InvalidSemanticRegistry(err) => SdkError::InvalidSemanticRegistry {
             detail: err.to_string(),
         },
-        CompilerCatalogError::DuplicatePrecompileDescriptor { precompile_id } => {
-            SdkError::InvalidPrecompileDescriptorRegistration {
-                detail: format!(
-                    "duplicate precompile descriptor registration for id 0x{:04x}",
-                    precompile_id.0,
-                ),
+        CompilerCatalogError::DuplicateCapabilityDescriptor { path } => {
+            SdkError::InvalidCapabilityDescriptorRegistration {
+                detail: format!("duplicate capability descriptor registration for path {path}"),
             }
         }
-        CompilerCatalogError::InvalidPrecompileDescriptor { detail } => {
-            SdkError::InvalidPrecompileDescriptorRegistration { detail }
+        CompilerCatalogError::InvalidCapabilityDescriptor { detail } => {
+            SdkError::InvalidCapabilityDescriptorRegistration { detail }
         }
     }
 }

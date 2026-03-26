@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use tabula_core::SchemeId;
-use tabula_ext::ColumnBackendFactory;
+use tabula_ext::ExtError;
+use tabula_ext::scheme::{ColumnBackendFactory, ColumnBackendSetup, MaterializedColumnBackend};
 
 mod smt;
 mod ssmc;
@@ -10,10 +11,73 @@ mod ssmc;
 pub use smt::SmtScheme;
 pub use ssmc::SsmcScheme;
 
+#[derive(Clone, Copy, Debug)]
+struct BuiltinSsmcScheme;
+
+impl ColumnBackendFactory for BuiltinSsmcScheme {
+    fn scheme_id(&self) -> SchemeId {
+        SchemeId::SSMC
+    }
+
+    fn name(&self) -> &str {
+        "ssmc"
+    }
+
+    fn materialize_backend(
+        &self,
+        setup: ColumnBackendSetup<'_>,
+    ) -> Result<MaterializedColumnBackend, ExtError> {
+        // Current StateShard hash-chain layout only admits W <= 5
+        // because continuation inputs reserve 11 of Poseidon's 16 lanes.
+        match setup.encoding_runtime.trace_width() {
+            1 => SsmcScheme::<1>.materialize_backend(setup),
+            2 => SsmcScheme::<2>.materialize_backend(setup),
+            3 => SsmcScheme::<3>.materialize_backend(setup),
+            4 => SsmcScheme::<4>.materialize_backend(setup),
+            5 => SsmcScheme::<5>.materialize_backend(setup),
+            width => Err(ExtError::validation(format!(
+                "builtin ssmc backend does not support trace width {width}"
+            ))),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BuiltinSmtScheme;
+
+impl ColumnBackendFactory for BuiltinSmtScheme {
+    fn scheme_id(&self) -> SchemeId {
+        SchemeId::SMT
+    }
+
+    fn name(&self) -> &str {
+        "smt"
+    }
+
+    fn materialize_backend(
+        &self,
+        setup: ColumnBackendSetup<'_>,
+    ) -> Result<MaterializedColumnBackend, ExtError> {
+        match setup.encoding_runtime.trace_width() {
+            1 => SmtScheme::<1>.materialize_backend(setup),
+            2 => SmtScheme::<2>.materialize_backend(setup),
+            3 => SmtScheme::<3>.materialize_backend(setup),
+            4 => SmtScheme::<4>.materialize_backend(setup),
+            5 => SmtScheme::<5>.materialize_backend(setup),
+            6 => SmtScheme::<6>.materialize_backend(setup),
+            7 => SmtScheme::<7>.materialize_backend(setup),
+            8 => SmtScheme::<8>.materialize_backend(setup),
+            width => Err(ExtError::validation(format!(
+                "builtin smt backend does not support trace width {width}"
+            ))),
+        }
+    }
+}
+
 pub(crate) fn default_backend_factories() -> BTreeMap<SchemeId, Arc<dyn ColumnBackendFactory>> {
     let mut schemes: BTreeMap<SchemeId, Arc<dyn ColumnBackendFactory>> = BTreeMap::new();
-    schemes.insert(SchemeId::SSMC, Arc::new(SsmcScheme::<3>));
-    schemes.insert(SchemeId::SMT, Arc::new(SmtScheme::<3>));
+    schemes.insert(SchemeId::SSMC, Arc::new(BuiltinSsmcScheme));
+    schemes.insert(SchemeId::SMT, Arc::new(BuiltinSmtScheme));
     schemes
 }
 
@@ -21,16 +85,19 @@ pub(crate) fn default_backend_factories() -> BTreeMap<SchemeId, Arc<dyn ColumnBa
 mod tests {
     use std::collections::BTreeSet;
 
+    use tabula_core::PropertyQueryKind;
     use tabula_core::error::TabulaError;
     use tabula_core::{ColId, RowKey, SchemeProfileId, TableId};
     use tabula_ext::ExtError;
-    use tabula_ext::{ColumnBackendFactory, ColumnBackendSetup};
-    use tabula_ir::{PropertyQuery, PropertyQueryKind};
+    use tabula_ext::scheme::{ColumnBackendFactory, ColumnBackendSetup};
+    use tabula_ir::{StatePropertyQuery as PropertyQuery, ValueRef, ValueTupleRef};
     use tabula_profile::{
         ColumnProfile, CommitmentRole, ENCODING_U64_ID, ProfileCatalog, SCHEME_PROFILE_SMT_ID,
         SCHEME_PROFILE_SSMC_ID, TYPE_U64_ID, builtin_catalog,
     };
-    use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedColumnEntry, u64_typed};
+    use tabula_types::{
+        EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedColumnEntry, u64_portable, u64_typed,
+    };
 
     use super::{SmtScheme, SsmcScheme};
 
@@ -160,7 +227,12 @@ mod tests {
         let succ = prepared
             .runtime_column
             .as_ref()
-            .resolve_property(&PropertyQuery::Successor { key: RowKey(10) }, &state)
+            .resolve_property(
+                &PropertyQuery::Successor {
+                    key: ValueTupleRef(vec![ValueRef::Literal(u64_portable(10))]),
+                },
+                &state,
+            )
             .expect("successor");
         assert_eq!(succ.key, Some(RowKey(20)));
         assert_eq!(succ.value, u64_typed(200));
@@ -168,7 +240,12 @@ mod tests {
         let pred = prepared
             .runtime_column
             .as_ref()
-            .resolve_property(&PropertyQuery::Predecessor { key: RowKey(10) }, &state)
+            .resolve_property(
+                &PropertyQuery::Predecessor {
+                    key: ValueTupleRef(vec![ValueRef::Literal(u64_portable(10))]),
+                },
+                &state,
+            )
             .expect("predecessor");
         assert_eq!(pred.key, Some(RowKey(5)));
         assert_eq!(pred.value, u64_typed(50));
@@ -207,7 +284,9 @@ mod tests {
         let err = prepared
             .runtime_column
             .resolve_property(
-                &PropertyQuery::Successor { key: RowKey(10) },
+                &PropertyQuery::Successor {
+                    key: ValueTupleRef(vec![ValueRef::Literal(u64_portable(10))]),
+                },
                 &[TypedColumnEntry {
                     row_key: RowKey(10),
                     value: u64_typed(100),

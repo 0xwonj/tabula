@@ -44,7 +44,7 @@ pub struct PreparedMachineInput {
     /// Prepared root-tier witness store.
     pub root: PreparedTierInput,
     /// AIR-level public values.
-    pub statement: PublicStatement,
-    /// Digest of the higher-level execution statement bound into the transcript.
-    pub statement_digest: [u8; 32],
+    pub air_statement: PublicStatement,
+    /// Digest of the higher-level semantic statement bound into the transcript.
+    pub semantic_statement_digest: [u8; 32],
 }

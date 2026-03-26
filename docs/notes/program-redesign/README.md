@@ -31,9 +31,21 @@ These notes define:
 
 - the target DSL and compiler architecture
 - exact HIR / MIR / canonical IR contracts
+- the runtime/executor ownership split beneath canonical IR
 - the static typing/effect model
 - the finalized seam decisions
 - the staged rewrite plan
+
+For the current implementation state, the rewritten V1/V2/V3 exact surface is
+the canonical compiler/runtime path at the crate roots:
+
+- `tabula_compiler::{compile_program_source, register_compiled_program, ...}`
+- `tabula_runtime::{RuntimeBuilder, TabulaRuntime, Verifier, ...}`
+
+Deferred features such as query proving, capability proving,
+property-read proving, `requires`, and later spec features remain intentionally
+out of scope for the current implementation. Static canonical relation proving
+for `EnumSet` and `Map` is now part of the implemented native proof path.
 
 Shared notes that remain one level up in `docs/notes/` are intentionally not
 duplicated here, because they are referenced by multiple note clusters:

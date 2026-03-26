@@ -1,0 +1,45 @@
+program Membership
+
+context {
+  caller: u64;
+  epoch: u64;
+}
+
+relation AllowedTier(tier: u64) = enum { 0, 1, 2, 3 };
+relation UpgradeWindow(epoch: u64) = range(10, 13);
+relation AdminCaller(actor: u64) = set { 7, 8 };
+relation NextTier(current: u64) -> next: u64 = map {
+  0 => 1,
+  1 => 2,
+  2 => 3,
+  3 => 3,
+};
+
+state {
+  table members(key member: u64) {
+    tier: u64 @ssmc;
+  }
+}
+
+event MembershipApproved(member: u64, actor: u64, tier: u64);
+
+query current_tier(member: u64) -> u64 {
+  return members[member].tier;
+}
+
+query preview_upgrade(member: u64) -> u64 {
+  assert relation UpgradeWindow(epoch);
+  let current = members[member].tier;
+  return eval relation NextTier(current);
+}
+
+tx approve_upgrade(member: u64) {
+  assert relation UpgradeWindow(epoch);
+  assert relation AdminCaller(caller);
+  let current = members[member].tier;
+  let next = eval relation NextTier(current);
+  assert relation AllowedTier(next);
+  members[member].tier = next;
+  emit MembershipApproved(member, caller, next);
+  return;
+}

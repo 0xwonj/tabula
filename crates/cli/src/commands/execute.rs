@@ -1,158 +1,112 @@
 //! Handler for the `execute` subcommand.
 
-use tabula_artifact::{State, TransactionBatch};
-use tabula_core::mock::Blake3Hasher;
-use tabula_runtime::{CompiledBatchInput, run_compiled_batch};
-use tabula_types::TypeRuntimeRegistry;
+use tabula_sdk::{Artifact, Context, Program, Sdk, State, TransactionBatch};
 
-use crate::io::{ExecutionOutput, StateEntry, load_json, write_json};
+use crate::io::{ExecutionOutput, load_json, write_json};
+
+fn load_program(sdk: &Sdk, program_path: &std::path::Path) -> anyhow::Result<Program> {
+    if program_path.extension().and_then(|ext| ext.to_str()) == Some("tab") {
+        let source = std::fs::read_to_string(program_path)?;
+        let artifact = sdk.compile(&source)?;
+        return Ok(sdk.open(artifact)?);
+    }
+
+    let artifact: Artifact = load_json(program_path)?;
+    Ok(sdk.open(artifact)?)
+}
 
 pub fn cmd_execute(
     program_path: &std::path::Path,
     state_path: &std::path::Path,
     batch_path: &std::path::Path,
+    context_path: Option<&std::path::Path>,
     output_state_path: Option<&std::path::Path>,
-    include_trace: bool,
     json_output: bool,
 ) -> anyhow::Result<()> {
-    // 1. Load + register program
-    let compiled = tabula_compiler::load_and_register_program(program_path)?;
+    let sdk = Sdk::standard();
+    let program = load_program(&sdk, program_path)?;
+    let runner = program.runner();
 
-    // 2. Load state + batch
-    let state: State = load_json(state_path)?;
-    let transaction_batch: TransactionBatch = load_json(batch_path)?;
-    let type_runtimes = TypeRuntimeRegistry::seeded()?;
-
-    // 3. Execute via runtime pipeline
-    let executed = run_compiled_batch(&CompiledBatchInput {
-        compiled_program: &compiled,
-        state: &state,
-        batch: &transaction_batch,
-        hasher: &Blake3Hasher,
-        type_runtimes: &type_runtimes,
-    })?;
-
-    if let Some(out_path) = output_state_path {
-        write_json(out_path, &executed.state_after)?;
-    }
-
-    let read_set: Vec<StateEntry> = executed
-        .read_set()
-        .iter()
-        .map(|(k, v)| StateEntry::from_cell_pair(k, v))
-        .collect();
-    let write_set: Vec<StateEntry> = executed
-        .write_set()
-        .iter()
-        .map(|(k, v)| StateEntry::from_cell_pair(k, v))
-        .collect();
-    let all_events: Vec<_> = executed
-        .txs()
-        .iter()
-        .flat_map(tabula_core::TxResult::access_trace)
-        .cloned()
-        .collect();
-    let trace = if include_trace {
-        Some(all_events)
-    } else {
-        None
+    let snapshot: State = load_json(state_path)?;
+    let batch: TransactionBatch = load_json(batch_path)?;
+    let context: Context = match context_path {
+        Some(path) => load_json(path)?,
+        None => Context::default(),
     };
 
-    let emitted: Vec<_> = executed
-        .txs()
+    let execution = runner.execute(&snapshot, &batch, &context)?;
+    let outcomes = execution.outcomes();
+
+    if let Some(out_path) = output_state_path {
+        write_json(out_path, &execution.state_after())?;
+    }
+
+    let tx_outcomes = outcomes
         .iter()
-        .filter_map(|tx| match tx {
-            tabula_core::TxResult::Success { emitted, .. } => Some(emitted.iter()),
-            _ => None,
+        .map(|outcome| {
+            if outcome.success() {
+                serde_json::json!({
+                    "status": "success",
+                    "tx_index": outcome.tx_index(),
+                    "entry_id": outcome.entry_id().0,
+                    "state_effect_count": outcome.state_effect_count(),
+                    "event_effect_count": outcome.event_effect_count(),
+                    "capability_effect_count": outcome.capability_effect_count(),
+                    "relation_effect_count": outcome.relation_effect_count(),
+                })
+            } else {
+                serde_json::json!({
+                    "status": "failed",
+                    "tx_index": outcome.tx_index(),
+                    "entry_id": outcome.entry_id().0,
+                    "reason": outcome.reason(),
+                    "failed_op_index": outcome.failed_op_index(),
+                })
+            }
         })
-        .flatten()
-        .cloned()
-        .collect();
+        .collect::<Vec<_>>();
 
     if json_output {
         let output = ExecutionOutput {
-            tx_results: executed.txs().to_vec(),
-            read_set,
-            write_set,
-            emitted: emitted.clone(),
-            consistency: executed.consistency.clone(),
-            trace,
+            tx_outcomes,
+            read_count: execution.read_count(),
+            write_count: execution.write_count(),
+            state_after: execution.state_after(),
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
     }
 
     println!("=== Execution Results ===\n");
-
-    for (i, tx_result) in executed.txs().iter().enumerate() {
-        match tx_result {
-            tabula_core::TxResult::Success { .. } => println!("  tx {i}: SUCCESS"),
-            tabula_core::TxResult::Failed {
-                reason,
-                partial_events,
-                failed_instruction,
-            } => {
-                let instr = failed_instruction
-                    .map(|idx| format!(" at instruction {idx}"))
-                    .unwrap_or_default();
-                let partial = if partial_events.is_empty() {
-                    String::new()
-                } else {
-                    format!(", {} partial events", partial_events.len())
-                };
-                println!("  tx {i}: FAILED ({reason}{instr}{partial})");
-            }
+    for outcome in &outcomes {
+        if outcome.success() {
+            println!(
+                "  tx {}: SUCCESS (state effects={}, event effects={})",
+                outcome.tx_index(),
+                outcome.state_effect_count(),
+                outcome.event_effect_count(),
+            );
+        } else {
+            let op = outcome
+                .failed_op_index()
+                .map(|value| format!(" at op {value}"))
+                .unwrap_or_default();
+            println!(
+                "  tx {}: FAILED ({}{op})",
+                outcome.tx_index(),
+                outcome.reason().unwrap_or("unknown failure"),
+            );
         }
     }
     println!();
-
-    println!("Read set:  {} entries", read_set.len());
-    println!("Write set: {} entries", write_set.len());
-    println!(
-        "Events:    {} total",
-        trace.as_ref().map_or(0, std::vec::Vec::len)
-    );
-    println!("Emitted:   {} total", emitted.len());
-    println!();
-
-    println!("Write set (final state changes):");
-    for cell in &write_set {
+    println!("Read set:  {} entries", execution.read_count());
+    println!("Write set: {} entries", execution.write_count());
+    println!("Final state:");
+    for (key, value) in execution.state_after().cells() {
         println!(
-            "  table={} row={} col={} -> {:?}",
-            cell.table, cell.row, cell.col, cell.value
+            "  table={} row={} field={} = {:?}",
+            key.table.0, key.row.0, key.col.0, value
         );
-    }
-    println!();
-
-    match &executed.consistency {
-        tabula_core::ExecutionConsistencyStatus::Passed => println!("Consistency check: PASSED"),
-        tabula_core::ExecutionConsistencyStatus::Failed { reason } => {
-            println!("Consistency check: FAILED ({reason})");
-        }
-    }
-
-    if include_trace {
-        println!("\n--- Execution Trace ---");
-        for (tx_idx, tx) in executed.txs().iter().enumerate() {
-            if let tabula_core::TxResult::Success { access_trace, .. } = tx {
-                for event in access_trace {
-                    let op = match event.op {
-                        tabula_core::OpKind::Read => "READ ",
-                        tabula_core::OpKind::Write => "WRITE",
-                    };
-                    println!(
-                        "  t={:<3} tx={} {} table={} row={} col={} -> {:?}",
-                        event.time,
-                        tx_idx,
-                        op,
-                        event.key.table.0,
-                        event.key.row.0,
-                        event.key.col.0,
-                        event.value
-                    );
-                }
-            }
-        }
     }
 
     Ok(())

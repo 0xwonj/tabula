@@ -1,7 +1,6 @@
 //! Compiler error types.
 
 use serde::{Deserialize, Serialize};
-use tabula_ir::PrecompileId;
 use tabula_profile::ProfileError;
 use thiserror::Error;
 
@@ -11,6 +10,8 @@ pub type CompilerResult<T> = Result<T, CompilerError>;
 /// Structured compile diagnostic for adapters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompileDiagnostic {
+    /// Pipeline stage that produced this diagnostic.
+    pub stage: CompileStage,
     /// Compile error kind.
     pub kind: String,
     /// Human-readable diagnostic message.
@@ -23,6 +24,31 @@ pub struct CompileDiagnostic {
     pub line: usize,
     /// 1-based column.
     pub col: usize,
+}
+
+/// Compiler pipeline stage used for structured diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompileStage {
+    /// Source-semantic context construction and validation.
+    FrontendSemantics,
+    /// Source parser.
+    FrontendParse,
+    /// HIR builder.
+    FrontendBuild,
+    /// HIR verifier.
+    FrontendVerify,
+    /// HIR -> MIR lowering.
+    HirLower,
+    /// MIR structural verification.
+    MirVerify,
+    /// MIR analysis.
+    MirAnalyze,
+    /// MIR normalization/inlining.
+    MirNormalize,
+    /// MIR -> canonical lowering.
+    MirLower,
+    /// Canonical validation.
+    CanonicalValidate,
 }
 
 /// Compiler-level error type shared across adapters/orchestration.
@@ -72,15 +98,15 @@ pub enum CompilerCatalogError {
     /// Semantic registry failed validation.
     #[error("invalid semantic registry: {0}")]
     InvalidSemanticRegistry(#[source] ProfileError),
-    /// Duplicate precompile descriptors are not allowed.
-    #[error("duplicate precompile descriptor registration for id {precompile_id:?}")]
-    DuplicatePrecompileDescriptor {
-        /// Conflicting portable precompile identifier.
-        precompile_id: PrecompileId,
+    /// Duplicate source capability descriptors are not allowed.
+    #[error("duplicate capability descriptor registration for path {path}")]
+    DuplicateCapabilityDescriptor {
+        /// Conflicting capability import path.
+        path: String,
     },
-    /// Precompile descriptor contract is invalid for the active semantic registry.
-    #[error("invalid precompile descriptor registration: {detail}")]
-    InvalidPrecompileDescriptor {
+    /// Source capability descriptor contract is invalid for the active semantic registry.
+    #[error("invalid capability descriptor registration: {detail}")]
+    InvalidCapabilityDescriptor {
         /// Human-readable validation detail.
         detail: String,
     },

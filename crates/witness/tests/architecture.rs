@@ -13,7 +13,7 @@ fn root_surface_does_not_reexport_old_witness_types() {
 
     assert!(
         !lib.contains("pub mod legacy;"),
-        "legacy compatibility namespace must not remain at crate root"
+        "removed root alias module must not remain at crate root"
     );
     assert!(
         !lib.contains("pub mod witness;"),
@@ -125,15 +125,21 @@ fn stark_module_keeps_low_level_memory_helpers_internal() {
 
     assert!(
         stark_mod.contains("pub mod execution_store;")
+            && stark_mod.contains("pub mod lowering;")
             && stark_mod.contains("pub mod root_store;")
             && !stark_mod.contains("pub mod shared_store;"),
-        "witness::stark must expose split execution/root store kernels and must not retain a shared_store module"
+        "witness::stark must expose split execution/root store kernels plus native lowering, and must not retain a shared_store module"
     );
     assert!(
         stark_mod.contains("pub use execution_store::prepare_execution_store;")
+            && stark_mod.contains("LowerSuccessfulTxInput")
+            && stark_mod.contains("LoweringOutput")
+            && stark_mod.contains("TxLoweringOutput")
+            && stark_mod.contains("lower_successful_tx")
+            && stark_mod.contains("merge_lowering_outputs")
             && stark_mod
                 .contains("pub use root_store::{SmtRootStoreContext, prepare_smt_root_store};"),
-        "witness::stark must expose function-shaped execution/root store kernels"
+        "witness::stark must expose function-shaped execution/root store kernels and native lowering types"
     );
     for forbidden in ["ExecutionStoreBuilder", "SmtRootStoreBuilder"] {
         assert!(
@@ -166,6 +172,8 @@ fn stark_module_keeps_low_level_memory_helpers_internal() {
         "pub use crate::PropertyReadClaim;",
         "lower_program_batch",
         "LowerProgramBatchInput",
+        "LoweringCapabilityCall",
+        "LoweringPropertyRead",
     ] {
         assert!(
             !stark_mod.contains(forbidden),

@@ -1,34 +1,62 @@
 //! Handler for the `example` subcommand.
 
-use tabula_compiler::transfer_example_bundle;
+use tabula_sdk::Sdk;
 
 use crate::io::write_json;
 
+const EXAMPLE_SOURCE: &str = r#"
+program Example
+
+state {
+  table balances(key id: u64) {
+    amount: u64 @ssmc;
+  }
+}
+
+tx set_balance(id: u64, amount: u64) {
+  balances[id].amount = amount;
+  return;
+}
+"#;
+
 pub fn cmd_example(dir: &std::path::Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(dir)?;
-    let bundle = transfer_example_bundle()?;
 
-    // Write .tab source
-    std::fs::write(dir.join("program.tab"), bundle.program_tab_source)
-        .map_err(|e| anyhow::anyhow!("failed to write program.tab: {e}"))?;
+    let sdk = Sdk::standard();
+    let artifact = sdk.compile(EXAMPLE_SOURCE)?;
+    let program = sdk.open(artifact.clone())?;
+    let state = program
+        .state()
+        .set("balances", 0, "amount", 1000u64)?
+        .set("balances", 1, "amount", 500u64)?
+        .build();
+    let batch = program
+        .batch()
+        .call("set_balance", [0u64, 750u64])?
+        .call("set_balance", [1u64, 625u64])?
+        .build();
+    let context = program.context().build();
 
-    write_json(&dir.join("program.json"), &bundle.program)?;
-    write_json(&dir.join("state.json"), &bundle.state)?;
-    write_json(&dir.join("batch.json"), &bundle.batch)?;
+    std::fs::write(dir.join("program.tab"), EXAMPLE_SOURCE)?;
+    write_json(&dir.join("program.json"), &artifact)?;
+    write_json(&dir.join("state.json"), &state)?;
+    write_json(&dir.join("batch.json"), &batch)?;
+    write_json(&dir.join("context.json"), &context)?;
 
     println!("Generated example files in {}:", dir.display());
-    println!("  program.tab   - DSL source");
-    println!("  program.json  - compiled IR");
-    println!("  state.json    - 3 accounts (1000, 500, 200)");
-    println!("  batch.json    - 3 transfers");
+    println!("  program.tab   - rewritten source");
+    println!("  program.json  - registered native program");
+    println!("  state.json    - initial state snapshot");
+    println!("  batch.json    - portable entry batch");
+    println!("  context.json  - public context input");
     println!();
     println!("Run with:");
     println!(
-        "  tabula execute -p {dir}/program.tab -s {dir}/state.json -b {dir}/batch.json",
+        "  tabula execute -p {dir}/program.tab -s {dir}/state.json -b {dir}/batch.json -c {dir}/context.json",
         dir = dir.display()
     );
     println!(
-        "  tabula execute -p {dir}/program.json -s {dir}/state.json -b {dir}/batch.json",
+        "  tabula execute -p {dir}/program.json -s {dir}/state.json -b {dir}/batch.json -c {dir}/context.json",
         dir = dir.display()
     );
 

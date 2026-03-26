@@ -87,7 +87,7 @@ Runtime should resolve the program once into an execution-specific contract:
 - parameter schema already resolved,
 - read/write column type metadata already resolved,
 - property routes already resolved,
-- precompile routes and typed signatures already resolved,
+- capability routes and typed signatures already resolved,
 - future relation routes already resolved.
 
 The executor should run that resolved plan, not rediscover it.
@@ -101,7 +101,7 @@ effect families include:
 
 - state access,
 - property read,
-- precompile call,
+- capability call,
 - IR hash,
 - emitted application event,
 - future relation or lookup effect.
@@ -119,7 +119,7 @@ be the internal source of truth for proving.
 The proof system does not consume "a bag of execution output." It consumes:
 
 - column-local deltas,
-- precompile-local call groups,
+- capability-call-local call groups,
 - execution-lane witness inputs,
 - root-binding-relevant commitments.
 
@@ -154,7 +154,7 @@ leaking into the proof model.
 
 `tabula-runtime` should remain the first layer that knows both:
 
-- the sealed program and installed capabilities,
+- the sealed program plus host-installed runtime registries and schemes,
 - and the proof backends and machine setup that must later consume execution.
 
 For that reason, runtime should own the canonical resolved forms:
@@ -192,7 +192,7 @@ Executor is a deterministic semantic engine, not a proof planner.
 
 - lowering one successful tx,
 - materializing one column witness,
-- materializing one precompile witness,
+- materializing one capability witness,
 - materializing one IR-hash witness,
 - future relation witness kernels.
 
@@ -205,9 +205,9 @@ Witness should not own:
 
 Runtime proving should feed typed success-path facts directly into these witness
 kernels. Portable reporting carriers remain boundary artifacts for reporting
-and verifier-facing precompile contracts, not a lowering seam.
+and verifier-facing capability transcript contracts, not a lowering seam.
 
-On the proof hot path, typed access and precompile effects should be projected
+On the proof hot path, typed access and capability effects should be projected
 once and reused, not re-encoded through duplicate lowering or transcript
 materialization passes.
 
@@ -227,7 +227,7 @@ Machine should not know:
 - execution IR semantics,
 - runtime type meaning,
 - property-read routing,
-- precompile grouping policy,
+- capability grouping policy,
 - any generic batch result shape.
 
 This boundary keeps backend concerns clean and replaceable.
@@ -357,7 +357,7 @@ Examples include:
 
 - read or write access to committed or overlay state,
 - property query resolution result,
-- precompile call input and output,
+- capability call input and output,
 - IR-hash canonical input set and digest,
 - emitted event payload.
 
@@ -391,7 +391,7 @@ semantic family:
 
 - access effects,
 - property-read effects,
-- precompile-call effects,
+- capability-call effects,
 - IR-hash effects,
 - emitted events,
 - future relation effects.
@@ -429,7 +429,7 @@ dependency for state evolution or consistency decisions.
 Runtime proving should first know:
 
 - which column proof slots exist,
-- which precompile proof slots exist,
+- which capability transcript proof slots exist,
 - which grouping rules exist,
 - how the execution tier and root tier are wired.
 
@@ -474,7 +474,7 @@ The correct relationship is:
 The execution tier may carry extensions such as:
 
 - IR hash,
-- precompile transcript,
+- capability transcript,
 - future relation proof systems.
 
 But those extensions should remain backend execution-tier extensions, not
@@ -489,7 +489,7 @@ order.
 That means:
 
 - column proof inputs should already be in column-setup order,
-- precompile proof inputs should already be in their plan order,
+- capability transcript proof inputs should already be in their plan order,
 - tier partitioning should be a final backend step, not a semantic regrouping
   step.
 
@@ -514,7 +514,7 @@ The right top-level parallel stages are:
 
 1. tx-local proof projection from the execution journal,
 2. per-slot column proof preparation,
-3. per-slot precompile proof preparation,
+3. per-slot capability transcript proof preparation,
 4. future per-slot relation proof preparation,
 5. trace building where the machine setup already supports independent tiers or
    independent columns.

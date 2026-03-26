@@ -47,11 +47,11 @@ authoring input
 
 At the workspace level, the architecture is split into a few clear layers:
 
-- shared meaning: `tabula-core`, `tabula-contract`, `tabula-artifact`
+- shared meaning: `tabula-core`, `tabula-contract`
 - authoring and registration: `tabula-lang`, `tabula-ir`, `tabula-compiler`
 - execution and runtime policy: `tabula-executor`, `tabula-runtime`
 - proof backend: `tabula-commitment`, `tabula-witness`, `tabula-gadgets`, `tabula-chips`, `tabula-stark`, `tabula-machine`
-- package surfaces: `tabula-ext`, `tabula-sdk`
+- package surfaces: `tabula-ext`, `tabula-sdk`, `tabula-cli`
 
 For the canonical current architecture, read
 [`docs/design/architecture.md`](docs/design/architecture.md).

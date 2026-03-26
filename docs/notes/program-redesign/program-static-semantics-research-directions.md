@@ -64,7 +64,7 @@ full language design wholesale.
 The most promising remaining directions are instead:
 
 1. **coeffects or context-demand tracking**
-2. **obligation summaries richer than a coarse `may_fail` bit**
+2. **obligation summaries richer than a coarse `semantic_may_fail` bit**
 3. **footprint-indexed effect summaries over the closed-world program schema**
 4. **lightweight phase-ordered effects**
 5. **optional quantitative or bounded summaries**
@@ -207,10 +207,10 @@ pub struct ContextDemandSummary {
 This is one of the most attractive additions because Tabula already has the
 surface concept needed for it.
 
-### 4.2 Obligation summaries instead of only `may_fail`
+### 4.2 Obligation summaries instead of only `semantic_may_fail`
 
-The current `may_fail: bool` is a good V1 choice, but it is intentionally
-coarse.
+The current `semantic_may_fail: bool` is a good V1 choice, but it is
+intentionally coarse.
 
 Research in effect refinements, indexed effects, and specification-aware effect
 systems suggests a stronger alternative:
@@ -440,7 +440,9 @@ In other words, a callable body may eventually need more than:
 pub struct EffectSummary {
     pub world: WorldEffects,
     pub proof: ProofEffects,
-    pub may_fail: bool,
+    pub semantic_may_fail: bool,
+    pub uses_builtin_hash: bool,
+    pub host_contract_sensitive: bool,
 }
 ```
 
@@ -632,7 +634,7 @@ This note is intended to settle the following research-level conclusions.
 - The biggest remaining opportunities are not "more general effect syntax".
 - Coeffects or context-demand tracking appear highly relevant to Tabula.
 - A richer obligation summary is likely more useful than a permanent
-  `may_fail: bool`.
+  `semantic_may_fail: bool`.
 - Closed-world footprint summaries may fit Tabula better than classic open-world
   effect polymorphism.
 - Lightweight phase ordering and quantitative summaries are promising later

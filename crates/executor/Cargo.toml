@@ -8,19 +8,9 @@ license.workspace = true
 tabula-core = { workspace = true }
 tabula-types = { workspace = true }
 tabula-ir = { workspace = true }
-tabula-ir-next = { workspace = true }
 tabula-profile = { workspace = true }
 thiserror = { workspace = true }
 borsh = { workspace = true }
-
-[dev-dependencies]
-proptest = { workspace = true }
-criterion = { workspace = true }
-tabula-testing = { workspace = true }
-
-[[bench]]
-name = "interpreter"
-harness = false
 
 [lints]
 workspace = true

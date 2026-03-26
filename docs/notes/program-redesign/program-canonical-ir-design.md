@@ -88,7 +88,7 @@ The following are **not** assumed to survive unchanged:
 - the current instruction enum shape,
 - the current `ValueExpr` / `RowExpr` split,
 - the current `Lookup` instruction,
-- the current precompile instruction taxonomy,
+- the current capability instruction taxonomy,
 - the current event representation,
 - and the current state access / nullability encoding.
 
@@ -247,11 +247,13 @@ The IR should not expose:
 - proof-slot layout
 - or runtime host IDs
 
-### 5.3 Remain the execution contract
+### 5.3 Remain the semantic execution contract
 
 This is not a pure proof-only IR.
 
-The executor should still execute it directly and deterministically.
+It should still define execution semantics deterministically, but the hot-path
+consumer should be a runtime-resolved execution contract rather than raw
+portable IR.
 
 ### 5.4 Be amenable to journal-first proving
 
@@ -313,7 +315,7 @@ The canonical IR should still model whole-program structure, but only the
 minimal structure required for execution and proof.
 
 ```rust
-pub struct ProgramIr {
+pub struct Program {
     pub program_id: ProgramId,
     pub state: StateSchema,
     pub context: ContextSchema, // initial policy: public-only, statement-bound
@@ -321,8 +323,7 @@ pub struct ProgramIr {
     pub relation_manifest: RelationManifest,
     pub event_manifest: EventManifest,
     pub capability_manifest: CapabilityManifest,
-    pub queries: Vec<QueryIr>,
-    pub transactions: Vec<TxIr>,
+    pub entries: Vec<Entry>,
 }
 ```
 
@@ -365,21 +366,17 @@ pub enum EntryKind {
     Tx,
 }
 
-pub struct EntryIr {
+pub struct Entry {
     pub id: EntryId,
     pub kind: EntryKind,
     pub params: Vec<Param>,
     pub results: Vec<ResultValue>, // empty for tx
-    pub body: BodyIr,
+    pub body: Body,
 }
 ```
 
-Program-level storage may keep:
-
-- `Vec<QueryIr>`
-- `Vec<TxIr>`
-
-for ergonomics, but semantically the body model can be shared.
+Program-level storage should keep one `Vec<Entry>` and preserve the semantic
+distinction through `EntryKind`.
 
 ### 9.1 Why `query` and `tx` stay distinct
 
@@ -511,8 +508,8 @@ lowering may need to avoid evaluating untaken paths.
 The IR should therefore distinguish them explicitly rather than pretending they
 are ordinary arithmetic.
 
-This class is important because it aligns with MIR's `may_fail` axis and with
-the later guarded-lowering frontier.
+This class is important because it aligns with MIR's semantic-failure axis and
+with the later guarded-lowering frontier.
 
 ### 12.3 Guardable semantic operations
 
@@ -785,7 +782,7 @@ Capabilities are explicit operational semantics, not relations.
 
 Canonical IR should use `CallCapability` for:
 
-- typed precompile-like calls,
+- typed capability-like calls,
 - external operational kernels,
 - and other nontrivial semantic computation capabilities.
 
@@ -1080,11 +1077,18 @@ its validation should be simple, strong, and fail-closed.
 
 The canonical IR should be designed together with execution, not before it.
 
-### 21.1 Executor relationship
+### 21.1 Runtime and executor relationship
 
-The executor should consume canonical IR directly.
+Canonical IR should lower naturally into runtime-owned resolved contracts:
 
-That means canonical IR operations must map naturally onto:
+- `ValidatedProgram`
+- `RuntimeProgram { execution, proof }`
+- `ResolvedExecutionProgram`
+- `ResolvedProofProgram`
+
+The executor should consume `ResolvedExecutionProgram`, not raw portable IR.
+
+That means canonical IR operations must still map naturally onto:
 
 - deterministic interpretation
 - typed state access
@@ -1108,7 +1112,17 @@ model.
 
 The journal should not have to rediscover semantics from generic instructions.
 
-### 21.3 Runtime proving relationship
+### 21.3 Proof relationship
+
+Proof visibility filtering and statement assembly should happen after execution,
+in runtime-owned reduction:
+
+- executor emits a semantic `ExecutionJournal`
+- runtime reduces that into a proof-facing `ProofJournal`
+- runtime assembles public context binding and event digest into the eventual
+  statement surface
+
+### 21.4 Runtime proving relationship
 
 Runtime proving should reduce journaled canonical effects into:
 

@@ -10,6 +10,8 @@ use tabula_stark::air::interaction::{AirInteraction, core_buses};
 
 use super::columns::ExecutionCols;
 use crate::ir_hash::IR_HASH_BUS;
+use crate::relation_table::RELATION_TABLE_BUS;
+use crate::relation_transcript::{RELATION_DIGEST_BUS, RELATION_TUPLE_BUS};
 
 /// C10 ReadAccess bus send: non-empty reads.
 ///
@@ -233,30 +235,128 @@ pub(super) fn send_property_read<AB: InteractionAirBuilder, const W: usize>(
     );
 }
 
-/// C17 Precompile bus send: canonical precompile call header.
+/// C17 Capability bus send: canonical capability call header.
 ///
 /// Tuple:
-/// `(tx_index, instruction_index, precompile_id, input_count, output_count, event_digest[0..8])`.
-/// Multiplicity: `is_real * op_precompile`.
-pub(super) fn send_precompile<AB: InteractionAirBuilder, const W: usize>(
+/// `(tx_index, instruction_index, capability_transcript_id, input_count, output_count, event_digest[0..8])`.
+/// Multiplicity: `is_real * op_capability_call`.
+pub(super) fn send_capability_call<AB: InteractionAirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
 ) {
-    let multiplicity: AB::Expr = local.is_real.into() * local.op_precompile.into();
+    let multiplicity: AB::Expr = local.is_real.into() * local.op_capability_call.into();
 
     let mut values: Vec<AB::Expr> = Vec::with_capacity(13);
     values.push(local.tx_index.into());
     values.push(local.instruction_index.into());
-    values.push(local.precompile_id.into());
-    values.push(local.precompile_input_count.into());
-    values.push(local.precompile_output_count.into());
+    values.push(local.capability_transcript_id.into());
+    values.push(local.capability_input_count.into());
+    values.push(local.capability_output_count.into());
     for i in 0..8 {
-        values.push(local.precompile_event_digest[i].into());
+        values.push(local.capability_event_digest[i].into());
     }
 
     builder.send(AirInteraction {
         values,
         multiplicity,
-        bus: core_buses::PRECOMPILE,
+        bus: core_buses::CAPABILITY_TRANSCRIPT,
+    });
+}
+
+/// Relation tuple bus send: bind execution tuple values to the transcript lane.
+pub(super) fn send_relation_tuples<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr = local.is_real.into() * local.op_relation_table.into();
+
+    let mut send_one = |role: AB::Expr,
+                        used: &[AB::Var; super::columns::MAX_SLOTS],
+                        type_ids: &[AB::Var; super::columns::MAX_SLOTS],
+                        values: &[[AB::Var; W]; super::columns::MAX_SLOTS]| {
+        let mut bus_values = Vec::with_capacity(
+            3 + super::columns::MAX_SLOTS
+                + super::columns::MAX_SLOTS
+                + super::columns::MAX_SLOTS * W,
+        );
+        bus_values.push(local.tx_index.into());
+        bus_values.push(local.effect_ordinal_in_tx.into());
+        bus_values.push(role);
+        for flag in used {
+            bus_values.push((*flag).into());
+        }
+        for type_id in type_ids {
+            bus_values.push((*type_id).into());
+        }
+        for value_limbs in values {
+            for value in value_limbs {
+                bus_values.push((*value).into());
+            }
+        }
+        builder.send(AirInteraction {
+            values: bus_values,
+            multiplicity: multiplicity.clone(),
+            bus: RELATION_TUPLE_BUS,
+        });
+    };
+
+    send_one(
+        AB::Expr::ONE,
+        &local.relation_input_used,
+        &local.relation_input_type_ids,
+        &local.relation_input_vals,
+    );
+    send_one(
+        AB::Expr::ONE + AB::Expr::ONE,
+        &local.relation_output_used,
+        &local.relation_output_type_ids,
+        &local.relation_output_vals,
+    );
+}
+
+/// Relation digest bus receive: bind transcript-computed digests to execution rows.
+pub(super) fn receive_relation_digests<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr = local.is_real.into() * local.op_relation_table.into();
+
+    for (role, digest) in [
+        (AB::Expr::ONE, &local.relation_input_digest),
+        (AB::Expr::ONE + AB::Expr::ONE, &local.relation_output_digest),
+    ] {
+        let mut values = Vec::with_capacity(11);
+        values.push(local.tx_index.into());
+        values.push(local.effect_ordinal_in_tx.into());
+        values.push(role);
+        for word in digest {
+            values.push((*word).into());
+        }
+        builder.receive(AirInteraction {
+            values,
+            multiplicity: multiplicity.clone(),
+            bus: RELATION_DIGEST_BUS,
+        });
+    }
+}
+
+/// Relation lookup bus send: membership/functionality key for static relations.
+pub(super) fn send_relation_table<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr = local.is_real.into() * local.op_relation_table.into();
+    let mut values = Vec::with_capacity(17);
+    values.push(local.relation_id.into());
+    for word in &local.relation_input_digest {
+        values.push((*word).into());
+    }
+    for word in &local.relation_output_digest {
+        values.push((*word).into());
+    }
+    builder.send(AirInteraction {
+        values,
+        multiplicity,
+        bus: RELATION_TABLE_BUS,
     });
 }

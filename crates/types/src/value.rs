@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tabula_core::{PortableValue, RowKey, TypeId};
 
 /// Runtime-only value representation used by executor, witness preparation, and
-/// typed precompile execution.
+/// typed capability execution.
 ///
 /// The payload is canonical type-owned bytes. `TypedValue` is not serialized
 /// across artifacts or protocol boundaries.

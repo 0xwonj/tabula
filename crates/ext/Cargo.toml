@@ -5,8 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["prove"]
+default = ["authoring"]
+authoring = []
+runtime = []
 verify = [
+    "runtime",
     "dep:tabula-machine",
     "dep:tabula-stark",
     "dep:tabula-chips",
@@ -22,10 +25,11 @@ prove = [
     "dep:tabula-gadgets",
     "dep:tabula-witness",
 ]
+backend = ["prove"]
 
 [dependencies]
 thiserror = { workspace = true }
-tabula-artifact = { workspace = true }
+tabula-compiler = { workspace = true }
 tabula-contract = { workspace = true }
 tabula-core = { workspace = true }
 tabula-types = { workspace = true }

@@ -1,29 +1,30 @@
 //! Official extension authoring surface for Tabula.
 //!
-//! Package consumers use `tabula-sdk`, while extension authors implement
-//! custom schemes and semantic precompiles against `tabula-ext`.
+//! Application embedding belongs in `tabula-sdk`. Extension authors package
+//! reusable contributions here and install them atomically through the SDK.
 
-/// Advanced backend-facing support for extension authors.
+/// Expert-only backend-facing support for AIR/witness/backend work.
 pub mod backend;
 mod error;
-/// Semantic precompile authoring contracts and backend bundle types.
-pub mod precompile;
+mod extension;
 /// Root backend authoring and root witness preparation contracts.
 pub mod root;
 /// Column commitment scheme authoring contracts and bundle types.
 pub mod scheme;
 
-#[cfg(feature = "verify")]
-pub use backend::precompile::PrecompileBackendFactory;
+pub mod prelude {
+    #[cfg(feature = "prove")]
+    pub use crate::RootBackend;
+    pub use crate::{
+        Capability, EncodingContribution, Extension, ExtensionBuilder, SchemeContribution,
+        TypeContribution,
+    };
+}
+
 pub use error::{ExtError, ExtResult};
-#[cfg(feature = "verify")]
-pub use precompile::PrecompileBackendFactoryBundle;
-pub use precompile::{
-    PrecompileDescriptor, PrecompileId, PrecompileSignature, PrecompileValueProfile,
+pub use extension::{
+    Capability, EncodingContribution, Extension, ExtensionBuilder, SchemeContribution,
+    TypeContribution,
 };
-#[cfg(feature = "verify")]
-pub use scheme::{
-    ColumnBackendFactory, ColumnBackendFactoryBundle, ColumnBackendSetup, ColumnVerifierContract,
-    MaterializedColumnBackend, RootBindingContract,
-};
-pub use scheme::{ColumnLayoutKind, PropertyQueryKind, RootProfileId, RuntimeColumn, SchemeId};
+#[cfg(feature = "prove")]
+pub use root::RootBackend;

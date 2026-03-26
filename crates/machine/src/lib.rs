@@ -10,8 +10,8 @@
 //!     execution,
 //!     columns,
 //!     root,
-//!     statement,
-//!     statement_digest: [0u8; 32],
+//!     air_statement,
+//!     semantic_statement_digest: [0u8; 32],
 //! })?;
 //! machine.verify(&proof)?;
 //! ```

@@ -1,42 +1,23 @@
-//! Deterministic execution engine for the Tabula kernel.
+//! Deterministic execution engine for the canonical `tabula_ir` program model.
 //!
-//! # Primary API
-//!
-//! Most callers need only the re-exports below. The underlying modules remain
-//! `pub` for advanced use cases (custom environments, overlay introspection).
-//!
-//! - [`execute_batch`] — execute a full transaction batch against the
-//!   canonical resolved execution contract
-//! - [`derive_batch_report`] / [`derive_portable_state_summary`] /
-//!   [`derive_consistency_status`] — explicit
-//!   reporting projections from the canonical journal
-//! - [`BatchEnv`] — execution environment (hasher, static tables, type runtimes, optional services)
-//! - [`execute_tx`] — execute a single transaction body for tests and harnesses
-//! - [`Overlay`] / [`OverlayResult`] — per-tx state overlay
+//! The root re-exports the stable execution nouns directly.
 
-pub mod batch;
-pub mod consistency;
-mod execution_state;
-pub mod interpreter;
-pub mod ir_next;
-pub mod journal;
-pub mod overlay;
-pub mod precompile;
-pub mod property;
-pub mod resolve;
-pub mod resolved_program;
+mod host;
+mod machine;
+mod program;
+mod state;
+mod surface;
 
-// ── Curated re-exports ──────────────────────────────────────────────────────
-
-pub use batch::{BatchEnv, execute_batch};
-pub use interpreter::{execute, execute_tx};
-pub use journal::{
-    ExecutionJournal, ExecutionStateSummary, FailedAccessObservation, FailedTxExecution,
-    IrHashEffect, PortableStateSummary, SuccessfulTxExecution, TxExecutionOutcome,
-    TypedAccessEffect, TypedPrecompileCallEffect, TypedPropertyReadEffect, TypedStateSnapshot,
-    TypedStateWrite, derive_batch_report, derive_consistency_status, derive_portable_state_summary,
+pub use host::{
+    CapabilityExecutor, CapabilityHandler, CapabilityRegistry, PropertyReadExecutor,
+    PropertyReadQuery, PropertyReadRequest,
 };
-pub use overlay::{Overlay, OverlayResult};
-pub use precompile::{PrecompileHandler, PrecompileRegistry};
-pub use property::{CommittedStateProvider, PropertyQueryHandler, PropertyQueryRegistry};
-pub use resolved_program::{ResolvedColumnLayout, ResolvedExecutionProgram, ResolvedTxDefinition};
+pub use machine::{execute_batch, execute_query};
+pub use program::{ResolvedExecutionProgram, ResolvedTable};
+pub use state::{Overlay, OverlayResult};
+pub use surface::{
+    CapabilityEffect, ContextValues, ExecContext, ExecuteError, ExecutionJournal,
+    ExecutionStateSummary, FailedTxExecution, QueryExecutionResult, RelationEffect,
+    RelationEffectKind, StateEffectKind, StatePropertyEffect, SuccessfulTxExecution, TxCall,
+    TxExecutionOutcome, TypedEventEffect, TypedStateEffect, TypedStateSnapshot, TypedStateWrite,
+};

@@ -1,0 +1,86 @@
+use capability poseidon_hash;
+
+program Dex
+
+context {
+  caller: u64;
+  epoch: u64;
+}
+
+const BPS_SCALE: u64 = 10000;
+const DEFAULT_FEE_BPS: u64 = 30;
+
+relation AllowedFeeBps(fee: u64) = enum { 5, 30, 100 };
+
+state {
+  table pools(key pair: u64) {
+    reserve_base: u64 @ssmc;
+    reserve_quote: u64 @ssmc;
+    fee_bps: u64 @ssmc;
+    last_swap_out: u64 @ssmc;
+  }
+}
+
+event SwapRecorded(pair: u64, trader: u64);
+
+fn effective_fee_bps(pair: u64) -> u64 {
+  let configured = pools[pair].fee_bps;
+  let fee_bps = select(configured == 0, DEFAULT_FEE_BPS, configured);
+  assert relation AllowedFeeBps(fee_bps);
+  return fee_bps;
+}
+
+fn quote_out_for_exact_base_in(pair: u64, amount_in: u64) -> u64 {
+  let fee_bps = effective_fee_bps(pair);
+  let reserve_base = pools[pair].reserve_base;
+  let reserve_quote = pools[pair].reserve_quote;
+  let net_amount_in = amount_in * (BPS_SCALE - fee_bps) / BPS_SCALE;
+  return net_amount_in * reserve_quote / (reserve_base + net_amount_in);
+}
+
+query pool_reserve(pair: u64, selector: u64) -> u64 {
+  let reserve_base = pools[pair].reserve_base;
+  let reserve_quote = pools[pair].reserve_quote;
+  if reserve_base > reserve_quote {
+    assert true;
+  } else {
+    assert true;
+  }
+  match selector {
+    0 => {
+      assert true;
+    }
+    _ => {
+      assert true;
+    }
+  }
+  return select(selector == 0, reserve_base, reserve_quote);
+}
+
+query quote_exact_base_in(pair: u64, amount_in: u64) -> u64 {
+  return quote_out_for_exact_base_in(pair, amount_in);
+}
+
+query configured_fee_bps(pair: u64) -> u64 {
+  return effective_fee_bps(pair);
+}
+
+query last_swap_out(pair: u64) -> u64 {
+  return pools[pair].last_swap_out;
+}
+
+query swap_digest(amount_in: u64) -> bytes32 {
+  let digest = poseidon_hash(amount_in);
+  return digest;
+}
+
+tx swap_exact_base_for_quote(pair: u64, quoted_out: u64) {
+  if epoch > 0 {
+    assert true;
+  } else {
+    assert true;
+  }
+  pools[pair].last_swap_out = quoted_out;
+  emit SwapRecorded(pair, caller);
+  return;
+}

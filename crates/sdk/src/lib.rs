@@ -1,28 +1,41 @@
 //! Public host SDK for Tabula.
 //!
-//! The SDK is the intended application-facing surface above the compiler,
-//! artifact models, and runtime engine.
+//! The SDK is the application-facing surface above the compiler and runtime.
 
+pub mod advanced;
+mod artifact;
+mod batch;
+mod context;
+mod environment;
 mod error;
-mod execution;
 mod program;
 #[cfg(feature = "verify")]
 mod proof;
+#[cfg(feature = "execute")]
+mod runner;
+mod schema;
 mod sdk;
+mod state;
+mod value;
 #[cfg(feature = "verify")]
 mod verifier;
 
-/// Safe extension surface for custom schemes and precompiles.
-pub mod ext;
-
-pub use error::SdkError;
-pub use execution::Execution;
-pub use program::Program;
+pub use artifact::Artifact;
+pub use batch::TransactionBatch;
+pub use context::Context;
+pub use environment::Environment;
+pub use error::{InstallError, SdkError};
+pub use program::{ContextBuilder, Program, StateBuilder, TransactionBatchBuilder};
 #[cfg(feature = "verify")]
 pub use proof::Proof;
+#[cfg(feature = "execute")]
+pub use runner::{ExecutionReceipt, QueryResult, Runner, TxOutcomeSummary};
+pub use schema::{
+    ContextFieldHandle, FieldHandle, ParameterHandle, QueryHandle, Schema, TableHandle, TxHandle,
+};
 pub use sdk::{Sdk, SdkBuilder};
+pub use state::State;
+#[cfg(feature = "verify")]
+pub use tabula_runtime::ProofStatement as Statement;
 #[cfg(feature = "verify")]
 pub use verifier::Verifier;
-
-pub use tabula_artifact::{Artifact, State, Statement, TransactionBatch, TransactionInput};
-pub use tabula_compiler::{CompileDiagnostic, ProgramDefinition};

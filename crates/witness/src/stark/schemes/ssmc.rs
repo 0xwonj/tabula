@@ -12,7 +12,9 @@ use tabula_chips::shards::ssmc::{SSMC_WITNESS_LABEL, SsmcWitness};
 use tabula_commitment::schemes::ssmc::SsmcList;
 use tabula_commitment::{ColumnRootBinding, NormalizedVerifierDigest, PoseidonHasher};
 use tabula_core::error::TabulaError;
-use tabula_core::{CellKey, ColId, Digest, RootProfileId, RowKey, TableId};
+use tabula_core::{CellKey, ColId, Digest, PropertyQueryKind, RootProfileId, RowKey, TableId};
+use tabula_ir::{AggregateKind, StatePropertyQuery, ValueRef, ValueTupleRef};
+use tabula_profile::is_u64_type;
 use tabula_stark::trace::WitnessStore;
 use tabula_types::{EncodingRuntime, TypeRuntime, encode_structural_u64};
 
@@ -220,15 +222,78 @@ fn encode_property_record<const W: usize>(
     encoding_runtime: &dyn EncodingRuntime,
     claim: &PropertyReadClaim,
 ) -> Result<PropertyReadRecord, TabulaError> {
-    let (arg0, arg1) = claim.query.encoded_args();
+    let (arg0, arg1) = encoded_query_args(&claim.query)?;
     Ok(PropertyReadRecord {
-        query_type: claim.query.kind_ordinal(),
+        query_type: property_query_kind(&claim.query).ordinal(),
         query_arg0: encode_structural_u64::<W>(arg0)?,
         query_arg1: encode_structural_u64::<W>(arg1)?,
         result_val: encode_padded_with_encoding::<W>(encoding_runtime, &claim.result.value)?,
         result_key: encode_structural_u64::<W>(claim.result.key.unwrap_or(RowKey(0)).0)?,
         is_null: claim.result.is_null,
     })
+}
+
+fn property_query_kind(query: &StatePropertyQuery) -> PropertyQueryKind {
+    match query {
+        StatePropertyQuery::Minimum => PropertyQueryKind::Minimum,
+        StatePropertyQuery::Maximum => PropertyQueryKind::Maximum,
+        StatePropertyQuery::Successor { .. } => PropertyQueryKind::Successor,
+        StatePropertyQuery::Predecessor { .. } => PropertyQueryKind::Predecessor,
+        StatePropertyQuery::NonExistenceRange { .. } => PropertyQueryKind::NonExistenceRange,
+        StatePropertyQuery::Aggregate { .. } => PropertyQueryKind::Aggregate,
+    }
+}
+
+fn encoded_query_args(query: &StatePropertyQuery) -> Result<(u64, u64), TabulaError> {
+    match query {
+        StatePropertyQuery::Minimum | StatePropertyQuery::Maximum => Ok((0, 0)),
+        StatePropertyQuery::Successor { key } | StatePropertyQuery::Predecessor { key } => {
+            Ok((single_literal_u64(key)?, 0))
+        }
+        StatePropertyQuery::NonExistenceRange { lower, upper } => {
+            Ok((single_literal_u64(lower)?, single_literal_u64(upper)?))
+        }
+        StatePropertyQuery::Aggregate { kind } => Ok((aggregate_kind_ordinal(*kind), 0)),
+    }
+}
+
+fn aggregate_kind_ordinal(kind: AggregateKind) -> u64 {
+    match kind {
+        AggregateKind::Sum => 0,
+        AggregateKind::Count => 1,
+    }
+}
+
+fn single_literal_u64(tuple: &ValueTupleRef) -> Result<u64, TabulaError> {
+    if tuple.0.len() != 1 {
+        return Err(TabulaError::ProofError {
+            phase: "ssmc_proof",
+            detail: format!(
+                "expected one literal u64 query operand, got tuple arity {}",
+                tuple.0.len()
+            ),
+        });
+    }
+    let ValueRef::Literal(value) = &tuple.0[0] else {
+        return Err(TabulaError::ProofError {
+            phase: "ssmc_proof",
+            detail: format!(
+                "expected literal property-query operand, got {:?}",
+                tuple.0[0]
+            ),
+        });
+    };
+    if !is_u64_type(value.type_id()) {
+        return Err(TabulaError::ProofError {
+            phase: "ssmc_proof",
+            detail: format!(
+                "expected u64 property-query operand, got type {}",
+                value.type_id().0
+            ),
+        });
+    }
+    borsh::from_slice::<u64>(value.payload())
+        .map_err(|error| TabulaError::BorshEncodingError(error.to_string()))
 }
 
 fn encode_padded_with_encoding<const W: usize>(

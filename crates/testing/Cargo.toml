@@ -6,28 +6,13 @@ license.workspace = true
 publish = false
 
 [dependencies]
-borsh = { workspace = true }
-tabula-artifact = { workspace = true }
-tabula-chips = { workspace = true }
-tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-compiler = { workspace = true }
 tabula-core = { workspace = true, features = ["test-utils"] }
-tabula-executor = { workspace = true }
-tabula-ext = { workspace = true, features = ["prove"] }
-tabula-gadgets = { workspace = true }
 tabula-ir = { workspace = true }
-tabula-lang = { workspace = true }
-tabula-machine = { workspace = true }
 tabula-profile = { workspace = true }
-tabula-types = { workspace = true }
 tabula-runtime = { workspace = true, features = ["prove"] }
-tabula-stark = { workspace = true }
-tabula-witness = { workspace = true }
-p3-air = { workspace = true }
-p3-field = { workspace = true }
-p3-koala-bear = { workspace = true }
-p3-matrix = { workspace = true }
-sha2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tempfile = "3"
 
 [lints]

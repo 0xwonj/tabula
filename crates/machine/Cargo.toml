@@ -31,7 +31,6 @@ tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-stark = { workspace = true }
 tabula-witness = { workspace = true }
 tabula-executor = { workspace = true }
-tabula-ir = { workspace = true }
 tabula-lang = { workspace = true }
 p3-koala-bear = { workspace = true }
 p3-field = { workspace = true }

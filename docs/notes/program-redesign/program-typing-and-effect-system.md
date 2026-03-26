@@ -1,7 +1,7 @@
 # Program Typing and Effect System
 
-> **Status**: Proposed architecture note
-> **Date**: 2026-03-24
+> **Status**: Implemented architecture note for the current rewritten stack
+> **Date**: 2026-03-25
 > **Scope**: Defines the intended typing and effect-system model for the
 > redesigned Tabula program DSL and explains how it should guide HIR, MIR, and
 > canonical IR design.
@@ -317,14 +317,30 @@ That is much better aligned with Tabula than "pure/impure".
 
 ## 9. Proposed Effect Summary Shape
 
-The exact Rust type can vary, but conceptually a body should summarize effects
-roughly like this:
+The exact Rust type can vary, but conceptually MIR analysis should summarize
+callable behavior roughly like this:
 
 ```rust
 pub struct EffectSummary {
     pub world: WorldEffects,
     pub proof: ProofEffects,
-    pub may_fail: bool,
+}
+
+pub struct FailureSummary {
+    pub semantic_may_fail: bool,
+    pub host_contract_sensitive: bool,
+}
+
+pub struct PolicySummary {
+    pub uses_builtin_hash: bool,
+    pub uses_tx_only_capability: bool,
+    pub uses_query_safe_capability: bool,
+    pub uses_journaled_capability: bool,
+    pub uses_opaque_runtime_capability: bool,
+}
+
+pub struct ContextDemandSummary {
+    pub fields: BTreeSet<ContextFieldId>,
 }
 ```
 
@@ -342,12 +358,23 @@ pub enum ProofEffect {
     RelationUse,
     StatePropertyRead,
     CapabilityCall,
-    Hash,
 }
 ```
 
 This is only one possible encoding, but the separation itself is the important
 part.
+
+The important ownership rule is:
+
+- raw MIR payload does not need to store these summaries directly
+- the summaries can live in an analyzed wrapper such as
+  `VerifiedProgram -> AnalyzedProgram`
+- effect summary is best treated as derived compiler analysis, not as a second
+  source of truth inside the structural IR payload
+- failure and policy summaries are separate static axes, not extensions of
+  effect classification
+- context demand is another static axis:
+  it is not a world effect, but still matters for public-input discipline
 
 ### 9.1 Why `StateRead` belongs in world effects
 
@@ -369,9 +396,23 @@ But they are still semantically important:
 
 - they should journal as relation uses,
 - they shape proof input reduction,
-- and they should not be erased as "ordinary pure arithmetic".
+- and they are not just "pure arithmetic".
 
-So they are not world effects, but they are not semantically ignorable either.
+So relation use deserves its own proof-observable category.
+
+### 9.3 Why failure must stay separate from effects
+
+`semantic_may_fail` and `host_contract_sensitive` matter for static reasoning,
+but they are not world effects and not proof-observable effects. Keeping them
+in a separate `FailureSummary` makes later lowering and legality rules much
+clearer.
+
+### 9.4 Why builtin/hash and capability policy facts belong in policy summary
+
+Facts such as `uses_builtin_hash`, `uses_tx_only_capability`, and capability
+visibility class are not themselves semantic effects. They are callable-policy
+facts that analysis can use for legality and backend planning, so they belong
+in a separate `PolicySummary`.
 
 ---
 
@@ -459,9 +500,14 @@ Allowed:
 - `StateRead`
 - `StatePropertyRead`
 - `RelationUse`
-- `Hash`
 - query-safe `CapabilityCall`
 - `MayFail` if query assertions are allowed
+
+Also freely usable because they are pure total value computation rather than
+effects:
+
+- arithmetic/comparison/boolean value ops
+- builtin blessed `Hash`
 
 Forbidden:
 
@@ -560,6 +606,12 @@ The capability descriptor should eventually carry at least:
 - proof-observable versus not journaled
 - whether it belongs to a blessed builtin family such as hash
 
+The finalized execution semantics are:
+
+- `Checked` means the capability may fail as part of ordinary program semantics.
+- `Total` means the capability is semantically non-failing; any runtime/host
+  error is a contract violation rather than a user-level semantic failure.
+
 ### 13.3 Why this improves the current design
 
 Without this metadata, capability calls remain underspecified compared to:
@@ -590,6 +642,10 @@ From the effect-system perspective, the important point is:
 - hashes are normally total and deterministic,
 - so they behave much more like pure builtin computations than like checked
   operational kernels.
+- builtin `Hash` is therefore **not** a world effect and **not** a
+  proof-observable effect family
+- if MIR wants to remember that a callable used builtin hash, that should be an
+  analysis bit such as `uses_builtin_hash`, not a proof-effect classification
 
 This is why treating at least some hash families separately still makes sense.
 
@@ -611,9 +667,10 @@ It matters because:
 
 ### 15.2 `MayFail`
 
-The effect summary should therefore include a coarse flag such as:
+The MIR failure summary should therefore include a semantic-failure flag such
+as:
 
-- `may_fail`
+- `semantic_may_fail`
 
 This should cover:
 
@@ -621,6 +678,14 @@ This should cover:
 - checked arithmetic such as `DivMod`
 - partial relation evaluation if any exist
 - checked capabilities if any exist
+
+It should **not** cover:
+
+- total capability host/runtime failures
+
+Those belong to a separate operational axis such as:
+
+- `host_contract_sensitive`
 
 ### 15.3 Why this matters for control lowering
 
@@ -632,6 +697,12 @@ know which operations:
 
 `MayFail` is therefore not only a typing concern. It is also a control-lowering
 concern.
+
+In the finalized lower-boundary architecture this means:
+
+- checked capability calls contribute to `semantic_may_fail`
+- total capability calls do not contribute to `semantic_may_fail`
+- total capability calls may still set `host_contract_sensitive`
 
 ---
 
@@ -787,24 +858,37 @@ This is the natural home for:
 
 ### 20.1 Recommended MIR improvement
 
-Callable MIR definitions should carry an explicit inferred effect summary.
+MIR should expose an explicit analyzed boundary instead of storing derived
+effect summaries directly on raw callable payloads.
 
 For example:
 
 ```rust
-pub struct FunctionDef {
-    pub id: FunctionId,
-    pub body: Body,
-    pub effects: EffectSummary,
+pub struct VerifiedProgram(Program);
+
+pub struct AnalyzedProgram {
+    pub verified: VerifiedProgram,
+    pub analysis: ProgramAnalysis,
+}
+
+pub struct ProgramAnalysis {
+    pub effect_summaries: BTreeMap<CallableId, EffectSummary>,
+    pub failure_summaries: BTreeMap<CallableId, FailureSummary>,
+    pub policy_summaries: BTreeMap<CallableId, PolicySummary>,
+    pub context_demands: BTreeMap<CallableId, ContextDemandSummary>,
+    pub call_graph: BTreeMap<CallableId, BTreeSet<CallableId>>,
 }
 ```
 
-The same should hold for:
+This is the cleaner architecture because:
 
-- `QueryDef`
-- `TxDef`
-
-This is one of the clearest improvements suggested by this note.
+- raw MIR stays structural
+- effect, failure, and policy summaries stay derived
+- context demand stays derived and separate from effects
+- query legality can use both call graph and capability policy
+- inlining and canonicalization remain rewrite passes that invalidate analysis
+- normalization and lowering can consume analyzed MIR without making analysis
+  caches part of the IR payload itself
 
 ---
 
@@ -883,9 +967,11 @@ at minimum.
 This should be a named design point, not just an accidental consequence of the
 current op taxonomy.
 
-### 22.5 Introduce `EffectSummary` as an explicit MIR concept
+### 22.5 Introduce explicit MIR analysis summaries
 
-This is the most practical compiler-level improvement suggested by this note.
+The most practical compiler-level improvement suggested by this note is to keep
+`EffectSummary`, `FailureSummary`, and `PolicySummary` explicit at the analyzed
+MIR boundary rather than collapsing them into a single summary kind.
 
 ---
 

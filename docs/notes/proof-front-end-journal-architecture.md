@@ -17,7 +17,7 @@
 ## 1. Why This Note Exists
 
 The profile-native migration removed the legacy carrier model and finished the
-typed runtime and precompile contracts. The main proof-front-end limitation that
+typed runtime and capability transcript contracts. The main proof-front-end limitation that
 remains is structural rather than semantic:
 
 - execution produces one general-purpose `BatchReport`,
@@ -75,7 +75,7 @@ The primary effects are facts such as:
 
 - access effects,
 - property-read effects,
-- precompile-call effects,
+- capability-call effects,
 - IR-hash effects,
 - future relation or lookup effects,
 - emitted application events.
@@ -107,13 +107,13 @@ added to serial passes.
 ### 3.3 Plan-indexed columnar proof compilation
 
 The final proof input shape should not be a set of maps keyed by `(table, col)`
-or by precompile id.
+or by capability transcript id.
 
 Instead, runtime proving should first materialize the proof plan and then reduce
 all execution effects into vectors aligned with that plan:
 
 - `columns[i]` corresponds exactly to column proof slot `i`,
-- `precompiles[i]` corresponds exactly to precompile proof slot `i`,
+- `capabilities[i]` corresponds exactly to capability transcript proof slot `i`,
 - future relation slots should follow the same rule.
 
 This gives stronger determinism, simpler downstream code, and fewer accidental
@@ -144,7 +144,7 @@ proof-specific structure.
 
 Runtime is the right owner because it is the first layer that knows both:
 
-- the executed program and installed capabilities,
+- the executed program plus host-installed runtime registries and schemes,
 - and the exact proof backends and proof grouping plan.
 
 ### 4.3 Witness owns materialization kernels only
@@ -155,7 +155,7 @@ Witness should own only narrow kernels such as:
 
 - lowering one successful tx,
 - materializing one column witness,
-- materializing one precompile witness,
+- materializing one capability witness,
 - materializing one IR-hash witness,
 - future relation witness kernels.
 
@@ -219,8 +219,8 @@ It should contain:
 
 - lowering output,
 - prepared column inputs aligned to column proof slots,
-- prepared precompile calls aligned to precompile proof slots,
-- precompile transcript calls,
+- prepared capability calls aligned to capability transcript proof slots,
+- capability transcript calls,
 - future relation inputs aligned to relation proof slots.
 
 This is the final reduction boundary before backend-specific preparation.
@@ -265,7 +265,7 @@ In practice, the core effect families are:
 
 - state access,
 - property read,
-- precompile call,
+- capability call,
 - IR hash,
 - emitted event,
 - future relation or lookup effect.
@@ -274,7 +274,7 @@ This matters because proof reducers should work over semantic families rather
 than over whatever fields happened to exist in a generic execution result type.
 
 Projection work on the proof hot path should also be single-pass wherever
-possible. Access events and precompile transcript materialization should be
+possible. Access events and capability transcript materialization should be
 projected once and then reused by both lowering and slot-aligned reduction.
 
 ---
@@ -288,7 +288,7 @@ The architecture should make the ordering contract explicit:
 - tx merge order is ascending `tx_index`,
 - instruction-local order is source instruction order,
 - property-read order is stable within tx and then stable across txs,
-- precompile-call order is stable within tx and then stable across txs,
+- capability-call order is stable within tx and then stable across txs,
 - per-column access-event order is derived from stable execution order,
 - future multiplicity reductions must use explicit reduction keys.
 
@@ -324,7 +324,7 @@ The ideal top-level parallel stages are:
 
 1. tx-local proof projection,
 2. per-slot column proof preparation,
-3. per-slot precompile proof preparation,
+3. per-slot capability transcript proof preparation,
 4. merge into `ProofArtifacts`,
 5. future per-slot relation proof preparation.
 
@@ -348,7 +348,7 @@ This architecture is justified because it removes real structural problems:
 
 - repeated scans of execution output,
 - repeated portable-to-typed decoding,
-- separate grouping passes for column, property, and precompile data,
+- separate grouping passes for column, property, and capability data,
 - witness owning orchestration concerns that belong to runtime,
 - late and partial use of parallelism.
 

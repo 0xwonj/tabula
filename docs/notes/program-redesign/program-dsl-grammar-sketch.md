@@ -70,7 +70,7 @@ without leaking backend terms such as:
 - trace rows,
 - chips,
 - proof slots,
-- or numeric precompile IDs.
+- or numeric capability transcript IDs.
 
 ### 2.4 Staged rollout without architectural churn
 

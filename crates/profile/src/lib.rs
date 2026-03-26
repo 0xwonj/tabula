@@ -10,7 +10,7 @@ pub use builtins::{
     ENCODING_BOOL_ID, ENCODING_BYTES32_ID, ENCODING_I64_ID, ENCODING_U64_ID, SCHEME_PROFILE_SMT_ID,
     SCHEME_PROFILE_SSMC_ID, TYPE_BOOL_ID, TYPE_BYTES32_ID, TYPE_I64_ID, TYPE_U64_ID,
     builtin_catalog, builtin_semantic_registry, builtin_smt_scheme_profile,
-    builtin_ssmc_scheme_profile,
+    builtin_ssmc_scheme_profile, is_bool_type, is_bytes32_type, is_i64_type, is_u64_type,
 };
 pub use error::ProfileError;
 pub use model::{

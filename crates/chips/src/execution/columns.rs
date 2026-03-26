@@ -9,7 +9,6 @@
 //! - SSA slots (Layout A: full carry)
 
 use tabula_gadgets::KeyRangeChecked;
-use tabula_ir::GENERIC_EXECUTION_VALUE_WIDTH;
 use tabula_stark::air::columns::num_cols;
 
 use super::ops::cmp::CmpWitness;
@@ -23,7 +22,7 @@ use super::ops::mul::MulCarry;
 pub const MAX_SLOTS: usize = 16;
 
 /// Fixed logical value width used by the generic execution lane.
-pub const EXECUTION_STANDARD_VALUE_WIDTH: usize = GENERIC_EXECUTION_VALUE_WIDTH;
+pub const EXECUTION_STANDARD_VALUE_WIDTH: usize = 3;
 
 /// Column layout for the ExecutionChip AIR.
 ///
@@ -41,7 +40,7 @@ pub struct ExecutionCols<T, const W: usize> {
     /// Effect ordinal within the transaction (E-Trace identity anchor).
     pub effect_ordinal_in_tx: T,
 
-    // ── Opcode one-hot selectors (13) ──
+    // ── Opcode one-hot selectors (14) ──
     // Note: Emit is intentionally omitted — it is out-of-protocol (semantics-spec §2.8)
     // and produces no AIR constraints.
     /// Read from state.
@@ -68,21 +67,23 @@ pub struct ExecutionCols<T, const W: usize> {
     pub op_hash: T,
     /// Lookup (static table query).
     pub op_lookup: T,
-    /// Precompile call (custom instruction).
-    pub op_precompile: T,
+    /// Capability call (custom instruction).
+    pub op_capability_call: T,
     /// PropertyRead (structural query on committed state).
     pub op_property_read: T,
+    /// Relation lookup / static functional relation evaluation.
+    pub op_relation_table: T,
 
-    /// Precompile ID witness (populated when op_precompile=1).
-    pub precompile_id: T,
-    /// Instruction index within the tx body (populated when op_precompile=1).
+    /// Capability transcript ID witness (populated when op_capability_call=1).
+    pub capability_transcript_id: T,
+    /// Instruction index within the tx body (populated when op_capability_call=1).
     pub instruction_index: T,
-    /// Number of precompile input values.
-    pub precompile_input_count: T,
-    /// Number of precompile output values / written slots.
-    pub precompile_output_count: T,
-    /// Canonical transcript digest for the precompile call.
-    pub precompile_event_digest: [T; 8],
+    /// Number of capability input values.
+    pub capability_input_count: T,
+    /// Number of capability output values / written slots.
+    pub capability_output_count: T,
+    /// Canonical transcript digest for the capability call.
+    pub capability_event_digest: [T; 8],
 
     // ── Arith sub-selectors (gated by op_arith) ──
     /// 1 if Sub, 0 otherwise.
@@ -179,6 +180,32 @@ pub struct ExecutionCols<T, const W: usize> {
     pub property_val_sel: [T; MAX_SLOTS],
     /// One-hot: which slot receives the key result.
     pub property_key_sel: [T; MAX_SLOTS],
+
+    // ── RelationProof opcode ──
+    /// Whether this relation row is an `eval` (1) or `assert` (0).
+    pub relation_is_eval: T,
+    /// Relation identifier.
+    pub relation_id: T,
+    /// Canonical transcript digest for the input tuple.
+    pub relation_input_digest: [T; 8],
+    /// Canonical transcript digest for the output tuple.
+    pub relation_output_digest: [T; 8],
+    /// Prefix-boolean occupancy mask for input tuple positions.
+    pub relation_input_used: [T; MAX_SLOTS],
+    /// Type ids for input tuple positions.
+    pub relation_input_type_ids: [T; MAX_SLOTS],
+    /// Prefix-boolean occupancy mask for output tuple positions.
+    pub relation_output_used: [T; MAX_SLOTS],
+    /// Type ids for output tuple positions.
+    pub relation_output_type_ids: [T; MAX_SLOTS],
+    /// Input tuple values in canonical position order.
+    pub relation_input_vals: [[T; W]; MAX_SLOTS],
+    /// Output tuple values in canonical position order.
+    pub relation_output_vals: [[T; W]; MAX_SLOTS],
+    /// One-hot input slot selectors per tuple position.
+    pub relation_input_sel: [[T; MAX_SLOTS]; MAX_SLOTS],
+    /// One-hot output slot selectors per tuple position.
+    pub relation_output_sel: [[T; MAX_SLOTS]; MAX_SLOTS],
 }
 
 /// Compute the width of ExecutionCols for a given value width.

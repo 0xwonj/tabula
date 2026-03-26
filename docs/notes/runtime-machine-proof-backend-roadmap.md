@@ -341,9 +341,9 @@ This especially matters for:
 
 - `tabula-ext::backend::execution::ExecutionBackend` is the stable advanced
   execution-tier authoring seam
-- built-in execution backends such as IR hash and precompile transcript live in
+- built-in execution backends such as IR hash and capability transcript live in
   `tabula-ext`, not runtime
-- `PrecompileProofSystem` is also an `ExecutionBackend`
+- `CapabilityTranscriptProofSystem` is also an `ExecutionBackend`
 - runtime and verifier attach ext-owned execution backends through one internal
   machine bridge instead of hand-written per-backend wrappers
 

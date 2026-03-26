@@ -77,6 +77,24 @@ pub struct TabulaProof {
     pub statement_digest: [u8; 32],
 }
 
+impl TabulaProof {
+    /// Borrow one execution-tier chip opening by chip id.
+    #[must_use]
+    pub fn execution_chip_opening(&self, chip_id: ChipId) -> Option<&ChipOpening> {
+        self.execution
+            .chip_openings
+            .iter()
+            .find(|opening| opening.chip_id == chip_id)
+    }
+
+    /// Borrow one execution-tier chip's public values by chip id.
+    #[must_use]
+    pub fn execution_chip_public_values(&self, chip_id: ChipId) -> Option<&[KoalaBear]> {
+        self.execution_chip_opening(chip_id)
+            .map(|opening| opening.public_values.as_slice())
+    }
+}
+
 /// Per-chip out-of-domain evaluations and metadata.
 pub struct ChipOpening {
     /// Type-safe chip identifier.

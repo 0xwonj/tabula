@@ -1,9 +1,9 @@
 # tabula-contract
 
-`tabula-contract` is the fail-closed compatibility and binding policy layer for
-Tabula. It defines the versioned metadata and validation rules that let
-separated compiler, runtime, and verification paths agree on what they are
-allowed to trust.
+`tabula-contract` is the fail-closed compatibility, binding, and proof-visible
+format layer for Tabula. It defines the versioned metadata, shared artifact
+schemas, and canonical encoding rules that let separated compiler, runtime,
+witness, chip, and verification paths agree on what they are allowed to trust.
 
 ## Role
 
@@ -13,13 +13,16 @@ This crate exists to answer one question:
 compatible?"
 
 Specific versions and fields will evolve. The lasting boundary is that
-compatibility policy, binding metadata, and fail-closed validation live here.
+compatibility policy, binding metadata, sealed artifact schemas, proof-visible
+canonical encodings, and fail-closed validation live here.
 
 ## Owns
 
 - versioned contract metadata carried with sealed artifacts
 - compatibility policy applied at proof and verification entry points
 - binding registry and public-input field policy
+- proof-visible artifact schemas shared across compiler/runtime/verifier paths
+- canonical digest and encoding rules that multiple layers must match bit-for-bit
 - fail-closed validation for known and unknown compatibility versions
 - contract-level rules that multiple layers must interpret the same way
 
@@ -29,6 +32,8 @@ compatibility policy, binding metadata, and fail-closed validation live here.
 - artifact storage or canonical serialization
 - execution behavior
 - runtime orchestration
+- semantic registration or IR traversal
+- witness aggregation policy
 - backend proof implementation
 
 ## Design Intent
@@ -47,7 +52,9 @@ compatibility policy, binding metadata, and fail-closed validation live here.
 
 ## Dependency Rules
 
-- This crate may build policy on top of `tabula-core`.
+- This crate may build shared contract rules on top of `tabula-core`,
+  `tabula-types`, `tabula-ir`, and native commitment primitives when those rules
+  define canonical proof-visible encodings.
 - It should not depend on compiler, runtime, or backend proof crates.
 - If a rule is about whether two sides should trust the same sealed contract,
   it belongs here before it belongs in consumers.
@@ -55,7 +62,7 @@ compatibility policy, binding metadata, and fail-closed validation live here.
 ## How To Change This Crate Safely
 
 - Introduce compatibility changes deliberately, with coordinated updates across
-  compiler, artifact, runtime, and verifier consumers.
+  compiler, runtime, and verifier consumers.
 - Resist adding permissive fallback behavior for version mismatches.
 - Keep the policy layer small and explicit instead of spreading contract rules
   across multiple consuming crates.
@@ -76,5 +83,5 @@ Preserve the behaviors that prove this crate still owns the contract boundary:
 ## Related Crates
 
 - `tabula-core` provides the underlying shared vocabulary
-- `tabula-artifact` carries contract metadata across storage and transport boundaries
-- `tabula-compiler` produces metadata that `tabula-runtime` and verifiers enforce
+- `tabula-compiler` seals contract metadata into `RegisteredProgram`
+- `tabula-runtime` and verifiers enforce that sealed contract at execution and proof boundaries

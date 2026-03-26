@@ -127,9 +127,9 @@ impl InstructionBuilder {
         self
     }
 
-    /// Set the precompile identifier.
-    pub fn precompile_id(mut self, id: u16) -> Self {
-        self.inner.precompile_id = Some(id);
+    /// Set the capability transcript identifier.
+    pub fn capability_transcript_id(mut self, id: u16) -> Self {
+        self.inner.capability_transcript_id = Some(id);
         self
     }
 

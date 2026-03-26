@@ -2,28 +2,16 @@
 
 use std::path::PathBuf;
 
+use serde::Serialize;
 pub use tempfile::TempDir;
-
-use tabula_artifact::{Artifact, State, TransactionBatch, write_json};
 
 pub fn tempdir() -> TempDir {
     tempfile::tempdir().expect("create test tempdir")
 }
 
-pub fn write_artifact_json(dir: &TempDir, file_name: &str, artifact: &Artifact) -> PathBuf {
+pub fn write_json<T: Serialize>(dir: &TempDir, file_name: &str, value: &T) -> PathBuf {
     let path = dir.path().join(file_name);
-    write_json(&path, artifact).expect("write artifact json");
-    path
-}
-
-pub fn write_state_json(dir: &TempDir, file_name: &str, state: &State) -> PathBuf {
-    let path = dir.path().join(file_name);
-    write_json(&path, state).expect("write state json");
-    path
-}
-
-pub fn write_batch_json(dir: &TempDir, file_name: &str, batch: &TransactionBatch) -> PathBuf {
-    let path = dir.path().join(file_name);
-    write_json(&path, batch).expect("write batch json");
+    let body = serde_json::to_vec_pretty(value).expect("serialize json fixture");
+    std::fs::write(&path, body).expect("write json fixture");
     path
 }

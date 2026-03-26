@@ -1,18 +1,17 @@
 use std::sync::Arc;
 
-use tabula_ext::{ColumnBackendFactoryBundle, PrecompileBackendFactoryBundle};
+use tabula_ext::scheme::ColumnBackendFactoryBundle;
 use tabula_types::{EncodingRuntime, TypeRuntime};
 
 use crate::error::RuntimeError;
 
-use super::{InstalledPrecompiles, InstalledSchemes, RuntimeRegistries};
+use super::{InstalledSchemes, RuntimeRegistries};
 
-/// Host-owned installed capability surface consumed by runtime and verifier builders.
+/// Host-owned runtime registries and scheme backends consumed by runtime and verifier builders.
 #[derive(Clone)]
 pub struct HostEnvironment {
     runtime_registries: RuntimeRegistries,
     schemes: InstalledSchemes,
-    precompiles: InstalledPrecompiles,
 }
 
 impl HostEnvironment {
@@ -21,16 +20,14 @@ impl HostEnvironment {
         Self {
             runtime_registries: RuntimeRegistries::standard(),
             schemes: InstalledSchemes::standard(),
-            precompiles: InstalledPrecompiles::empty(),
         }
     }
 
-    /// Start with no installed host capabilities.
+    /// Start with no installed runtime registries or schemes.
     pub fn empty() -> Self {
         Self {
             runtime_registries: RuntimeRegistries::empty(),
             schemes: InstalledSchemes::empty(),
-            precompiles: InstalledPrecompiles::empty(),
         }
     }
 
@@ -43,12 +40,6 @@ impl HostEnvironment {
     /// Replace the installed scheme backends.
     pub fn with_schemes(mut self, schemes: InstalledSchemes) -> Self {
         self.schemes = schemes;
-        self
-    }
-
-    /// Replace the installed precompile backends.
-    pub fn with_precompiles(mut self, precompiles: InstalledPrecompiles) -> Self {
-        self.precompiles = precompiles;
         self
     }
 
@@ -97,15 +88,6 @@ impl HostEnvironment {
         Ok(self)
     }
 
-    /// Consume and register one canonical precompile backend bundle.
-    pub fn with_precompile_backend_bundle(
-        mut self,
-        bundle: PrecompileBackendFactoryBundle,
-    ) -> Result<Self, RuntimeError> {
-        self.precompiles = self.precompiles.with_precompile_backend_bundle(bundle)?;
-        Ok(self)
-    }
-
     /// Borrow the installed runtime type/encoding implementations.
     pub fn runtime_registries(&self) -> &RuntimeRegistries {
         &self.runtime_registries
@@ -114,11 +96,6 @@ impl HostEnvironment {
     /// Borrow the installed scheme backends.
     pub fn schemes(&self) -> &InstalledSchemes {
         &self.schemes
-    }
-
-    /// Borrow the installed precompile backends.
-    pub fn precompiles(&self) -> &InstalledPrecompiles {
-        &self.precompiles
     }
 }
 

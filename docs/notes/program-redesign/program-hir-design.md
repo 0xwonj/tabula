@@ -1,1086 +1,299 @@
 # Program HIR Design
 
-> **Status**: Proposed architecture note
-> **Date**: 2026-03-24
-> **Scope**: Defines the intended role, structure, invariants, and MLIR-inspired
-> design choices for Tabula's new HIR layer.
-> **Related**: [program-dsl-and-ir-redesign.md](program-dsl-and-ir-redesign.md),
-> [program-dsl-grammar-sketch.md](program-dsl-grammar-sketch.md),
-> [program-hir-contract-and-data-model.md](program-hir-contract-and-data-model.md),
-> [program-typing-and-effect-system.md](program-typing-and-effect-system.md),
-> [../canonical-vocabulary.md](../canonical-vocabulary.md),
-> [../executor-proof-codesign-architecture.md](../executor-proof-codesign-architecture.md),
-> [../proof-front-end-journal-architecture.md](../proof-front-end-journal-architecture.md)
+> **Status**: Implemented V3 structured-control architecture note
+> **Date**: 2026-03-25
+> **Scope**: Defines the intended HIR role and the MLIR-inspired design choices
+> that now guide the new `tabula-lang::program` frontend.
+> **Related**: [program-hir-contract-and-data-model.md](program-hir-contract-and-data-model.md),
+> [program-mir-design.md](program-mir-design.md),
+> [program-typing-and-effect-system.md](program-typing-and-effect-system.md)
 
 ---
 
-## 1. Why This Note Exists
+## 1. Position in the Stack
 
-The redesign now assumes a real compiler pipeline:
+The active compiler stack is:
 
-- AST
-- HIR
-- MIR
-- canonical IR
+1. AST
+2. HIR
+3. MIR
+4. canonical IR
+5. `RuntimeProgram { execution, proof }`
+6. executor/runtime
 
-That layering is no longer optional. It is required if Tabula is going to
-support:
-
-- `program`-scoped declarations,
-- constants and relations,
-- external query and output surfaces,
-- and later structured control such as `if` and `match`
-
-without polluting the canonical proof IR.
-
-This note fixes the intended HIR design before the rewrite begins.
-
-The purpose of HIR is not merely "another tree". Its role is:
-
-> **the first semantic program representation that preserves the language's
-> major source-level categories while already being structured enough for real
-> compiler reasoning.**
+HIR is the first semantic layer and the last strongly source-shaped layer.
 
 ---
 
-## 2. Position in the Compiler Stack
+## 2. Core Design Thesis
 
-The intended stack is:
+The ideal Tabula HIR is:
 
-1. **AST**
-   - parsed surface syntax
-2. **HIR**
-   - semantic source IR
-3. **MIR**
-   - normalized compiler IR
-4. **canonical IR**
-   - flat proof/execution contract
+- symbol-table oriented
+- region-based
+- non-SSA
+- declaration-category preserving
+- source-semantic
+- compiler-friendly without being proof-shaped
 
-### 2.1 AST versus HIR
+The most important negative constraint is:
 
-AST is syntax-oriented.
+> **HIR must not try to become MIR early.**
 
-HIR is semantics-oriented.
+That means HIR should not absorb:
 
-AST answers:
-
-- what tokens and source forms appeared,
-- how the parser grouped them,
-- where they occurred in source.
-
-HIR answers:
-
-- what declarations exist,
-- what kind of declaration each one is,
-- what semantic scopes they belong to,
-- and what structured program each body denotes.
-
-### 2.2 HIR versus MIR
-
-HIR is still language-shaped.
-
-MIR is compiler-shaped.
-
-HIR preserves:
-
-- top-level source categories,
-- structured control,
-- lexical binding structure,
-- and the difference between `tx`, `query`, `fn`, `relation`, `event`, and
-  `const`.
-
-MIR is where:
-
-- sugar disappears,
-- names resolve to stable semantic IDs,
-- effects become explicit,
-- helpers are inlined or normalized,
-- control regions are normalized,
-- and lowering feasibility is checked.
-
-### 2.3 HIR versus canonical IR
-
-HIR is **not** proof IR.
-
-HIR must not be forced to:
-
-- become SSA,
-- become flat,
-- carry guarded effects,
-- encode `select`-level normalization,
-- or own canonical proof-facing effect ordering.
-
-That belongs later.
+- ANF normalization
+- SSA locals
+- effect summaries
+- canonical guards
+- runtime/executor identities
 
 ---
 
-## 3. Core Thesis
+## 3. What We Borrow from MLIR
 
-The ideal HIR for Tabula is:
+The useful MLIR pattern is not “copy MLIR syntax”. It is a set of structural
+habits.
 
-- **structured**
-- **symbol-based**
-- **region-based**
-- **semantic-category-preserving**
-- **typed enough for semantic checking**
-- **but not yet SSA, CFG, or proof-shaped**
+### 3.1 Separate structural IR from analyses
 
-This is intentionally close to the good parts of MLIR's worldview:
+Raw HIR is structure plus resolved source semantics.
 
-- operations,
-- regions,
-- blocks,
-- values,
-- symbols,
-- and structure-preserving lowering
+It is not:
 
-without importing MLIR wholesale.
+- effect analysis
+- call graph analysis
+- normalization state
 
----
+That separation matches the MIR refactor and keeps pass ownership clean.
 
-## 4. What HIR Is Responsible For
+### 3.2 Make regions explicit early
 
-HIR should own the following responsibilities.
+HIR now uses:
 
-### 4.1 Program-level semantic shape
+- `Body`
+- `Region`
+- `Terminator`
 
-HIR should represent the whole source file as one semantic program containing:
+This now directly supports exact V3 structured control: root regions end in
+`Return`, nested control regions end in `Yield`, and `if` / `match` stay
+structured in HIR rather than being flattened early.
 
-- state declarations,
-- context declarations,
-- constants,
-- relations,
-- events,
-- predicates,
-- invariants,
-- functions,
-- queries,
-- transactions,
-- imports or uses.
+### 3.3 Keep symbol tables and lexical scopes explicit
 
-### 4.2 Declaration categorization
+HIR is the correct layer to preserve:
 
-HIR should make declaration kind explicit.
+- top-level declaration categories
+- lexical bindings
+- source names
+- source-oriented diagnostics
 
-This is one of its most important jobs. The language should no longer flow
-through the compiler as a generic bag of named nodes.
+This is closer to MLIR symbol-based frontends than to low-level CFG IRs.
 
-`ConstDecl`, `RelationDecl`, `EventDecl`, `FnDecl`, `QueryDecl`, and `TxDecl`
-should remain distinct HIR nodes.
+### 3.4 Use passes, not omniscient nodes
 
-### 4.3 Structured bodies
+The frontend is intentionally split into:
 
-HIR should preserve source-shaped bodies:
+- collection
+- building
+- verification
 
-- statement blocks,
-- lexical scopes,
-- `if` regions,
-- `match` arms,
-- and later bounded loop regions.
+The public API stays free-function based. The implementation uses context
+objects such as `CollectCx`, `BuildCx`, `BodyBuildCx`, and `VerifyCx`.
 
-This preserves semantic structure for diagnostics and for later MIR
-normalization.
+That is the same architectural instinct as MLIR verification, analysis, and
+conversion passes.
 
-### 4.4 Lexical binding and local structure
+### 3.5 Let verification depend on semantic interfaces, not builder history
 
-HIR should still model:
+The current HIR verifier takes the same immutable `FrontendPrelude` semantic
+context as the builder.
 
-- local bindings by name,
-- lexical visibility,
-- destructuring patterns if supported,
-- and source-like expression nesting.
+That is deliberate:
 
-SSA conversion belongs later.
+- builder-time checking is allowed for early diagnostics,
+- but verifier-time checking must still independently reject invalid raw HIR,
+- and the shared semantic interface is the frontend equivalent of MLIR
+  verifier hooks plus dialect/type interfaces.
 
-### 4.5 Source-level semantic validation
-
-HIR is the natural place to validate source semantics such as:
-
-- declaration uniqueness,
-- relation-definition shape,
-- illegal use of `query` from the wrong context,
-- misuse of relation evaluation mode,
-- illegal event emission in a read-only body,
-- or the difference between state and const references.
-
-HIR should therefore already preserve enough callable-category information to
-enforce:
-
-- `fn` as internal helper logic,
-- `query` as externally callable read-only logic,
-- `tx` as externally callable mutating logic.
-
-This is not all of typechecking, but it is more than parsing.
+So the authoritative contract is not “builder already resolved it”, but rather
+“raw HIR plus semantic context verifies”.
 
 ---
 
-## 5. What HIR Is Not Responsible For
+## 4. What HIR Preserves
 
-HIR should **not** do the following.
+HIR preserves source-semantic categories that MIR intentionally erases later.
 
-### 5.1 Not canonical lowering
+In current exact code this means preserving:
 
-HIR should not encode:
+- one program root
+- capability imports
+- context declarations
+- state declarations
+- const declarations
+- relation declarations
+- event declarations
+- callable category: `Function` vs `Query` vs `Tx`
+- lexical bindings
+- source-shaped expressions
 
-- guarded effects,
-- selector synthesis,
-- `select` insertion,
-- one-hot match lowering,
-- or flat slot-level execution order.
-
-### 5.2 Not SSA
-
-HIR should not force:
-
-- unique assignment names,
-- explicit value numbering,
-- phi-like merge modeling,
-- or dominance-driven structure.
-
-### 5.3 Not generic CFG
-
-HIR should not introduce:
-
-- arbitrary basic blocks,
-- branch terminators,
-- explicit jump graphs,
-- or block arguments as a general discipline.
-
-Those may appear internally later if needed, but they should not be HIR's
-semantic foundation.
-
-### 5.4 Not proof backend concerns
-
-HIR should not know about:
-
-- proof slots,
-- trace shapes,
-- witness stores,
-- chips,
-- machine backends,
-- or journal reduction order.
+This is why HIR has separate declaration structs instead of pushing everything
+through a generic node soup.
 
 ---
 
-## 6. MLIR Concepts to Absorb
+## 5. What HIR Does Not Preserve
 
-The HIR should deliberately absorb several structural ideas from MLIR.
+HIR deliberately does not preserve:
 
-### 6.1 Operations, values, regions, and blocks
+- unresolved generic calls
+- parser-only trivia
+- runtime identity
+- canonical op taxonomy
+- proof visibility filtering
+- effect summaries
 
-MLIR's core observation is that:
-
-- operations define values,
-- operations live inside blocks,
-- blocks live inside regions,
-- and operations may themselves own regions.
-
-This is a very good fit for Tabula's HIR world because:
-
-- top-level declarations behave like named semantic operations,
-- `fn` / `query` / `tx` own executable bodies,
-- `if` and `match` naturally own nested regions,
-- and later `for` can do the same.
-
-Tabula does not need to copy MLIR's exact infrastructure, but it should copy
-this structural mindset.
-
-### 6.2 Symbols and symbol tables
-
-MLIR's symbol design is also worth absorbing.
-
-A program is naturally a symbol table containing named declarations:
-
-- tables,
-- constants,
-- relations,
-- events,
-- predicates,
-- functions,
-- queries,
-- transactions,
-- imported capabilities.
-
-Top-level references should therefore behave more like symbolic references than
-like local SSA value references.
-
-That is particularly useful for:
-
-- `const` references,
-- relation references,
-- event names in `emit`,
-- and capability references in call-like syntax.
-
-### 6.3 Structured control operations
-
-MLIR's `scf.if` and `scf.index_switch` are good models for what Tabula should
-preserve in HIR and likely also in MIR:
-
-- structured branches,
-- region-owned bodies,
-- explicit yielded structure when needed,
-- but no commitment to canonical CFG as the end state.
-
-This is a strong fit for Tabula because the final canonical IR remains
-predicated and flat, while the higher layers still need structured control.
-
-### 6.4 Traits and interfaces as design thinking
-
-Tabula does not need MLIR traits or interfaces literally, but it should borrow
-the habit of classifying nodes by semantic behavior.
-
-Examples of HIR-level semantic traits include:
-
-- callable-like declarations,
-- read-only bodies,
-- mutating bodies,
-- value-producing operations,
-- declaration-like symbols,
-- and effectful statements.
-
-This classification discipline matters even in Rust enum form.
+Those belong either earlier in AST or later in MIR/canonical/runtime.
 
 ---
 
-## 7. MLIR Concepts to Exclude
+## 6. Why HIR Is Not SSA
 
-MLIR is a powerful framework, but not every part of it fits Tabula's goals.
+HIR is not the place for SSA because the source language still wants:
 
-### 7.1 No MLIR dependency
+- names
+- lexical scopes
+- direct source-shaped expression trees
+- declaration-level body policies
 
-Tabula should not make HIR depend on:
+SSA becomes useful only once the compiler starts normalizing computation order
+and structured control for lowering. That is exactly why MIR exists.
 
-- MLIR tooling,
-- LLVM build infrastructure,
-- tablegen,
-- or generic MLIR textual syntax.
+So the division is:
 
-The language remains a Rust-native compiler.
-
-### 7.2 No generic operation soup
-
-Tabula HIR should not become a generic "everything is an op with attributes"
-system just because MLIR can do that.
-
-The language benefits from typed Rust node families such as:
-
-- `RelationDecl`
-- `FnDecl`
-- `TxDecl`
-- `IfStmt`
-- `MatchStmt`
-
-The objective is not maximal genericity. The objective is semantic clarity.
-
-### 7.3 No arbitrary CFG in HIR
-
-MLIR can represent CFGs and multi-block regions. That is not a good default for
-Tabula HIR.
-
-HIR should remain:
-
-- structured,
-- lexical,
-- source-shaped.
-
-General CFG belongs neither in the source model nor in the canonical proof
-model.
-
-### 7.4 No dominance-driven semantics
-
-HIR should not use SSA dominance as the organizing principle for source
-semantics. That belongs to later lowering stages if needed.
+- HIR: lexical bindings and source semantics
+- MIR: ANF + explicit regions + analysis
 
 ---
 
-## 8. HIR Design Principles
+## 7. Why HIR Is Not CFG
 
-### 8.1 Preserve source categories
+General CFG is a poor default for the source-semantic layer.
 
-If the source distinguishes:
+The important invariant is:
 
-- `tx`,
-- `query`,
-- `fn`,
-- `relation`,
-- `const`,
-- `event`,
+> **Structured source remains structured in HIR.**
 
-HIR should preserve that distinction.
+In current exact code, that means one root region ending in `Return`.
 
-### 8.2 Be richer than the parser tree
-
-HIR should not merely mirror surface tokens.
-
-It should normalize and attach semantics where useful:
-
-- keyword-driven declaration category,
-- normalized relation body shape,
-- explicit symbol identity,
-- and canonical parameter or field representation.
-
-### 8.3 Stay structured as long as possible
-
-Flattening too early is a mistake.
-
-HIR should keep:
-
-- nested regions,
-- statement nesting,
-- and source control constructs
-
-because that is where diagnostics, legality checks, and many later
-transformations are easiest.
-
-### 8.4 Delay proof-shaping
-
-HIR should prepare for canonical lowering, but should not itself be shaped by
-final proof constraints. Otherwise the source language will be bent around
-backend details too early.
+Later, when `if` and `match` are enabled, the intended extension is still
+structured nested regions, not arbitrary basic blocks.
 
 ---
 
-## 9. Top-Level HIR Object Model
+## 8. Symbol Policy
 
-The exact Rust types may change, but the semantic structure should look roughly
-like this.
+The current rewritten symbol policy is intentionally strict.
 
-```rust
-pub struct Program {
-    pub name: ProgramName,
-    pub uses: Vec<UseDecl>,
-    pub top_level: Vec<TopLevelDecl>,
-    pub span: Span,
-}
+- one flat top-level namespace
+- table fields are table-local
+- local bindings and params may not shadow top-level symbols or imported
+  capability aliases
+- bare call heads must resolve to function, capability, or blessed hash import
 
-pub enum TopLevelDecl {
-    State(StateDecl),
-    Context(ContextDecl),
-    Const(ConstDecl),
-    Relation(RelationDecl),
-    Event(EventDecl),
-    Predicate(PredicateDecl),
-    Invariant(InvariantDecl),
-    Function(FunctionDecl),
-    Query(QueryDecl),
-    Transaction(TxDecl),
-}
-```
-
-This preserves the semantic top-level structure explicitly.
-
-It is acceptable for later compiler passes to build symbol tables or indexed
-maps over this representation, but the HIR itself should remain declaration
-structured.
+This reduces ambiguity during bring-up and keeps builder diagnostics sharp.
 
 ---
 
-## 10. Symbol Model
+## 9. HIR and the Type/Effect Story
 
-HIR should be symbol-aware from the start.
+Typed effect reasoning is centered in MIR, not HIR.
 
-### 10.1 Program as the root symbol table
+HIR still participates in the static story by preserving callable categories and
+ source distinctions such as:
 
-The program defines the root symbol table.
+- state access versus const use
+- function call versus capability call
+- relation assertion versus relation evaluation
+- tx bodies versus helper functions
 
-Top-level declarations are named semantic entities. The compiler should not
-have to rediscover their category from surrounding syntax later.
+But HIR does not carry derived effect summaries.
 
-### 10.2 Symbol categories
+This is deliberate and mirrors the MLIR-style separation between structural IR
+and analyses.
 
-HIR should distinguish at least the following symbol categories:
-
-- table
-- const
-- relation
-- event
-- predicate
-- function
-- query
-- transaction
-- imported capability
-
-Type names may live in a separate type namespace.
-
-### 10.3 Stable symbol identity
-
-Name resolution should produce stable symbolic identity, even if the HIR still
-prints or stores source names for diagnostics.
-
-That identity may be represented as:
-
-- symbol IDs,
-- interned names with declaration anchors,
-- or other compiler-owned handles.
-
-The exact mechanism matters less than the rule:
-
-> HIR references to top-level declarations should be symbol-like, not stringly
-> typed.
-
-### 10.4 Local bindings are different from symbols
-
-Top-level declarations are symbols.
-
-Local `let`-bound names are lexical local bindings, not symbols in the same
-sense. They remain block-local and source-like in HIR.
-
-This is an important distinction borrowed from MLIR's separation between
-symbols and SSA values.
+One important corollary is that source-selected field scheme metadata stays in
+frontend/compiler-owned structures. It is verified in HIR, preserved by the
+next compiler artifact as sidecar metadata, and intentionally not pushed into
+canonical IR.
 
 ---
 
-## 11. HIR Regions and Blocks
+## 10. HIR -> MIR Ownership
 
-HIR should use region structure, but in a controlled way.
+The ownership boundary is now fixed.
 
-### 11.1 Region-owning declarations
+- `tabula-lang` stops at `VerifiedProgram`
+- `tabula-compiler` owns `VerifiedProgram -> mir::Program`
 
-The following HIR nodes should own body regions:
+This is the correct split because:
 
-- `FunctionDecl`
-- `QueryDecl`
-- `TxDecl`
-- `PredicateDecl`
-- `InvariantDecl`
+- HIR lowering is compiler conversion logic, not frontend semantic resolution
+- MIR verification, analysis, inlining, and canonical lowering should remain
+  MIR-owned
 
-### 11.2 Region-owning statements
-
-The following HIR statements should own nested regions:
-
-- `IfStmt`
-- `MatchStmt`
-- later `ForStmt`
-
-### 11.3 Single-block structured regions
-
-HIR regions should initially be **single-block structured regions**.
-
-That means:
-
-- bodies are statement lists,
-- not general CFGs,
-- and not arbitrary collections of basic blocks.
-
-This captures the good part of MLIR's region model without importing its more
-general control-flow complexity.
-
-### 11.4 Lexical capture in HIR
-
-HIR regions should follow source-like lexical capture rules:
-
-- they can refer to in-scope parameters,
-- surrounding local bindings,
-- and top-level symbol references.
-
-This is another reason to avoid SSA/block-argument discipline in HIR.
-
----
-
-## 12. Declaration Nodes
-
-### 12.1 State and tables
-
-```rust
-pub struct StateDecl {
-    pub tables: Vec<TableDecl>,
-    pub span: Span,
-}
-
-pub struct TableDecl {
-    pub name: SymbolName,
-    pub keys: Vec<KeyFieldDecl>,
-    pub fields: Vec<FieldDecl>,
-    pub span: Span,
-}
-
-pub struct KeyFieldDecl {
-    pub name: FieldName,
-    pub ty: TypeRef,
-    pub span: Span,
-}
-
-pub struct FieldDecl {
-    pub name: FieldName,
-    pub ty: TypeRef,
-    pub scheme: Option<SchemeAnn>,
-    pub span: Span,
-}
-```
-
-The important thing here is semantic separation:
-
-- key fields are not ordinary value fields,
-- state declaration remains explicit,
-- scheme annotations remain attached at source semantic level.
-
-### 12.2 Context
-
-```rust
-pub struct ContextDecl {
-    pub fields: Vec<ContextFieldDecl>,
-    pub span: Span,
-}
-```
-
-Even if V1 does not expose `context`, HIR should be ready for it.
-
-### 12.3 Constants
-
-```rust
-pub struct ConstDecl {
-    pub name: SymbolName,
-    pub ty: TypeRef,
-    pub value: ConstExpr,
-    pub span: Span,
-}
-```
-
-HIR should preserve the difference between:
-
-- a constant declaration,
-- and a local `let` expression.
-
-### 12.4 Relations
-
-```rust
-pub struct RelationDecl {
-    pub name: SymbolName,
-    pub params: Vec<ParamDecl>,
-    pub results: Vec<ParamDecl>,
-    pub body: RelationBody,
-    pub span: Span,
-}
-
-pub enum RelationBody {
-    Enum { values: Vec<Expr> },
-    Range { lower: Expr, upper: Expr },
-    Map { items: Vec<MapRelationItem> },
-    Set { items: Vec<TupleExpr> },
-    Extern,
-}
-```
-
-HIR should normalize relation definitions into a small number of semantic body
-forms. It should not preserve incidental syntax if multiple surface spellings
-map to the same relation meaning.
-
-### 12.5 Events
-
-```rust
-pub struct EventDecl {
-    pub name: SymbolName,
-    pub params: Vec<ParamDecl>,
-    pub span: Span,
-}
-```
-
-### 12.6 Callable-like declarations
-
-```rust
-pub struct FunctionDecl {
-    pub name: SymbolName,
-    pub params: Vec<ParamDecl>,
-    pub result: Option<TypeRef>,
-    pub body: BodyRegion,
-    pub span: Span,
-}
-
-pub struct QueryDecl {
-    pub name: SymbolName,
-    pub params: Vec<ParamDecl>,
-    pub result: TypeRef,
-    pub requires: Vec<Expr>,
-    pub body: BodyRegion,
-    pub span: Span,
-}
-
-pub struct TxDecl {
-    pub name: SymbolName,
-    pub params: Vec<ParamDecl>,
-    pub requires: Vec<Expr>,
-    pub ensures: Vec<Expr>,
-    pub body: BodyRegion,
-    pub span: Span,
-}
-```
-
-The exact clause set may be staged, but the callable categories should remain
-distinct.
-
-### 12.7 Body policy should be explicit
-
-Even if HIR does not yet carry full inferred effect summaries, it should still
-preserve the body-policy distinction that later effect checking depends on.
-
-Conceptually, HIR should already know whether a body belongs to:
-
-- an internal helper,
-- a read-only external query,
-- a mutating external transaction,
-- a predicate-like logical body,
-- or an invariant body.
-
-That policy may be represented implicitly by declaration kind or explicitly via
-a small enum such as:
-
-```rust
-pub enum BodyKind {
-    Function,
-    Query,
-    Tx,
-    Predicate,
-    Invariant,
-}
-```
-
-The important point is not the exact Rust type. The important point is that HIR
-must preserve enough information for later effect discipline.
-
----
-
-## 13. Body Model
-
-HIR bodies should remain statement-oriented and lexical.
-
-```rust
-pub struct BodyRegion {
-    pub block: Block,
-    pub span: Span,
-}
-
-pub struct Block {
-    pub statements: Vec<Stmt>,
-    pub span: Span,
-}
-```
-
-This is deliberately simpler than a general CFG.
-
----
-
-## 14. Statement Nodes
-
-HIR statements should preserve source-level structure.
-
-```rust
-pub enum Stmt {
-    Let(LetStmt),
-    Assign(AssignStmt),
-    Assert(AssertStmt),
-    If(IfStmt),
-    Match(MatchStmt),
-    For(ForStmt),
-    Emit(EmitStmt),
-    Return(ReturnStmt),
-    Expr(ExprStmt),
-}
-```
-
-### 14.1 `let` and patterns
-
-```rust
-pub struct LetStmt {
-    pub pattern: Pattern,
-    pub value: Expr,
-    pub span: Span,
-}
-```
-
-Pattern structure should survive in HIR because:
-
-- it improves diagnostics,
-- and lowering destructuring into MIR temporaries is a later concern.
-
-### 14.2 Assignment
-
-```rust
-pub struct AssignStmt {
-    pub target: LValue,
-    pub value: Expr,
-    pub span: Span,
-}
-```
-
-State assignment should remain distinct from local rebinding.
-
-### 14.3 Assertion
-
-```rust
-pub struct AssertStmt {
-    pub target: AssertTarget,
-    pub span: Span,
-}
-
-pub enum AssertTarget {
-    Expr(Expr),
-    Relation(RelationUse),
-}
-```
-
-This keeps relation membership assertion visible in HIR rather than forcing it
-through a generic call-like expression too early.
-
-### 14.4 Structured control
-
-```rust
-pub struct IfStmt {
-    pub condition: Expr,
-    pub then_region: BodyRegion,
-    pub else_region: Option<BodyRegion>,
-    pub span: Span,
-}
-
-pub struct MatchStmt {
-    pub scrutinee: Expr,
-    pub arms: Vec<MatchArm>,
-    pub span: Span,
-}
-
-pub struct MatchArm {
-    pub pattern: MatchPattern,
-    pub body: MatchArmBody,
-    pub span: Span,
-}
-```
-
-This is one of the strongest places to adopt MLIR-style region thinking without
-adopting generic CFG machinery.
-
-### 14.5 Event emission
-
-```rust
-pub struct EmitStmt {
-    pub event: EventRef,
-    pub args: Vec<Expr>,
-    pub span: Span,
-}
-```
-
-Emit should refer to an event symbol, not a topic string.
-
----
-
-## 15. Expression Nodes
-
-HIR expressions should preserve source semantics while making key semantic
-categories explicit.
-
-```rust
-pub enum Expr {
-    Literal(LiteralExpr),
-    Local(LocalRef),
-    Const(ConstRef),
-    TableRead(TableReadExpr),
-    Unary(UnaryExpr),
-    Binary(BinaryExpr),
-    Call(CallExpr),
-    EvalRelation(RelationUse),
-    Select(SelectExpr),
-    Tuple(TupleExpr),
-    List(ListExpr),
-}
-```
-
-### 15.1 Why `Const` is explicit
-
-Constants should already be distinct in HIR. Treating them as generic name
-lookups would blur one of the central semantic distinctions of the new
-language.
-
-### 15.2 Why relation evaluation is explicit
-
-`eval relation` should remain explicit in HIR as a distinct expression kind.
-
-That ensures:
-
-- relation semantics remain visible,
-- misuse diagnostics stay strong,
-- and MIR does not have to rediscover relation meaning from generic call forms.
-
-### 15.3 Calls remain generic only for non-relation callables
-
-Bare calls in HIR should mean:
-
-- helper function calls,
-- capability calls,
-- future pure builtins.
-
-They should not be overloaded to mean relation evaluation.
-
----
-
-## 16. HIR Type Information
-
-HIR should already carry enough type information to be semantically useful.
-
-That does not necessarily mean fully inferred backend-ready types everywhere,
-but it does mean:
-
-- declaration signatures are typed,
-- table fields are typed,
-- relation signatures are typed,
-- event signatures are typed,
-- body-local expressions can be typechecked against those declarations.
-
-The precise degree of annotation can vary, but HIR should not remain "mostly
-untyped parser output".
-
----
-
-## 17. HIR Validation Rules
-
-HIR is a natural place to verify structural source-level invariants.
-
-Examples include:
-
-- exactly one `program` header per file,
-- at most one `state` block,
-- at most one `context` block,
-- unique top-level symbol names under the chosen symbol policy,
-- relation definitions consistent with declared signatures,
-- `query` and `tx` category misuse,
-- no assignment to constants,
-- no `emit` from invalid body kinds,
-- no state mutation from read-only body kinds,
-- illegal references to undeclared tables, relations, or events,
-- and early shape checks on `match` arm structure.
-
-HIR should also enforce the source-side version of the key static distinctions:
-
-- `query` is read-only, not necessarily pure,
-- `relation` use remains explicit and mode-checked,
-- and capability use may already be constrained by declaration metadata where
-  available.
-
-These checks belong here because they are semantic source invariants, not yet
-canonical IR invariants.
-
----
-
-## 18. HIR to MIR Boundary
-
-HIR should cross into MIR only after:
-
-- declaration classes are fixed,
-- symbol identities are resolved,
-- source scoping is validated,
-- relation and const semantics are explicit,
-- and structured control is made explicit.
-
-The HIR -> MIR boundary is where the compiler should begin:
-
-- desugaring,
-- local-binding normalization,
-- effect classification,
-- inlining or helper expansion,
-- and control-region normalization.
-
-HIR should therefore be designed to make that lowering easy, but not to perform
-it prematurely.
-
----
-
-## 19. Example
-
-Given:
-
-```tabula
-program Registry
-
-state {
-  table users(key id: UserId) {
-    active: bool @ssmc;
-    tier: u8 @ssmc;
-  }
-}
-
-relation AllowedTier(tier: u8) = enum { 0, 1, 2, 3 };
-
-tx register(id: UserId, tier: u8) {
-  assert relation AllowedTier(tier);
-  users[id].active = true;
-  users[id].tier = tier;
-}
-```
-
-The HIR should preserve this roughly as:
+So the sequence is:
 
 ```text
-Program(name = Registry)
-  StateDecl
-    TableDecl(name = users)
-      Key(id: UserId)
-      Field(active: bool @ssmc)
-      Field(tier: u8 @ssmc)
-
-  RelationDecl(name = AllowedTier)
-    params = [tier: u8]
-    body = Enum { 0, 1, 2, 3 }
-
-  TxDecl(name = register)
-    params = [id: UserId, tier: u8]
-    body:
-      Assert(RelationUse(AllowedTier, [Local(tier)]))
-      Assign(TableReadWrite(users, [Local(id)], active), Literal(true))
-      Assign(TableReadWrite(users, [Local(id)], tier), Local(tier))
+parse -> build_hir -> verify_hir -> lower_hir_to_mir(program_id)
+       -> verify MIR -> analyze MIR -> inline -> canonicalize
+       -> analyze MIR -> lower to canonical
 ```
 
-This is already semantic, but not yet SSA, not yet flattened, and not yet
-proof-shaped.
+`ProgramId` is compiler-owned identity, not frontend-owned source semantics, so
+it is minted by the compiler pipeline and injected at the HIR -> MIR boundary.
 
 ---
 
-## 20. Implementation Guidance
+## 11. Current Scope Discipline
 
-### 20.1 Ownership
+The current exact HIR code intentionally does not implement:
 
-The exact crate boundary may still be decided later, but conceptually HIR
-belongs to the **frontend semantic boundary**, not to runtime and not to the
-canonical proof IR.
+- `for`
+- `requires` (intentionally deferred to a later phase)
+- `ensures`
+- `predicate`
+- `invariant`
 
-Whether it physically lives in:
+That means the rewritten frontend now owns:
 
-- `tabula-lang`,
-- `tabula-compiler`,
-- or a dedicated frontend crate
+- `context`
+- `query`
+- `event`
+- `emit`
+- statement-level `if`
+- statement-level `match`
 
-is less important than keeping its role clear.
+while still leaving later spec and sugar forms closed.
 
-### 20.2 Use typed Rust nodes, not maximal genericity
-
-HIR should be implemented as explicit Rust data structures, not as a generic
-"operation plus attribute bag" system.
-
-It should be MLIR-inspired in structure, not MLIR-cloned in infrastructure.
-
-### 20.3 Keep HIR stable enough to document
-
-HIR should be stable enough that:
-
-- parser tests can target it,
-- name resolution tests can target it,
-- and MIR lowering tests can treat it as the semantic source contract.
-
-That means its node set should be explicit and documented, not left as
-incidental compiler glue.
+The important discipline is that exact code only opens the surface that the
+rest of the stack can execute end-to-end today.
 
 ---
 
-## 21. What This Note Commits To
+## 12. End-State Judgment
 
-This note is intended to settle the following.
+Under the current lower boundary, this HIR shape is the right one.
 
-- HIR is a required new layer.
-- HIR is semantic and source-shaped, not parser-shaped.
-- HIR is structured, symbol-based, and region-based.
-- MLIR's region and symbol ideas are good fits and should be absorbed.
-- MLIR's generic infrastructure, CFG bias, and operation soup should not be
-  copied.
-- HIR should preserve declaration categories and structured control.
-- HIR should preserve callable body policy strongly enough for later effect
-  checking.
-- HIR should not become SSA or canonical proof IR.
+It is:
 
-If these points hold, the next step is the exact HIR contract and data model,
-followed by the exact frontend skeleton that builds and validates it.
+- minimal enough to avoid over-design
+- structured enough to support later MLIR-style lowering
+- separate enough from MIR to keep normalization and effect reasoning clean
+
+The next correct growth path is not redesigning HIR again. It is:
+
+- preserving the rewritten V2/V3 path as the default
+- then opening later spec and sugar features in later phases
+- while preserving the same HIR principles

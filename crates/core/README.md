@@ -80,5 +80,5 @@ Preserve the behaviors that prove this crate still owns the kernel boundary:
 ## Related Crates
 
 - `tabula-contract` builds policy on top of core concepts
-- `tabula-artifact` serializes core-aligned data models across boundaries
+- `tabula-ir` defines the canonical registered-program IR and portable request carriers
 - `tabula-compiler`, `tabula-runtime`, and the proof crates all consume this shared vocabulary

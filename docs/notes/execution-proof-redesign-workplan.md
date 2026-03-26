@@ -221,7 +221,7 @@ plan-aligned `ProofJournal`.
   - plan-aligned finalization
 - prepared column inputs become fully column-owned and include all proof-local
   column data such as property reads
-- precompile proof inputs become proof-plan aligned at journal-build time
+- capability transcript proof inputs become proof-plan aligned at journal-build time
 - witness whole-batch orchestration stops being part of the runtime prove path
 
 ### Architectural intent
@@ -276,7 +276,7 @@ the only sanctioned architecture.
 - no old orchestration path remains in production code
 - `ExecutionJournal` and `ProofJournal` are the only canonical internal
   execution and proof boundaries
-- proof hot paths do not re-project access effects or re-encode precompile
+- proof hot paths do not re-project access effects or re-encode capability
   transcript payloads more than once per semantic effect
 - deterministic and parallel behavior are verified under test
 - runtime proving no longer crosses a portable reporting boundary before

@@ -1,7 +1,8 @@
 # Program Rewrite Roadmap
 
-> **Status**: Proposed implementation roadmap
-> **Date**: 2026-03-24
+> **Status**: Updated implementation roadmap through V3 structured control and
+> core-first native proving
+> **Date**: 2026-03-25
 > **Scope**: Defines the implementation roadmap for the Tabula language and IR
 > rewrite after the new program DSL, HIR, MIR, and canonical IR architecture
 > has been designed.
@@ -80,6 +81,24 @@ It includes:
 It does **not** initially require a full rewrite of every lower runtime
 subsystem. The runtime/proof stack should instead act as an anchor while the
 frontend, middle-end, and canonical IR are rebuilt around the new architecture.
+
+### 2.1.1 Post-cutover relation proof optimization backlog
+
+After the sound static relation proof family landed, two performance follow-ups
+were intentionally left for a later optimization pass:
+
+- shrink the `RelationProof` execution relay so the execution chip keeps only
+  digest relay and output-binding fields, not full relation tuple payload
+- compact relation transcript trace rows so continuation rows do not repeat the
+  full tuple payload across every round
+
+These are deferred on purpose:
+
+- they are trace-shape optimizations, not soundness repairs
+- they should be implemented only after the repaired relation proof contract is
+  treated as stable
+- they are local to proving performance and should not reopen the compiler /
+  runtime semantic architecture
 
 ### 2.2 Immediate implementation goal
 
@@ -292,7 +311,7 @@ Turn the current design notes into an agreed implementation contract.
 
 ---
 
-## 6.2 Phase 1: Freeze Exact Canonical IR and Execution Contract
+## 6.2 Phase 1: Freeze Exact Canonical IR and Runtime/Execution Contract
 
 ### Goal
 
@@ -304,8 +323,12 @@ contract.
 - define exact canonical IR Rust data structures,
 - define exact manifest and schema data structures used by canonical IR,
 - freeze op taxonomy and validation invariants,
-- define executor semantics for each canonical op family,
-- define journal projection rules for each semantic effect family,
+- define `ValidatedProgram` as the raw canonical execution boundary,
+- define runtime-owned `RuntimeProgram { execution, proof }`,
+- define `ResolvedExecutionProgram` and `ResolvedProofProgram`,
+- define executor semantics for each canonical op family against resolved
+  execution contracts,
+- define runtime-owned reduction rules from execution journal to proof journal,
 - define the initial guard model and inactive-default semantics precisely.
 
 ### Scope
@@ -322,8 +345,9 @@ Only the V1 canonical subset needs to be modeled exactly.
 
 - exact canonical IR Rust data model exists,
 - validation rules are explicit,
-- executor/journal semantics are specified against the new IR rather than the
-  old one.
+- runtime resolution into execution/proof contracts exists,
+- executor semantics are specified against `ResolvedExecutionProgram`,
+- proof-journal reduction is runtime-owned rather than executor-owned.
 
 ---
 
@@ -336,10 +360,13 @@ Create the real normalization layer that targets the new canonical IR.
 ### Main work
 
 - define exact MIR Rust data structures,
-- define `EffectSummary` and callable-policy data structures,
+- define `EffectSummary`, `FailureSummary`, and callable-policy data structures,
 - implement MIR validation,
 - define MIR -> canonical IR lowering rules,
-- define inlining, effect propagation, and capability metadata checks.
+- define inlining, canonicalization, effect propagation, and capability metadata
+  checks,
+- target the already-frozen runtime/executor lower boundary rather than
+  continuing to redesign it.
 
 ### Non-goals
 
@@ -363,9 +390,10 @@ Create the source-semantic frontend that feeds MIR.
 
 ### Main work
 
-- define exact HIR Rust data structures,
-- implement HIR validation and body-policy checks,
-- define HIR -> MIR lowering rules,
+- add the new parallel `tabula-lang::program` frontend path,
+- define exact V1 HIR Rust data structures,
+- implement symbol collection, HIR building, and HIR verification,
+- implement compiler-owned `VerifiedHIR -> MIR` lowering,
 - wire parser output into HIR construction for the V1 subset,
 - add boundary tests:
   - parser -> HIR
@@ -376,6 +404,8 @@ Create the source-semantic frontend that feeds MIR.
 
 - a small V1 program can parse and lower through all new layers,
 - HIR/MIR/canonical IR validation passes on that subset,
+- the new frontend path coexists with the old `tabula_lang::{ast, parser, lower}`
+  path,
 - old and new pipelines can coexist.
 
 ---
@@ -389,8 +419,10 @@ canonical IR.
 
 ### Main work
 
-- adapt executor to consume new canonical IR,
-- adapt journaling to the new semantic op families,
+- add the rewritten source pipeline that returns validated canonical programs,
+- wire that compiler-owned path into the already-built runtime/executor path,
+- adapt journaling inputs from source lowering into the new semantic op
+  families,
 - remove `Lookup` from the new path,
 - add relation-aware execution and journaling,
 - add const-pool support,
@@ -398,7 +430,9 @@ canonical IR.
 
 ### Exit criteria
 
-- V1 programs execute through the new canonical IR,
+- V1 programs lower into canonical IR and execute through `RuntimeProgram {
+  execution, proof }`,
+- the rewritten compiler path is the active source route for covered V1 examples,
 - execution journaling reflects:
   - state effects,
   - relation effects,
@@ -417,16 +451,23 @@ Make the new pipeline the default for the core language.
 
 ### Main work
 
-- migrate old core DSL examples/tests to the new surface where needed,
+- migrate rewritten-V1 compiler docs, examples, and fixtures to the canonical
+  compiler root,
 - compare old and new execution behavior on shared cases,
-- update toolchain entrypoints to prefer the new pipeline,
-- deprecate the old frontend path,
-- keep compatibility shims only if they are strictly temporary.
+- update compiler-facing entrypoints and internal guidance to prefer the
+  rewritten pipeline,
+- preserve source-selected field schemes as compiler-owned sidecar metadata
+  rather than canonical IR payload,
+- freeze the old frontend path for compatibility and critical fixes only,
+- then remove the old compatibility surface once the rewritten path fully owns
+  in-repo callers.
 
 ### Exit criteria
 
-- the new path is the default compiler path for the V1 language,
-- the old path is no longer needed for core flows,
+- the rewritten path is the default compiler path for the V1 language,
+- root compiler APIs are the only supported compiler surface,
+- rewritten-V1 internal code uses the canonical compiler root rather than
+  deprecated aliases,
 - regression suites pass against the new canonical IR.
 
 ---
@@ -443,7 +484,7 @@ Add the external boundary surfaces that the architecture already reserves.
 - implement `query`,
 - implement typed `event`,
 - implement `emit`,
-- optionally implement `requires`,
+- keep `requires` deferred to a later phase,
 - define runtime APIs for query execution,
 - implement the initial proof policy for:
   - context fields,
@@ -468,6 +509,16 @@ That makes them a clean second wave after V1 execution correctness is secured.
 - query validation and execution rules are enforced,
 - events lower to canonical `EmitEvent`,
 - runtime APIs can expose V2 surfaces coherently.
+
+### Current state
+
+This phase is now implemented on the rewritten path:
+
+- `context`, `query`, `event`, and `emit` exist in the new frontend/HIR
+- `requires` remains intentionally deferred and is rejected as a deferred feature
+- HIR lowers them into MIR/canonical IR without changing the lower boundary
+- runtime query execution and typed event execution are exercised end-to-end
+- helper-transitive query legality remains MIR-analysis owned
 
 ---
 
@@ -503,6 +554,19 @@ The intended design remains:
 - canonical IR stays flat and CFG-free,
 - executor semantics match the intended guarded/predicated model,
 - proving remains fixed-shape with no canonical CFG.
+
+### Current state
+
+This phase is now implemented on the rewritten path:
+
+- exact V3 source supports statement-level `if` and `match`
+- HIR uses nested regions with `Yield`
+- HIR lowers directly to MIR structured control without introducing a second
+  control IR
+- MIR lowers structured control into flat canonical IR through selectors and
+  guarded effectful or checked ops
+- canonical IR remains CFG-free
+- later spec and sugar features remain intentionally deferred
 
 ---
 
@@ -586,7 +650,25 @@ Owns:
 - journal reduction alignment,
 - relation-aware proof inputs,
 - capability/relation effect integration,
-- proof-artifact preparation compatibility.
+- proof-artifact preparation,
+- sealed static relation table derivation.
+
+Current state on the rewritten path:
+
+- `tabula_compiler` root now seals `RegisteredProgram` artifacts without
+  back-converting through legacy artifacts or legacy IR
+- `tabula_runtime` root provides the native execution/proving surface with
+  `RuntimeBuilder`, `TabulaRuntime`, `Verifier`, and `ProofStatement`
+- `tabula_witness::stark::lowering` lowers core-first rewritten execution and
+  proof facts directly into `PreparedMachineInput`
+- the initial native proving cutover covers state, context, typed events,
+  builtin hash, checked ops, and V3 control lowered into canonical guards
+- static canonical relation proving now covers `EnumSet` and `Map`, with
+  source `Range` and `Set` supported through their existing canonical lowering
+- relation proof preparation is witness-owned, and `StaticTableRoot` is now
+  transcript-bound in the native proof statement/verifier contract
+- capability proving, property-read proving, and `Extern` relation proving
+  remain explicit later extensions
 
 ---
 
@@ -617,6 +699,12 @@ Each phase should have tests at the layer boundaries, not only end-to-end tests.
 - compile + execute
 - compile + journal
 - compile + prove/verify
+
+Current gate status:
+
+- rewritten tx flows now run end to end through compile, register, runtime
+  build, execute, journal reduction, prove, and verify
+- rewritten queries remain execution-only by design in this phase
 
 ### 8.5 Differential migration tests
 
@@ -694,6 +782,10 @@ the V1/V2 core path is solid.
 
 The rewrite only fully succeeds if the old pipeline is eventually removed.
 
+At this point, the remaining major step is migration and legacy deletion rather
+than another architecture phase. The proving/runtime bootstrap is now available
+on the rewritten path for the core-first scope.
+
 ---
 
 ## 11. Recommended Immediate Next Steps
@@ -704,16 +796,20 @@ The next concrete sequence should be:
 2. freeze the effect taxonomy and callable policy:
    - world effects,
    - proof-observable effects,
-   - `may_fail`,
+   - `semantic_may_fail`,
+   - `host_contract_sensitive`,
+   - callable-policy summaries,
    - `fn` / `query` / `tx` policy
-3. define exact Rust data structures for canonical IR
-4. define exact executor and journal semantics for canonical IR
-5. define exact Rust data structures for MIR
-6. define exact Rust data structures for HIR
-7. implement V1 parser -> HIR
-8. implement HIR -> MIR for the V1 subset
-9. implement MIR -> canonical IR for the V1 subset
-10. migrate executor + journal for the new canonical IR
+3. define exact Rust data structures for canonical IR and `ValidatedProgram`
+4. define runtime-owned `RuntimeProgram { execution, proof }`
+5. define exact executor semantics against `ResolvedExecutionProgram`
+6. define exact runtime proof reduction against `ResolvedProofProgram`
+7. define exact Rust data structures for MIR
+8. define exact Rust data structures for HIR
+9. implement V1 parser -> HIR
+10. implement HIR -> MIR for the V1 subset
+11. implement MIR canonicalization for the V1 subset
+12. implement MIR -> canonical IR for the V1 subset
 
 This is the shortest path from architecture to a running rewritten compiler.
 

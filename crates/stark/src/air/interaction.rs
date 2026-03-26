@@ -72,8 +72,8 @@ pub mod core_buses {
     pub const SMT_LEAF_DIGEST: BusId = BusId(15);
     /// SmtColPathChip → SmtTablePathChip (per-table SMT roots).
     pub const SMT_TABLE_ROOT: BusId = BusId(16);
-    /// ExecutionChip → PrecompileChip (precompile I/O commitment).
-    pub const PRECOMPILE: BusId = BusId(17);
+    /// ExecutionChip → CapabilityTranscriptChip (capability I/O commitment).
+    pub const CAPABILITY_TRANSCRIPT: BusId = BusId(17);
     /// Execution → PropertyVerifier (cross-tier property query results).
     pub const PROPERTY_READ: BusId = BusId(18);
     /// MetaShard → scheme-owned property chips (old column is empty).
@@ -94,7 +94,7 @@ pub mod core_buses {
         COALESCED_WRITE,
         SMT_LEAF_DIGEST,
         SMT_TABLE_ROOT,
-        PRECOMPILE,
+        CAPABILITY_TRANSCRIPT,
         PROPERTY_READ,
         EMPTY_OLD_COLUMN,
         SSMC_OLD_ENTRY,
@@ -114,7 +114,7 @@ pub mod core_buses {
             14 => Some("CoalescedWrite"),
             15 => Some("SmtLeafDigest"),
             16 => Some("SmtTableRoot"),
-            17 => Some("Precompile"),
+            17 => Some("CapabilityTranscript"),
             18 => Some("PropertyRead"),
             19 => Some("EmptyOldColumn"),
             20 => Some("SsmcOldEntry"),

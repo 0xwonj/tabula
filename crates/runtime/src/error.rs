@@ -8,14 +8,6 @@ pub type RuntimeResult<T> = Result<T, RuntimeError>;
 /// Errors arising from batch execution in the runtime pipeline.
 #[derive(Debug, Error)]
 pub enum RuntimeError {
-    /// State input is invalid or cannot be normalized.
-    #[error("invalid state: {0}")]
-    InvalidState(#[source] tabula_artifact::ArtifactError),
-
-    /// Batch input is invalid or cannot be converted.
-    #[error("invalid batch: {0}")]
-    InvalidBatch(#[source] tabula_artifact::ArtifactError),
-
     /// Execution failed during batch processing.
     #[error("execution failed: {source}")]
     Execution {
@@ -67,7 +59,7 @@ pub enum RuntimeError {
     TraceBuild(#[source] tabula_core::error::TabulaError),
 
     /// Canonical execution statement construction failed.
-    #[cfg(feature = "prove")]
+    #[cfg(feature = "verify")]
     #[error("statement build: {detail}")]
     StatementBuild {
         /// Description of the statement construction failure.

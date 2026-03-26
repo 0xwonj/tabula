@@ -3,8 +3,10 @@ use std::collections::BTreeSet;
 #[cfg(feature = "verify")]
 use std::sync::Arc;
 use tabula_core::error::TabulaError;
-pub use tabula_core::{ColId, ColumnLayoutKind, Digest, RootProfileId, SchemeId, TableId};
-pub use tabula_ir::{PropertyQuery, PropertyQueryKind};
+pub use tabula_core::{
+    ColId, ColumnLayoutKind, Digest, PropertyQueryKind, RootProfileId, SchemeId, TableId,
+};
+pub use tabula_ir::StatePropertyQuery;
 #[cfg(feature = "verify")]
 use tabula_profile::{ResolvedColumnProfileRef, VerifierDigestFormat};
 #[cfg(feature = "verify")]
@@ -31,14 +33,14 @@ pub trait RuntimeColumn: Send + Sync {
     /// Resolve a structural property query over one committed column snapshot.
     fn resolve_property(
         &self,
-        query: &PropertyQuery,
+        query: &StatePropertyQuery,
         state: &[TypedColumnEntry],
     ) -> Result<TypedPropertyQueryResult, TabulaError> {
         let _ = state;
         Err(TabulaError::InvalidIr(format!(
             "column scheme '{}' does not support property query {:?}",
             self.name(),
-            query.kind(),
+            query,
         )))
     }
 }

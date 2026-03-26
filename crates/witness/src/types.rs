@@ -1,7 +1,8 @@
-//! Logical shared input types for runtime-owned proof preparation.
+//! Logical shared input types for witness-owned proof preparation.
 
 use tabula_core::{CellKey, EncodingProfileId, LogicalTime, RowKey, TypeId};
-use tabula_ir::PropertyQuery;
+use tabula_ir as ir;
+use tabula_ir::StatePropertyQuery;
 use tabula_types::{TypedPropertyQueryResult, TypedValue};
 
 /// Logical committed-state entry for one row of a committed column.
@@ -58,9 +59,41 @@ pub struct ColumnWrite {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PropertyReadClaim {
     /// Original structural query.
-    pub query: PropertyQuery,
+    pub query: StatePropertyQuery,
     /// Execution result claimed for this query.
     pub result: TypedPropertyQueryResult,
+}
+
+/// Relation proof claim kind extracted from execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelationClaimKind {
+    /// `assert relation ...`
+    Assert,
+    /// `eval relation ...`
+    Eval,
+}
+
+/// Logical relation claim extracted from execution for proof preparation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RelationClaim {
+    /// Relation identifier.
+    pub relation: ir::RelationId,
+    /// Proof-visible relation claim kind.
+    pub kind: RelationClaimKind,
+    /// Relation input tuple in execution order.
+    pub inputs: Vec<TypedValue>,
+    /// Canonical transcript digest for the input tuple.
+    pub input_digest: [u32; 8],
+    /// Relation output tuple in execution order.
+    pub outputs: Vec<TypedValue>,
+    /// Canonical transcript digest for the output tuple.
+    pub output_digest: [u32; 8],
+    /// Transaction index within the batch.
+    pub tx_index: u32,
+    /// Effect ordinal within the transaction.
+    pub effect_ordinal_in_tx: u32,
+    /// Canonical op index within the entry body.
+    pub op_index: usize,
 }
 
 /// Sealed per-column profile/runtime identity used by proof preparation.

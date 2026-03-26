@@ -19,7 +19,7 @@ pub struct ContractMetadataEnvelope {
     /// Contract schema version.
     pub contract_schema_version: u32,
     /// Binding registry version.
-    pub binding_version: u32,
+    pub binding_registry_version: u32,
     /// Execution statement schema version.
     pub statement_schema_version: u32,
     /// Verifier profile version.
@@ -36,7 +36,7 @@ impl ContractMetadataEnvelope {
     /// 2. serialization version (u8)
     /// 3. `profile_hash` (32 bytes)
     /// 4. `contract_schema_version` (u32 big-endian)
-    /// 5. `binding_version` (u32 big-endian)
+    /// 5. `binding_registry_version` (u32 big-endian)
     /// 6. `statement_schema_version` (u32 big-endian)
     /// 7. `verifier_profile_version` (u32 big-endian)
     /// 8. semantic flag (u8; 0/1)
@@ -47,7 +47,7 @@ impl ContractMetadataEnvelope {
         out.push(METADATA_SERIALIZATION_VERSION);
         out.extend_from_slice(&self.profile_hash);
         out.extend_from_slice(&self.contract_schema_version.to_be_bytes());
-        out.extend_from_slice(&self.binding_version.to_be_bytes());
+        out.extend_from_slice(&self.binding_registry_version.to_be_bytes());
         out.extend_from_slice(&self.statement_schema_version.to_be_bytes());
         out.extend_from_slice(&self.verifier_profile_version.to_be_bytes());
         match self.semantic_hash_stub {

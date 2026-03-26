@@ -2,10 +2,12 @@
 
 use std::collections::BTreeMap;
 
+use borsh::{BorshDeserialize, BorshSerialize};
+use serde::{Deserialize, Serialize};
 use tabula_core::{Digest, ProgramBudgets};
 
-use crate::BINDING_VERSION_V1;
-use crate::policy::ContractValidationError;
+use crate::BINDING_REGISTRY_VERSION;
+use crate::compatibility::ContractValidationError;
 
 /// Public inputs for the ApplyBatch proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +27,7 @@ pub struct PublicInputs {
 }
 
 /// Canonical binding for one sealed program artifact plus contract metadata.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct ProgramBinding {
     program_hash: String,
     metadata_hash: String,
@@ -109,6 +111,8 @@ pub struct DeferredBinding {
 pub enum BindingStatus {
     /// Public input is bound by AIR.
     BoundInAir,
+    /// Public input is bound by the higher-level semantic statement digest in the transcript.
+    BoundInTranscript,
     /// Public input is intentionally deferred with governance metadata.
     Deferred(DeferredBinding),
 }
@@ -149,54 +153,39 @@ impl BindingRegistry {
     }
 }
 
-/// Default binding registry for schema v1.
-pub fn binding_registry_v1() -> BindingRegistry {
+/// Default binding registry for the current contract schema.
+pub fn binding_registry() -> BindingRegistry {
     BindingRegistry::new(
-        BINDING_VERSION_V1,
+        BINDING_REGISTRY_VERSION,
         [
             (PublicInputField::OldStateRoot, BindingStatus::BoundInAir),
             (PublicInputField::NewStateRoot, BindingStatus::BoundInAir),
             (
                 PublicInputField::ProgramRoot,
-                BindingStatus::Deferred(DeferredBinding {
-                    reason: DeferredReasonCode::ProgramRootDeferred,
-                    owner: "proof",
-                    milestone: "M12",
-                    expiry: Some("2026-06-30"),
-                }),
+                BindingStatus::BoundInTranscript,
             ),
             (
                 PublicInputField::AppliedTxDigest,
-                BindingStatus::Deferred(DeferredBinding {
-                    reason: DeferredReasonCode::AppliedTxDigestDeferred,
-                    owner: "proof",
-                    milestone: "M12",
-                    expiry: Some("2026-06-30"),
-                }),
+                BindingStatus::BoundInTranscript,
             ),
             (
                 PublicInputField::StaticTableRoot,
-                BindingStatus::Deferred(DeferredBinding {
-                    reason: DeferredReasonCode::StaticTableRootDeferred,
-                    owner: "proof",
-                    milestone: "M12",
-                    expiry: Some("2026-06-30"),
-                }),
+                BindingStatus::BoundInTranscript,
             ),
             (
                 PublicInputField::Budgets,
                 BindingStatus::Deferred(DeferredBinding {
                     reason: DeferredReasonCode::BudgetsDeferred,
                     owner: "proof",
-                    milestone: "M12",
-                    expiry: Some("2026-06-30"),
+                    milestone: "M13",
+                    expiry: Some("2026-09-30"),
                 }),
             ),
         ],
     )
 }
 
-/// Return C10/C11 v2 tuple field names for snapshot tests.
+/// Return access-bus tuple field names for snapshot tests.
 pub fn access_bus_field_names(value_width: usize) -> Vec<String> {
     let mut names = vec![
         "table_id".to_string(),
@@ -211,4 +200,41 @@ pub fn access_bus_field_names(value_width: usize) -> Vec<String> {
     }
     names.push("is_null".to_string());
     names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binding_registry_is_complete_and_marks_transcript_fields() {
+        let registry = binding_registry();
+        registry
+            .validate_completeness()
+            .expect("binding registry should be complete");
+        assert_eq!(
+            registry.bindings.get(&PublicInputField::OldStateRoot),
+            Some(&BindingStatus::BoundInAir)
+        );
+        assert_eq!(
+            registry.bindings.get(&PublicInputField::NewStateRoot),
+            Some(&BindingStatus::BoundInAir)
+        );
+        assert_eq!(
+            registry.bindings.get(&PublicInputField::ProgramRoot),
+            Some(&BindingStatus::BoundInTranscript)
+        );
+        assert_eq!(
+            registry.bindings.get(&PublicInputField::AppliedTxDigest),
+            Some(&BindingStatus::BoundInTranscript)
+        );
+        assert_eq!(
+            registry.bindings.get(&PublicInputField::StaticTableRoot),
+            Some(&BindingStatus::BoundInTranscript)
+        );
+        assert!(matches!(
+            registry.bindings.get(&PublicInputField::Budgets),
+            Some(BindingStatus::Deferred(_))
+        ));
+    }
 }

@@ -6,11 +6,13 @@
 #[cfg(feature = "test-utils")]
 pub mod test_utils;
 
+pub mod capability_transcript;
 pub mod execution;
 pub mod ir_hash;
 pub mod poseidon;
-pub mod precompile_transcript;
 pub mod range_check;
+pub mod relation_table;
+pub mod relation_transcript;
 pub mod shards;
 pub mod smt_path;
 pub mod static_table;

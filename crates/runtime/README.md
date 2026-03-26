@@ -1,8 +1,21 @@
 # tabula-runtime
 
-`tabula-runtime` is the default integration surface for Tabula. It sits between
-sealed program semantics and the lower execution/proof backends, and it owns
-the policy for turning a registered program into concrete runtime resources.
+`tabula-runtime` is the low-level native orchestration surface for Tabula. It
+sits between sealed program semantics and the lower execution/proof backends,
+and it owns the policy for turning a registered program into concrete runtime
+resources.
+
+For normal application embedding, the default product-facing surface is now
+`tabula-sdk`. `tabula-runtime` remains the expert-oriented runtime layer below
+that SDK boundary.
+
+The rewritten path is now explicitly split into:
+
+- `tabula_runtime::semantics` for semantic execution-journal reduction and
+  semantic public-statement construction
+- crate-root `tabula_runtime::{RuntimeBuilder, TabulaRuntime, Verifier,
+  StateSnapshot, ProofStatement, ...}` for native runtime setup,
+  execution, proving, and verification orchestration
 
 ## Role
 
@@ -18,9 +31,14 @@ policy-and-orchestration layer above execution and backend proving.
 
 - the default caller-facing execution and proof orchestration surface
 - policy for turning a sealed program into runtime resources
-- scheme, precompile, and proof-side extension wiring at the runtime boundary
+- runtime registries and scheme backends at the runtime boundary, while
+  capability execution/proof contracts are consumed from sealed compiler data
 - binding between sealed program expectations and backend verification inputs
 - preparation of backend-ready inputs from already registered semantics
+- native runtime/proving setup from
+  `tabula_compiler::RegisteredProgram`
+- native proof statements whose digest is bound into the machine
+  transcript
 
 ## Does Not Own
 
@@ -48,6 +66,11 @@ policy-and-orchestration layer above execution and backend proving.
   verification belong here, not in the machine layer.
 - Convenience surfaces may evolve, but this crate should remain the default
   integration boundary for applications.
+- AIR public values stay minimal: only old/new state roots belong in the AIR
+  statement. Richer native semantic proof meaning belongs in the runtime
+  `ProofStatement` digest bound through the transcript.
+- Query execution is supported on the rewritten path, but query proving remains
+  intentionally absent.
 
 ## Dependency Rules
 
@@ -79,6 +102,8 @@ Preserve the behaviors that prove this crate still owns the runtime boundary:
 - sealed-program requirements are checked before backend proving
 - binding mismatches are rejected at the runtime/verifier boundary
 - default integration paths continue to cover execution and proof workflows
+- native proving stays legacy-bridge free
+- semantic public statements remain public-context plus event-digest only
 
 ## Related Crates
 

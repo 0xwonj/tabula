@@ -136,6 +136,16 @@ impl SemanticRegistry {
             .ok_or(ProfileError::MissingDefaultEncoding(type_id))
     }
 
+    /// Snapshot the canonical default-encoding selection map in deterministic
+    /// type-id order.
+    #[must_use]
+    pub fn default_encoding_entries(&self) -> Vec<(TypeId, EncodingProfileId)> {
+        self.default_encoding_by_type
+            .iter()
+            .map(|(type_id, encoding_profile_id)| (*type_id, *encoding_profile_id))
+            .collect()
+    }
+
     /// Resolve the default scheme profile for one `(scheme family, encoding)`
     /// pair.
     pub fn resolve_default_scheme_profile(

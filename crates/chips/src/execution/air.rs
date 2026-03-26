@@ -13,6 +13,7 @@
 //! 10. Transaction index monotonicity
 //! 11. Operand-to-slot linkage (delegated to `linkage`)
 //! 12. Empty column flag: is_empty_col → op_read ∧ access_is_null
+//! 13. Relation tuple binding and digest relay.
 
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
@@ -70,8 +71,9 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         super::ops::logic::constrain_and(builder, local, is_real.clone());
         super::ops::logic::constrain_or(builder, local, is_real.clone());
         super::ops::hash::constrain_hash(builder, local, is_real.clone());
-        super::ops::precompile::constrain_precompile(builder, local, is_real.clone());
+        super::ops::capability_call::constrain_capability_call(builder, local, is_real.clone());
         super::ops::property_read::constrain_property_read(builder, local, is_real.clone());
+        super::ops::relation::constrain_relation_table(builder, local, is_real.clone());
         constrain_lookup(builder, local, is_real.clone());
         constrain_tx_index_monotonicity(builder, local, next, both_real);
 
@@ -88,9 +90,12 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         super::buses::send_empty_col_read(builder, local);
         super::buses::send_range_checks(builder, local);
         super::buses::send_hash_relay(builder, local);
-        super::buses::send_precompile(builder, local);
+        super::buses::send_capability_call(builder, local);
         super::buses::send_property_read(builder, local);
         super::buses::send_static_table_lookup(builder, local);
+        super::buses::send_relation_tuples(builder, local);
+        super::buses::receive_relation_digests(builder, local);
+        super::buses::send_relation_table(builder, local);
     }
 }
 
@@ -114,8 +119,9 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder.assert_bool(local.op_select);
     builder.assert_bool(local.op_hash);
     builder.assert_bool(local.op_lookup);
-    builder.assert_bool(local.op_precompile);
+    builder.assert_bool(local.op_capability_call);
     builder.assert_bool(local.op_property_read);
+    builder.assert_bool(local.op_relation_table);
 
     // Arith sub-selectors
     builder.assert_bool(local.arith_is_sub);
@@ -129,6 +135,7 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder.assert_bool(local.cond_val);
     builder.assert_bool(local.carry0);
     builder.assert_bool(local.carry1);
+    builder.assert_bool(local.relation_is_eval);
 
     // Cmp sub-selectors and witnesses
     builder.assert_bool(local.cmp.is_eq);
@@ -144,10 +151,16 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     for s in 0..MAX_SLOTS {
         builder.assert_bool(local.slot_is_null[s]);
         builder.assert_bool(local.slot_written[s]);
+        builder.assert_bool(local.relation_input_used[s]);
+        builder.assert_bool(local.relation_output_used[s]);
+        for idx in 0..MAX_SLOTS {
+            builder.assert_bool(local.relation_input_sel[s][idx]);
+            builder.assert_bool(local.relation_output_sel[s][idx]);
+        }
     }
 }
 
-/// 3. Opcode exactly-one: sum of 14 selectors = 1 when is_real.
+/// 3. Opcode exactly-one: sum of opcode selectors = 1 when is_real.
 fn constrain_opcode_one_hot<AB: AirBuilder, const W: usize>(
     builder: &mut AB,
     local: &ExecutionCols<AB::Var, W>,
@@ -165,8 +178,9 @@ fn constrain_opcode_one_hot<AB: AirBuilder, const W: usize>(
         + local.op_select.into()
         + local.op_hash.into()
         + local.op_lookup.into()
-        + local.op_precompile.into()
-        + local.op_property_read.into();
+        + local.op_capability_call.into()
+        + local.op_property_read.into()
+        + local.op_relation_table.into();
 
     builder.assert_zero(is_real * (opcode_sum - AB::Expr::ONE));
 }
@@ -290,13 +304,19 @@ fn constrain_slot_written_count<AB: AirBuilder, const W: usize>(
     is_real: AB::Expr,
 ) {
     let written_sum: AB::Expr = (0..MAX_SLOTS).map(|s| local.slot_written[s].into()).sum();
+    let relation_output_count: AB::Expr = (0..MAX_SLOTS)
+        .map(|idx| local.relation_output_used[idx].into())
+        .sum();
 
-    let default_expected: AB::Expr =
-        AB::Expr::ONE - local.op_write.into() - local.op_assert.into() - local.op_precompile.into()
-            + local.op_divmod.into()
-            + local.op_property_read.into() * AB::Expr::TWO;
-    let expected =
-        default_expected + local.op_precompile.into() * local.precompile_output_count.into();
+    let default_expected: AB::Expr = AB::Expr::ONE
+        - local.op_write.into()
+        - local.op_assert.into()
+        - local.op_capability_call.into()
+        + local.op_divmod.into()
+        + local.op_property_read.into() * (AB::Expr::ONE + AB::Expr::ONE);
+    let expected = default_expected
+        + local.op_capability_call.into() * local.capability_output_count.into()
+        + local.op_relation_table.into() * (relation_output_count - AB::Expr::ONE);
 
     builder.assert_zero(is_real * (written_sum - expected));
 }

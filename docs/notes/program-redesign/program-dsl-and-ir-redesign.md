@@ -168,7 +168,7 @@ one possible proving realization of a relation, not the user-facing concept.
 
 ### 4.4 Capabilities
 
-Algorithmic computation capabilities such as hashes, precompiles, and other
+Algorithmic computation capabilities such as hashes, capabilities, and other
 typed nontrivial operations.
 
 These are neither state nor relation. They are operational capabilities.
@@ -425,7 +425,7 @@ the start.
 Relations capture proof-native semantics that should not be modeled as:
 
 - mutable state,
-- generic precompile calls,
+- generic capability calls,
 - or low-level table reads.
 
 Typical examples:

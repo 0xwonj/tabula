@@ -1,10 +1,10 @@
 # Program MIR Contract and Data Model
 
-> **Status**: Proposed implementation contract
-> **Date**: 2026-03-24
-> **Scope**: Defines the exact MIR contract that should be used as the
-> immediate compiler-middle-end target, together with the recommended Rust data
-> model and the MIR -> canonical IR lowering contract.
+> **Status**: Implemented implementation contract
+> **Date**: 2026-03-25
+> **Scope**: Defines the exact MIR contract used as Tabula's compiler-owned
+> middle-end, together with the exact Rust data model, validation invariants,
+> effect summary model, and MIR -> canonical IR lowering contract.
 > **Related**: [program-mir-design.md](program-mir-design.md),
 > [program-hir-contract-and-data-model.md](program-hir-contract-and-data-model.md),
 > [program-canonical-ir-contract-and-data-model.md](program-canonical-ir-contract-and-data-model.md),
@@ -17,109 +17,100 @@
 
 ## 1. Why This Note Exists
 
-The MIR architecture note explains:
+MIR is now the compiler's exact target between HIR and canonical IR.
 
-- why MIR exists,
-- what MIR is responsible for,
-- and how MIR differs from HIR and canonical IR.
+That means this note must answer concrete implementation questions:
 
-That is no longer enough.
+- what Rust types represent MIR
+- what is allowed to remain in MIR
+- what must disappear before canonical IR
+- what MIR analyses are authoritative
+- what validation MIR performs
+- and exactly how MIR lowers into canonical IR
 
-The rewrite now needs an exact middle-end contract that can answer:
-
-- what Rust types should represent MIR,
-- what exactly is allowed to remain in MIR,
-- what exactly must disappear before canonical IR,
-- and how MIR lowers into the canonical executor/prover contract.
-
-This note freezes that exact contract.
+This note is therefore the implementation authority for `compiler::mir`.
 
 ---
 
-## 2. What This Note Assumes Is Already Fixed
+## 2. Fixed Assumptions
 
 This note does not reopen the following.
 
-- Tabula is a closed-world `program` language.
-- The compiler layering is `AST -> HIR -> MIR -> canonical IR`.
-- Canonical IR is already defined as:
+- compiler layering is `AST -> HIR -> MIR -> canonical IR`
+- canonical IR is already fixed as:
   - flat
+  - typed
   - SSA-disciplined
   - CFG-free
-  - executor/prover-facing
-- `Lookup` is gone and `Relation` is first-class.
-- The typing/effect system distinguishes:
-  - world effects
-  - proof-observable semantic effects
-  - `MayFail`
-- The seam decisions are already fixed:
-  - builtin blessed `Hash`
-  - public-only statement-bound initial `context`
-  - digest-only initial event binding
-  - separate future query-proof mode
-  - guards only on effectful or checked ops
+  - portable semantic contract
+- runtime owns:
+  - `RuntimeProgram { execution, proof }`
+  - `ResolvedExecutionProgram`
+  - `ResolvedProofProgram`
+- executor consumes resolved execution contracts, not raw compiler MIR
+- builtin `Hash` is a pure total value op, not a journaled effect family
+- capability semantics are fixed:
+  - `Checked` capability failure is semantic failure
+  - `Total` capability failure is host/runtime contract violation
 
-MIR is therefore designed **against** fixed canonical IR policy, not alongside
-it.
+MIR is therefore designed against a closed lower boundary.
 
 ---
 
-## 3. MIR's Exact Role
+## 3. Exact MIR Role
 
-The exact role of MIR is:
+MIR is:
 
 - the last compiler-owned representation
-- the first fully resolved representation
-- the first effect-explicit representation
-- the layer that still preserves structured control
-- and the layer that owns normalization before canonical flattening
+- the first fully normalized compiler representation
+- the first layer with an explicit verification/analysis boundary
+- the last layer that keeps structured control
+- the layer where function inlining and control normalization happen
 
-It should therefore be:
+MIR is not:
 
-- richer than canonical IR
-- poorer than HIR
-- strict enough to support effect checking and legality
-- but still expressive enough to represent:
-  - `fn`
-  - `query`
-  - `tx`
-  - `if`
-  - `match`
+- source-shaped like HIR
+- proof-shaped like canonical IR
+- CFG-SSA
+- a second executor IR
 
-without inventing CFG.
+The exact design target is:
 
----
-
-## 4. Naming Recommendation
-
-Within the eventual `mir` module, the preferred type names are:
-
-- `mir::Program`
-- `mir::Callable`
-- `mir::Body`
-- `mir::Op`
-- `mir::Region`
-
-not:
-
-- `MirProgram`
-- `MirBody`
-- `MirOp`
-
-Layer identity should come from the module path, not from type-name suffixes.
-
-This keeps naming aligned across:
-
-- `ast::Program`
-- `hir::Program`
-- `mir::Program`
-- `ir::Program`
+- **single-assignment ANF**
+- **region-based control**
+- **single-block regions**
+- **explicit region results**
+- **no CFG**
+- **no phi**
+- **no guards**
 
 ---
 
-## 5. Exact MIR Root Shape
+## 4. Current MIR Scope
 
-The recommended exact MIR root is:
+The exact MIR contract now covers the rewritten core and boundary surface that
+the compiler executes end-to-end today.
+
+Included:
+
+- `Function`
+- `Query`
+- `Tx`
+- `If`
+- `Match`
+
+Not in the exact MIR contract:
+
+- `For`
+- `Predicate`
+- `Invariant`
+
+Those remain architecture-level or HIR-level reserved vocabulary for later
+phases. MIR should not carry disabled surface futures in its exact contract.
+
+---
+
+## 5. Exact Rust Root Shape
 
 ```rust
 pub struct Program {
@@ -132,35 +123,7 @@ pub struct Program {
     pub event_manifest: EventManifest,
     pub callables: Vec<Callable>,
 }
-```
 
-### 5.1 Why MIR keeps the same top-level semantic universe
-
-MIR should still carry:
-
-- state schema
-- context schema
-- constant pool
-- relation manifest
-- capability manifest
-- event manifest
-
-because MIR legality depends on all of them.
-
-Examples:
-
-- query legality depends on capability metadata
-- relation modes depend on relation signatures
-- emit legality depends on event descriptors
-- state accesses depend on table/field schemas
-
-### 5.2 Why one `Callable` set is better than separate vectors
-
-MIR should not split top-level callables into three disconnected vectors.
-
-Use:
-
-```rust
 pub struct Callable {
     pub id: CallableId,
     pub symbol: String,
@@ -168,13 +131,8 @@ pub struct Callable {
     pub params: Vec<ParamDecl>,
     pub returns: Vec<TypeRef>,
     pub body: Body,
-    pub effects: EffectSummary,
 }
-```
 
-with:
-
-```rust
 pub enum CallableKind {
     Function,
     Query,
@@ -182,63 +140,62 @@ pub enum CallableKind {
 }
 ```
 
-This is better because:
+This is the correct root shape because:
 
-- `Function`, `Query`, and `Tx` are all bodies with parameters and returns
-- effect policy can be checked uniformly
-- inlining logic can refer to one callable universe
-- diagnostics can still branch on `CallableKind`
+- MIR sees the same semantic universe as canonical IR
+- callable graph reasoning is simpler with one `Vec<Callable>`
+- inlining and query legality are both defined over one callable universe
 
-Unlike canonical IR, MIR still needs `Function`.
+Canonical IR removes `Function`. MIR does not.
 
 ---
 
-## 6. Exact MIR Body Shape
-
-MIR bodies should remain structured.
+## 6. Exact Body and Region Shape
 
 ```rust
 pub struct Body {
     pub locals: Vec<LocalDecl>,
     pub region: Region,
 }
-```
 
-The root region is:
+pub struct LocalDecl {
+    pub id: LocalId,
+    pub symbol: Option<String>,
+    pub ty: TypeRef,
+}
 
-```rust
 pub struct Region {
     pub ops: Vec<Op>,
+    pub terminator: Terminator,
+}
+
+pub enum Terminator {
+    Yield { values: ValueTupleRef },
+    Return { values: ValueTupleRef },
 }
 ```
 
-### 6.1 Why `Region` exists
+The exact control rule is:
 
-MIR needs a reusable structured container for:
+- root callable region must terminate with `Return`
+- nested `if`/`match` regions must terminate with `Yield`
 
-- root bodies
-- `if` arms
-- `match` arms
-- future bounded loop bodies
+`Return` and `Yield` are terminators, not ordinary ops.
 
-This is one of the strongest places to absorb MLIR's region thinking without
-adopting MLIR itself.
+This is the cleanest way to combine:
 
-### 6.2 Why MIR should not use CFG blocks
+- ANF local sequencing
+- region-based control
+- explicit region results
+- value-producing branches
 
-MIR may be richer than canonical IR, but it still should not become:
-
-- arbitrary CFG
-- block arguments everywhere
-- dominance-sensitive machine IR
-
-Structured regions are enough for the intended language.
+without inventing CFG.
 
 ---
 
-## 7. Value Model
+## 7. Exact Value Model
 
-MIR should already use resolved value references.
+MIR already uses resolved value references.
 
 ```rust
 pub enum ValueRef {
@@ -250,257 +207,134 @@ pub enum ValueRef {
 }
 ```
 
-This intentionally matches the canonical value-source model closely.
+This intentionally mirrors canonical IR's value-source model. MIR differs from
+canonical IR mainly in:
 
-That is good.
+- `Function`
+- `CallFunction`
+- structured control
+- region results
+- explicit compiler analysis results
 
-MIR should differ from canonical IR mainly in:
+`LocalId` is single-assignment.
 
-- control structure
-- callable structure
-- effect summaries
-- and remaining compiler-owned normalization work
-
-not by inventing a different value world.
-
-### 7.1 Local declarations
-
-```rust
-pub struct LocalDecl {
-    pub id: LocalId,
-    pub symbol: Option<String>,
-    pub ty: TypeRef,
-}
-```
-
-Unlike canonical IR, MIR may still preserve optional local symbols because:
-
-- diagnostics
-- debugging
-- and source mapping
-
-still matter here.
+- a local is defined exactly once
+- re-assignment is not allowed
+- branch-produced values flow through region `Yield` results and control-op
+  destination locals
 
 ---
 
-## 8. Exact MIR Op Taxonomy
+## 8. Exact Op Taxonomy
 
-The recommended exact MIR op set is:
+Pure value computation is grouped under `BindValue`.
 
 ```rust
 pub enum Op {
-    // Pure total value binding
-    BindValue {
-        dst: LocalId,
-        value: ValueOp,
-    },
+    BindValue { dst: LocalId, value: ValueOp },
 
-    // Checked / partial
-    DivMod {
-        dst_q: LocalId,
-        dst_r: LocalId,
-        lhs: ValueRef,
-        rhs: ValueRef,
-    },
+    DivMod { dst_q: LocalId, dst_r: LocalId, lhs: ValueRef, rhs: ValueRef },
 
-    // State
-    ReadState {
-        dst_value: LocalId,
-        dst_present: LocalId,
-        table: TableId,
-        key: ValueTupleRef,
-        field: FieldId,
-    },
-    WriteState {
-        table: TableId,
-        key: ValueTupleRef,
-        field: FieldId,
-        value: ValueRef,
-    },
-    DeleteState {
-        table: TableId,
-        key: ValueTupleRef,
-        field: FieldId,
-    },
-    ReadStateProperty {
-        dsts: Vec<LocalId>,
-        table: TableId,
-        field: FieldId,
-        query: StatePropertyQuery,
-    },
+    ReadState { dst_value: LocalId, dst_present: LocalId, table: TableId, key: ValueTupleRef, field: FieldId },
+    WriteState { table: TableId, key: ValueTupleRef, field: FieldId, value: ValueRef },
+    DeleteState { table: TableId, key: ValueTupleRef, field: FieldId },
+    ReadStateProperty { dsts: Vec<LocalId>, table: TableId, field: FieldId, query: StatePropertyQuery },
 
-    // Assertions
-    Assert {
-        cond: ValueRef,
-    },
+    Assert { cond: ValueRef },
 
-    // Relations
-    AssertRelation {
-        relation: RelationId,
-        args: ValueTupleRef,
-    },
-    EvalRelation {
-        relation: RelationId,
-        inputs: ValueTupleRef,
-        dsts: Vec<LocalId>,
-    },
+    AssertRelation { relation: RelationId, args: ValueTupleRef },
+    EvalRelation { relation: RelationId, inputs: ValueTupleRef, dsts: Vec<LocalId> },
 
-    // Capabilities
-    CallCapability {
-        capability: CapabilityId,
-        inputs: ValueTupleRef,
-        dsts: Vec<LocalId>,
-    },
+    CallCapability { capability: CapabilityId, inputs: ValueTupleRef, dsts: Vec<LocalId> },
+    CallFunction { callee: CallableId, inputs: ValueTupleRef, dsts: Vec<LocalId> },
 
-    // Calls
-    CallFunction {
-        callee: CallableId,
-        inputs: ValueTupleRef,
-        dsts: Vec<LocalId>,
-    },
+    EmitEvent { event: EventId, args: ValueTupleRef },
 
-    // Output
-    EmitEvent {
-        event: EventId,
-        args: ValueTupleRef,
-    },
-
-    // Structured control
-    If {
-        cond: ValueRef,
-        then_region: Region,
-        else_region: Region,
-    },
-    Match {
-        scrutinee: ValueRef,
-        arms: Vec<MatchArm>,
-        default: Option<Region>,
-    },
-
-    // End
-    Return {
-        values: ValueTupleRef,
-    },
+    If { dsts: Vec<LocalId>, cond: ValueRef, then_region: Region, else_region: Region },
+    Match { dsts: Vec<LocalId>, scrutinee: ValueRef, arms: Vec<MatchArm>, default: Option<Region> },
 }
 ```
-
-### 8.1 Pure total value ops are nested under `BindValue`
-
-Pure total value production should stay compact.
 
 ```rust
 pub enum ValueOp {
-    Arith {
-        op: ArithOp,
-        lhs: ValueRef,
-        rhs: ValueRef,
-    },
-    Cmp {
-        op: CmpOp,
-        lhs: ValueRef,
-        rhs: ValueRef,
-    },
-    Not {
-        src: ValueRef,
-    },
-    And {
-        lhs: ValueRef,
-        rhs: ValueRef,
-    },
-    Or {
-        lhs: ValueRef,
-        rhs: ValueRef,
-    },
-    Select {
-        cond: ValueRef,
-        if_true: ValueRef,
-        if_false: ValueRef,
-    },
-    Hash {
-        family: HashFamily,
-        inputs: ValueTupleRef,
-    },
+    Arith { op: ArithOp, lhs: ValueRef, rhs: ValueRef },
+    Cmp { op: CmpOp, lhs: ValueRef, rhs: ValueRef },
+    Not { src: ValueRef },
+    And { lhs: ValueRef, rhs: ValueRef },
+    Or { lhs: ValueRef, rhs: ValueRef },
+    Select { cond: ValueRef, if_true: ValueRef, if_false: ValueRef },
+    Hash { family: HashFamily, inputs: ValueTupleRef },
 }
 ```
 
-This makes the pure-total subset visually and structurally separate from:
+Key points:
 
-- world effects
-- proof-observable effects
-- checked ops
-- structured control
+- `Hash` is a `ValueOp`
+- `Hash` is pure, total, and builtin
+- `Hash` is not an effect family
+- `CallFunction` exists only in MIR
+- `If` and `Match` are value-producing control ops
+- `dsts` may be empty, so effect-only branches are allowed
 
-### 8.2 Why `CallFunction` remains in MIR
-
-`Function` calls are still useful in MIR because MIR is where:
-
-- inlining
-- effect propagation
-- and body normalization
-
-should happen.
-
-`CallFunction` must not survive into canonical IR.
-
-### 8.3 Why `If` and `Match` remain first-class in MIR
-
-This is the key difference from canonical IR.
-
-MIR still needs:
-
-- structured control regions
-- region-local legality checks
-- branch-local effect reasoning
-
-before final predicated lowering.
-
----
-
-## 9. Match Arms
-
-The exact match-arm shape should be:
+Exact current match patterns are:
 
 ```rust
 pub struct MatchArm {
     pub pattern: MatchPattern,
     pub region: Region,
 }
-```
 
-The initial `MatchPattern` should stay intentionally small:
-
-```rust
 pub enum MatchPattern {
     Literal(LiteralValue),
     Wildcard,
 }
 ```
 
-That is enough for:
-
-- finite numeric dispatch
-- enum-tag-like lowering
-- later one-hot selector synthesis
-
-without reopening full pattern matching.
-
 ---
 
-## 10. Effect Summary Is Mandatory in MIR
+## 9. Exact MIR Analysis Shape
 
-MIR is the exact layer where callable effects become explicit.
+Raw MIR is structural only. Derived metadata such as effect summaries and call
+graphs live in the analyzed wrapper, not in `Callable` payload.
 
 ```rust
+pub struct VerifiedProgram(Program);
+
+pub struct AnalyzedProgram {
+    pub verified: VerifiedProgram,
+    pub analysis: ProgramAnalysis,
+}
+
+pub struct ProgramAnalysis {
+    pub effect_summaries: BTreeMap<CallableId, EffectSummary>,
+    pub failure_summaries: BTreeMap<CallableId, FailureSummary>,
+    pub policy_summaries: BTreeMap<CallableId, PolicySummary>,
+    pub context_demands: BTreeMap<CallableId, ContextDemandSummary>,
+    pub call_graph: BTreeMap<CallableId, BTreeSet<CallableId>>,
+}
+
 pub struct EffectSummary {
     pub world: WorldEffects,
     pub proof: ProofEffects,
-    pub may_fail: bool,
 }
-```
 
-Recommended exact shapes:
+pub struct FailureSummary {
+    pub semantic_may_fail: bool,
+    pub host_contract_sensitive: bool,
+}
 
-```rust
+pub struct PolicySummary {
+    pub uses_builtin_hash: bool,
+    pub uses_tx_only_capability: bool,
+    pub uses_query_safe_capability: bool,
+    pub uses_journaled_capability: bool,
+    pub uses_opaque_runtime_capability: bool,
+}
+
+pub struct ContextDemandSummary {
+    pub fields: BTreeSet<ContextFieldId>,
+}
+
 pub struct WorldEffects {
     pub state_read: bool,
     pub state_write: bool,
@@ -512,62 +346,95 @@ pub struct ProofEffects {
     pub relation_use: bool,
     pub state_property_read: bool,
     pub capability_call: bool,
-    pub builtin_hash: bool,
 }
 ```
 
-### 10.1 Why `builtin_hash` is here
+The meanings are:
 
-Even though builtin `Hash` is a pure value op, tracking it in MIR summary is
-still useful for:
+`EffectSummary`
 
-- compiler accounting
-- future optimization policy
-- query diagnostics
+- world mutation and read surface only
+- proof-observable operation families only
 
-It does **not** make `Hash` a world effect or guarded op.
+`FailureSummary`
 
-It simply records that the callable uses the blessed builtin family.
+- `semantic_may_fail`
+  - assertion failure
+  - `DivMod`
+  - relation assertion failure
+  - relation evaluation failure for current bindings
+  - checked capability failure
+- `host_contract_sensitive`
+  - total capability use
+  - means lowering targets a runtime/host contract, not semantic failure
 
-### 10.2 Why summary is attached to callables, not every op
+`PolicySummary`
 
-Per-op classification still exists in the op taxonomy.
+- `uses_builtin_hash`
+  - builtin hash use only
+  - analysis bit, not effect family
+- `uses_tx_only_capability`
+  - makes a callable graph query-illegal
+- `uses_query_safe_capability`
+  - records query-safe capability dependence without turning it into a world effect
+- `uses_journaled_capability` / `uses_opaque_runtime_capability`
+  - preserve capability proof-visibility facts as MIR policy metadata
 
-But the summary is attached to the callable because it supports:
+`ContextDemandSummary`
 
-- query legality
-- tx legality
-- inlining
-- effect propagation through `CallFunction`
+- records which public context fields a callable may read
+- is merged transitively across helper calls
+- stays separate from effects/policy/failure because context use is a demand,
+  not a world mutation or proof event family
+
+This split is intentional.
+
+- raw MIR owns structure
+- verification owns structural/type/region invariants
+- analysis owns effect summaries, call graph, and query policy checking
+
+This follows the intended MLIR-like pass separation:
+
+- structural IR payload
+- verifier
+- analyses
+- normalization
+- conversion
 
 ---
 
-## 11. Exact Callable Policy
+## 10. Capability Semantics in MIR
 
-### 11.1 `Function`
+Capability metadata is already semantic in MIR.
 
-Functions are:
+- `CapabilityQueryPolicy`
+  - contributes to query legality
+- `CapabilityTotality`
+  - contributes to failure summary
+- `CapabilityProofVisibility`
+  - visible as metadata
+  - but proof visibility filtering remains runtime-owned, not MIR-owned
 
-- internal
-- callable from other MIR functions, queries, and txs
-- not externally invokable
-- inlined or otherwise erased before canonical IR
+Exact totality interpretation:
 
-Functions may have broad effect summaries.
+- `Checked`
+  - contributes to `semantic_may_fail`
+- `Total`
+  - does not contribute to `semantic_may_fail`
+  - contributes to `host_contract_sensitive`
 
-They are not required to be pure.
+This matches the fixed lower boundary used by canonical IR, runtime, and
+executor.
 
-### 11.2 `Query`
+---
 
-Queries are:
+## 11. Query Legality
 
-- external
-- read-only
-- result-bearing
+MIR is where query legality becomes compiler-exact.
 
-Queries may use:
+Allowed in queries:
 
-- `BindValue`
+- pure value ops
 - `DivMod`
 - `ReadState`
 - `ReadStateProperty`
@@ -576,255 +443,168 @@ Queries may use:
 - `EvalRelation`
 - builtin `Hash`
 - query-safe `CallCapability`
-- `CallFunction` only if the callee's inferred effect summary is query-legal
+- `CallFunction` only if callee summary is query-legal
 - `If`
 - `Match`
-- `Return`
 
-Queries may not use:
+Forbidden in queries:
 
 - `WriteState`
 - `DeleteState`
 - `EmitEvent`
-- tx-only `CallCapability`
-- `CallFunction` to a function whose summary would violate query policy
+- tx-only capability
+- `CallFunction` whose reachable summary violates query policy
 
-### 11.3 `Tx`
+This check happens in MIR analysis after structural verification.
 
-Transactions may use any MIR op family that is otherwise valid.
+It is intentionally not encoded as a raw `EffectSummary` bit, because query
+legality depends on both effect and policy facts. The implemented analysis
+therefore derives query legality from:
 
-### 11.4 Why policy belongs in MIR validation
+- read-only `EffectSummary.world`
+- absence of `PolicySummary.uses_tx_only_capability`
+- verifier-enforced callable-category rules
 
-This policy should be enforced:
+This keeps query legality analysis-derived without pretending that callable
+policy is just another effect bit.
 
-- after name resolution
-- after effect inference
-- before canonical lowering
+- capability query policy
+- helper call graph reachability
+- callable kind
 
-MIR is the only layer where all three are present together.
+and not just on effect-family presence.
 
 ---
 
 ## 12. Lowering Contract to Canonical IR
 
-This is the most important part of the note.
+The following survive structurally into canonical IR:
 
-### 12.1 What must disappear before canonical IR
+- `BindValue(ValueOp::Arith/Cmp/Not/And/Or/Select/Hash)`
+- `DivMod`
+- state ops
+- relation ops
+- `CallCapability`
+- `EmitEvent`
 
-The following must not survive:
+The following must disappear before canonical IR:
 
 - `CallableKind::Function`
 - `CallFunction`
 - `If`
 - `Match`
-- optional local symbols
+- optional MIR local symbols
 
-### 12.2 What must survive almost unchanged
+### 12.1 Function elimination
 
-The following should lower almost directly:
+`CallFunction` is removed by MIR normalization via inlining.
 
-- `ReadState`
-- `WriteState`
-- `DeleteState`
-- `ReadStateProperty`
-- `Assert`
-- `AssertRelation`
-- `EvalRelation`
-- `CallCapability`
-- `EmitEvent`
-- `Return`
+- callee params are bound from caller inputs
+- callee locals are hygienically re-bound
+- analyzed MIR is re-verified and re-analyzed after inlining
+- canonical IR never sees a function call op
 
-### 12.3 Pure value lowering
+### 12.2 Control lowering
 
-`BindValue` lowers to one canonical value op per destination local.
-
-This is close to a structural rewrite:
-
-- `ValueOp::Arith` -> canonical `Arith`
-- `ValueOp::Cmp` -> canonical `Cmp`
-- `ValueOp::Not` -> canonical `Not`
-- `ValueOp::And` -> canonical `And`
-- `ValueOp::Or` -> canonical `Or`
-- `ValueOp::Select` -> canonical `Select`
-- `ValueOp::Hash` -> canonical `Hash`
-
-### 12.4 Checked-op lowering
-
-`DivMod` lowers directly to canonical `DivMod`.
-
-When later reached under control lowering:
-
-- canonical guard insertion happens there
-- not in ordinary straight-line MIR
-
-### 12.5 Function-call lowering
-
-`CallFunction` should be eliminated by:
-
-- inlining the callee body into the caller
-- propagating the callee effect summary upward
-- remapping locals and params hygienically
-
-The preferred policy is:
-
-- **no canonical function call op**
-
-### 12.6 `If` lowering
-
-`If` lowers by:
-
-1. lowering the condition to a boolean local
-2. synthesizing branch guards
-3. lowering each region recursively
-4. inserting guards onto the canonical guardable frontier
-5. merging branch-produced pure values with canonical `Select`
-
-This is where MIR becomes canonical predicated SSA.
-
-### 12.7 `Match` lowering
-
-`Match` lowers by:
-
-1. synthesizing one boolean selector per arm
-2. enforcing one-hot/exhaustive policy in lowering
-3. lowering each arm region recursively
-4. inserting guards on guardable/checked canonical ops
-5. merging produced pure values through nested `Select` or one-hot value
-   combination
-
-### 12.8 Why MIR should not pre-encode guards
-
-MIR should not itself carry canonical guards on ordinary ops.
-
-That would:
-
-- blur MIR and canonical IR
-- make MIR less structured
-- and force guard policy too early
+MIR does not carry guard fields.
 
 Instead:
 
-- MIR owns structured control
-- canonical IR owns guards
+- branch regions are recursively lowered
+- canonical guards are introduced only during MIR -> canonical lowering
+- only effectful or checked canonical ops receive guards
+- yielded branch values are merged with canonical `Select`
 
-That is the clean boundary.
+This is the correct split:
 
----
-
-## 13. Inlining Contract
-
-Inlining should be treated as part of MIR normalization, not a later optional
-optimization.
-
-### 13.1 Why it belongs here
-
-Canonical IR should not know about internal helpers.
-
-So function elimination is not an optimization detail. It is part of the
-required lowering contract.
-
-### 13.2 Minimal exact contract
-
-Inlining must:
-
-- allocate fresh locals for the callee body
-- map call inputs to callee params
-- append the callee region into the caller region
-- rewrite returned values into the call destination locals
-- compose effect summaries transitively
-
-### 13.3 What is allowed later
-
-The compiler may eventually choose between:
-
-- eager inlining
-- normalization into a call-free MIR
-- or a dedicated inlining pass
-
-But by the time MIR lowers to canonical IR:
-
-- no `Function`
-- no `CallFunction`
-
-may remain.
+- MIR owns structured control and region results
+- canonical IR owns guard insertion and flat predicated form
 
 ---
 
-## 14. Validation Invariants
+## 13. Validation Invariants
 
-MIR validation should enforce at least the following.
+The exact MIR validator must enforce:
 
-### 14.1 Structural
+- unique callable IDs
+- unique param IDs per callable
+- unique local IDs per callable
+- root region terminator is `Return`
+- nested region terminator is `Yield`
+- every local is assigned exactly once
+- every used local is defined earlier in region order
+- tx callables do not declare explicit returns
+- `If` result arity matches both arm yields
+- `Match` result arity matches all arm/default yields
+- literal match pattern type matches scrutinee
+- wildcard arm occurs at most once and only last
+- wildcard and default do not coexist
+- value-producing match must be exhaustive via wildcard or default
+- `CallFunction` target exists and is `CallableKind::Function`
+- tuple arities match table keys, relations, capabilities, and events
+- every MIR construct has a defined canonical lowering
 
-- every callable kind is well-formed
-- every region is well-formed
-- every `Return` occurs only in a valid terminal position within a region
-- `Match` arms use supported pattern forms
+The MIR analysis phase must additionally enforce:
 
-### 14.2 Reference resolution
-
-- all referenced IDs exist
-- all tables/fields exist in the state schema
-- all relation IDs exist
-- all capability IDs exist
-- all event IDs exist
-- all called functions exist and are `CallableKind::Function`
-
-### 14.3 Typing
-
-- all operands are type-correct
-- destination locals have the correct declared types
-- tuple arities match descriptor signatures
-- `HashFamily` input/output rules hold
-
-### 14.4 Effect and callable policy
-
-- every callable has an inferred `EffectSummary`
-- query bodies satisfy query legality
-- tx bodies satisfy tx policy
-- function bodies may be broad but are still summarized
-- capability usage obeys descriptor metadata
-
-### 14.5 Lowering readiness
-
-- no MIR construct exists without a defined canonical lowering
-- every `If` / `Match` is lowerable under the chosen guard frontier
-- no op requires canonical CFG
+- exact `EffectSummary` inference
+- call graph construction
+- query legality over reachable helpers and capability policy
 
 ---
 
-## 15. Recommended Implementation Order
+## 14. Exact Lowering Target
 
-After canonical IR exact data model is frozen, the next implementation work
-should be:
+MIR lowers to the already-frozen lower boundary:
 
-1. define exact MIR Rust data structures
-2. define and test `EffectSummary`
-3. implement MIR validation
-4. implement function inlining / call elimination
-5. implement MIR -> canonical IR lowering for straight-line V1
-6. only then extend MIR lowering to `If` / `Match`
+- canonical `Program`
+- canonical `ValidatedProgram`
+- runtime `RuntimeProgram { execution, proof }`
+- executor `ResolvedExecutionProgram`
+- runtime `ResolvedProofProgram`
 
-This sequencing matters.
+That means MIR should be designed for the current closed semantics of:
 
-If MIR exact lowering is not fixed before HIR grows richer, the middle-end will
-start improvising.
+- builtin hash
+- capability totality
+- runtime-owned proof visibility filtering
+- executor-owned semantic journaling
+
+MIR is not allowed to assume a looser or more abstract lower boundary than the
+one already implemented.
 
 ---
 
-## 16. What This Note Commits To
+## 15. Implementation Order
 
-This note is intended to settle the following.
+The intended implementation order is:
 
-- MIR should use one `Program` root with one `Callable` universe.
-- MIR should keep `Function`, `Query`, and `Tx` together as `CallableKind`.
-- MIR should keep structured control through explicit `Region`, `If`, and
-  `Match`.
-- MIR should carry explicit `EffectSummary`.
-- MIR should keep function calls only long enough to inline them away.
-- MIR should lower to canonical IR without introducing CFG.
-- Guards are introduced only during MIR -> canonical IR lowering, not earlier.
-- MIR validation owns callable legality and lowering readiness.
+1. exact MIR data model
+2. structural verifier
+3. MIR analysis
+4. `CallFunction` inlining
+5. re-verification and re-analysis
+6. straight-line MIR -> canonical IR lowering
+7. `If` lowering
+8. `Match` lowering
 
-With this note in place, the next natural design step is the exact HIR data
-model that feeds this MIR contract.
+That order keeps MIR grounded in the real canonical/runtime/executor target.
+
+---
+
+## 16. Final Recommendation
+
+The exact current MIR should remain:
+
+- core-only
+- single-assignment
+- ANF
+- region-based
+- non-CFG
+- analysis-backed
+- canonical-IR-targeting
+
+This is the smallest structure that is:
+
+- richer than HIR where compiler work actually needs help
+- richer than canonical IR where control normalization still matters
+- but not so rich that Tabula accidentally creates a second low-level IR.

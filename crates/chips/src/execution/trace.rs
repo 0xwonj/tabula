@@ -12,7 +12,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use tabula_gadgets::bool_fe;
 use tabula_stark::air::columns::borrow_cols_mut;
 
-use super::columns::{ExecutionCols, MAX_SLOTS, execution_width};
+use super::columns::{EXECUTION_STANDARD_VALUE_WIDTH, ExecutionCols, MAX_SLOTS, execution_width};
 use super::trace_witness::{
     populate_arith_carry, populate_cmp_witness, populate_divmod, populate_mul_carry,
     set_opcode_selectors,
@@ -66,10 +66,12 @@ pub enum Opcode {
     Hash,
     /// Static table lookup.
     Lookup,
-    /// Precompile call.
-    Precompile,
+    /// Capability call.
+    CapabilityCall,
     /// PropertyRead (structural query on committed state).
     PropertyRead,
+    /// Static canonical relation assertion / evaluation.
+    RelationProof,
 }
 
 /// Per-instruction witness record for trace generation.
@@ -119,16 +121,16 @@ pub struct InstructionRecord {
     pub hash_digest: Option<[KoalaBear; 8]>,
     /// For Read: whether the column being read is empty.
     pub is_empty_col: bool,
-    /// For Precompile: the precompile identifier.
-    pub precompile_id: Option<u16>,
-    /// For Precompile: instruction index within the tx body.
+    /// For a capability call: the capability transcript identifier.
+    pub capability_transcript_id: Option<u16>,
+    /// For a capability call: instruction index within the tx body.
     pub instruction_index: Option<u32>,
-    /// For Precompile: number of input values.
-    pub precompile_input_count: Option<u32>,
-    /// For Precompile: number of output values.
-    pub precompile_output_count: Option<u32>,
-    /// For Precompile: canonical event digest.
-    pub precompile_event_digest: Option<[KoalaBear; 8]>,
+    /// For a capability call: number of input values.
+    pub capability_input_count: Option<u32>,
+    /// For a capability call: number of output values.
+    pub capability_output_count: Option<u32>,
+    /// For a capability call: canonical event digest.
+    pub capability_event_digest: Option<[KoalaBear; 8]>,
     /// For PropertyRead: query type discriminant (PropertyQueryKind ordinal).
     pub property_query_type: Option<u8>,
     /// For PropertyRead: first canonical query operand (encoded `U64` limbs).
@@ -141,6 +143,30 @@ pub struct InstructionRecord {
     pub property_result_key: Vec<KoalaBear>,
     /// For PropertyRead: result null flag.
     pub property_result_is_null: bool,
+    /// For RelationProof: whether the op is `eval` (`true`) or `assert` (`false`).
+    pub relation_is_eval: bool,
+    /// For RelationProof: relation identifier.
+    pub relation_id: Option<u32>,
+    /// For RelationProof: canonical input tuple digest.
+    pub relation_input_digest: Option<[KoalaBear; 8]>,
+    /// For RelationProof: canonical output tuple digest.
+    pub relation_output_digest: Option<[KoalaBear; 8]>,
+    /// For RelationProof: prefix-boolean input tuple occupancy.
+    pub relation_input_used: [bool; MAX_SLOTS],
+    /// For RelationProof: input tuple type ids.
+    pub relation_input_type_ids: [u32; MAX_SLOTS],
+    /// For RelationProof: prefix-boolean output tuple occupancy.
+    pub relation_output_used: [bool; MAX_SLOTS],
+    /// For RelationProof: output tuple type ids.
+    pub relation_output_type_ids: [u32; MAX_SLOTS],
+    /// For RelationProof: input tuple values in canonical position order.
+    pub relation_input_vals: [[KoalaBear; EXECUTION_STANDARD_VALUE_WIDTH]; MAX_SLOTS],
+    /// For RelationProof: output tuple values in canonical position order.
+    pub relation_output_vals: [[KoalaBear; EXECUTION_STANDARD_VALUE_WIDTH]; MAX_SLOTS],
+    /// For RelationProof: one-hot input selectors per tuple position.
+    pub relation_input_sel: [[bool; MAX_SLOTS]; MAX_SLOTS],
+    /// For RelationProof: one-hot output selectors per tuple position.
+    pub relation_output_sel: [[bool; MAX_SLOTS]; MAX_SLOTS],
 }
 
 impl Default for InstructionRecord {
@@ -164,17 +190,29 @@ impl Default for InstructionRecord {
             writes: vec![],
             hash_digest: None,
             is_empty_col: false,
-            precompile_id: None,
+            capability_transcript_id: None,
             instruction_index: None,
-            precompile_input_count: None,
-            precompile_output_count: None,
-            precompile_event_digest: None,
+            capability_input_count: None,
+            capability_output_count: None,
+            capability_event_digest: None,
             property_query_type: None,
             property_query_arg0: vec![],
             property_query_arg1: vec![],
             property_result_val: vec![],
             property_result_key: vec![],
             property_result_is_null: false,
+            relation_is_eval: false,
+            relation_id: None,
+            relation_input_digest: None,
+            relation_output_digest: None,
+            relation_input_used: [false; MAX_SLOTS],
+            relation_input_type_ids: [0; MAX_SLOTS],
+            relation_output_used: [false; MAX_SLOTS],
+            relation_output_type_ids: [0; MAX_SLOTS],
+            relation_input_vals: [[KoalaBear::ZERO; EXECUTION_STANDARD_VALUE_WIDTH]; MAX_SLOTS],
+            relation_output_vals: [[KoalaBear::ZERO; EXECUTION_STANDARD_VALUE_WIDTH]; MAX_SLOTS],
+            relation_input_sel: [[false; MAX_SLOTS]; MAX_SLOTS],
+            relation_output_sel: [[false; MAX_SLOTS]; MAX_SLOTS],
         }
     }
 }
@@ -309,31 +347,31 @@ pub fn generate_execution_trace<const W: usize>(
             cols.hash_digest = *digest;
         }
 
-        // Precompile ID
-        if rec.opcode == Opcode::Precompile
-            && let Some(id) = rec.precompile_id
+        // Capability transcript ID
+        if rec.opcode == Opcode::CapabilityCall
+            && let Some(id) = rec.capability_transcript_id
         {
-            cols.precompile_id = KoalaBear::from_u32(id as u32);
+            cols.capability_transcript_id = KoalaBear::from_u32(id as u32);
         }
-        if rec.opcode == Opcode::Precompile
+        if (rec.opcode == Opcode::CapabilityCall || rec.opcode == Opcode::RelationProof)
             && let Some(instruction_index) = rec.instruction_index
         {
             cols.instruction_index = KoalaBear::new(instruction_index);
         }
-        if rec.opcode == Opcode::Precompile
-            && let Some(input_count) = rec.precompile_input_count
+        if rec.opcode == Opcode::CapabilityCall
+            && let Some(input_count) = rec.capability_input_count
         {
-            cols.precompile_input_count = KoalaBear::new(input_count);
+            cols.capability_input_count = KoalaBear::new(input_count);
         }
-        if rec.opcode == Opcode::Precompile
-            && let Some(output_count) = rec.precompile_output_count
+        if rec.opcode == Opcode::CapabilityCall
+            && let Some(output_count) = rec.capability_output_count
         {
-            cols.precompile_output_count = KoalaBear::new(output_count);
+            cols.capability_output_count = KoalaBear::new(output_count);
         }
-        if rec.opcode == Opcode::Precompile
-            && let Some(event_digest) = rec.precompile_event_digest
+        if rec.opcode == Opcode::CapabilityCall
+            && let Some(event_digest) = rec.capability_event_digest
         {
-            cols.precompile_event_digest = event_digest;
+            cols.capability_event_digest = event_digest;
         }
 
         // PropertyRead columns
@@ -370,6 +408,37 @@ pub fn generate_execution_trace<const W: usize>(
                 );
                 cols.property_val_sel[val_slot] = KoalaBear::ONE;
                 cols.property_key_sel[key_slot] = KoalaBear::ONE;
+            }
+        }
+
+        // RelationProof columns
+        if rec.opcode == Opcode::RelationProof {
+            cols.relation_is_eval = bool_fe(rec.relation_is_eval);
+            if let Some(relation_id) = rec.relation_id {
+                cols.relation_id = KoalaBear::new(relation_id);
+            }
+            if let Some(input_digest) = rec.relation_input_digest {
+                cols.relation_input_digest = input_digest;
+            }
+            if let Some(output_digest) = rec.relation_output_digest {
+                cols.relation_output_digest = output_digest;
+            }
+            for idx in 0..MAX_SLOTS {
+                cols.relation_input_used[idx] = bool_fe(rec.relation_input_used[idx]);
+                cols.relation_input_type_ids[idx] =
+                    KoalaBear::new(rec.relation_input_type_ids[idx]);
+                cols.relation_output_used[idx] = bool_fe(rec.relation_output_used[idx]);
+                cols.relation_output_type_ids[idx] =
+                    KoalaBear::new(rec.relation_output_type_ids[idx]);
+                for limb in 0..W.min(EXECUTION_STANDARD_VALUE_WIDTH) {
+                    cols.relation_input_vals[idx][limb] = rec.relation_input_vals[idx][limb];
+                    cols.relation_output_vals[idx][limb] = rec.relation_output_vals[idx][limb];
+                }
+                for slot in 0..MAX_SLOTS {
+                    cols.relation_input_sel[idx][slot] = bool_fe(rec.relation_input_sel[idx][slot]);
+                    cols.relation_output_sel[idx][slot] =
+                        bool_fe(rec.relation_output_sel[idx][slot]);
+                }
             }
         }
 

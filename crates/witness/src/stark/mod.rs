@@ -12,7 +12,7 @@ pub(crate) use rows::{AccessRow, InitRow};
 
 pub use execution_store::prepare_execution_store;
 pub use lowering::{
-    LowerSuccessfulTxInput, LoweringOutput, LoweringPrecompileCall, LoweringPropertyRead,
-    TxLoweringOutput, lower_successful_tx,
+    LowerSuccessfulTxInput, LoweringOutput, TxLoweringOutput, lower_successful_tx,
+    merge_lowering_outputs,
 };
 pub use root_store::{SmtRootStoreContext, prepare_smt_root_store};

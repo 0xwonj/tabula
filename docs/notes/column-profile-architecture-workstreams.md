@@ -198,7 +198,7 @@ Therefore:
 This implies:
 
 - custom types may participate in generic IR through declared semantics families,
-- arbitrary domain-specific logic should go through precompiles, not type-defined operators.
+- arbitrary domain-specific logic should go through capabilities, not type-defined operators.
 
 ## 5.3 Setup-Time Specialization
 
@@ -377,25 +377,25 @@ as one verifier contract.
 
 ## 6.4 Bundle 3: Extensibility Boundary and Migration Hardening
 
-This bundle defines where custom types stop and precompile families begin, and how the
+This bundle defines where custom types stop and capability families begin, and how the
 old world is retired.
 
 ### Goal
 
 - define the exact boundary of custom types inside generic IR,
-- route domain-specific semantics to precompile families,
-- make precompile transcript and proof contracts profile-aware,
+- route domain-specific semantics to capability families,
+- make capability transcript and proof contracts profile-aware,
 - fix migration phases, compatibility shims, and deletion order.
 
 ### Why These Belong Together
 
-- allowing custom types changes the precompile and transcript boundary too,
+- allowing custom types changes the capability and transcript boundary too,
 - migration strategy is part of architecture here, not follow-up cleanup,
 - boundary mistakes at this layer turn extensibility into an unbounded VM problem.
 
 ### Success Criteria
 
-- registered custom types can flow through precompile I/O,
+- registered custom types can flow through capability transcript I/O,
 - generic IR remains closed in operation vocabulary,
 - architecture tests can forbid built-in privilege and duplicated truth sources,
 - legacy `ValueType`-centric and built-in-only paths are reduced to explicit deletion targets.
@@ -403,12 +403,12 @@ old world is retired.
 ### Design Philosophy
 
 - extensibility without arbitrary VM plugins,
-- domain semantics belong in precompiles,
+- domain semantics belong in capabilities,
 - migration is a first-class architecture concern.
 
 ### Important Public Interface Direction
 
-- precompile I/O and transcript become profile-aware,
+- capability transcript I/O and transcript become profile-aware,
 - custom types participate by descriptor and capability, not operator injection,
 - migration gates and deletion criteria are made explicit.
 
@@ -416,7 +416,7 @@ old world is retired.
 
 - H
 - I
-- parts of C and D at the precompile boundary
+- parts of C and D at the capability boundary
 
 ---
 
@@ -434,7 +434,7 @@ design bundles above.
 | E | scheme profile and commitment/root unification | Bundle 2 |
 | F | column backend and proof materialization refactor | Bundle 2 |
 | G | proof layout specialization and width polymorphism | Bundle 2 |
-| H | precompile and custom-type boundary | Bundle 3 |
+| H | capability and custom-type boundary | Bundle 3 |
 | I | migration, compatibility, and legacy deletion | Bundle 3 |
 
 These workstreams are still the right units for:
@@ -487,7 +487,7 @@ Before detailed planning begins for a bundle, the following questions must be an
 
 ## 9.4 Bundle 3 Gate
 
-- Does the custom-type boundary align cleanly with the precompile boundary?
+- Does the custom-type boundary align cleanly with the capability boundary?
 - Are migration and deletion criteria explicit enough to avoid indefinite dual truth sources?
 
 If any answer is still vague, that bundle is not ready for detailed implementation planning.
@@ -500,7 +500,7 @@ If any answer is still vague, that bundle is not ready for detailed implementati
 - Column-by-column scheme choice remains explicit.
 - Built-ins remain available, but not architecturally privileged.
 - Custom types are allowed, but arbitrary custom operators are not part of generic IR.
-- Complex domain semantics should go through precompile families.
+- Complex domain semantics should go through capability families.
 - This note is now the top-level planning structure for the column-profile migration.
 
 ---
@@ -515,6 +515,6 @@ The migration should be considered complete only when all of the following are t
 4. width, transcript encoding, null encoding, and proof layout are profile-owned,
 5. scheme commitment semantics are canonical and profile-owned across native and proof layers,
 6. shared runtime/prover/verifier orchestration no longer depends on built-in concrete state enums,
-7. custom registered types can flow through the system, including precompile boundaries, without being faked as built-in types.
+7. custom registered types can flow through the system, including capability boundaries, without being faked as built-in types.
 
 If any of these statements is false, the architecture is still only partially migrated.

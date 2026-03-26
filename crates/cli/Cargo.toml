@@ -6,21 +6,14 @@ license.workspace = true
 
 [dependencies]
 tabula-core = { workspace = true, features = ["test-utils"] }
-tabula-artifact = { workspace = true }
-tabula-compiler = { workspace = true }
-tabula-runtime = { workspace = true }
-tabula-types = { workspace = true }
+tabula-sdk = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }
-
-[dev-dependencies]
-tabula-executor = { workspace = true }
-tabula-ir = { workspace = true }
-tabula-testing = { workspace = true }
+borsh = { workspace = true }
 
 [lints]
 workspace = true

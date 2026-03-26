@@ -90,7 +90,7 @@ It answers questions like:
 
 - which column proof slots exist,
 - in what deterministic order,
-- which precompile proof slots exist,
+- which capability transcript proof slots exist,
 - which installed backend owns each slot.
 
 It is resolved from:
@@ -109,7 +109,7 @@ It answers questions like:
 
 - what lowering output was produced,
 - what reduced per-slot column inputs exist,
-- what reduced precompile calls exist,
+- what reduced capability calls exist,
 - what proof-relevant execution facts survived reduction.
 
 It is the final semantic reduction boundary before backend-specific preparation.

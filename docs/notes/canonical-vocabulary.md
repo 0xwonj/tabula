@@ -32,7 +32,7 @@ ownership.
   - Use when the type answers: "what is this thing?"
   - A descriptor defines identity, typed shape, and compatibility-relevant
     contract for one item.
-  - Good fits: `TypeDescriptor`, `PrecompileDescriptor`,
+  - Good fits: `TypeDescriptor`, `CapabilityDescriptor`,
     future `RelationDescriptor`.
 - `Catalog`
   - Canonical reusable collection of descriptors.
@@ -44,7 +44,7 @@ ownership.
   - Use when the collection answers: "which exact items are present or
     required in this sealed scope?"
   - A manifest is typically ordered, unique, and binding-relevant.
-  - Good fit: `precompile_manifest`.
+  - Good fit: `capability_manifest`.
 - `Binding`
   - Exact identity or commitment for one semantic scope.
   - Use when the type answers: "what exact artifact / program / relation set
@@ -113,27 +113,44 @@ ownership.
 
 ### 2. Semantic Program Model
 
-- `ProgramDefinition`
-  - Source-derived program shape before metadata sealing.
-  - Current type: `tabula_compiler::ProgramDefinition`.
 - `CompiledProgram`
   - Compiler-owned in-memory semantic program.
   - Current type: `tabula_compiler::CompiledProgram`.
+- `RegisteredProgram`
+  - Sealed portable representation of a compiled program.
+  - Current type: `tabula_compiler::RegisteredProgram`.
 
 ### 3. Portable Contract Objects
 
 - `Artifact`
-  - Sealed portable representation of a program.
-  - Current type: `tabula_artifact::Artifact`.
+  - Canonical sealed portable program object on the SDK happy path.
+  - Current type: `tabula_sdk::Artifact`, wrapping
+    `tabula_compiler::RegisteredProgram`.
+- `StateSnapshot`
+  - Canonical runtime-native execution and proving state carrier.
+  - Current type: `tabula_runtime::StateSnapshot`.
 - `State`
-  - Canonical execution-boundary state object.
-  - Current type anchor: `tabula_artifact::StateView`.
+  - Canonical SDK-facing committed state carrier.
+  - Current type: `tabula_sdk::State`, wrapping `tabula_runtime::StateSnapshot`.
+- `EntryBatch`
+  - Canonical runtime-native batch execution request.
+  - Current type: `tabula_ir::EntryBatch`.
 - `TransactionBatch`
-  - Canonical batch execution request.
-  - Current type: `tabula_artifact::TransactionBatch`.
+  - Canonical SDK-facing batch execution request.
+  - Current type: `tabula_sdk::TransactionBatch`, wrapping
+    `tabula_ir::EntryBatch`.
+- `ContextInput`
+  - Canonical runtime-native public context request carrier.
+  - Current type: `tabula_ir::ContextInput`.
+- `Context`
+  - Canonical SDK-facing public context request carrier.
+  - Current type: `tabula_sdk::Context`, wrapping `tabula_ir::ContextInput`.
+- `ProofStatement`
+  - Canonical semantic public claim for one execution.
+  - Current type: `tabula_runtime::ProofStatement`.
 - `Statement`
-  - Canonical public claim for one execution.
-  - Current type: `tabula_artifact::Statement`.
+  - Canonical SDK-facing semantic public claim for one execution.
+  - Current type: `tabula_sdk::Statement`.
 - `PortableValue`
   - Canonical public and serialized value carrier.
   - Current type: `tabula_core::PortableValue`.
@@ -141,7 +158,7 @@ ownership.
 ### 4. Execution and Proof Carriers
 
 - `TypedValue`
-  - Canonical internal execution, proof, and precompile carrier.
+  - Canonical internal execution, proof, and capability carrier.
   - Current type: `tabula_types::TypedValue`.
 - `TypeRuntime`
   - Runtime behavior for one registered type.
@@ -159,14 +176,14 @@ ownership.
 ### 5. Contract and Compatibility
 
 - `Metadata`
-  - Versioned contract metadata attached to an artifact.
+  - Versioned contract metadata attached to a registered program.
   - Current type: `tabula_contract::ContractMetadataEnvelope`.
 - `CompatibilityPolicy`
   - Fail-closed metadata compatibility rules.
   - Current type: `tabula_contract::ContractCompatibilityPolicy`.
 - `Binding`
   - Expected verifier-side identity for a program context.
-  - Current type: `tabula_runtime::Binding`.
+  - Current type: `tabula_contract::ProgramBinding`.
 
 ### 6. Runtime Orchestration
 
@@ -179,9 +196,6 @@ ownership.
 - `Verifier`
   - Prepared verification object bound to one artifact and binding.
   - Current main type: `tabula_runtime::Verifier`.
-- `ExecutionEnvelope`
-  - Runtime-owned envelope containing execution outputs and consistency status.
-  - Current type: `tabula_runtime::ExecutionEnvelope`.
 - `ExecutionJournal`
   - Canonical internal execution-effect journal used as the execution truth for
     runtime proving.
@@ -203,8 +217,8 @@ ownership.
 ### 6.1 Host Bootstrap
 
 - `HostEnvironment`
-  - Canonical process-local installation model for runtime behavior and backend
-    capabilities on the `verify` / `prove` runtime surface.
+  - Canonical process-local installation model for runtime behavior on the
+    `verify` / `prove` runtime surface.
   - Current type: `tabula_runtime::HostEnvironment`.
 - `RuntimeRegistries`
   - Installed type and encoding runtime set on the `verify` / `prove` runtime
@@ -213,9 +227,10 @@ ownership.
 - `InstalledSchemes`
   - Installed canonical column backend families.
   - Current type: `tabula_runtime::InstalledSchemes`.
-- `InstalledPrecompiles`
-  - Installed canonical precompile backend families.
-  - Current type: `tabula_runtime::InstalledPrecompiles`.
+
+Today `HostEnvironment` owns runtime registries and installed schemes. Sealed
+capability descriptors and capability transcript signatures travel with the
+compiled/runtime inputs rather than through a separate installed host registry.
 
 Builders and SDK surfaces are facades over this host-owned model.
 
@@ -235,17 +250,21 @@ Builders and SDK surfaces are facades over this host-owned model.
   - Sealed per-column composition of type, encoding, scheme, proof layout, and
     root-binding choices.
   - Current code anchor: `tabula_profile::ColumnProfile`.
-- `Precompile`
+- `Capability`
   - Custom instruction capability with typed execution and proof contracts.
-- `PrecompileValueProfile`
-  - Typed value contract for one precompile input or output position.
-  - Current code anchor: `tabula_ext::PrecompileValueProfile`.
-- `PrecompileSignature`
-  - Full typed I/O contract for a precompile.
-  - Current code anchor: `tabula_ext::PrecompileSignature`.
-- `PrecompileBackendFactory`
-  - Host-installed backend family for one exact precompile descriptor.
-  - Current type: `tabula_ext::PrecompileBackendFactory`.
+  - Current code anchors: `tabula_ir::CapabilityDescriptor`,
+    `tabula_executor::CapabilityHandler`.
+- `CapabilityTranscriptValueProfile`
+  - Typed value contract for one proof-visible capability input or output
+    position.
+  - Current code anchor: `tabula_core::CapabilityTranscriptValueProfile`.
+- `CapabilityTranscriptSignature`
+  - Full typed transcript I/O contract for one proof-visible capability.
+  - Current code anchor: `tabula_core::CapabilityTranscriptSignature`.
+
+Proof-visible capability transcript backends currently plug into
+`tabula_ext::backend::ExecutionBackend`; there is no separate public
+backend-factory type for capability transcripts.
 
 ### 7.1 Reserved Vocabulary for Relations and Constants
 
@@ -359,19 +378,20 @@ These are delivery surfaces, not core semantic concepts.
 | `Definition` | Source-derived program before sealing | `ProgramDefinition` |
 | `Program` | Top-level semantic unit | closest current anchor: `CompiledProgram` |
 | `Artifact` | Sealed portable program form | `Artifact` |
-| `State` | Canonical state boundary object | `StateView` |
-| `TransactionBatch` | Canonical execution request batch | `TransactionBatch` |
-| `Statement` | Canonical public execution claim | `Statement` |
+| `State` | Canonical state boundary object | `tabula_sdk::State` |
+| `TransactionBatch` | Canonical execution request batch | `tabula_sdk::TransactionBatch` |
+| `Statement` | Canonical public execution claim | `tabula_sdk::Statement` |
 | `PortableValue` | Canonical public value carrier | `tabula_core::PortableValue` |
 | `TypedValue` | Canonical internal value carrier | `tabula_types::TypedValue` |
 | `Binding` | Expected verifier-side program identity | `Binding` |
 | `HostEnvironment` | Canonical bootstrap installation model on the `verify` / `prove` runtime surface | `tabula_runtime::HostEnvironment` |
-| `Verifier` | Reusable verification object bound to one program context | `Verifier` |
+| `Verifier` | Reusable verification object bound to one program context | `tabula_sdk::Verifier` |
 | `TypeDescriptor` | Registered semantic type definition | `tabula_profile::TypeDescriptor` |
 | `EncodingProfile` | Registered proof/transcript representation contract | `tabula_profile::EncodingProfile` |
 | `SchemeProfile` | Registered commitment/opening contract | `tabula_profile::SchemeProfile` |
 | `ColumnProfile` | Sealed per-column semantic/proof contract | `tabula_profile::ColumnProfile` |
-| `PrecompileSignature` | Sealed typed precompile I/O contract | `tabula_ext::PrecompileSignature` |
+| `Capability` | Custom instruction capability | `tabula_ir::CapabilityDescriptor` |
+| `CapabilityTranscriptSignature` | Sealed typed capability transcript I/O contract | `tabula_core::CapabilityTranscriptSignature` |
 | `ColumnRootBinding` | Canonical committed-column binding contract | `tabula_commitment::ColumnRootBinding` |
 | `RelationDescriptor` | Reserved future semantic relation definition | planned vocabulary |
 | `RelationManifest` | Reserved future sealed relation inclusion set | planned vocabulary |
@@ -396,7 +416,6 @@ public SDK vocabulary.
 | `TabulaRuntime` | Prepared per-program execution/proving engine |
 | `RuntimeRegistries` | Installed runtime behavior bundle |
 | `InstalledSchemes` | Installed canonical scheme families |
-| `InstalledPrecompiles` | Installed canonical precompile families |
 | `ExecutionJournal` | Canonical executor-owned execution truth consumed by runtime proving |
 | `ExecutionStateSummary` | Nested derived batch-level state view inside `ExecutionJournal` |
 | `FailedAccessObservation` | Diagnostic failed-tx access observation excluded from proof reduction |

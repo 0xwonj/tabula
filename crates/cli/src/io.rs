@@ -1,35 +1,26 @@
 //! JSON input/output types for the CLI.
 
-use tabula_artifact::{State as ArtifactState, StateEntry as ArtifactStateEntry};
-use tabula_core::{AccessEvent, EmittedEvent, ExecutionConsistencyStatus, TxResult};
+use tabula_sdk::State;
 
-/// JSON representation of state.
-pub type State = ArtifactState;
-/// JSON representation of a state entry.
-pub type StateEntry = ArtifactStateEntry;
 /// JSON representation of execution results.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionOutput {
-    /// Per-transaction results.
-    pub tx_results: Vec<TxResult>,
-    /// Cells read from committed state.
-    pub read_set: Vec<StateEntry>,
-    /// Final writes to committed state.
-    pub write_set: Vec<StateEntry>,
-    /// Emitted application events.
-    pub emitted: Vec<EmittedEvent>,
-    /// Typed consistency check result.
-    pub consistency: ExecutionConsistencyStatus,
-    /// Full execution trace (only if requested).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace: Option<Vec<AccessEvent>>,
+    /// Per-entry outcomes in batch order.
+    pub tx_outcomes: Vec<serde_json::Value>,
+    /// Number of committed cells read from pre-state.
+    pub read_count: usize,
+    /// Number of committed cells written into post-state.
+    pub write_count: usize,
+    /// Final committed state snapshot.
+    pub state_after: State,
 }
 
 /// Deserialize a JSON file from the given path.
 pub(crate) fn load_json<T: serde::de::DeserializeOwned>(
     path: &std::path::Path,
 ) -> anyhow::Result<T> {
-    Ok(tabula_artifact::load_json(path)?)
+    let content = std::fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&content)?)
 }
 
 /// Serialize a value to a pretty-printed JSON file.
@@ -37,5 +28,6 @@ pub(crate) fn write_json<T: serde::Serialize>(
     path: &std::path::Path,
     value: &T,
 ) -> anyhow::Result<()> {
-    Ok(tabula_artifact::write_json(path, value)?)
+    std::fs::write(path, serde_json::to_vec_pretty(value)?)?;
+    Ok(())
 }

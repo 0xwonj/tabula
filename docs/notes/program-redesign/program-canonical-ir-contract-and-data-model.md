@@ -1,7 +1,7 @@
 # Program Canonical IR Contract and Data Model
 
-> **Status**: Proposed implementation contract
-> **Date**: 2026-03-24
+> **Status**: Implemented implementation contract
+> **Date**: 2026-03-25
 > **Scope**: Defines the exact canonical IR contract that should be used as the
 > immediate implementation target, together with the recommended Rust-facing
 > data model shape for that contract.
@@ -43,6 +43,8 @@ This note assumes the following architecture is already fixed:
 
 - Tabula is a closed-world `program` language.
 - The compiler pipeline is `AST -> HIR -> MIR -> canonical IR`.
+- source-level `if` / `match` remain structured above canonical IR and flatten
+  only through MIR lowering into guards plus `Select`.
 - Canonical IR is:
   - flat
   - SSA-disciplined
@@ -92,19 +94,24 @@ The Rust structure should make it natural to validate:
 - type correctness
 - and SSA single-assignment
 
-### 3.3 The model should be executor-shaped
+### 3.3 The model should be runtime-resolution-shaped
 
 Canonical IR is not just a compiler interchange format.
 
 It is directly consumed by:
 
-- the executor
-- the execution journal
-- proof-journal reduction
-- and proof-artifact generation
+- validation
+- runtime resolution into execution/proof contracts
+- and long-lived semantic tooling or artifact boundaries
 
-So data-model choices should favor deterministic interpretation over source-like
-presentation.
+It is only indirectly consumed by:
+
+- the executor, through `ResolvedExecutionProgram`
+- proof-journal reduction, through `ResolvedProofProgram`
+
+So data-model choices should favor closed semantic meaning over source-like
+presentation, while keeping hot-path routing and proof-slot planning out of the
+portable IR itself.
 
 ### 3.4 The model should keep MIR pressure out
 
@@ -125,7 +132,7 @@ Canonical IR should not re-grow those concerns in encoded form.
 The most coherent exact shape is:
 
 ```rust
-pub struct ProgramIr {
+pub struct Program {
     pub program_id: ProgramId,
     pub state: StateSchema,
     pub context: ContextSchema,
@@ -133,13 +140,13 @@ pub struct ProgramIr {
     pub relation_manifest: RelationManifest,
     pub capability_manifest: CapabilityManifest,
     pub event_manifest: EventManifest,
-    pub entries: Vec<EntryIr>,
+    pub entries: Vec<Entry>,
 }
 ```
 
 The important recommendation here is:
 
-- use a **single `EntryIr` type**
+- use a **single `Entry` type**
 - distinguish query versus tx by `EntryKind`
 
 rather than having two wholly separate top-level body types.
@@ -169,7 +176,7 @@ pub struct EventId(pub u32);
 
 These should be:
 
-- stable within one `ProgramIr`
+- stable within one `Program`
 - dense enough for compact runtime storage
 - never reused across different semantic families
 
@@ -191,13 +198,13 @@ Canonical IR should not have `Fn` entries.
 ### 6.2 Entry structure
 
 ```rust
-pub struct EntryIr {
+pub struct Entry {
     pub id: EntryId,
     pub symbol: String,
     pub kind: EntryKind,
     pub params: Vec<ParamDecl>,
     pub returns: Vec<TypeRef>,
-    pub body: BodyIr,
+    pub body: Body,
 }
 ```
 
@@ -559,6 +566,11 @@ This is the minimum needed for:
 - guardability
 - journaling policy
 
+And the finalized execution semantics are:
+
+- `Checked` means capability failure is part of ordinary program semantics
+- `Total` means capability failure is a host/runtime contract violation
+
 ---
 
 ## 12. Exact Op Taxonomy
@@ -708,6 +720,10 @@ Different structural queries may return:
 So `ReadStateProperty` should use a result tuple rather than overfit a single
 shape.
 
+The V1 executor may support only a smaller row-oriented subset, but that
+restriction belongs to runtime resolution or execution capability checks, not to
+canonical IR validity.
+
 ### 12.3 Why `Return` stays explicit
 
 Canonical IR should not split:
@@ -803,6 +819,10 @@ maps into the event journal.
 
 Builtin `Hash` should not require its own journal family in the initial model.
 
+Canonical IR therefore remains smaller than the eventual runtime-owned proof
+plan. Hash is semantically present as a pure value op, but not as a journaled
+effect family.
+
 ---
 
 ## 15. Validation Invariants
@@ -811,7 +831,7 @@ Canonical IR validation should enforce at least the following.
 
 ### 15.1 Structural invariants
 
-- every `EntryIr` has exactly one `Return`
+- every `Entry` has exactly one `Return`
 - `Return` is the last op in the body
 - all referenced IDs exist in the appropriate manifest or schema
 - all locals and params are uniquely declared
@@ -849,9 +869,11 @@ This note implies the following implementation order.
 
 1. freeze these exact Rust-facing canonical IR shapes
 2. implement canonical validation against this contract
-3. implement executor semantics against this contract
-4. implement journal projection against this contract
-5. only then design MIR exact data structures against this target
+3. implement runtime-owned `RuntimeProgram { execution, proof }` resolution
+   against this contract
+4. implement executor semantics against `ResolvedExecutionProgram`
+5. implement runtime proof reduction against `ResolvedProofProgram`
+6. only then freeze MIR exact data structures against this target
 
 This is the right order because canonical IR is the boundary all higher layers
 must eventually satisfy.
@@ -864,7 +886,7 @@ This note is intended to settle the following.
 
 - The next concrete rewrite step should be **canonical IR contract plus exact
   Rust data model together**, not separately.
-- Canonical IR should use one `EntryIr` with `EntryKind`, not duplicate query
+- Canonical IR should use one `Entry` with `EntryKind`, not duplicate query
   and tx container structure.
 - `ValueRef` should include `Literal`, `Param`, `Context`, `Local`, and `Const`.
 - `context` is an immutable value source, not a state read.
@@ -874,8 +896,8 @@ This note is intended to settle the following.
 - Guards apply only to effectful or checked ops.
 - Inactive guarded outputs use typed defaults.
 - Canonical validation owns entry-kind legality and guard legality.
-- Executor and journal implementation should be written against this contract
-  before MIR/HIR exact data models are frozen.
+- Runtime resolution, executor semantics, and proof-journal reduction should be
+  written against this contract before MIR/HIR exact data models are frozen.
 
 With this in place, the next design target is no longer "what should canonical
 IR mean?" but "how should MIR target this exact contract?"

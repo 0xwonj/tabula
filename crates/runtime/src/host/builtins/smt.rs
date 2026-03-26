@@ -4,14 +4,14 @@ use tabula_chips::shards::memory::MemoryShardChip;
 use tabula_chips::shards::meta::MetaShardChip;
 use tabula_chips::shards::smt_state::SmtStateShardChip;
 use tabula_commitment::{PoseidonHasher, compute_column_root_binding_prefix_digest};
-use tabula_core::{ColumnLayoutKind, SchemeId};
+use tabula_core::{ColumnLayoutKind, PropertyQueryKind, SchemeId};
 use tabula_ext::ExtError;
-use tabula_ext::RuntimeColumn;
-use tabula_ext::{
+use tabula_ext::scheme::RuntimeColumn;
+use tabula_ext::scheme::{
     ColumnBackendFactory, ColumnBackendSetup, ColumnVerifierContract, MaterializedColumnBackend,
     RootBindingContract,
 };
-use tabula_ir::{PropertyQuery, PropertyQueryKind};
+use tabula_ir::StatePropertyQuery;
 use tabula_machine::SetupError;
 use tabula_machine::backend::{AnyRap, ColumnChipSet, ProofColumn};
 use tabula_stark::chips::ChipIdAllocator;
@@ -175,13 +175,13 @@ impl RuntimeColumn for SmtRuntimeColumn {
 
     fn resolve_property(
         &self,
-        query: &PropertyQuery,
+        query: &StatePropertyQuery,
         _state: &[TypedColumnEntry],
     ) -> Result<TypedPropertyQueryResult, tabula_core::error::TabulaError> {
         Err(tabula_core::error::TabulaError::InvalidIr(format!(
             "column scheme '{}' does not implement property query {:?} for table {} col {}",
             self.name(),
-            query.kind(),
+            property_query_kind(query),
             self.state.table_id.0,
             self.state.col_id.0,
         )))
@@ -189,6 +189,17 @@ impl RuntimeColumn for SmtRuntimeColumn {
 
     fn supported_property_query_kinds(&self) -> &[PropertyQueryKind] {
         &[]
+    }
+}
+
+fn property_query_kind(query: &StatePropertyQuery) -> PropertyQueryKind {
+    match query {
+        StatePropertyQuery::Minimum => PropertyQueryKind::Minimum,
+        StatePropertyQuery::Maximum => PropertyQueryKind::Maximum,
+        StatePropertyQuery::Successor { .. } => PropertyQueryKind::Successor,
+        StatePropertyQuery::Predecessor { .. } => PropertyQueryKind::Predecessor,
+        StatePropertyQuery::NonExistenceRange { .. } => PropertyQueryKind::NonExistenceRange,
+        StatePropertyQuery::Aggregate { .. } => PropertyQueryKind::Aggregate,
     }
 }
 

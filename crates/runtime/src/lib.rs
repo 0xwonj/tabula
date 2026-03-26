@@ -1,7 +1,7 @@
 //! Tabula execution runtime.
 //!
 //! Canonical batch execution pipeline, separated from the compiler
-//! to enable independent consumption by CLI, daemon, and embedded
+//! to enable independent consumption by CLI and embedded
 //! applications.
 //!
 //! # Architecture
@@ -13,9 +13,10 @@
 //! Stable runtime APIs remain backend-neutral. Extension authoring lives in
 //! `tabula-ext`, while the runtime consumes those contracts and prepares
 //! prove/verify resources internally before handing traces to the machine.
-//! Compiler-owned descriptor catalogs are sealed before this layer. Concrete
-//! scheme and precompile backends are installed through `HostEnvironment` on
-//! the `verify` / `prove` runtime surface.
+//! Compiler-owned descriptor catalogs are sealed before this layer.
+//! `HostEnvironment` currently installs runtime registries and scheme
+//! backends on the `verify` / `prove` surface; end-to-end capability handler
+//! installation remains a follow-up architecture step.
 //!
 //! ```text
 //! compiler (compile/load/register) -> runtime (execute/prove) -> machine (STARK)
@@ -23,51 +24,33 @@
 //!
 //! # Feature gating
 //!
-//! - **No features** (default): only [`run_batch()`] — zero crypto deps.
+//! - **No features** (default): shared semantic helpers and error types only.
 //! - **`verify`**: adds [`Verifier`] and [`VerifierBuilder`] for
-//!   proof verification against sealed artifacts.
+//!   native proof verification against registered programs.
 //! - **`prove`**: adds [`TabulaRuntime`], [`RuntimeBuilder`], and the full
-//!   witness → trace → prove pipeline. Implies `verify`.
+//!   native witness → trace → prove pipeline. Implies `verify`.
 
-#[cfg(any(feature = "prove", feature = "verify"))]
-mod bootstrap;
-mod error;
-mod execute;
-#[cfg(any(feature = "prove", feature = "verify"))]
-mod host;
-pub mod ir_next;
-mod policy;
-#[cfg(any(feature = "prove", feature = "verify"))]
-mod program;
-#[cfg(feature = "prove")]
-mod proving;
-#[cfg(feature = "prove")]
-mod runtime;
-#[cfg(test)]
-mod testing;
 #[cfg(feature = "verify")]
-mod verifier;
+#[allow(dead_code)]
+mod bootstrap;
+#[cfg(feature = "verify")]
+mod engine;
+mod error;
+#[cfg(feature = "verify")]
+mod host;
+#[cfg(feature = "prove")]
+mod proof_summary;
+pub mod semantics;
 
 pub use error::{RuntimeError, RuntimeResult};
-pub use execute::{
-    BatchInput, CompiledBatchInput, ExecutionEnvelope, run_batch, run_compiled_batch,
-};
 
-#[cfg(feature = "prove")]
-pub use bootstrap::RuntimeBuilder;
-#[cfg(any(feature = "prove", feature = "verify"))]
-pub use host::{
-    HostEnvironment, InstalledPrecompiles, InstalledSchemes, RuntimeRegistries, SmtScheme,
-    SsmcScheme,
-};
-#[cfg(any(feature = "prove", feature = "verify"))]
-pub use program::Binding;
-#[cfg(feature = "prove")]
-pub use program::{ProofPlan, ResolvedProofProgram, RuntimeProgram};
-#[cfg(feature = "prove")]
-pub use proving::{ProofSummary, ProveInput, ProveResult, VerifiedResult, digest_to_hex};
-#[cfg(feature = "prove")]
-/// Runtime built once per [`tabula_compiler::SealedProgram`].
-pub use runtime::TabulaRuntime;
 #[cfg(feature = "verify")]
-pub use verifier::{Verifier, VerifierBuilder};
+pub use engine::{ExecutionReceipt, ProofStatement, RuntimeBuilder, StateSnapshot, TabulaRuntime};
+#[cfg(feature = "prove")]
+pub use engine::{ProveInput, ProveResult, VerifiedResult};
+#[cfg(feature = "verify")]
+pub use engine::{Verifier, VerifierBuilder};
+#[cfg(feature = "verify")]
+pub use host::{HostEnvironment, InstalledSchemes, RuntimeRegistries, SmtScheme, SsmcScheme};
+#[cfg(feature = "prove")]
+pub use proof_summary::ProofSummary;

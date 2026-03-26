@@ -3,7 +3,7 @@
 > **Status**: Complete
 > **Date**: 2026-03-23
 > **Scope**: Final end-to-end architecture after the legacy carrier, compat,
-> and precompile-contract migrations.
+> and capability-contract migrations.
 > **Related**: [canonical-vocabulary.md](canonical-vocabulary.md),
 > [column-profile-architecture-workstreams.md](column-profile-architecture-workstreams.md),
 > [proof-hierarchy-and-grouping.md](proof-hierarchy-and-grouping.md),
@@ -23,11 +23,12 @@ proving, and verification:
 - `tabula-types` owns runtime type and encoding behavior.
 - `tabula-core` owns portable protocol data only.
 - `tabula-ext` owns extension contracts only.
-- `tabula-runtime` consumes installed capabilities and orchestrates execution,
-  proving preparation, and verifier setup.
+- `tabula-runtime` consumes sealed capability contracts and orchestrates
+  execution, proving preparation, and verifier setup.
 
-The legacy built-in carrier model is gone. There is no compatibility namespace,
-no legacy value adapter layer, and no meta-based commitment public surface.
+The legacy built-in carrier model is gone. There is no deprecated public alias
+layer, no legacy value adapter layer, and no meta-based commitment public
+surface.
 
 ---
 
@@ -51,7 +52,7 @@ built-in tags.
 ### 2.2 Two carriers only
 
 - `PortableValue` is the only public and serialized carrier.
-- `TypedValue` is the only internal runtime, proof, and precompile carrier.
+- `TypedValue` is the only internal runtime, proof, and capability carrier.
 
 There is no third long-lived production carrier.
 
@@ -61,7 +62,7 @@ Built-ins are registered during bootstrap. After bootstrap:
 
 - built-in and custom types use the same runtime registries,
 - built-in and custom schemes use the same backend materialization path,
-- built-in and custom precompiles use the same typed contract path.
+- built-in and custom capabilities use the same typed contract path.
 
 ### 2.4 Hard-break cleanup is complete
 
@@ -120,8 +121,7 @@ Extension contracts only.
 It owns:
 
 - canonical scheme backend contracts,
-- canonical precompile backend contracts,
-- typed precompile signatures and handler interfaces.
+- execution-tier and root-tier backend hooks for extension authors.
 
 ### 3.5 `tabula-runtime`
 
@@ -162,32 +162,38 @@ It owns:
 
 - installed type runtimes,
 - installed encoding runtimes,
-- installed schemes,
-- installed precompiles.
+- installed schemes.
+
+Capability descriptors and capability transcript signatures are sealed into
+compiler/runtime inputs today; a separate installed capability registry is
+follow-up work, not part of the current `HostEnvironment` type.
 
 `RuntimeBuilder`, `VerifierBuilder`, and `SdkBuilder` are facades over this
 host-owned model. They do not keep parallel registry ownership.
 
 ---
 
-## 5. Precompile Contract
+## 5. Capability Transcript Contract
 
-Precompile I/O is explicit, typed, and sealed.
+Capability transcript I/O is explicit, typed, and sealed.
 
 The canonical contract is:
 
-- `PrecompileValueProfile { type_id, encoding_profile_id }`
-- `PrecompileSignature { inputs, outputs }`
+- `CapabilityTranscriptValueProfile { type_id, encoding_profile_id }`
+- `CapabilityTranscriptSignature { inputs, outputs }`
 - artifact descriptors that carry the full typed signature
+
+The typed transcript structures live in `tabula-core`; extension backends
+consume them, but `tabula-ext` does not redefine that vocabulary.
 
 Compiler catalogs, source lowering, IR typecheck, runtime dispatch, proof
 preparation, and transcript generation validate the same sealed contract.
 
-Precompile transcript encoding is signature-driven and registry-driven.
+Capability transcript encoding is signature-driven and registry-driven.
 `type_id`, `encoding_profile_id`, and atom counts are encoded bytewise as LE32
 prefixes before transcript atoms.
 
-Precompile I/O that does not fit the current generic execution-slot width is
+Capability transcript I/O that does not fit the current generic execution-slot width is
 rejected early at compile/register time and rechecked at runtime setup.
 
 ---
@@ -215,7 +221,7 @@ The migration completed in four phases:
 
 1. Host-centric contract freeze
 2. Proof and witness typed-carrier migration
-3. Sealed typed precompile contract completion
+3. Sealed typed capability transcript contract completion
 4. Final legacy deletion and canonical surface cleanup
 
 The older slice numbering remains useful only as historical context.
@@ -227,13 +233,13 @@ The older slice numbering remains useful only as historical context.
 The architecture is complete because all of the following are now true:
 
 - `PortableValue` is the only public and serialized carrier
-- `TypedValue` is the only internal execution, proof, and precompile carrier
+- `TypedValue` is the only internal execution, proof, and capability carrier
 - profile data is the only semantic source of truth
 - built-in and custom types share the same runtime registries
 - built-in and custom schemes share the same backend materialization path
-- built-in and custom precompiles share the same typed signature path
+- built-in and custom capabilities share the same typed signature path
 - witness and proof preparation do not depend on the deleted legacy carrier
-- no public compatibility namespace remains
+- no public alias layer remains
 - no public commitment meta surface remains
 - architecture guards fail on reintroduction of the removed seams
 
@@ -249,7 +255,7 @@ Three items remain intentionally out of scope for this completed migration:
 
 The current generic execution AIR remains fixed-width with width `3`.
 Wide custom values are supported in profile, runtime, storage, proof, and typed
-precompile contracts, but not as arbitrary generic execution-slot values.
+capability transcript contracts, but not as arbitrary generic execution-slot values.
 
 Future work on symbolic AIR compilation should be treated as a new architecture
 track, not as unfinished migration debt from this bundle.

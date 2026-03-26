@@ -3,9 +3,6 @@
 /// Backend-facing execution-tier extension contracts.
 #[cfg(feature = "verify")]
 pub mod execution;
-/// Backend-facing semantic precompile proof authoring contracts.
-#[cfg(feature = "verify")]
-pub mod precompile;
 /// Backend-facing column proof authoring contracts.
 #[cfg(feature = "verify")]
 pub mod scheme;

@@ -35,6 +35,30 @@ pub const SCHEME_PROFILE_SSMC_ID: SchemeProfileId = SchemeProfileId(0);
 /// Built-in catalog-scoped scheme profile id for SMT.
 pub const SCHEME_PROFILE_SMT_ID: SchemeProfileId = SchemeProfileId(1);
 
+/// Whether this is the canonical built-in `u64` type id.
+#[must_use]
+pub fn is_u64_type(type_id: TypeId) -> bool {
+    type_id == TYPE_U64_ID
+}
+
+/// Whether this is the canonical built-in `i64` type id.
+#[must_use]
+pub fn is_i64_type(type_id: TypeId) -> bool {
+    type_id == TYPE_I64_ID
+}
+
+/// Whether this is the canonical built-in `bool` type id.
+#[must_use]
+pub fn is_bool_type(type_id: TypeId) -> bool {
+    type_id == TYPE_BOOL_ID
+}
+
+/// Whether this is the canonical built-in `bytes32` type id.
+#[must_use]
+pub fn is_bytes32_type(type_id: TypeId) -> bool {
+    type_id == TYPE_BYTES32_ID
+}
+
 /// Construct the canonical built-in profile catalog.
 pub fn builtin_catalog() -> Result<ProfileCatalog, ProfileError> {
     let u64_type = builtin_u64_type()?;

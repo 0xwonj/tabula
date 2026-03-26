@@ -1,6 +1,8 @@
+use tabula_chips::capability_transcript::CapabilityTranscriptChip;
 use tabula_chips::ir_hash::IrHashChip;
 use tabula_chips::poseidon::PoseidonChip;
-use tabula_chips::precompile_transcript::PrecompileTranscriptChip;
+use tabula_chips::relation_table::RelationTableChip;
+use tabula_chips::relation_transcript::RelationTranscriptChip;
 use tabula_stark::trace::{BusConsumer, DynChip};
 
 use crate::backend::AnyRap;
@@ -40,24 +42,48 @@ impl ExecutionBackend for IrHashExecutionBackend {
     }
 }
 
-/// Built-in execution backend for precompile transcript proving.
+/// Built-in execution backend for capability transcript proving.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct PrecompileTranscriptExecutionBackend;
+pub struct CapabilityTranscriptExecutionBackend;
 
-impl ExecutionBackend for PrecompileTranscriptExecutionBackend {
+impl ExecutionBackend for CapabilityTranscriptExecutionBackend {
     fn name(&self) -> &str {
-        "precompile_transcript"
+        "capability_transcript"
     }
 
     fn airs(&self) -> Vec<Box<dyn AnyRap>> {
-        vec![Box::new(PrecompileTranscriptChip), Box::new(PoseidonChip)]
+        vec![Box::new(CapabilityTranscriptChip), Box::new(PoseidonChip)]
     }
 
     fn dyn_chips(&self) -> Vec<Box<dyn DynChip>> {
-        vec![Box::new(PrecompileTranscriptChip), Box::new(PoseidonChip)]
+        vec![Box::new(CapabilityTranscriptChip), Box::new(PoseidonChip)]
     }
 
     fn bus_consumers(&self) -> Vec<Box<dyn BusConsumer>> {
         vec![Box::new(PoseidonChip)]
+    }
+}
+
+/// Built-in execution backend for static canonical relation proving.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RelationExecutionBackend;
+
+impl ExecutionBackend for RelationExecutionBackend {
+    fn name(&self) -> &str {
+        "relation"
+    }
+
+    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
+        vec![
+            Box::new(RelationTranscriptChip),
+            Box::new(RelationTableChip),
+        ]
+    }
+
+    fn dyn_chips(&self) -> Vec<Box<dyn DynChip>> {
+        vec![
+            Box::new(RelationTranscriptChip),
+            Box::new(RelationTableChip),
+        ]
     }
 }

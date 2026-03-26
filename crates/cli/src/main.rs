@@ -46,13 +46,13 @@ enum Command {
         #[arg(short, long)]
         batch: PathBuf,
 
+        /// Path to public context input (JSON).
+        #[arg(short = 'c', long)]
+        context: Option<PathBuf>,
+
         /// Write the resulting state to this file.
         #[arg(short, long)]
         output_state: Option<PathBuf>,
-
-        /// Include full execution trace in output.
-        #[arg(long)]
-        trace: bool,
 
         /// Output results as JSON instead of human-readable text.
         #[arg(long)]
@@ -90,15 +90,15 @@ fn main() -> anyhow::Result<()> {
             program,
             state,
             batch,
+            context,
             output_state,
-            trace,
             json,
         } => commands::execute::cmd_execute(
             &program,
             &state,
             &batch,
+            context.as_deref(),
             output_state.as_deref(),
-            trace,
             json,
         ),
         Command::Inspect { state, table } => commands::inspect::cmd_inspect(&state, table),

@@ -6,18 +6,19 @@ use tabula_chips::shards::meta::MetaShardChip;
 use tabula_chips::shards::property::SsmcPropertyChip;
 use tabula_chips::shards::state::StateShardChip;
 use tabula_commitment::{PoseidonHasher, compute_column_root_binding_prefix_digest};
-use tabula_core::{ColumnLayoutKind, SchemeId};
+use tabula_core::{ColumnLayoutKind, PropertyQueryKind, SchemeId};
 use tabula_ext::ExtError;
-use tabula_ext::RuntimeColumn;
 #[cfg(feature = "prove")]
 use tabula_ext::backend::scheme::{ColumnProofBackend, ColumnProofContext, PreparedColumnProof};
-use tabula_ext::{
+use tabula_ext::scheme::RuntimeColumn;
+use tabula_ext::scheme::{
     ColumnBackendFactory, ColumnBackendSetup, ColumnVerifierContract, MaterializedColumnBackend,
     RootBindingContract,
 };
-use tabula_ir::{PropertyQuery, PropertyQueryKind};
+use tabula_ir::{StatePropertyQuery, ValueRef, ValueTupleRef};
 use tabula_machine::SetupError;
 use tabula_machine::backend::{AnyRap, ColumnChipSet, ProofColumn};
+use tabula_profile::TYPE_U64_ID;
 use tabula_stark::chips::ChipIdAllocator;
 use tabula_stark::trace::DynChip;
 #[cfg(feature = "prove")]
@@ -193,36 +194,42 @@ impl RuntimeColumn for SsmcRuntimeColumn {
 
     fn resolve_property(
         &self,
-        query: &PropertyQuery,
+        query: &StatePropertyQuery,
         state: &[TypedColumnEntry],
     ) -> Result<TypedPropertyQueryResult, tabula_core::error::TabulaError> {
         let non_null = || state.iter().filter(|entry| !entry.is_null);
 
         let resolved = match query {
-            PropertyQuery::Successor { key } => non_null()
-                .filter(|entry| entry.row_key > *key)
-                .min_by_key(|entry| entry.row_key)
-                .map(|entry| TypedPropertyQueryResult {
-                    value: entry.value.clone(),
-                    key: Some(entry.row_key),
-                    is_null: false,
-                }),
-            PropertyQuery::Predecessor { key } => non_null()
-                .filter(|entry| entry.row_key < *key)
-                .max_by_key(|entry| entry.row_key)
-                .map(|entry| TypedPropertyQueryResult {
-                    value: entry.value.clone(),
-                    key: Some(entry.row_key),
-                    is_null: false,
-                }),
-            PropertyQuery::Minimum
-            | PropertyQuery::Maximum
-            | PropertyQuery::NonExistenceRange { .. }
-            | PropertyQuery::Aggregate { .. } => {
+            StatePropertyQuery::Successor { key } => {
+                let key = single_row_key(key)?;
+                non_null()
+                    .filter(|entry| entry.row_key > key)
+                    .min_by_key(|entry| entry.row_key)
+                    .map(|entry| TypedPropertyQueryResult {
+                        value: entry.value.clone(),
+                        key: Some(entry.row_key),
+                        is_null: false,
+                    })
+            }
+            StatePropertyQuery::Predecessor { key } => {
+                let key = single_row_key(key)?;
+                non_null()
+                    .filter(|entry| entry.row_key < key)
+                    .max_by_key(|entry| entry.row_key)
+                    .map(|entry| TypedPropertyQueryResult {
+                        value: entry.value.clone(),
+                        key: Some(entry.row_key),
+                        is_null: false,
+                    })
+            }
+            StatePropertyQuery::Minimum
+            | StatePropertyQuery::Maximum
+            | StatePropertyQuery::NonExistenceRange { .. }
+            | StatePropertyQuery::Aggregate { .. } => {
                 return Err(tabula_core::error::TabulaError::InvalidIr(format!(
                     "column scheme '{}' does not implement property query {:?} for table {} col {}",
                     self.name(),
-                    query.kind(),
+                    property_query_kind(query),
                     self.state.table_id.0,
                     self.state.col_id.0,
                 )));
@@ -234,6 +241,43 @@ impl RuntimeColumn for SsmcRuntimeColumn {
             key: None,
             is_null: true,
         }))
+    }
+}
+
+fn single_row_key(
+    tuple: &ValueTupleRef,
+) -> Result<tabula_core::RowKey, tabula_core::error::TabulaError> {
+    let values = &tuple.0;
+    if values.len() != 1 {
+        return Err(tabula_core::error::TabulaError::InvalidIr(format!(
+            "SSMC runtime expects one row-key literal, got tuple of arity {}",
+            values.len()
+        )));
+    }
+    let ValueRef::Literal(value) = &values[0] else {
+        return Err(tabula_core::error::TabulaError::InvalidIr(format!(
+            "SSMC runtime does not support non-literal row-key property queries: {tuple:?}",
+        )));
+    };
+    if value.type_id() != TYPE_U64_ID {
+        return Err(tabula_core::error::TabulaError::InvalidIr(format!(
+            "SSMC runtime expects one u64 row key literal, got type {}",
+            value.type_id().0
+        )));
+    }
+    let row = borsh::from_slice::<u64>(value.payload())
+        .map_err(|error| tabula_core::error::TabulaError::BorshEncodingError(error.to_string()))?;
+    Ok(tabula_core::RowKey(row))
+}
+
+fn property_query_kind(query: &StatePropertyQuery) -> PropertyQueryKind {
+    match query {
+        StatePropertyQuery::Minimum => PropertyQueryKind::Minimum,
+        StatePropertyQuery::Maximum => PropertyQueryKind::Maximum,
+        StatePropertyQuery::Successor { .. } => PropertyQueryKind::Successor,
+        StatePropertyQuery::Predecessor { .. } => PropertyQueryKind::Predecessor,
+        StatePropertyQuery::NonExistenceRange { .. } => PropertyQueryKind::NonExistenceRange,
+        StatePropertyQuery::Aggregate { .. } => PropertyQueryKind::Aggregate,
     }
 }
 
