@@ -10,6 +10,8 @@ tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-stark = { workspace = true }
 tabula-chips = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+borsh = { workspace = true }
 p3-air = { workspace = true }
 p3-koala-bear = { workspace = true }
 p3-field = { workspace = true }
@@ -34,7 +36,7 @@ tabula-executor = { workspace = true }
 tabula-lang = { workspace = true }
 p3-koala-bear = { workspace = true }
 p3-field = { workspace = true }
-criterion = { workspace = true }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [lints]
 workspace = true

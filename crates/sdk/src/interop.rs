@@ -10,27 +10,41 @@ pub use tabula_compiler::{
     CompileDiagnostic, CompiledProgram, CompilerCatalogs, RegisteredProgram,
     SourceCapabilityDescriptor, StateFieldSchemeBinding,
 };
+pub use tabula_core::{CellKey, PortableValue};
 use tabula_profile::SemanticRegistry;
 use tabula_runtime::{HostEnvironment, RuntimeRegistries};
 use tabula_types::{EncodingRuntime, TypeRuntime};
 
 #[cfg(feature = "execute")]
-use tabula_executor::ExecutionJournal;
+pub use tabula_executor::{
+    CapabilityEffect, ExecutionJournal, ExecutionStateSummary, FailedTxExecution,
+    QueryExecutionResult, RelationEffect, RelationEffectKind, StateEffectKind, StatePropertyEffect,
+    SuccessfulTxExecution, TxExecutionOutcome, TypedEventEffect, TypedStateEffect,
+    TypedStateSnapshot, TypedStateWrite,
+};
 #[cfg(feature = "prove")]
 use tabula_ext::root::RootBackendBundle;
 #[cfg(feature = "execute")]
 pub use tabula_ext::scheme::ColumnBackendFactoryBundle;
 #[cfg(feature = "execute")]
 use tabula_machine::TabulaStarkConfig;
+pub use tabula_types::TypedValue;
 
 use crate::{
     Artifact, Context, ExecutionReceipt, Sdk, SdkBuilder, SdkError, State, TransactionBatch,
 };
 
 pub use tabula_compiler;
-pub use tabula_core::PortableValue;
-pub use tabula_ir::{ContextInput, EntryBatch, EntryCall, EntryId, EntryKind, FieldId, TableId};
-pub use tabula_runtime::{ProofStatement, StateSnapshot};
+pub use tabula_contract::{
+    ProofEncodingId, ProofEnvelopeV2, ProofStatement, ProofSystemId, PublicContextBinding,
+    PublicStatement,
+};
+pub use tabula_ir::{
+    CapabilityId, CapabilityProofVisibility, CapabilityQueryPolicy, CapabilityTotality,
+    ContextFieldId, ContextInput, EntryBatch, EntryCall, EntryId, EntryKind, EventId, FieldId,
+    HashFamily, RelationId, StatePropertyQuery, TableId, TypeRef,
+};
+pub use tabula_runtime::StateSnapshot;
 
 /// Extension trait for [`SdkBuilder`] exposing advanced configuration options.
 pub trait SdkBuilderExt {
@@ -232,4 +246,28 @@ pub fn share_type_runtime(runtime: impl TypeRuntime + 'static) -> Arc<dyn TypeRu
 /// Wrap an [`EncodingRuntime`] implementor behind a shared reference.
 pub fn share_encoding_runtime(runtime: impl EncodingRuntime + 'static) -> Arc<dyn EncodingRuntime> {
     Arc::new(runtime)
+}
+
+/// Construct one SDK execution receipt from raw runtime-owned parts.
+#[cfg(feature = "execute")]
+pub fn execution_receipt_from_raw_parts(
+    #[cfg(feature = "prove")] program_digest: String,
+    snapshot: tabula_runtime::StateSnapshot,
+    batch: tabula_ir::EntryBatch,
+    context: tabula_ir::ContextInput,
+    state_after: tabula_runtime::StateSnapshot,
+    journal: tabula_executor::ExecutionJournal,
+) -> ExecutionReceipt {
+    let inner = tabula_runtime::ExecutionReceipt {
+        snapshot,
+        batch,
+        context,
+        journal,
+        state_after,
+    };
+    ExecutionReceipt::from_runtime(
+        #[cfg(feature = "prove")]
+        program_digest,
+        inner,
+    )
 }

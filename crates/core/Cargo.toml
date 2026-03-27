@@ -14,7 +14,7 @@ thiserror = { workspace = true }
 blake3 = { workspace = true, optional = true }
 
 [dev-dependencies]
-proptest = { workspace = true }
+proptest = "1"
 blake3 = { workspace = true }
 
 [lints]

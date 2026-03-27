@@ -125,8 +125,9 @@ fn runtime_root_exposes_only_the_final_native_surface() {
     );
     assert!(
         runtime_lib.contains(
-            "pub use engine::{ExecutionReceipt, ProofStatement, RuntimeBuilder, StateSnapshot, TabulaRuntime};"
-        ) && runtime_lib.contains("pub use engine::{ProveInput, ProveResult, VerifiedResult};")
+            "pub use engine::{ExecutionReceipt, RuntimeBuilder, StateSnapshot, TabulaRuntime};"
+        ) && runtime_lib.contains("pub use tabula_contract::ProofStatement;")
+            && runtime_lib.contains("pub use engine::{ProveInput, ProveResult, VerifiedResult};")
             && runtime_lib.contains("pub use engine::{Verifier, VerifierBuilder};"),
         "runtime root must re-export the canonical native runtime and verifier types"
     );

@@ -27,19 +27,19 @@ blake3 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tabula-contract = { workspace = true }
 tabula-compiler = { workspace = true }
 tabula-core = { workspace = true }
 tabula-ir = { workspace = true }
 tabula-types = { workspace = true }
 tabula-ext = { workspace = true, default-features = false }
 tabula-profile = { workspace = true }
-tabula-runtime = { path = "../runtime", default-features = false }
+tabula-runtime = { workspace = true, default-features = false }
 tabula-executor = { workspace = true, optional = true }
 tabula-machine = { workspace = true, optional = true }
 
 [dev-dependencies]
 tabula-ext = { workspace = true, features = ["prove"] }
-tabula-contract = { workspace = true }
 tabula-testing = { workspace = true }
 
 [lints]

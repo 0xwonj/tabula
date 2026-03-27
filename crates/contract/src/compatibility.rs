@@ -95,6 +95,11 @@ pub enum ContractValidationError {
         /// Version provided by envelope or policy.
         got: u32,
     },
+    /// Envelope references an unsupported proof envelope version.
+    UnknownProofEnvelopeVersion {
+        /// Version provided by the envelope.
+        got: u32,
+    },
     /// Known schema version does not match selected profile policy.
     ContractSchemaVersionMismatch {
         /// Version expected by policy.
@@ -142,6 +147,7 @@ impl ContractValidationError {
             Self::UnknownBindingRegistryVersion { .. } => "unknown_binding_registry_version",
             Self::UnknownStatementSchemaVersion { .. } => "unknown_statement_schema_version",
             Self::UnknownVerifierProfileVersion { .. } => "unknown_verifier_profile_version",
+            Self::UnknownProofEnvelopeVersion { .. } => "unknown_proof_envelope_version",
             Self::ContractSchemaVersionMismatch { .. } => "contract_schema_version_mismatch",
             Self::BindingRegistryVersionMismatch { .. } => "binding_registry_version_mismatch",
             Self::StatementSchemaVersionMismatch { .. } => "statement_schema_version_mismatch",
@@ -184,6 +190,14 @@ impl std::fmt::Display for ContractValidationError {
                 write!(
                     f,
                     "[{}] unsupported verifier profile version {}",
+                    self.code(),
+                    got
+                )
+            }
+            Self::UnknownProofEnvelopeVersion { got } => {
+                write!(
+                    f,
+                    "[{}] unsupported proof envelope version {}",
                     self.code(),
                     got
                 )

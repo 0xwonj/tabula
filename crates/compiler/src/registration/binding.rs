@@ -58,9 +58,8 @@ pub(crate) fn compute_program_binding(
     for binding in field_schemes {
         hasher.update(&borsh::to_vec(binding)?);
     }
-    let program_hash = hasher.finalize().to_hex().to_string();
     Ok(ProgramBinding::new(
-        program_hash,
-        metadata_envelope.canonical_hash_hex(),
+        *hasher.finalize().as_bytes(),
+        metadata_envelope.canonical_hash_bytes(),
     ))
 }

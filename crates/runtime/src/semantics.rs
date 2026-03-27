@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use serde::{Deserialize, Serialize};
+pub use tabula_contract::{PublicContextBinding, PublicStatement};
 use tabula_core::error::TabulaError;
 use tabula_core::traits::Hasher;
 use tabula_core::{Digest, PortableValue};
@@ -179,15 +179,6 @@ impl RuntimeProgram {
     }
 }
 
-/// A portable binding of one public context field to its committed value.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct PublicContextBinding {
-    /// The context field ID.
-    pub field: ir::ContextFieldId,
-    /// The portable serialized value.
-    pub value: PortableValue,
-}
-
 /// Per-slot execution effects for a single state column in one batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofStateSlotJournal {
@@ -230,17 +221,6 @@ pub struct ProofJournal {
     pub relation_slots: Vec<ProofRelationSlotJournal>,
     /// All event emissions in execution order.
     pub event_effects: Vec<exec::TypedEventEffect>,
-}
-
-/// The public statement committed by a STARK proof: program ID, context, and event digest.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct PublicStatement {
-    /// The program that was executed.
-    pub program_id: ir::ProgramId,
-    /// Committed public context values.
-    pub public_context: Vec<PublicContextBinding>,
-    /// Digest over all emitted events (deterministic, order-preserving).
-    pub event_digest: Digest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]

@@ -309,6 +309,46 @@ fn prove_and_verify_native_execution() {
 
 #[cfg(feature = "prove")]
 #[test]
+fn proof_binary_round_trip_reuses_contract_envelope() {
+    let sdk = sdk();
+    let artifact = sdk.compile(SDK_SURFACE_SOURCE).expect("compile source");
+    let program = sdk.open(artifact).expect("open artifact");
+    let snapshot = seeded_state(&program);
+    let batch = program
+        .batch()
+        .call("register", (true, 0u64))
+        .expect("register batch item")
+        .build();
+    let context = context(&program, 7, 99);
+    let execution = program
+        .runner()
+        .execute(&snapshot, &batch, &context)
+        .expect("execute");
+    let proof = program.runner().prove(&execution).expect("prove");
+
+    let encoded = proof.encode_binary().expect("encode proof binary");
+    let decoded = tabula_sdk::Proof::decode_binary(&encoded).expect("decode proof binary");
+
+    assert_eq!(proof.statement().binding, decoded.statement().binding);
+    assert_eq!(
+        proof
+            .statement()
+            .statement_hash_bytes()
+            .expect("original statement hash"),
+        decoded
+            .statement()
+            .statement_hash_bytes()
+            .expect("decoded statement hash"),
+    );
+
+    program
+        .verifier()
+        .verify(&decoded)
+        .expect("verify decoded proof");
+}
+
+#[cfg(feature = "prove")]
+#[test]
 fn warm_and_reuse_runtime_and_verifier() {
     let sdk = sdk();
     let program = open_program(&sdk, SDK_SURFACE_SOURCE);

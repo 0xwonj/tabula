@@ -16,6 +16,8 @@ The rewritten path is now explicitly split into:
 - crate-root `tabula_runtime::{RuntimeBuilder, TabulaRuntime, Verifier,
   StateSnapshot, ProofStatement, ...}` for native runtime setup,
   execution, proving, and verification orchestration
+  `ProofStatement` is re-exported from `tabula-contract`; runtime consumes it
+  but no longer owns the canonical type.
 
 ## Role
 
@@ -37,8 +39,8 @@ policy-and-orchestration layer above execution and backend proving.
 - preparation of backend-ready inputs from already registered semantics
 - native runtime/proving setup from
   `tabula_compiler::RegisteredProgram`
-- native proof statements whose digest is bound into the machine
-  transcript
+- construction and validation of contract-owned proof statements whose digest is
+  bound into the machine transcript
 
 ## Does Not Own
 
@@ -46,6 +48,7 @@ policy-and-orchestration layer above execution and backend proving.
 - low-level execution semantics implemented by the executor
 - native commitment semantics
 - backend proof implementation details once inputs are prepared
+- the canonical `ProofStatement` or `proof.bin` outer schema
 - authoring-language concerns
 
 ## Design Intent
@@ -63,12 +66,13 @@ policy-and-orchestration layer above execution and backend proving.
 - Lower backend crates should receive prepared inputs, not ownership of runtime
   registry policy.
 - Statement or binding checks that connect sealed program expectations to proof
-  verification belong here, not in the machine layer.
+  verification belong here, not in the machine layer, even when the statement
+  type itself is contract-owned.
 - Convenience surfaces may evolve, but this crate should remain the default
   integration boundary for applications.
 - AIR public values stay minimal: only old/new state roots belong in the AIR
   statement. Richer native semantic proof meaning belongs in the runtime
-  `ProofStatement` digest bound through the transcript.
+  proof-statement digest bound through the transcript.
 - Query execution is supported on the rewritten path, but query proving remains
   intentionally absent.
 
@@ -108,6 +112,7 @@ Preserve the behaviors that prove this crate still owns the runtime boundary:
 ## Related Crates
 
 - `tabula-compiler` produces the sealed inputs consumed here
+- `tabula-contract` owns the proof-visible statement and envelope contracts
 - `tabula-executor` performs deterministic execution
 - `tabula-witness` prepares proof-oriented logical inputs
 - `tabula-machine` performs backend proving and verification

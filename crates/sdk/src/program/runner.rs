@@ -167,6 +167,11 @@ impl QueryResult {
         Self { returns }
     }
 
+    /// Borrow all portable return values in declaration order.
+    pub fn returns(&self) -> &[PortableValue] {
+        &self.returns
+    }
+
     /// Number of return values.
     pub fn len(&self) -> usize {
         self.returns.len()

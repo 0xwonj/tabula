@@ -1247,6 +1247,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "876ac351060d4f882bb1032b6369eb0aef79ad9df1ea8bc404874d8cc3d0cd98"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1338,7 +1347,9 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "tabula-profile",
  "tabula-sdk",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1385,9 +1396,12 @@ dependencies = [
  "p3-field",
  "p3-koala-bear",
  "serde",
+ "serde_json",
+ "sha2",
  "tabula-commitment",
  "tabula-core",
  "tabula-ir",
+ "thiserror",
 ]
 
 [[package]]
@@ -1472,6 +1486,7 @@ name = "tabula-machine"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "borsh",
  "criterion",
  "p3-air",
  "p3-challenger",
@@ -1486,6 +1501,7 @@ dependencies = [
  "p3-symmetric",
  "p3-uni-stark",
  "rayon",
+ "serde",
  "tabula-chips",
  "tabula-commitment",
  "tabula-core",
@@ -1676,6 +1692,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml"
+version = "1.1.0+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8195ca05e4eb728f4ba94f3e3291661320af739c4e43779cbdfae82ab239fcc"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_parser",
+ "toml_writer",
+ "winnow",
+]
+
+[[package]]
 name = "toml_datetime"
 version = "1.1.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1704,6 +1735,12 @@ checksum = "2334f11ee363607eb04df9b8fc8a13ca1715a72ba8662a26ac285c98aabb4011"
 dependencies = [
  "winnow",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.1.0+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d282ade6016312faf3e41e57ebbba0c073e4056dab1232ab1cb624199648f8ed"
 
 [[package]]
 name = "tracing"

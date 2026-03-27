@@ -39,6 +39,12 @@ pub enum SdkError {
         /// Human-readable validation detail.
         detail: String,
     },
+    /// Proof envelope or proof byte decoding failure.
+    #[error("invalid proof payload: {detail}")]
+    ProofDecode {
+        /// Human-readable validation detail.
+        detail: String,
+    },
     /// Schema lookup failed on the default SDK path.
     #[error("schema lookup failed: {detail}")]
     SchemaLookup {

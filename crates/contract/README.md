@@ -1,9 +1,9 @@
 # tabula-contract
 
-`tabula-contract` is the fail-closed compatibility, binding, and proof-visible
-format layer for Tabula. It defines the versioned metadata, shared artifact
-schemas, and canonical encoding rules that let separated compiler, runtime,
-witness, chip, and verification paths agree on what they are allowed to trust.
+`tabula-contract` is the fail-closed trust-contract layer for Tabula. It
+defines the versioned metadata, proof-visible schemas, and canonical encoding
+rules that let separated compiler, runtime, machine, SDK, and verification
+paths agree on what they are allowed to trust.
 
 ## Role
 
@@ -13,15 +13,17 @@ This crate exists to answer one question:
 compatible?"
 
 Specific versions and fields will evolve. The lasting boundary is that
-compatibility policy, binding metadata, sealed artifact schemas, proof-visible
-canonical encodings, and fail-closed validation live here.
+compatibility policy, binding metadata, proof-visible schemas, proof-envelope
+contracts, canonical encodings, and fail-closed validation live here.
 
 ## Owns
 
 - versioned contract metadata carried with sealed artifacts
 - compatibility policy applied at proof and verification entry points
 - binding registry and public-input field policy
-- proof-visible artifact schemas shared across compiler/runtime/verifier paths
+- contract-owned `ProofStatement`, `PublicStatement`, and `PublicContextBinding`
+- canonical `proof.bin` outer envelope (`ProofEnvelopeV2`)
+- proof-visible schemas shared across compiler/runtime/verifier paths
 - canonical digest and encoding rules that multiple layers must match bit-for-bit
 - fail-closed validation for known and unknown compatibility versions
 - contract-level rules that multiple layers must interpret the same way
@@ -29,12 +31,12 @@ canonical encodings, and fail-closed validation live here.
 ## Does Not Own
 
 - program semantics
-- artifact storage or canonical serialization
+- compiler-native artifact storage or canonical serialization
 - execution behavior
 - runtime orchestration
 - semantic registration or IR traversal
 - witness aggregation policy
-- backend proof implementation
+- backend proof implementation or concrete proof codecs
 
 ## Design Intent
 
@@ -44,10 +46,12 @@ canonical encodings, and fail-closed validation live here.
 
 ## Core Contract
 
-- Unknown compatibility versions are incompatible by default.
+- Unknown compatibility or proof-envelope versions are incompatible by default.
 - Compatibility checks should reject mismatches rather than auto-repairing or
   silently downgrading them.
 - Binding metadata defined here is shared policy, not local implementation detail.
+- `ProofStatement` and `ProofEnvelopeV2` are contract artifacts, not runtime-
+  local or CLI-local formats.
 - Changes here are cross-layer contract changes and should be treated as such.
 
 ## Dependency Rules
@@ -77,6 +81,8 @@ Start with:
 Preserve the behaviors that prove this crate still owns the contract boundary:
 
 - unknown or mismatched versions fail closed
+- `ProofStatement` canonical bytes and hashes remain stable for a given schema
+- `ProofEnvelopeV2` encode/decode stays stable and fail-closed
 - compatibility policies reject invalid envelopes consistently
 - binding expectations remain explicit and complete
 
@@ -84,4 +90,5 @@ Preserve the behaviors that prove this crate still owns the contract boundary:
 
 - `tabula-core` provides the underlying shared vocabulary
 - `tabula-compiler` seals contract metadata into `RegisteredProgram`
-- `tabula-runtime` and verifiers enforce that sealed contract at execution and proof boundaries
+- `tabula-runtime` produces and validates contract-owned proof statements
+- `tabula-machine` owns the concrete proof bytes embedded inside `proof.bin`

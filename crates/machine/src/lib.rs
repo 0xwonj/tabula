@@ -29,6 +29,8 @@ mod testing;
 pub use config::{EF4, TabulaStarkConfig, default_config, make_config};
 pub use input::{ColumnSlotKey, PreparedColumnInput, PreparedMachineInput, PreparedTierInput};
 pub use machine::TabulaMachine;
+pub use proof::codec::{decode_proof_bytes, encode_proof_bytes};
+pub use proof::errors::ProofCodecError;
 pub use proof::errors::{ProveError, VerificationError};
 pub use proof::model::{ChipOpening, ColumnProofEntry, ProofTier, SubProofEnvelope, TabulaProof};
 pub use setup::builder::MachineBuilder;

@@ -13,7 +13,7 @@ use tabula_commitment::PoseidonHasher;
 use tabula_compiler::RegisteredProgram;
 #[cfg(feature = "prove")]
 use tabula_contract::TupleEncodingDefaults;
-use tabula_contract::{ProgramBinding, StaticTableArtifact};
+use tabula_contract::{ProgramBinding, ProofStatement, StaticTableArtifact};
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
 use tabula_core::{CellKey, ColId, Digest, PortableValue, RootProfileId, RowKey, TableId};
@@ -298,79 +298,6 @@ impl StateView for StateSnapshot {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-struct ProofPublicContextBinding {
-    field: ir::ContextFieldId,
-    value: PortableValue,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-struct CanonicalProofStatement {
-    program_hash: String,
-    metadata_hash: String,
-    program_id: ir::ProgramId,
-    public_context: Vec<ProofPublicContextBinding>,
-    event_digest: Digest,
-    applied_tx_digest: Digest,
-    static_table_root: Digest,
-    old_state_root: Digest,
-    new_state_root: Digest,
-}
-
-/// Transcript-bound semantic proof statement for the native runtime.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct ProofStatement {
-    /// Compiler-sealed program binding.
-    pub binding: ProgramBinding,
-    /// Semantic public statement visible to native callers.
-    pub public: runtime_ir::PublicStatement,
-    /// Canonical digest of the applied transaction batch.
-    pub applied_tx_digest: Digest,
-    /// Transcript-bound root of the sealed static relation table set.
-    pub static_table_root: Digest,
-    /// Root before batch execution.
-    pub old_state_root: Digest,
-    /// Root after batch execution.
-    pub new_state_root: Digest,
-}
-
-impl ProofStatement {
-    /// Serialize the statement canonically for transcript binding.
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RuntimeError> {
-        let canonical = CanonicalProofStatement {
-            program_hash: self.binding.program_hash().to_string(),
-            metadata_hash: self.binding.metadata_hash().to_string(),
-            program_id: self.public.program_id,
-            public_context: self
-                .public
-                .public_context
-                .iter()
-                .map(|binding| ProofPublicContextBinding {
-                    field: binding.field,
-                    value: binding.value.clone(),
-                })
-                .collect(),
-            event_digest: self.public.event_digest,
-            applied_tx_digest: self.applied_tx_digest,
-            static_table_root: self.static_table_root,
-            old_state_root: self.old_state_root,
-            new_state_root: self.new_state_root,
-        };
-        let mut bytes = b"tabula.runtime.proof_statement.v1".to_vec();
-        bytes.extend(
-            borsh::to_vec(&canonical).map_err(|error| RuntimeError::StatementBuild {
-                detail: format!("failed to encode proof statement: {error}"),
-            })?,
-        );
-        Ok(bytes)
-    }
-
-    /// Canonical transcript-bound digest.
-    pub fn statement_hash_bytes(&self) -> Result<[u8; 32], RuntimeError> {
-        Ok(sha2::Sha256::digest(self.canonical_bytes()?).into())
-    }
-}
-
 /// Inputs for native proving.
 #[cfg(feature = "prove")]
 pub struct ProveInput<'a> {
@@ -643,7 +570,12 @@ impl Verifier {
                 detail: "proof statement binding does not match the verifier binding".to_string(),
             });
         }
-        let expected_digest = statement.statement_hash_bytes()?;
+        let expected_digest =
+            statement
+                .statement_hash_bytes()
+                .map_err(|error| RuntimeError::StatementBuild {
+                    detail: error.to_string(),
+                })?;
         if proof.statement_digest != expected_digest {
             return Err(RuntimeError::ValidationFailed {
                 detail: "proof statement digest does not match the proof transcript binding"
@@ -1042,7 +974,12 @@ impl TabulaRuntime {
                 detail: "proof statement binding does not match the runtime binding".to_string(),
             });
         }
-        let expected_digest = statement.statement_hash_bytes()?;
+        let expected_digest =
+            statement
+                .statement_hash_bytes()
+                .map_err(|error| RuntimeError::StatementBuild {
+                    detail: error.to_string(),
+                })?;
         if proof.statement_digest != expected_digest {
             return Err(RuntimeError::ValidationFailed {
                 detail: "proof statement digest does not match the proof transcript binding"
@@ -1131,16 +1068,21 @@ impl TabulaRuntime {
             &typed_context,
             input.executed,
         )?;
-        let statement = ProofStatement {
-            binding: self.runtime_program.binding.clone(),
+        let statement = ProofStatement::new(
+            self.runtime_program.binding.clone(),
             public,
             applied_tx_digest,
-            static_table_root: self.runtime_program.static_table_artifact.root,
-            old_state_root: proof_artifacts.air_statement.old_root.to_bytes(),
-            new_state_root: proof_artifacts.air_statement.new_root.to_bytes(),
-        };
-        let machine_input =
-            proof_artifacts.into_prepared_machine_input(statement.statement_hash_bytes()?);
+            self.runtime_program.static_table_artifact.root,
+            proof_artifacts.air_statement.old_root.to_bytes(),
+            proof_artifacts.air_statement.new_root.to_bytes(),
+        );
+        let statement_digest =
+            statement
+                .statement_hash_bytes()
+                .map_err(|error| RuntimeError::StatementBuild {
+                    detail: error.to_string(),
+                })?;
+        let machine_input = proof_artifacts.into_prepared_machine_input(statement_digest);
         Ok((statement, machine_input))
     }
 

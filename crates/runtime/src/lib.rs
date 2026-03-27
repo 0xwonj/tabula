@@ -45,7 +45,7 @@ pub mod semantics;
 pub use error::{RuntimeError, RuntimeResult};
 
 #[cfg(feature = "verify")]
-pub use engine::{ExecutionReceipt, ProofStatement, RuntimeBuilder, StateSnapshot, TabulaRuntime};
+pub use engine::{ExecutionReceipt, RuntimeBuilder, StateSnapshot, TabulaRuntime};
 #[cfg(feature = "prove")]
 pub use engine::{ProveInput, ProveResult, VerifiedResult};
 #[cfg(feature = "verify")]
@@ -54,3 +54,5 @@ pub use engine::{Verifier, VerifierBuilder};
 pub use host::{HostEnvironment, InstalledSchemes, RuntimeRegistries, SmtScheme, SsmcScheme};
 #[cfg(feature = "prove")]
 pub use proof_summary::ProofSummary;
+#[cfg(feature = "verify")]
+pub use tabula_contract::ProofStatement;

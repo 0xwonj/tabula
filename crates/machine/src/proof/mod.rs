@@ -1,4 +1,5 @@
 pub(crate) mod chip_ref;
+pub mod codec;
 pub mod errors;
 pub(crate) mod instance;
 pub mod model;

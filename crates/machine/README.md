@@ -20,6 +20,8 @@ or runtime policy.
 - backend trace construction from typed prepared inputs
 - backend proof generation and verification
 - the proof object and related backend proof types
+- canonical encoding/decoding of the concrete machine proof bytes embedded in
+  contract-owned `proof.bin`
 - explicit backend extension seams
 - validation that backend inputs are structurally acceptable for proving
 
@@ -82,5 +84,6 @@ Preserve the behaviors that prove this crate still owns the backend boundary:
 ## Related Crates
 
 - `tabula-runtime` is the default policy layer above this crate
+- `tabula-contract` owns the outer proof envelope and statement contract
 - `tabula-witness` and `tabula-chips` help produce the inputs consumed here
 - `tabula-stark` provides lower proving infrastructure

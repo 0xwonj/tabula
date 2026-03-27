@@ -4,15 +4,22 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+verify = ["tabula-sdk/verify"]
+prove = ["verify", "tabula-sdk/prove"]
+
 [dependencies]
 tabula-sdk = { workspace = true }
-clap = { workspace = true }
+tabula-profile = { workspace = true }
+clap = { version = "4", features = ["derive"] }
 anyhow = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+tracing-subscriber = "0.3"
 serde_json = { workspace = true }
 serde = { workspace = true }
 borsh = { workspace = true }
+toml = "1"
 
 [lints]
 workspace = true

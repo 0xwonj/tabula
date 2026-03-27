@@ -7,14 +7,17 @@ license.workspace = true
 [dependencies]
 blake3 = { workspace = true }
 borsh = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true }
+sha2 = { workspace = true }
 tabula-core = { workspace = true }
 tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-ir = { workspace = true }
 p3-field = { workspace = true }
 p3-koala-bear = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 tabula-core = { workspace = true }
 
 [lints]

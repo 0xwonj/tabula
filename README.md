@@ -30,7 +30,8 @@ Tabula is organized around a few durable ideas:
 - compile-time analysis is part of the optimization story: work resolved
   statically is work the prover does not need to pay for repeatedly
 - execution, commitment semantics, and proving are separate layers
-- the runtime is the default integration boundary
+- `tabula-sdk` is the default product-facing integration boundary
+- `tabula-runtime` remains the lower-level native orchestration layer
 - the proof backend should be replaceable without redefining program meaning
 
 ## Architecture At A Glance
@@ -77,17 +78,41 @@ cargo test
 Generate example inputs and run a local batch:
 
 ```sh
-cargo run -p tabula-cli -- example --dir /tmp/tabula-example
+cargo run -p tabula-cli -- example basic --dir /tmp/tabula-example
 cargo run -p tabula-cli -- execute \
-  --program /tmp/tabula-example/example_program.json \
-  --state /tmp/tabula-example/example_state.json \
-  --batch /tmp/tabula-example/example_batch.json
+  --program /tmp/tabula-example/program.tab \
+  --state /tmp/tabula-example/state.json \
+  --batch /tmp/tabula-example/batch.json \
+  --context /tmp/tabula-example/context.json
 ```
 
-Check or compile a `.tab` program:
+Produce and verify a proof from that execution:
+
+```sh
+cargo run -p tabula-cli -- execute \
+  --program /tmp/tabula-example/program.tab \
+  --state /tmp/tabula-example/state.json \
+  --batch /tmp/tabula-example/batch.json \
+  --context /tmp/tabula-example/context.json \
+  --receipt-out /tmp/tabula-example/receipt.bin
+
+cargo run -p tabula-cli -- prove \
+  --program /tmp/tabula-example/program.tab \
+  --receipt /tmp/tabula-example/receipt.bin \
+  --proof-out /tmp/tabula-example/proof.bin \
+  --statement-out /tmp/tabula-example/statement.json \
+  --summary-out /tmp/tabula-example/proof_summary.json
+
+cargo run -p tabula-cli -- verify \
+  --program /tmp/tabula-example/program.tab \
+  --proof /tmp/tabula-example/proof.bin
+```
+
+Check, inspect, or compile a `.tab` program:
 
 ```sh
 cargo run -p tabula-cli -- check path/to/program.tab
+cargo run -p tabula-cli -- schema path/to/program.tab
 cargo run -p tabula-cli -- compile path/to/program.tab
 ```
 

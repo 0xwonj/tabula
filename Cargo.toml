@@ -48,7 +48,7 @@ tabula-chips = { path = "crates/chips" }
 tabula-witness = { path = "crates/witness" }
 tabula-machine = { path = "crates/machine" }
 tabula-lang = { path = "crates/lang" }
-tabula-runtime = { path = "crates/runtime" }
+tabula-runtime = { path = "crates/runtime", default-features = false }
 tabula-compiler = { path = "crates/compiler" }
 tabula-ext = { path = "crates/ext", default-features = false }
 tabula-sdk = { path = "crates/sdk" }
@@ -87,14 +87,8 @@ anyhow = "1"
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = "0.3"
-
-# CLI
-clap = { version = "4", features = ["derive"] }
 
 # Testing
-proptest = "1"
-criterion = { version = "0.8", features = ["html_reports"] }
 
 # ── Workspace-level lints ─────────────────────────────────────────────────────
 

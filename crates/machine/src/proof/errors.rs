@@ -121,3 +121,28 @@ pub enum VerificationError {
         cumsum: [KoalaBear; 4],
     },
 }
+
+/// Errors during machine proof codec encoding or decoding.
+#[derive(Debug, thiserror::Error)]
+pub enum ProofCodecError {
+    /// Proof bytes could not be encoded.
+    #[error("failed to encode proof bytes: {detail}")]
+    Encode {
+        /// Human-readable detail.
+        detail: String,
+    },
+    /// Proof bytes could not be decoded.
+    #[error("failed to decode proof bytes: {detail}")]
+    Decode {
+        /// Human-readable detail.
+        detail: String,
+    },
+    /// A field element payload is non-canonical.
+    #[error("non-canonical field element in {context}: {value}")]
+    NonCanonicalField {
+        /// Short description of where the value came from.
+        context: String,
+        /// The offending raw value.
+        value: u32,
+    },
+}

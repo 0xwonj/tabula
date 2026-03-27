@@ -61,16 +61,21 @@ impl ContractMetadataEnvelope {
     }
 
     /// Hash the canonical bytes with fixed domain separation.
-    pub fn canonical_hash(&self) -> [u8; 32] {
+    pub fn canonical_hash_bytes(&self) -> [u8; 32] {
         let mut hasher = blake3::Hasher::new();
         hasher.update(METADATA_HASH_DOMAIN);
         hasher.update(&self.to_canonical_bytes());
         *hasher.finalize().as_bytes()
     }
 
+    /// Hash the canonical bytes with fixed domain separation.
+    pub fn canonical_hash(&self) -> [u8; 32] {
+        self.canonical_hash_bytes()
+    }
+
     /// Hash the canonical bytes and return the digest as lowercase hex.
     pub fn canonical_hash_hex(&self) -> String {
-        let hash = self.canonical_hash();
+        let hash = self.canonical_hash_bytes();
         let mut out = String::with_capacity(hash.len() * 2);
         for byte in hash {
             use std::fmt::Write as _;

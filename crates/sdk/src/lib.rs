@@ -24,7 +24,7 @@ pub use program::{
 pub use program::{ExecutionReceipt, QueryResult, Runner, TxOutcomeSummary};
 pub use sdk::Sdk;
 #[cfg(feature = "verify")]
-pub use tabula_runtime::ProofStatement as Statement;
+pub use tabula_contract::ProofStatement as Statement;
 #[cfg(feature = "verify")]
 pub use types::Proof;
 pub use types::{Context, State, TransactionBatch};

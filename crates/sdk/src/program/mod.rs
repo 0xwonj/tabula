@@ -79,14 +79,29 @@ impl Program {
         StateBuilder::new(self.clone())
     }
 
+    /// Start building a state snapshot from an existing value.
+    pub fn state_from(&self, state: &State) -> StateBuilder {
+        StateBuilder::from_state(self.clone(), state.clone())
+    }
+
     /// Start building a public context input using symbol-based field names.
     pub fn context(&self) -> ContextBuilder {
         ContextBuilder::new(self.clone())
     }
 
+    /// Start building a public context input from an existing value.
+    pub fn context_from(&self, context: &Context) -> ContextBuilder {
+        ContextBuilder::from_context(self.clone(), context.clone())
+    }
+
     /// Start building a transaction batch using symbol-based entry names.
     pub fn batch(&self) -> TransactionBatchBuilder {
         TransactionBatchBuilder::new(self.clone())
+    }
+
+    /// Start building a transaction batch from an existing value.
+    pub fn batch_from(&self, batch: &TransactionBatch) -> TransactionBatchBuilder {
+        TransactionBatchBuilder::from_batch(self.clone(), batch.clone())
     }
 
     /// Create an execution (and optionally proving) runner for this program.
@@ -114,6 +129,10 @@ impl StateBuilder {
         let state = State::from_raw(tabula_runtime::StateSnapshot::empty(
             program.artifact.registered().program(),
         ));
+        Self { program, state }
+    }
+
+    fn from_state(program: Program, state: State) -> Self {
         Self { program, state }
     }
 
@@ -162,6 +181,10 @@ impl ContextBuilder {
         }
     }
 
+    fn from_context(program: Program, context: Context) -> Self {
+        Self { program, context }
+    }
+
     /// Set a context field value by source symbol.
     pub fn set<V: EncodeValue>(mut self, symbol: &str, value: V) -> Result<Self, SdkError> {
         let field = self.program.context_field(symbol)?;
@@ -189,6 +212,10 @@ impl TransactionBatchBuilder {
             program,
             batch: TransactionBatch::default(),
         }
+    }
+
+    fn from_batch(program: Program, batch: TransactionBatch) -> Self {
+        Self { program, batch }
     }
 
     /// Append a transaction call by source symbol with encoded parameters.

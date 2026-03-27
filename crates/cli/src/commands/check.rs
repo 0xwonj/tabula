@@ -1,25 +1,18 @@
-//! Handler for the `check` subcommand.
+//! `tabula check`
 
-use std::path::Path;
+use crate::app::AppContext;
+use crate::cli::CheckArgs;
+use crate::io::load_artifact;
+use crate::output::{check_output, render_check};
 
-use tabula_sdk::{Artifact, Sdk};
-
-use crate::io::load_json;
-
-pub fn cmd_check(program_path: &Path) -> anyhow::Result<()> {
-    let sdk = Sdk::standard();
-    let artifact = if program_path.extension().and_then(|ext| ext.to_str()) == Some("tab") {
-        let source = std::fs::read_to_string(program_path)?;
-        sdk.compile(&source)?
+/// Validate source or artifact and print a schema-aware summary.
+pub(crate) fn run(ctx: &AppContext, args: &CheckArgs) -> anyhow::Result<()> {
+    let (artifact, input_kind) = load_artifact(ctx.sdk()?, &args.program)?;
+    let output = check_output(&artifact, input_kind);
+    if ctx.wants_json(args.json) {
+        println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        load_json::<Artifact>(program_path)?
-    };
-    let schema = artifact.schema();
-
-    println!(
-        "OK: {} table(s), {} tx entry(s)",
-        schema.table_count(),
-        schema.tx_count(),
-    );
+        println!("{}", render_check(&output));
+    }
     Ok(())
 }

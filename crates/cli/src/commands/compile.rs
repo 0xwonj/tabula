@@ -1,23 +1,24 @@
-//! Handler for the `compile` subcommand.
+//! `tabula compile`
 
-use std::path::Path;
+use anyhow::Context as _;
 
-use tabula_sdk::Sdk;
+use crate::app::AppContext;
+use crate::cli::CompileArgs;
+use crate::io::{default_artifact_output, ensure_parent_dir, load_artifact, write_json};
 
-use crate::io::write_json;
-
-pub fn cmd_compile(program_path: &Path, output: Option<&Path>) -> anyhow::Result<()> {
-    let source = std::fs::read_to_string(program_path)?;
-    let sdk = Sdk::standard();
-    let artifact = sdk.compile(&source)?;
-
-    let default_output = program_path.with_extension("json");
-    let output_path = output.unwrap_or(&default_output);
-    write_json(output_path, &artifact)?;
-
+/// Compile source into one artifact JSON file.
+pub(crate) fn run(ctx: &AppContext, args: &CompileArgs) -> anyhow::Result<()> {
+    let (artifact, _) = load_artifact(ctx.sdk()?, &args.program)?;
+    let output_path = args
+        .output
+        .clone()
+        .unwrap_or_else(|| default_artifact_output(&args.program));
+    ensure_parent_dir(&output_path)?;
+    write_json(&output_path, &artifact)
+        .with_context(|| format!("failed to write artifact {}", output_path.display()))?;
     println!(
         "Compiled {} -> {}",
-        program_path.display(),
+        args.program.display(),
         output_path.display()
     );
     Ok(())

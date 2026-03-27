@@ -43,6 +43,7 @@ requirements are derived here rather than rediscovered later.
 - fail-closed compatibility and binding metadata attached to registered programs
 - derivation of semantic requirements that downstream layers must honor
 - the sealed native in-memory program representation used for later setup
+- canonical serialization and digesting of that sealed registered-program artifact
 - deterministic program binding inputs derived from sealed native payloads
 
 ## Does Not Own
