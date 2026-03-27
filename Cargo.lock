@@ -1338,7 +1338,6 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
- "tabula-core",
  "tabula-sdk",
  "tracing",
  "tracing-subscriber",

@@ -5,7 +5,6 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-tabula-core = { workspace = true, features = ["test-utils"] }
 tabula-sdk = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
