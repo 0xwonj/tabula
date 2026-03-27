@@ -38,20 +38,14 @@ pub struct CompilerCatalogs {
     capability_descriptors: SourceCapabilityCatalog,
 }
 
-impl Default for CompilerCatalogs {
-    fn default() -> Self {
-        Self {
-            semantics: builtin_semantic_registry()
-                .expect("built-in semantic registry must remain valid"),
-            capability_descriptors: SourceCapabilityCatalog::new(),
-        }
-    }
-}
-
 impl CompilerCatalogs {
     /// Build compiler catalogs seeded with the built-in semantic registry.
-    pub fn standard() -> Self {
-        Self::default()
+    pub fn standard() -> Result<Self, CompilerCatalogError> {
+        Ok(Self {
+            semantics: builtin_semantic_registry()
+                .map_err(CompilerCatalogError::InvalidSemanticRegistry)?,
+            capability_descriptors: SourceCapabilityCatalog::new(),
+        })
     }
 
     /// Build compiler catalogs without any seeded semantic definitions.

@@ -1,9 +1,8 @@
-#![allow(clippy::wildcard_imports)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_ir as ir;
 
+#[allow(clippy::wildcard_imports)]
 use super::super::model::*;
 use super::super::validate::VerifiedProgram;
 
@@ -60,51 +59,47 @@ pub struct ProgramAnalysis {
 #[derive(Debug, Clone)]
 pub struct AnalyzedProgram {
     pub(super) verified: VerifiedProgram,
+    // MIR analysis summaries are currently consumed by MIR-focused tests while
+    // the production pipeline only needs the verified program view.
+    #[allow(dead_code)]
     pub(super) analysis: ProgramAnalysis,
 }
 
 impl AnalyzedProgram {
-    pub fn verified_program(&self) -> &VerifiedProgram {
-        &self.verified
-    }
-
     pub fn program(&self) -> &Program {
         self.verified.program()
     }
 
-    pub fn analysis(&self) -> &ProgramAnalysis {
-        &self.analysis
-    }
-
+    #[cfg(test)]
     pub fn effect_summary(&self, callable_id: CallableId) -> Option<EffectSummary> {
         self.analysis.effect_summaries.get(&callable_id).copied()
     }
 
+    #[cfg(test)]
     pub fn failure_summary(&self, callable_id: CallableId) -> Option<FailureSummary> {
         self.analysis.failure_summaries.get(&callable_id).copied()
     }
 
+    #[cfg(test)]
     pub fn policy_summary(&self, callable_id: CallableId) -> Option<PolicySummary> {
         self.analysis.policy_summaries.get(&callable_id).copied()
     }
 
+    #[cfg(test)]
     pub fn context_demand_summary(&self, callable_id: CallableId) -> Option<&ContextDemandSummary> {
         self.analysis.context_demands.get(&callable_id)
     }
 
+    #[cfg(test)]
     pub fn query_legal(&self, callable_id: CallableId) -> Option<bool> {
-        let effect = self.effect_summary(callable_id)?;
-        let policy = self.policy_summary(callable_id)?;
+        let effect = self.analysis.effect_summaries.get(&callable_id).copied()?;
+        let policy = self.analysis.policy_summaries.get(&callable_id).copied()?;
         Some(
             !effect.world.state_write
                 && !effect.world.state_delete
                 && !effect.world.emit_event
                 && !policy.uses_tx_only_capability,
         )
-    }
-
-    pub fn into_parts(self) -> (VerifiedProgram, ProgramAnalysis) {
-        (self.verified, self.analysis)
     }
 }
 

@@ -1,6 +1,6 @@
-#![allow(clippy::wildcard_imports)]
 #![allow(missing_docs)]
 
+#[allow(clippy::wildcard_imports)]
 use super::*;
 pub(super) fn single_output(outputs: &[TypeRef]) -> Option<TypeRef> {
     match outputs {

@@ -6,6 +6,7 @@ use p3_symmetric::{
     CryptographicHasher, PaddingFreeSponge, PseudoCompressionFunction, TruncatedPermutation,
 };
 
+use tabula_core::error::TabulaError;
 use tabula_core::traits::Hasher;
 use tabula_core::{Digest, PortableValue};
 
@@ -75,26 +76,17 @@ impl Hasher for PoseidonHasher {
         result.to_bytes()
     }
 
-    /// # Panics
-    ///
-    /// Panics if `left` or `right` contains a non-canonical KoalaBear value
-    /// (any 4-byte LE chunk >= KoalaBear modulus `p = 2130706433`).
-    fn hash_pair(&self, left: &Digest, right: &Digest) -> Digest {
-        let left_native =
-            NativeDigest::from_bytes(left).expect("hash_pair: left digest non-canonical");
-        let right_native =
-            NativeDigest::from_bytes(right).expect("hash_pair: right digest non-canonical");
+    fn hash_pair(&self, left: &Digest, right: &Digest) -> Result<Digest, TabulaError> {
+        let left_native = NativeDigest::from_bytes(left)?;
+        let right_native = NativeDigest::from_bytes(right)?;
         let result = FieldHasher::compress(self, &left_native, &right_native);
-        result.to_bytes()
+        Ok(result.to_bytes())
     }
 
     /// Override: uses native FE encoding per semantics-spec §1.5.5.
     ///
     /// `Poseidon(0x02 || n || encode(v_0) || ... || encode(v_{n-1}))`
     ///
-    /// # Panics
-    ///
-    /// Panics if any encoded byte is not representable as a canonical field element.
     fn hash_ir(&self, inputs: &[PortableValue]) -> Digest {
         let mut bytes = Vec::new();
         bytes.push(DOMAIN_HASH_IR as u8);
@@ -112,6 +104,7 @@ impl Hasher for PoseidonHasher {
 mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
+    use p3_field::PrimeField32;
     use tabula_types::{bool_portable, bytes32_portable, i64_portable, u64_portable};
 
     #[test]
@@ -161,9 +154,23 @@ mod tests {
         let h = PoseidonHasher::new();
         let left = NativeDigest([KoalaBear::ZERO; 8]).to_bytes();
         let right = NativeDigest([KoalaBear::ONE; 8]).to_bytes();
-        let result = h.hash_pair(&left, &right);
+        let result = h.hash_pair(&left, &right).expect("canonical digests");
         // Just verify it doesn't panic and returns a valid digest.
         assert_ne!(result, [0u8; 32]);
+    }
+
+    #[test]
+    fn poseidon_hash_pair_rejects_non_canonical_digest_bytes() {
+        let h = PoseidonHasher::new();
+        let left = NativeDigest([KoalaBear::ZERO; 8]).to_bytes();
+        let mut right = NativeDigest([KoalaBear::ONE; 8]).to_bytes();
+        right[0..4].copy_from_slice(&KoalaBear::ORDER_U32.to_le_bytes());
+
+        let error = h
+            .hash_pair(&left, &right)
+            .expect_err("non-canonical digest bytes must fail");
+
+        assert!(matches!(error, TabulaError::FieldEncodingError(_)));
     }
 
     #[test]

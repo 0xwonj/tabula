@@ -45,14 +45,17 @@ fn compile_artifact(sdk: &Sdk, source: &str) -> tabula_sdk::Artifact {
 
 #[cfg(not(feature = "compile"))]
 fn compile_artifact(sdk: &Sdk, source: &str) -> tabula_sdk::Artifact {
-    let compiled = compile_program_source_with_catalogs(source, &CompilerCatalogs::standard())
-        .expect("compile source");
+    let compiled = compile_program_source_with_catalogs(
+        source,
+        &CompilerCatalogs::standard().expect("standard catalogs"),
+    )
+    .expect("compile source");
     register_compiled(sdk, compiled).expect("register compiled program")
 }
 
 #[test]
 fn compile_and_open_artifact_without_prove() {
-    let sdk = Sdk::standard();
+    let sdk = Sdk::standard().expect("build standard sdk");
     let artifact = compile_artifact(&sdk, NO_PROVE_SOURCE);
     let reopened = sdk.open(artifact.clone()).expect("open artifact");
 
@@ -76,6 +79,7 @@ fn extension_capability_registration_supports_source_sealing() {
         .expect("build extension");
 
     let sdk = Sdk::builder()
+        .expect("create sdk builder")
         .with_extension(&extension)
         .expect("install extension")
         .build()
@@ -87,6 +91,7 @@ fn extension_capability_registration_supports_source_sealing() {
     #[cfg(not(feature = "compile"))]
     let artifact = {
         let compiler_catalogs = CompilerCatalogs::standard()
+            .expect("standard catalogs")
             .with_capability_descriptor(descriptor)
             .expect("demo hash compiler catalog");
         let compiled = compile_program_source_with_catalogs(CAPABILITY_SOURCE, &compiler_catalogs)

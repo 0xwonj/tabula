@@ -27,15 +27,15 @@ pub struct SdkBuilder {
 }
 
 impl SdkBuilder {
-    pub(crate) fn new() -> Self {
-        Self {
-            compiler_catalogs: CompilerCatalogs::standard(),
-            host_environment: HostEnvironment::standard(),
+    pub(crate) fn new() -> Result<Self, SdkError> {
+        Ok(Self {
+            compiler_catalogs: CompilerCatalogs::standard().map_err(map_compiler_catalog_error)?,
+            host_environment: HostEnvironment::standard().map_err(SdkError::from)?,
             #[cfg(feature = "execute")]
             machine_stark_config: tabula_machine::default_config(),
             #[cfg(feature = "prove")]
             root_backend_bundle: RootBackendBundle::standard(),
-        }
+        })
     }
 
     /// Install one extension bundle atomically.
@@ -260,12 +260,6 @@ impl SdkBuilder {
         }
 
         Ok(())
-    }
-}
-
-impl Default for SdkBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

@@ -1,8 +1,8 @@
-#![allow(clippy::wildcard_imports)]
 #![allow(missing_docs)]
 
 use crate::build::{FrontendPrelude, TypeCapabilityKind};
 use crate::error::{FrontendError, FrontendErrorKind};
+#[allow(clippy::wildcard_imports)]
 use crate::hir::*;
 use std::collections::{BTreeMap, BTreeSet};
 

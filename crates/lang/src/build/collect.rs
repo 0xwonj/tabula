@@ -1,9 +1,9 @@
-#![allow(clippy::wildcard_imports)]
 #![allow(missing_docs)]
 
 use std::collections::BTreeSet;
 
 use super::consts::insert_top_name;
+#[allow(clippy::wildcard_imports)]
 use super::*;
 use crate::error::{FrontendError, FrontendErrorKind};
 

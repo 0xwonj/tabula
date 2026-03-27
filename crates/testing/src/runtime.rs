@@ -13,6 +13,7 @@ pub type VerifiedExecution = VerifiedResult;
 /// Build the runtime from one registered program.
 pub fn build_runtime(registered: tabula_compiler::RegisteredProgram) -> TabulaRuntime {
     TabulaRuntime::builder(registered)
+        .expect("create runtime builder")
         .build()
         .expect("build runtime")
 }

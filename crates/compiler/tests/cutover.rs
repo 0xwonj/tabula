@@ -28,8 +28,11 @@ tx set_balance(id: u64, amount: u64) {
 
     let type_runtimes = TypeRuntimeRegistry::seeded().expect("seeded runtimes");
 
-    let compiled = compile_program_source_with_catalogs(source, &CompilerCatalogs::standard())
-        .expect("compile");
+    let compiled = compile_program_source_with_catalogs(
+        source,
+        &CompilerCatalogs::standard().expect("standard catalogs"),
+    )
+    .expect("compile");
     let runtime_program = RuntimeProgram::from_validated_program(compiled.into_validated_program())
         .expect("runtime program");
     let entry = runtime_program
@@ -56,9 +59,15 @@ tx set_balance(id: u64, amount: u64) {
     )
     .expect("execute");
 
-    let registered = compile_and_register_program_source(source, &CompilerCatalogs::standard())
-        .expect("register");
-    let runtime = TabulaRuntime::builder(registered).build().expect("runtime");
+    let registered = compile_and_register_program_source(
+        source,
+        &CompilerCatalogs::standard().expect("standard catalogs"),
+    )
+    .expect("register");
+    let runtime = TabulaRuntime::builder(registered)
+        .expect("runtime builder")
+        .build()
+        .expect("runtime");
     let snapshot = StateSnapshot::empty(runtime.execution_program().program());
     let runtime_batch = EntryBatch {
         calls: vec![EntryCall {

@@ -31,7 +31,6 @@
 //!   native witness → trace → prove pipeline. Implies `verify`.
 
 #[cfg(feature = "verify")]
-#[allow(dead_code)]
 mod bootstrap;
 #[cfg(feature = "verify")]
 mod engine;

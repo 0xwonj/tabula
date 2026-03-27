@@ -62,7 +62,7 @@ fn root_compile_is_deterministic_for_rewritten_source() {
 
 #[test]
 fn root_register_round_trips_rewritten_source() {
-    let catalogs = tabula_compiler::CompilerCatalogs::standard();
+    let catalogs = tabula_compiler::CompilerCatalogs::standard().expect("standard catalogs");
     let first =
         compile_and_register_program_source(next_source(), &catalogs).expect("first register");
     let second =
@@ -82,7 +82,7 @@ fn root_register_round_trips_rewritten_source() {
 
 #[test]
 fn registered_static_table_artifact_is_deterministic_for_relations() {
-    let catalogs = tabula_compiler::CompilerCatalogs::standard();
+    let catalogs = tabula_compiler::CompilerCatalogs::standard().expect("standard catalogs");
     let first =
         compile_and_register_program_source(relation_source(), &catalogs).expect("first register");
     let second =
@@ -96,7 +96,7 @@ fn registered_static_table_artifact_is_deterministic_for_relations() {
 
 #[test]
 fn relation_manifest_changes_static_table_artifact() {
-    let catalogs = tabula_compiler::CompilerCatalogs::standard();
+    let catalogs = tabula_compiler::CompilerCatalogs::standard().expect("standard catalogs");
     let first =
         compile_and_register_program_source(relation_source(), &catalogs).expect("first register");
     let second = compile_and_register_program_source(changed_relation_source(), &catalogs)

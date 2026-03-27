@@ -27,11 +27,11 @@ impl Hasher for XorHasher {
         &self,
         left: &tabula_core::Digest,
         right: &tabula_core::Digest,
-    ) -> tabula_core::Digest {
+    ) -> Result<tabula_core::Digest, TabulaError> {
         let mut data = Vec::new();
         data.extend_from_slice(left);
         data.extend_from_slice(right);
-        self.hash(&data)
+        Ok(self.hash(&data))
     }
 }
 

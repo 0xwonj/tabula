@@ -1,5 +1,3 @@
-#![allow(missing_docs)]
-
 use std::collections::BTreeMap;
 
 use tabula_profile::{SemanticRegistry, TypeCapabilities};
@@ -60,12 +58,17 @@ impl FrontendPrelude {
         Ok(prelude)
     }
 
-    pub fn builtin() -> Self {
+    pub fn builtin() -> Result<Self, FrontendError> {
         Self::new(
-            tabula_profile::builtin_semantic_registry().expect("built-in semantic registry"),
+            tabula_profile::builtin_semantic_registry().map_err(|error| {
+                FrontendError::new(
+                    FrontendErrorKind::InvalidProgram,
+                    Span::new(0, 0),
+                    error.to_string(),
+                )
+            })?,
             vec![],
         )
-        .expect("built-in frontend prelude")
     }
 
     pub(super) fn resolve_type(

@@ -129,6 +129,7 @@ tx check(x: u64) {
 
         let tuple_encoding_defaults = tabula_contract::TupleEncodingDefaults::new(
             crate::CompilerCatalogs::standard()
+                .expect("standard compiler catalogs")
                 .semantics()
                 .default_encoding_entries()
                 .into_iter()

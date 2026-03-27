@@ -1,7 +1,4 @@
 //! Exact MIR contract and pass pipeline for the program rewrite.
-#![allow(missing_docs)]
-#![allow(dead_code)]
-
 mod analysis;
 mod lower;
 mod model;

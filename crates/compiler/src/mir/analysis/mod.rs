@@ -1,10 +1,9 @@
-#![allow(clippy::wildcard_imports)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_core::error::TabulaError;
 use tabula_ir as ir;
 
+#[allow(clippy::wildcard_imports)]
 use super::model::*;
 use super::validate::VerifiedProgram;
 

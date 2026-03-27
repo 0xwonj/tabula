@@ -109,7 +109,7 @@ tx check(x: u64) {
 "#,
         )
         .expect("compiled");
-        let catalogs = CompilerCatalogs::standard();
+        let catalogs = CompilerCatalogs::standard().expect("standard compiler catalogs");
         let context = RegistrationContext::builtin().expect("builtin context");
 
         let explicit =

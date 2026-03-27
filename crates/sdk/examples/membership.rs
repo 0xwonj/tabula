@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(&output_dir)?;
     fs::copy(PROGRAM_PATH, output_dir.join("program.tab"))?;
 
-    let sdk = Sdk::standard();
+    let sdk = Sdk::standard()?;
     let artifact = sdk.compile(PROGRAM_SOURCE)?;
     write_json(&output_dir.join("artifact.json"), &artifact)?;
 

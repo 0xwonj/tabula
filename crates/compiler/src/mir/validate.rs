@@ -1,11 +1,10 @@
-#![allow(clippy::wildcard_imports)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_core::error::TabulaError;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BOOL_ID, TYPE_BYTES32_ID};
 
+#[allow(clippy::wildcard_imports)]
 use super::model::*;
 
 #[derive(Debug, Clone)]
@@ -15,19 +14,11 @@ impl VerifiedProgram {
     pub fn program(&self) -> &Program {
         &self.0
     }
-
-    pub fn into_program(self) -> Program {
-        self.0
-    }
 }
 
 pub fn verify_program(program: Program) -> Result<VerifiedProgram, TabulaError> {
     VerifyCx::new(&program)?.verify()?;
     Ok(VerifiedProgram(program))
-}
-
-pub fn validate_program(program: &Program) -> Result<(), TabulaError> {
-    verify_program(program.clone()).map(|_| ())
 }
 
 struct VerifyCx<'a> {

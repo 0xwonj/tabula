@@ -1,6 +1,6 @@
-#![allow(clippy::wildcard_imports)]
 #![allow(missing_docs)]
 
+#[allow(clippy::wildcard_imports)]
 use super::*;
 
 impl<'a> VerifyCx<'a> {

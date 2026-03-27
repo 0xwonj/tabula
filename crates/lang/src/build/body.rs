@@ -1,9 +1,9 @@
-#![allow(clippy::wildcard_imports)]
 #![allow(missing_docs)]
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::consts::{ensure_type, single_segment};
+#[allow(clippy::wildcard_imports)]
 use super::*;
 use crate::error::{FrontendError, FrontendErrorKind};
 

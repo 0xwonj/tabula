@@ -54,6 +54,7 @@ pub fn context_input(
 
 fn standard_catalogs() -> CompilerCatalogs {
     CompilerCatalogs::standard()
+        .expect("standard compiler catalogs")
         .with_capability_descriptor(SourceCapabilityDescriptor {
             path: "poseidon_hash".into(),
             inputs: vec![TYPE_U64_ID],

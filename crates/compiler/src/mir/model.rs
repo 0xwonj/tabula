@@ -25,8 +25,6 @@ pub type ArithOp = ir::ArithOp;
 pub type CmpOp = ir::CmpOp;
 pub type HashFamily = ir::HashFamily;
 pub type StatePropertyQuery = ir::StatePropertyQuery;
-pub type CapabilityTotality = ir::CapabilityTotality;
-pub type CapabilityQueryPolicy = ir::CapabilityQueryPolicy;
 pub type LiteralValue = PortableValue;
 
 #[derive(

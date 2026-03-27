@@ -15,7 +15,7 @@ pub trait Hasher: Send + Sync {
     /// Hash arbitrary data.
     fn hash(&self, data: &[u8]) -> Digest;
     /// Hash two digests together.
-    fn hash_pair(&self, left: &Digest, right: &Digest) -> Digest;
+    fn hash_pair(&self, left: &Digest, right: &Digest) -> Result<Digest, TabulaError>;
     /// Hash a sequence of byte slices. Default: length-prefix each item to prevent collisions.
     ///
     /// Each item is prefixed with its length as a little-endian u32. This ensures

@@ -1,5 +1,3 @@
-#![allow(clippy::wildcard_imports)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_core::PortableValue;
@@ -7,7 +5,10 @@ use tabula_core::error::TabulaError;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BOOL_ID, TYPE_I64_ID, TYPE_U64_ID};
 
-use crate::mir::model::*;
+use crate::mir::model::{
+    ArithOp, Body, Callable, CmpOp, LocalDecl, LocalId, MatchArm, Op, Program, Region,
+    StatePropertyQuery, Terminator, ValueOp, ValueRef, ValueTupleRef,
+};
 use crate::mir::validate::{VerifiedProgram, verify_program};
 
 pub fn canonicalize_program(program: &VerifiedProgram) -> Result<VerifiedProgram, TabulaError> {

@@ -455,11 +455,11 @@ mod tests {
             out
         }
 
-        fn hash_pair(&self, left: &Digest, right: &Digest) -> Digest {
+        fn hash_pair(&self, left: &Digest, right: &Digest) -> Result<Digest, TabulaError> {
             let mut data = Vec::new();
             data.extend_from_slice(left);
             data.extend_from_slice(right);
-            self.hash(&data)
+            Ok(self.hash(&data))
         }
     }
 

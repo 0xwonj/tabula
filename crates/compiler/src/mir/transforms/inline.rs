@@ -1,5 +1,3 @@
-#![allow(clippy::wildcard_imports)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_core::PortableValue;
@@ -8,7 +6,10 @@ use tabula_ir as ir;
 use tabula_profile::TYPE_BOOL_ID;
 
 use crate::mir::analysis::AnalyzedProgram;
-use crate::mir::model::*;
+use crate::mir::model::{
+    Body, Callable, CallableId, CallableKind, LocalDecl, LocalId, MatchArm, Op, Program, Region,
+    StatePropertyQuery, Terminator, ValueOp, ValueTupleRef,
+};
 use crate::mir::validate::{VerifiedProgram, verify_program};
 
 pub fn inline_functions(program: &AnalyzedProgram) -> Result<VerifiedProgram, TabulaError> {

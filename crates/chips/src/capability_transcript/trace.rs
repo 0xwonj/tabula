@@ -1,24 +1,12 @@
 //! Witness trace materialization for the capability transcript family.
-#![allow(unused_imports)]
-
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_core::error::TabulaError;
-use tabula_core::{
-    CapabilityCallEvent, CapabilityTranscriptSignature, CapabilityTranscriptValueProfile,
-    PortableValue,
-};
-use tabula_gadgets::constrain_is_real_prefix;
-use tabula_gadgets::integer::expr_from_u32;
-use tabula_stark::air::builder::InteractionAirBuilder;
-use tabula_stark::air::columns::{borrow_cols, borrow_cols_mut};
-use tabula_stark::air::interaction::{AirInteraction, core_buses};
-use tabula_stark::chips::ChipId;
+use tabula_stark::air::columns::borrow_cols_mut;
 use tabula_stark::trace::contributor::{TraceContributor, TracePhase, WitnessStore};
 use tabula_stark::trace::trace_map::TraceMap;
-use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 
 use crate::poseidon::constants::poseidon2_permutation;
 

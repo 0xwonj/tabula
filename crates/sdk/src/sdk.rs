@@ -28,14 +28,12 @@ pub(crate) struct SdkInner {
 
 impl Sdk {
     /// Build a standard SDK with built-in compiler catalogs and host environment.
-    pub fn standard() -> Self {
-        Self::builder()
-            .build()
-            .expect("built-in SDK environment must remain installable")
+    pub fn standard() -> Result<Self, SdkError> {
+        Self::builder()?.build()
     }
 
     /// Start a customized SDK builder.
-    pub fn builder() -> SdkBuilder {
+    pub fn builder() -> Result<SdkBuilder, SdkError> {
         SdkBuilder::new()
     }
 
@@ -94,16 +92,29 @@ impl Sdk {
         artifact: &Artifact,
     ) -> Result<Arc<tabula_runtime::TabulaRuntime>, SdkError> {
         let key = self.cache_key("runner", artifact);
+        let cache = self
+            .inner
+            .runtime_cache
+            .lock()
+            .map_err(|_| SdkError::Synchronization {
+                detail: "sdk runtime cache mutex poisoned".to_string(),
+            })?;
+        if let Some(runtime) = cache.get(&key) {
+            return Ok(Arc::clone(runtime));
+        }
+        drop(cache);
+
+        let built = Arc::new(self.build_runtime(artifact)?);
         let mut cache = self
             .inner
             .runtime_cache
             .lock()
-            .expect("sdk runtime cache mutex poisoned");
+            .map_err(|_| SdkError::Synchronization {
+                detail: "sdk runtime cache mutex poisoned".to_string(),
+            })?;
         if let Some(runtime) = cache.get(&key) {
             return Ok(Arc::clone(runtime));
         }
-
-        let built = Arc::new(self.build_runtime(artifact)?);
         cache.insert(key, Arc::clone(&built));
         Ok(built)
     }
@@ -114,16 +125,29 @@ impl Sdk {
         artifact: &Artifact,
     ) -> Result<Arc<tabula_runtime::Verifier>, SdkError> {
         let key = self.cache_key("verifier", artifact);
-        let mut cache = self
+        let cache = self
             .inner
             .verifier_cache
             .lock()
-            .expect("sdk verifier cache mutex poisoned");
+            .map_err(|_| SdkError::Synchronization {
+                detail: "sdk verifier cache mutex poisoned".to_string(),
+            })?;
         if let Some(verifier) = cache.get(&key) {
             return Ok(Arc::clone(verifier));
         }
+        drop(cache);
 
         let built = Arc::new(self.build_verifier(artifact)?);
+        let mut cache =
+            self.inner
+                .verifier_cache
+                .lock()
+                .map_err(|_| SdkError::Synchronization {
+                    detail: "sdk verifier cache mutex poisoned".to_string(),
+                })?;
+        if let Some(verifier) = cache.get(&key) {
+            return Ok(Arc::clone(verifier));
+        }
         cache.insert(key, Arc::clone(&built));
         Ok(built)
     }
@@ -134,6 +158,7 @@ impl Sdk {
         artifact: &Artifact,
     ) -> Result<tabula_runtime::TabulaRuntime, SdkError> {
         let builder = tabula_runtime::TabulaRuntime::builder(artifact.registered().clone())
+            .map_err(SdkError::from)?
             .with_host_environment(self.inner.environment.inner.host_environment.clone())
             .with_machine_stark_config(self.inner.environment.inner.machine_stark_config.clone());
         #[cfg(feature = "prove")]
@@ -145,6 +170,7 @@ impl Sdk {
     #[cfg(feature = "verify")]
     fn build_verifier(&self, artifact: &Artifact) -> Result<tabula_runtime::Verifier, SdkError> {
         let builder = tabula_runtime::Verifier::builder(artifact.registered().clone())
+            .map_err(SdkError::from)?
             .with_host_environment(self.inner.environment.inner.host_environment.clone())
             .with_machine_stark_config(self.inner.environment.inner.machine_stark_config.clone());
         #[cfg(feature = "prove")]
@@ -168,5 +194,145 @@ impl std::fmt::Debug for Sdk {
         f.debug_struct("Sdk")
             .field("environment", &self.inner.environment)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::environment::{Environment, EnvironmentInner};
+
+    #[cfg(feature = "execute")]
+    use tabula_runtime::{HostEnvironment, RuntimeError};
+
+    const SIMPLE_SOURCE: &str = r#"
+program RuntimeCache
+
+state {
+  table accounts(key id: u64) {
+    balance: u64 @ssmc;
+  }
+}
+
+tx touch(id: u64) {
+  let balance = accounts[id].balance;
+  assert balance >= 0;
+  return;
+}
+"#;
+
+    #[cfg(all(feature = "compile", feature = "execute"))]
+    fn compile_simple_artifact(sdk: &Sdk) -> Artifact {
+        sdk.compile(SIMPLE_SOURCE).expect("compile simple source")
+    }
+
+    #[cfg(all(feature = "compile", feature = "execute"))]
+    fn sdk_with_empty_runtime_host() -> Sdk {
+        let environment = Environment::new(EnvironmentInner {
+            compiler_catalogs: tabula_compiler::CompilerCatalogs::standard()
+                .expect("standard compiler catalogs"),
+            host_environment: HostEnvironment::empty(),
+            fingerprint: 7,
+            machine_stark_config: tabula_machine::default_config(),
+            #[cfg(feature = "prove")]
+            root_backend_bundle: tabula_ext::root::RootBackendBundle::standard(),
+        });
+        Sdk::from_environment(environment)
+    }
+
+    #[cfg(all(feature = "compile", feature = "execute"))]
+    #[test]
+    fn prepare_runtime_reuses_cached_instance() {
+        let sdk = Sdk::standard().expect("build standard sdk");
+        let artifact = compile_simple_artifact(&sdk);
+
+        let first = sdk.prepare_runtime(&artifact).expect("build runtime");
+        let second = sdk.prepare_runtime(&artifact).expect("reuse runtime");
+
+        assert!(Arc::ptr_eq(&first, &second));
+        let cache = sdk.inner.runtime_cache.lock().expect("runtime cache");
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[cfg(all(feature = "compile", feature = "execute"))]
+    #[test]
+    fn prepare_runtime_build_failure_does_not_poison_cache() {
+        let sdk = sdk_with_empty_runtime_host();
+        let artifact = compile_simple_artifact(&sdk);
+
+        let Err(first) = sdk.prepare_runtime(&artifact) else {
+            panic!("runtime build must fail without host environment");
+        };
+        let Err(second) = sdk.prepare_runtime(&artifact) else {
+            panic!("repeated runtime build failure must stay recoverable");
+        };
+
+        assert!(matches!(
+            first,
+            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+        ));
+        assert!(matches!(
+            second,
+            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+        ));
+        assert!(sdk.inner.runtime_cache.lock().is_ok());
+    }
+
+    #[cfg(all(feature = "compile", feature = "execute"))]
+    #[test]
+    fn poisoned_runtime_cache_returns_typed_error() {
+        let sdk = Sdk::standard().expect("build standard sdk");
+        let poisoned = sdk.clone();
+        let join = std::thread::spawn(move || {
+            let _guard = poisoned.inner.runtime_cache.lock().expect("runtime cache");
+            panic!("poison runtime cache mutex");
+        });
+        assert!(join.join().is_err(), "poisoning thread must panic");
+
+        let artifact = compile_simple_artifact(&sdk);
+        let Err(error) = sdk.prepare_runtime(&artifact) else {
+            panic!("poisoned cache must surface as typed error");
+        };
+
+        assert!(matches!(error, SdkError::Synchronization { .. }));
+    }
+
+    #[cfg(all(feature = "compile", feature = "verify", feature = "execute"))]
+    #[test]
+    fn prepare_verifier_reuses_cached_instance() {
+        let sdk = Sdk::standard().expect("build standard sdk");
+        let artifact = sdk.compile(SIMPLE_SOURCE).expect("compile simple source");
+
+        let first = sdk.prepare_verifier(&artifact).expect("build verifier");
+        let second = sdk.prepare_verifier(&artifact).expect("reuse verifier");
+
+        assert!(Arc::ptr_eq(&first, &second));
+        let cache = sdk.inner.verifier_cache.lock().expect("verifier cache");
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[cfg(all(feature = "compile", feature = "verify", feature = "execute"))]
+    #[test]
+    fn prepare_verifier_build_failure_does_not_poison_cache() {
+        let sdk = sdk_with_empty_runtime_host();
+        let artifact = sdk.compile(SIMPLE_SOURCE).expect("compile simple source");
+
+        let Err(first) = sdk.prepare_verifier(&artifact) else {
+            panic!("verifier build must fail without host environment");
+        };
+        let Err(second) = sdk.prepare_verifier(&artifact) else {
+            panic!("repeated verifier build failure must stay recoverable");
+        };
+
+        assert!(matches!(
+            first,
+            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+        ));
+        assert!(matches!(
+            second,
+            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+        ));
+        assert!(sdk.inner.verifier_cache.lock().is_ok());
     }
 }

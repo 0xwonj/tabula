@@ -406,16 +406,16 @@ pub struct VerifierBuilder {
 }
 
 impl RuntimeBuilder {
-    fn new(registered_program: RegisteredProgram) -> Self {
-        Self {
+    fn new(registered_program: RegisteredProgram) -> Result<Self, RuntimeError> {
+        Ok(Self {
             registered_program,
-            host_environment: HostEnvironment::standard(),
+            host_environment: HostEnvironment::standard()?,
             machine_stark_config: tabula_machine::default_config(),
             #[cfg(feature = "prove")]
             root_backend_bundle: RootBackendBundle::standard(),
             #[cfg(not(feature = "prove"))]
             root_proof_backend: Arc::new(SmtRootProofBackend),
-        }
+        })
     }
 
     /// Replace the host-owned runtime registries and scheme factories.
@@ -545,7 +545,7 @@ impl RuntimeBuilder {
 
 impl Verifier {
     /// Create a builder for one registered native program.
-    pub fn builder(registered_program: RegisteredProgram) -> VerifierBuilder {
+    pub fn builder(registered_program: RegisteredProgram) -> Result<VerifierBuilder, RuntimeError> {
         VerifierBuilder::new(registered_program)
     }
 
@@ -619,16 +619,16 @@ impl Verifier {
 }
 
 impl VerifierBuilder {
-    fn new(registered_program: RegisteredProgram) -> Self {
-        Self {
+    fn new(registered_program: RegisteredProgram) -> Result<Self, RuntimeError> {
+        Ok(Self {
             registered_program,
-            host_environment: HostEnvironment::standard(),
+            host_environment: HostEnvironment::standard()?,
             machine_stark_config: tabula_machine::default_config(),
             #[cfg(feature = "prove")]
             root_backend_bundle: RootBackendBundle::standard(),
             #[cfg(not(feature = "prove"))]
             root_proof_backend: Arc::new(SmtRootProofBackend),
-        }
+        })
     }
 
     /// Replace the host-owned runtime registries and scheme factories.
@@ -740,7 +740,7 @@ pub struct TabulaRuntime {
 
 impl TabulaRuntime {
     /// Create a builder for one registered native program.
-    pub fn builder(registered_program: RegisteredProgram) -> RuntimeBuilder {
+    pub fn builder(registered_program: RegisteredProgram) -> Result<RuntimeBuilder, RuntimeError> {
         RuntimeBuilder::new(registered_program)
     }
 
@@ -1951,6 +1951,7 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
     fn runtime_for_source(source: &str) -> (RegisteredProgram, TabulaRuntime) {
         let registered = register_program_from_source(source);
         let runtime = TabulaRuntime::builder(registered.clone())
+            .expect("create runtime builder")
             .build()
             .expect("build runtime");
         (registered, runtime)
@@ -2468,19 +2469,24 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
         let registered = register_program_from_source(relation_source());
         let extra_type = ExtraTypeRuntime::new();
         let extra_encoding = ExtraEncodingRuntime::new(extra_type.descriptor());
-        let host_environment = HostEnvironment::standard().with_runtime_registries(
-            crate::host::RuntimeRegistries::standard()
-                .with_type_runtime(extra_type.clone())
-                .expect("register extra type runtime")
-                .with_encoding_runtime(extra_encoding)
-                .expect("register extra encoding runtime"),
-        );
+        let host_environment = HostEnvironment::standard()
+            .expect("standard host environment")
+            .with_runtime_registries(
+                crate::host::RuntimeRegistries::standard()
+                    .expect("standard runtime registries")
+                    .with_type_runtime(extra_type.clone())
+                    .expect("register extra type runtime")
+                    .with_encoding_runtime(extra_encoding)
+                    .expect("register extra encoding runtime"),
+            );
 
         let runtime = TabulaRuntime::builder(registered.clone())
+            .expect("create runtime builder")
             .with_host_environment(host_environment.clone())
             .build()
             .expect("build runtime with extra host runtimes");
         let verifier = Verifier::builder(registered.clone())
+            .expect("create verifier builder")
             .with_host_environment(host_environment)
             .build()
             .expect("build verifier with extra host runtimes");

@@ -1,26 +1,16 @@
 //! Next-native witness lowering from canonical `tabula_ir` execution.
-#![allow(unused_imports)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
-use p3_field::PrimeCharacteristicRing;
-use p3_koala_bear::KoalaBear;
-
-use tabula_chips::execution::trace::{CmpOp as TraceCmpOp, InstructionRecord, Opcode};
-use tabula_chips::execution::{EXECUTION_STANDARD_VALUE_WIDTH, MAX_SLOTS};
+use tabula_chips::execution::trace::InstructionRecord;
 use tabula_chips::ir_hash::IrHashCall;
 use tabula_chips::relation_transcript::RelationTranscriptCall;
 use tabula_chips::static_table::trace::StaticTableRow;
-use tabula_contract::format::typed_tuple::{TupleEncodingDefaults, TypedTupleRole};
+use tabula_contract::format::typed_tuple::TupleEncodingDefaults;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::Hasher;
 use tabula_executor as exec;
 use tabula_ir as ir;
-use tabula_profile::is_u64_type;
-use tabula_types::{
-    ArithmeticOp, EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue, bool_typed,
-    bytes32_typed, typed_bool, typed_row_key, u64_typed,
-};
+use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 
 use super::context::LoweringCx;
 use crate::RelationClaim;

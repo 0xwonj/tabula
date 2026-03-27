@@ -194,7 +194,7 @@ fn build_sdk() -> Result<Sdk, Box<dyn Error>> {
     let extension = tabula_ext::Extension::builder("poseidon")
         .add_capability(tabula_ext::Capability::new(poseidon_descriptor()))
         .build()?;
-    Ok(Sdk::builder().with_extension(&extension)?.build()?)
+    Ok(Sdk::builder()?.with_extension(&extension)?.build()?)
 }
 
 fn poseidon_descriptor() -> SourceCapabilityDescriptor {

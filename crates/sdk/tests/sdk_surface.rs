@@ -137,6 +137,7 @@ fn sdk() -> Sdk {
         .build()
         .expect("build poseidon extension");
     Sdk::builder()
+        .expect("create sdk builder")
         .with_extension(&extension)
         .expect("install poseidon extension")
         .build()
@@ -157,6 +158,7 @@ fn poseidon_descriptor() -> tabula_compiler::SourceCapabilityDescriptor {
 
 fn compiler_catalogs() -> tabula_compiler::CompilerCatalogs {
     tabula_compiler::CompilerCatalogs::standard()
+        .expect("standard catalogs")
         .with_capability_descriptor(poseidon_descriptor())
         .expect("poseidon compiler catalog")
 }

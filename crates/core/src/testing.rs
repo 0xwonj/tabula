@@ -26,11 +26,11 @@ impl Hasher for Blake3Hasher {
         *blake3::hash(data).as_bytes()
     }
 
-    fn hash_pair(&self, left: &Digest, right: &Digest) -> Digest {
+    fn hash_pair(&self, left: &Digest, right: &Digest) -> Result<Digest, TabulaError> {
         let mut buf = [0u8; 64];
         buf[..32].copy_from_slice(left);
         buf[32..].copy_from_slice(right);
-        self.hash(&buf)
+        Ok(self.hash(&buf))
     }
 
     fn hash_many(&self, items: &[&[u8]]) -> Digest {
@@ -130,8 +130,8 @@ mod tests {
         let h = Blake3Hasher;
         let a = h.hash(b"left");
         let b = h.hash(b"right");
-        let c = h.hash_pair(&a, &b);
-        let d = h.hash_pair(&a, &b);
+        let c = h.hash_pair(&a, &b).unwrap();
+        let d = h.hash_pair(&a, &b).unwrap();
         assert_eq!(c, d);
     }
 

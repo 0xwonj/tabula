@@ -15,13 +15,19 @@ pub struct RuntimeRegistries {
 
 impl RuntimeRegistries {
     /// Seed the built-in runtime type and encoding implementations.
-    pub fn standard() -> Self {
-        Self {
-            type_runtimes: TypeRuntimeRegistry::seeded()
-                .expect("built-in type runtimes must remain valid"),
-            encoding_runtimes: EncodingRuntimeRegistry::seeded()
-                .expect("built-in encoding runtimes must remain valid"),
-        }
+    pub fn standard() -> Result<Self, RuntimeError> {
+        Ok(Self {
+            type_runtimes: TypeRuntimeRegistry::seeded().map_err(|error| {
+                RuntimeError::ValidationFailed {
+                    detail: error.to_string(),
+                }
+            })?,
+            encoding_runtimes: EncodingRuntimeRegistry::seeded().map_err(|error| {
+                RuntimeError::ValidationFailed {
+                    detail: error.to_string(),
+                }
+            })?,
+        })
     }
 
     /// Start with no runtime type or encoding implementations installed.
@@ -100,11 +106,5 @@ impl RuntimeRegistries {
     /// Borrow the installed runtime encoding implementations.
     pub fn encoding_runtimes(&self) -> &EncodingRuntimeRegistry {
         &self.encoding_runtimes
-    }
-}
-
-impl Default for RuntimeRegistries {
-    fn default() -> Self {
-        Self::standard()
     }
 }

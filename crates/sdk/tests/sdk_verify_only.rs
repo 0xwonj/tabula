@@ -33,9 +33,11 @@ tx touch(id: u64) {
 "#;
 
 fn compile_artifact(sdk: &Sdk) -> tabula_sdk::Artifact {
-    let compiled =
-        compile_program_source_with_catalogs(VERIFY_ONLY_SOURCE, &CompilerCatalogs::standard())
-            .expect("compile source");
+    let compiled = compile_program_source_with_catalogs(
+        VERIFY_ONLY_SOURCE,
+        &CompilerCatalogs::standard().expect("standard catalogs"),
+    )
+    .expect("compile source");
     register_compiled(sdk, compiled).expect("register compiled program")
 }
 
@@ -62,7 +64,7 @@ fn context(program: &Program, caller: u64) -> Context {
 
 #[test]
 fn verification_only_sdk_builds_and_warms_verifier_for_artifacts() {
-    let sdk = Sdk::standard();
+    let sdk = Sdk::standard().expect("build standard sdk");
     let artifact = compile_artifact(&sdk);
     let program = sdk.open(artifact.clone()).expect("open artifact");
     let reopened = sdk.open(artifact).expect("reopen artifact");
@@ -73,7 +75,7 @@ fn verification_only_sdk_builds_and_warms_verifier_for_artifacts() {
 
 #[test]
 fn verification_only_sdk_keeps_query_execution_available() {
-    let sdk = Sdk::standard();
+    let sdk = Sdk::standard().expect("build standard sdk");
     let program = open_program(&sdk);
     let result = program
         .runner()
@@ -90,7 +92,7 @@ fn verification_only_sdk_keeps_query_execution_available() {
 
 #[test]
 fn verification_only_sdk_opens_artifacts_without_compatibility_bridge() {
-    let sdk = Sdk::standard();
+    let sdk = Sdk::standard().expect("build standard sdk");
     let artifact = compile_artifact(&sdk);
     let reopened = sdk.open(artifact).expect("open artifact");
     let batch = reopened

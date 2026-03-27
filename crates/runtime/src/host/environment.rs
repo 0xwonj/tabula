@@ -18,11 +18,11 @@ pub struct HostEnvironment {
 
 impl HostEnvironment {
     /// Seed the standard built-in host environment.
-    pub fn standard() -> Self {
-        Self {
-            runtime_registries: RuntimeRegistries::standard(),
+    pub fn standard() -> Result<Self, RuntimeError> {
+        Ok(Self {
+            runtime_registries: RuntimeRegistries::standard()?,
             schemes: InstalledSchemes::standard(),
-        }
+        })
     }
 
     /// Start with no installed runtime registries or schemes.
@@ -98,11 +98,5 @@ impl HostEnvironment {
     /// Borrow the installed scheme backends.
     pub fn schemes(&self) -> &InstalledSchemes {
         &self.schemes
-    }
-}
-
-impl Default for HostEnvironment {
-    fn default() -> Self {
-        Self::standard()
     }
 }

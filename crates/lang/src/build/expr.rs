@@ -1,4 +1,3 @@
-#![allow(clippy::wildcard_imports)]
 #![allow(missing_docs)]
 
 use tabula_profile::{TYPE_BOOL_ID, TYPE_BYTES32_ID, TYPE_I64_ID};
@@ -7,6 +6,7 @@ use super::consts::{
     build_literal_value, convert_binary_op, convert_unary_op, literal_type, single_output_ty,
     single_segment,
 };
+#[allow(clippy::wildcard_imports)]
 use super::*;
 use crate::error::{FrontendError, FrontendErrorKind};
 

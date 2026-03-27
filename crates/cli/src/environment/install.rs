@@ -16,7 +16,7 @@ pub(crate) struct PreparedEnvironment {
 }
 
 pub(crate) fn prepare_environment(config: &ResolvedConfig) -> anyhow::Result<PreparedEnvironment> {
-    let mut builder = Sdk::builder();
+    let mut builder = Sdk::builder()?;
     let mut extensions = Vec::new();
     let mut build_error = None;
 

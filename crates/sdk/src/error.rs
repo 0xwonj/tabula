@@ -74,6 +74,12 @@ pub enum SdkError {
     /// The provided execution belongs to a different program artifact.
     #[error("execution receipt does not belong to this program")]
     ExecutionProgramMismatch,
+    /// Internal synchronization or cache state failed.
+    #[error("internal synchronization failure: {detail}")]
+    Synchronization {
+        /// Human-readable detail.
+        detail: String,
+    },
 }
 
 /// Build/install errors returned by the configurable SDK path.

@@ -51,7 +51,7 @@ tx set_balance(id: u64, amount: u64) {
     const DEX_SOURCE: &str = include_str!("../../../sdk/examples/programs/dex.tab");
 
     pub(super) fn generate_basic(dir: &Path) -> anyhow::Result<()> {
-        let sdk = Sdk::standard();
+        let sdk = Sdk::standard()?;
         let artifact = sdk.compile(BASIC_SOURCE)?;
         let program = sdk.open(artifact.clone())?;
         let state = program
@@ -77,7 +77,7 @@ tx set_balance(id: u64, amount: u64) {
     }
 
     pub(super) fn generate_membership(dir: &Path) -> anyhow::Result<()> {
-        let sdk = Sdk::standard();
+        let sdk = Sdk::standard()?;
         let artifact = sdk.compile(MEMBERSHIP_SOURCE)?;
         let program = sdk.open(artifact.clone())?;
         let state = program.state().set("members", 1, "tier", 0u64)?.build();
@@ -107,7 +107,7 @@ tx set_balance(id: u64, amount: u64) {
         )?;
         write_text(&extension_dir.join("poseidon.toml"), DEX_EXTENSION_BUNDLE)?;
 
-        let sdk = Sdk::builder()
+        let sdk = Sdk::builder()?
             .with_capability_descriptor(poseidon_descriptor())?
             .build()?;
         let artifact = sdk.compile(DEX_SOURCE)?;

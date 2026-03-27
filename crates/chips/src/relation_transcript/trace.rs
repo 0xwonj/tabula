@@ -1,31 +1,16 @@
 //! Witness trace generation for relation transcript calls.
-#![allow(unused_imports)]
-
-use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
-use tabula_contract::format::typed_tuple::{
-    EncodedTypedTupleElement, MaterializedTypedTuple, TYPED_TUPLE_BLOCKS, TYPED_TUPLE_MAX_SLOTS,
-    TYPED_TUPLE_TRANSCRIPT_DOMAIN_TAG, TYPED_TUPLE_TRANSCRIPT_RATE, TYPED_TUPLE_VALUE_WIDTH,
-    TupleEncodingDefaults, TypedTupleRole, materialize_typed_tuple,
-};
+use tabula_contract::format::typed_tuple::{TYPED_TUPLE_BLOCKS, TYPED_TUPLE_TRANSCRIPT_RATE};
 use tabula_core::error::TabulaError;
-use tabula_gadgets::constrain_is_real_prefix;
-use tabula_gadgets::integer::expr_from_u32;
-use tabula_stark::air::builder::InteractionAirBuilder;
-use tabula_stark::air::columns::{borrow_cols, borrow_cols_mut, num_cols};
-use tabula_stark::air::interaction::{AirInteraction, BusId};
-use tabula_stark::chips::{ChipId, ChipSpec};
+use tabula_stark::air::columns::borrow_cols_mut;
 use tabula_stark::trace::TraceGenerator;
 use tabula_stark::trace::contributor::{TraceContributor, TracePhase, WitnessStore};
 use tabula_stark::trace::trace_map::TraceMap;
-use tabula_types::{EncodingRuntimeRegistry, TypedValue};
 
-use crate::execution::{EXECUTION_STANDARD_VALUE_WIDTH, MAX_SLOTS};
-use crate::poseidon::air as poseidon_air;
-use crate::poseidon::columns::{POSEIDON_PREPROCESSED_WIDTH, PoseidonCols};
+use crate::execution::MAX_SLOTS;
 use crate::poseidon::constants::{TOTAL_ROUNDS, WIDTH, is_full_round, poseidon2_permutation};
 use crate::poseidon::generate_poseidon_preprocessed;
 
@@ -155,9 +140,13 @@ fn build_round_rows(calls: &[RelationTranscriptCall]) -> Vec<RelationTranscriptR
 #[cfg(test)]
 mod tests {
     use super::*;
+    use p3_field::PrimeCharacteristicRing;
     use std::sync::Arc;
+    use tabula_stark::air::columns::borrow_cols_mut;
 
-    use tabula_contract::format::typed_tuple::{TupleEncodingDefaults, TupleEncodingSelection};
+    use tabula_contract::format::typed_tuple::{
+        TYPED_TUPLE_BLOCKS, TupleEncodingDefaults, TupleEncodingSelection, TypedTupleRole,
+    };
     use tabula_core::EncodingProfileId;
     use tabula_core::error::TabulaError;
     use tabula_profile::{
@@ -165,7 +154,9 @@ mod tests {
         TYPE_U64_ID, TranscriptSerialization, builtin_catalog,
     };
     use tabula_stark::debug::debug_check;
-    use tabula_types::{EncodingRuntime, EncodingRuntimeRegistry, u64_typed};
+    use tabula_types::{EncodingRuntime, EncodingRuntimeRegistry, TypedValue, u64_typed};
+
+    use crate::poseidon::constants::TOTAL_ROUNDS;
 
     const ALT_U64_ENCODING_ID: EncodingProfileId = EncodingProfileId(0x8000_c301);
 

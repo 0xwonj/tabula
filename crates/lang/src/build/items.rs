@@ -1,9 +1,9 @@
-#![allow(clippy::wildcard_imports)]
 #![allow(missing_docs)]
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::consts::{body_span, build_literal_value};
+#[allow(clippy::wildcard_imports)]
 use super::*;
 use crate::error::{FrontendError, FrontendErrorKind};
 use crate::verify::verify_hir;

@@ -16,7 +16,15 @@ use crate::{CompilerCatalogs, SourceCapabilityDescriptor, hir_lower, mir};
 
 /// Compile rewritten source through the HIR/MIR/canonical pipeline.
 pub fn compile_program_source(source: &str) -> CompilerResult<CompiledProgram> {
-    compile_program_source_with_catalogs(source, &CompilerCatalogs::default())
+    let catalogs = CompilerCatalogs::standard().map_err(|err| {
+        compile_error(vec![spanless_diagnostic(
+            CompileStage::FrontendSemantics,
+            source,
+            "InvalidProgram",
+            err.to_string(),
+        )])
+    })?;
+    compile_program_source_with_catalogs(source, &catalogs)
 }
 
 /// Compile rewritten source through the HIR/MIR/canonical pipeline using explicit catalogs.
