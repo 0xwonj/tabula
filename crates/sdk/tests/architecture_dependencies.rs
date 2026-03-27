@@ -20,15 +20,12 @@ fn sdk_root_keeps_raw_runtime_and_compiler_types_under_advanced_only() {
     let sdk_lib = read_workspace_file("crates/sdk/src/lib.rs");
 
     for required in [
-        "pub mod advanced;",
-        "pub use artifact::Artifact;",
-        "pub use batch::TransactionBatch;",
-        "pub use context::Context;",
+        "pub mod interop;",
         "pub use environment::Environment;",
-        "pub use program::{ContextBuilder, Program, StateBuilder, TransactionBatchBuilder};",
-        "pub use runner::{ExecutionReceipt, QueryResult, Runner, TxOutcomeSummary};",
-        "pub use sdk::{Sdk, SdkBuilder};",
-        "pub use state::State;",
+        "pub use builder::SdkBuilder;",
+        "pub use sdk::Sdk;",
+        "pub use types::{Context, State, TransactionBatch};",
+        "pub use program::",
     ] {
         assert!(
             sdk_lib.contains(required),

@@ -1,4 +1,5 @@
 #![allow(clippy::wildcard_imports)]
+#![allow(missing_docs)]
 
 use tabula_profile::{TYPE_BOOL_ID, TYPE_BYTES32_ID, TYPE_I64_ID};
 

@@ -18,9 +18,9 @@ use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
 use tabula_core::{CellKey, ColId, Digest, PortableValue, RootProfileId, RowKey, TableId};
 use tabula_executor as exec;
-use tabula_ext::backend::execution::{IrHashExecutionBackend, RelationExecutionBackend};
 #[cfg(feature = "prove")]
-use tabula_ext::backend::scheme::{ColumnProofContext, PreparedColumnDelta, PreparedColumnProof};
+use tabula_ext::backend::column::{ColumnProofContext, PreparedColumnDelta, PreparedColumnProof};
+use tabula_ext::backend::execution::{IrHashExecutionBackend, RelationExecutionBackend};
 #[cfg(feature = "prove")]
 use tabula_ext::root::{RootBackendBundle, RootWitnessContext};
 #[cfg(all(feature = "verify", not(feature = "prove")))]
@@ -429,7 +429,7 @@ pub struct ExecutionReceipt {
 struct ColumnProofSlot {
     table: TableId,
     col: ColId,
-    proof_backend: Arc<dyn tabula_ext::backend::scheme::ColumnProofBackend>,
+    proof_backend: Arc<dyn tabula_ext::backend::column::ColumnProofBackend>,
 }
 
 #[derive(Clone)]

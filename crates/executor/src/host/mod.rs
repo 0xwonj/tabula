@@ -1,3 +1,5 @@
+//! Host extension points: capability handlers and property read executors.
+
 mod capability;
 mod property_read;
 

@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use std::collections::BTreeSet;
 
 use tabula_core::PortableValue;

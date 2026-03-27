@@ -1,3 +1,5 @@
+//! Public surface types exported from the executor crate.
+
 mod context;
 mod error;
 mod journal;

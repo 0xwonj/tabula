@@ -1,3 +1,5 @@
+//! Runtime type and encoding registries.
+
 use std::sync::Arc;
 
 use tabula_types::{EncodingRuntime, EncodingRuntimeRegistry, TypeRuntime, TypeRuntimeRegistry};

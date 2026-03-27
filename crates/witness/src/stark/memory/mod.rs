@@ -9,10 +9,11 @@ use tabula_types::{EncodingRuntime, TypeRuntime, encode_value_with_null_flag};
 
 use crate::{AccessEvent, InitCell};
 
-use super::rows::{AccessRow, InitRow};
+use self::rows::{AccessRow, InitRow};
 
 pub(crate) mod chain;
 pub(crate) mod inter_tx;
+pub(crate) mod rows;
 pub(crate) mod state;
 
 use chain::populate_state_chain_accumulators;

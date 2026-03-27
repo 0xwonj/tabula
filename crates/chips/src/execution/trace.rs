@@ -3,7 +3,7 @@
 //! Converts instruction records into a `RowMajorMatrix<KoalaBear>` trace.
 //!
 //! Utility functions live in `trace_utils.rs`; witness population helpers
-//! live in `trace_witness.rs`.
+//! live in `populate.rs`.
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
@@ -13,7 +13,7 @@ use tabula_gadgets::bool_fe;
 use tabula_stark::air::columns::borrow_cols_mut;
 
 use super::columns::{EXECUTION_STANDARD_VALUE_WIDTH, ExecutionCols, MAX_SLOTS, execution_width};
-use super::trace_witness::{
+use super::populate::{
     populate_arith_carry, populate_cmp_witness, populate_divmod, populate_mul_carry,
     set_opcode_selectors,
 };

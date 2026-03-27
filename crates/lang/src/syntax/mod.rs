@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 mod features;
 mod lexer;
 mod parser;

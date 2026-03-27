@@ -1,3 +1,5 @@
+//! Proof-program semantic types: slot-indexed views over the IR for witness generation.
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -10,25 +12,36 @@ use tabula_executor as exec;
 use tabula_ir as ir;
 use tabula_types::TypeRuntimeRegistry;
 
+/// A state column slot in the proof layout, identifying a (table, field) pair.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofStateSlot {
+    /// Target table.
     pub table: ir::TableId,
+    /// Target field within the table.
     pub field: ir::FieldId,
+    /// Type of the field value.
     pub ty: ir::TypeRef,
 }
 
+/// A capability slot in the proof layout, covering all journaled invocations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityProofSlot {
+    /// The capability ID this slot covers.
     pub capability: ir::CapabilityId,
+    /// Source-level capability name.
     pub symbol: String,
 }
 
+/// A relation slot in the proof layout, covering all lookups for one relation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelationProofSlot {
+    /// The relation ID this slot covers.
     pub relation: ir::RelationId,
+    /// Source-level relation name.
     pub symbol: String,
 }
 
+/// An IR program pre-indexed for proof witness generation and slot allocation.
 #[derive(Debug, Clone)]
 pub struct ResolvedProofProgram {
     program: Arc<ir::ValidatedProgram>,
@@ -42,10 +55,12 @@ pub struct ResolvedProofProgram {
 }
 
 impl ResolvedProofProgram {
+    /// Build a resolved proof program from a validated program, taking ownership.
     pub fn from_validated_program(program: ir::ValidatedProgram) -> Result<Self, TabulaError> {
         Self::from_shared_program(Arc::new(program))
     }
 
+    /// Build a resolved proof program from a shared validated program reference.
     pub fn from_shared_program(program: Arc<ir::ValidatedProgram>) -> Result<Self, TabulaError> {
         let raw = program.as_program();
         let mut state_slots = Vec::new();
@@ -111,27 +126,33 @@ impl ResolvedProofProgram {
         })
     }
 
+    /// Borrow the underlying validated program.
     pub fn validated_program(&self) -> &ir::ValidatedProgram {
         self.program.as_ref()
     }
 
+    /// Borrow the raw IR program.
     pub fn program(&self) -> &ir::Program {
         self.program.as_program()
     }
 
+    /// All state column slots in proof layout order.
     pub fn state_slots(&self) -> &[ProofStateSlot] {
         &self.state_slots
     }
 
+    /// All journaled capability slots in proof layout order.
     pub fn capability_slots(&self) -> &[CapabilityProofSlot] {
         &self.capability_slots
     }
 
+    /// All relation slots in proof layout order.
     pub fn relation_slots(&self) -> &[RelationProofSlot] {
         &self.relation_slots
     }
 }
 
+/// A paired execution + proof program view over one validated program.
 #[derive(Debug, Clone)]
 pub struct RuntimeProgram {
     execution: exec::ResolvedExecutionProgram,
@@ -139,6 +160,7 @@ pub struct RuntimeProgram {
 }
 
 impl RuntimeProgram {
+    /// Build a runtime program from a validated program, constructing both views.
     pub fn from_validated_program(program: ir::ValidatedProgram) -> Result<Self, TabulaError> {
         let shared = Arc::new(program);
         let execution = exec::ResolvedExecutionProgram::from_shared_program(shared.clone())?;
@@ -146,53 +168,78 @@ impl RuntimeProgram {
         Ok(Self { execution, proof })
     }
 
+    /// Borrow the execution-facing program view.
     pub fn execution(&self) -> &exec::ResolvedExecutionProgram {
         &self.execution
     }
 
+    /// Borrow the proof-facing program view.
     pub fn proof(&self) -> &ResolvedProofProgram {
         &self.proof
     }
 }
 
+/// A portable binding of one public context field to its committed value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct PublicContextBinding {
+    /// The context field ID.
     pub field: ir::ContextFieldId,
+    /// The portable serialized value.
     pub value: PortableValue,
 }
 
+/// Per-slot execution effects for a single state column in one batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofStateSlotJournal {
+    /// The state slot this journal covers.
     pub slot: ProofStateSlot,
+    /// All state cell reads/writes/deletes on this column.
     pub state_effects: Vec<exec::TypedStateEffect>,
+    /// All structural property reads on this column.
     pub property_effects: Vec<exec::StatePropertyEffect>,
 }
 
+/// Per-slot execution effects for a single journaled capability in one batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofCapabilitySlotJournal {
+    /// The capability slot this journal covers.
     pub slot: CapabilityProofSlot,
+    /// All invocations of this capability.
     pub effects: Vec<exec::CapabilityEffect>,
 }
 
+/// Per-slot execution effects for a single relation in one batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofRelationSlotJournal {
+    /// The relation slot this journal covers.
     pub slot: RelationProofSlot,
+    /// All lookups (assertions and evaluations) of this relation.
     pub effects: Vec<exec::RelationEffect>,
 }
 
+/// The complete proof-visible journal for one executed batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofJournal {
+    /// Committed public context values.
     pub public_context: Vec<PublicContextBinding>,
+    /// Per-state-column effect journals in proof layout order.
     pub state_slots: Vec<ProofStateSlotJournal>,
+    /// Per-capability effect journals in proof layout order.
     pub capability_slots: Vec<ProofCapabilitySlotJournal>,
+    /// Per-relation effect journals in proof layout order.
     pub relation_slots: Vec<ProofRelationSlotJournal>,
+    /// All event emissions in execution order.
     pub event_effects: Vec<exec::TypedEventEffect>,
 }
 
+/// The public statement committed by a STARK proof: program ID, context, and event digest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct PublicStatement {
+    /// The program that was executed.
     pub program_id: ir::ProgramId,
+    /// Committed public context values.
     pub public_context: Vec<PublicContextBinding>,
+    /// Digest over all emitted events (deterministic, order-preserving).
     pub event_digest: Digest,
 }
 
@@ -202,6 +249,7 @@ struct PortableEventRecord {
     args: Vec<PortableValue>,
 }
 
+/// Reduce an execution journal into per-slot proof journals.
 pub fn reduce_execution_journal(
     resolved_program: &ResolvedProofProgram,
     context: &exec::ContextValues,
@@ -318,6 +366,7 @@ pub fn reduce_execution_journal(
     })
 }
 
+/// Build the public proof statement from program, context, and execution journal.
 pub fn build_public_statement(
     resolved_program: &ResolvedProofProgram,
     context: &exec::ContextValues,
@@ -330,6 +379,7 @@ pub fn build_public_statement(
     build_public_statement_from_journal(&proof_journal, resolved_program, hasher)
 }
 
+/// Build the public proof statement directly from a pre-reduced [`ProofJournal`].
 pub fn build_public_statement_from_journal(
     proof_journal: &ProofJournal,
     resolved_program: &ResolvedProofProgram,

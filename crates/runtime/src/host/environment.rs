@@ -1,3 +1,5 @@
+//! Host environment type bundling runtime registries and scheme backends.
+
 use std::sync::Arc;
 
 use tabula_ext::scheme::ColumnBackendFactoryBundle;

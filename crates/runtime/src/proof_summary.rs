@@ -1,3 +1,5 @@
+//! Human-readable STARK proof summary for monitoring and diagnostics.
+
 use serde::{Deserialize, Serialize};
 use tabula_machine::TabulaProof;
 

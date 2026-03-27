@@ -1,21 +1,29 @@
+//! Value encoding and decoding traits for bridging Rust types to portable IR values.
+
 use borsh::BorshDeserialize as _;
 use tabula_core::PortableValue;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BOOL_ID, TYPE_BYTES32_ID, TYPE_I64_ID, TYPE_U64_ID};
 use tabula_types::{bool_portable, bytes32_portable, i64_portable, u64_portable};
 
+use crate::ParameterHandle;
 use crate::error::SdkError;
-use crate::schema::ParameterHandle;
 
+/// Encode a Rust value into a [`PortableValue`] for the given expected type.
 pub trait EncodeValue {
+    /// Encode `self` into a portable value, checking that it matches `expected`.
     fn encode_for(self, expected: ir::TypeRef) -> Result<PortableValue, SdkError>;
 }
 
+/// Decode a Rust value from a [`PortableValue`].
 pub trait DecodeValue: Sized {
+    /// Decode `value` into `Self`, returning an error on type mismatch or malformed payload.
     fn decode_from(value: &PortableValue) -> Result<Self, SdkError>;
 }
 
+/// Encode an ordered sequence of Rust values as entry call arguments.
 pub trait EncodeArgs {
+    /// Encode `self` into a positional argument list matching the `expected` parameter schema.
     fn encode_args(self, expected: &[ParameterHandle]) -> Result<Vec<PortableValue>, SdkError>;
 }
 

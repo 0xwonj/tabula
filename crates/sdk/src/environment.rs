@@ -1,3 +1,5 @@
+//! SDK environment: compiler catalogs, host runtime, and STARK configuration.
+
 use std::fmt;
 use std::sync::Arc;
 
@@ -9,6 +11,9 @@ use tabula_runtime::HostEnvironment;
 #[cfg(feature = "prove")]
 use tabula_ext::root::RootBackendBundle;
 
+/// Shareable bundle of compiler and runtime configuration for an SDK session.
+///
+/// `Environment` is cheap to clone (it wraps an `Arc`).
 #[derive(Clone)]
 pub struct Environment {
     pub(crate) inner: Arc<EnvironmentInner>,
@@ -31,6 +36,10 @@ impl Environment {
         }
     }
 
+    /// A stable numeric fingerprint derived from the environment's configuration.
+    ///
+    /// Can be used as a cache key: two environments with the same fingerprint
+    /// are expected to produce identical compilation and execution results.
     pub fn fingerprint(&self) -> u64 {
         self.inner.fingerprint
     }

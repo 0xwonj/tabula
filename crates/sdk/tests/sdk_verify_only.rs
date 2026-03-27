@@ -2,7 +2,7 @@
 #![cfg(all(feature = "verify", not(feature = "prove")))]
 
 use tabula_compiler::{CompilerCatalogs, compile_program_source_with_catalogs};
-use tabula_sdk::advanced::register_compiled;
+use tabula_sdk::interop::register_compiled;
 use tabula_sdk::{Context, Program, Sdk, State};
 
 const VERIFY_ONLY_SOURCE: &str = r#"

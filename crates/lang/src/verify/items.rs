@@ -1,4 +1,5 @@
 #![allow(clippy::wildcard_imports)]
+#![allow(missing_docs)]
 
 use super::*;
 use tabula_profile::is_bytes32_type;

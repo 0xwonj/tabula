@@ -1,3 +1,5 @@
+//! Installed column backend scheme factories.
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

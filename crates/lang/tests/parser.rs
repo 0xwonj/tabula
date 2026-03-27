@@ -1,3 +1,5 @@
+//! Tests for language parsing behavior.
+
 mod common;
 
 use common::assert_unsupported;

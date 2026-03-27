@@ -8,8 +8,8 @@ use tabula_core::PortableValue;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BYTES32_ID, TYPE_U64_ID};
 #[cfg(feature = "prove")]
-use tabula_sdk::advanced::ArtifactExt;
-use tabula_sdk::advanced::register_compiled;
+use tabula_sdk::interop::ArtifactExt;
+use tabula_sdk::interop::register_compiled;
 use tabula_sdk::{Context, Program, Sdk, State};
 use tabula_types::u64_portable;
 
@@ -68,6 +68,7 @@ tx register(flag: bool, id: u64) {
 }
 "#;
 
+#[cfg(feature = "prove")]
 const SDK_SURFACE_ALT_SCHEME_SOURCE: &str = r#"
 use capability poseidon_hash;
 

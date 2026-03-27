@@ -197,7 +197,7 @@ fn native_proof_path_stays_bridge_free() {
         ],
     );
     assert_source_omits(
-        "crates/witness/src/stark/lowering.rs",
+        "crates/witness/src/stark/lowering/driver.rs",
         &[
             leaked(&["tabula_", "artifact", "::"]),
             "tabula_ir::TxTypeDef",

@@ -1,8 +1,13 @@
+//! Stable numeric identifiers for IR model entities.
+
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use tabula_core::TypeId;
 
+/// A resolved type reference (alias for [`TypeId`]).
 pub type TypeRef = TypeId;
+
+/// Identifies a program registered in the Tabula registry.
 #[derive(
     Debug,
     Clone,
@@ -19,6 +24,7 @@ pub type TypeRef = TypeId;
 )]
 pub struct ProgramId(pub u32);
 
+/// Identifies a callable entry (function, query, or transaction) within a program.
 #[derive(
     Debug,
     Clone,
@@ -35,6 +41,7 @@ pub struct ProgramId(pub u32);
 )]
 pub struct EntryId(pub u32);
 
+/// Identifies a parameter of a callable entry.
 #[derive(
     Debug,
     Clone,
@@ -51,6 +58,7 @@ pub struct EntryId(pub u32);
 )]
 pub struct ParamId(pub u32);
 
+/// Identifies a local variable within an entry body.
 #[derive(
     Debug,
     Clone,
@@ -67,6 +75,7 @@ pub struct ParamId(pub u32);
 )]
 pub struct LocalId(pub u32);
 
+/// Identifies a field in the program's public context.
 #[derive(
     Debug,
     Clone,
@@ -83,6 +92,7 @@ pub struct LocalId(pub u32);
 )]
 pub struct ContextFieldId(pub u32);
 
+/// Identifies a compile-time constant in the constant pool.
 #[derive(
     Debug,
     Clone,
@@ -99,6 +109,7 @@ pub struct ContextFieldId(pub u32);
 )]
 pub struct ConstId(pub u32);
 
+/// Identifies a state table.
 #[derive(
     Debug,
     Clone,
@@ -115,6 +126,7 @@ pub struct ConstId(pub u32);
 )]
 pub struct TableId(pub u32);
 
+/// Identifies a column field within a state table.
 #[derive(
     Debug,
     Clone,
@@ -131,6 +143,7 @@ pub struct TableId(pub u32);
 )]
 pub struct FieldId(pub u16);
 
+/// Identifies a static relation.
 #[derive(
     Debug,
     Clone,
@@ -147,6 +160,7 @@ pub struct FieldId(pub u16);
 )]
 pub struct RelationId(pub u32);
 
+/// Identifies a native capability.
 #[derive(
     Debug,
     Clone,
@@ -163,6 +177,7 @@ pub struct RelationId(pub u32);
 )]
 pub struct CapabilityId(pub u32);
 
+/// Identifies an event type.
 #[derive(
     Debug,
     Clone,
@@ -179,19 +194,25 @@ pub struct CapabilityId(pub u32);
 )]
 pub struct EventId(pub u32);
 
+/// Discriminates callable entry kinds.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
 pub enum EntryKind {
+    /// A read-only query (no state writes).
     Query,
+    /// A state-mutating transaction.
     Tx,
 }
 
+/// Whether a callable entry has an explicit return value.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
 pub enum ReturnPolicy {
+    /// The entry returns nothing (unit).
     Unit,
+    /// The entry returns one or more explicit values.
     Explicit,
 }
 

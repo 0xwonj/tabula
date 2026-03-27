@@ -1,11 +1,11 @@
 //! Advanced backend-facing support types for extension authors.
 
+/// Backend-facing column proof authoring contracts.
+#[cfg(feature = "verify")]
+pub mod column;
 /// Backend-facing execution-tier extension contracts.
 #[cfg(feature = "verify")]
 pub mod execution;
-/// Backend-facing column proof authoring contracts.
-#[cfg(feature = "verify")]
-pub mod scheme;
 
 #[cfg(feature = "verify")]
 pub use execution::ExecutionBackend;

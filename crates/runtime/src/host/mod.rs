@@ -1,3 +1,5 @@
+//! Host environment: runtime registries, scheme backends, and built-in installations.
+
 mod builtins;
 mod environment;
 mod installed;

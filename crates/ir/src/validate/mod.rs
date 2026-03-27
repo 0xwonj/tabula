@@ -20,6 +20,7 @@ use helpers::unique_fields;
 use manifest::validate_relation_entry;
 use state::{TableValidationInfo, validate_state};
 
+/// Validate structural invariants for a complete IR program.
 pub fn validate_program(program: &Program) -> Result<(), TabulaError> {
     let state = validate_state(&program.state)?;
     let context = unique_fields(

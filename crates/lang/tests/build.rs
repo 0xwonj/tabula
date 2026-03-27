@@ -1,3 +1,5 @@
+//! Tests for HIR build and verification stages.
+
 mod common;
 
 use common::{custom_no_eq_prelude, prelude};

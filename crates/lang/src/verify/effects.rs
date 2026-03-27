@@ -1,4 +1,5 @@
 #![allow(clippy::wildcard_imports)]
+#![allow(missing_docs)]
 
 use super::*;
 pub(super) fn single_output(outputs: &[TypeRef]) -> Option<TypeRef> {

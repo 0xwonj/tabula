@@ -23,7 +23,7 @@ use tabula_types::{TypeRuntime, TypedColumnEntry, TypedPropertyQueryResult};
 use tabula_witness::stark::schemes::smt::{PreparedSmtProof, SmtProofInput, prepare_smt_proof};
 
 #[cfg(feature = "prove")]
-use tabula_ext::backend::scheme::{ColumnProofBackend, ColumnProofContext, PreparedColumnProof};
+use tabula_ext::backend::column::{ColumnProofBackend, ColumnProofContext, PreparedColumnProof};
 
 /// SMT commitment scheme factory.
 pub struct SmtScheme<const W: usize>;

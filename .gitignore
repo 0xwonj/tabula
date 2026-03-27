@@ -1,3 +1,6 @@
 /target
 .claude/
+.vscode/
+tasks/
+docs/archive/
 book/build/

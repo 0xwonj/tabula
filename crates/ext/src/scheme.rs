@@ -16,7 +16,7 @@ use tabula_types::{TypedColumnEntry, TypedPropertyQueryResult};
 #[cfg(feature = "verify")]
 use crate::backend::ProofColumn;
 #[cfg(feature = "prove")]
-use crate::backend::scheme::ColumnProofBackend;
+use crate::backend::column::ColumnProofBackend;
 #[cfg(feature = "verify")]
 use crate::error::ExtResult;
 

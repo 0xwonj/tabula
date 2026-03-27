@@ -1,4 +1,5 @@
 #![allow(clippy::wildcard_imports)]
+#![allow(missing_docs)]
 
 use crate::ast::*;
 use crate::error::{FrontendError, FrontendErrorKind};

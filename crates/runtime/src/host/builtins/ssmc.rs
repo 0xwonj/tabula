@@ -9,7 +9,7 @@ use tabula_commitment::{PoseidonHasher, compute_column_root_binding_prefix_diges
 use tabula_core::{ColumnLayoutKind, PropertyQueryKind, SchemeId};
 use tabula_ext::ExtError;
 #[cfg(feature = "prove")]
-use tabula_ext::backend::scheme::{ColumnProofBackend, ColumnProofContext, PreparedColumnProof};
+use tabula_ext::backend::column::{ColumnProofBackend, ColumnProofContext, PreparedColumnProof};
 use tabula_ext::scheme::RuntimeColumn;
 use tabula_ext::scheme::{
     ColumnBackendFactory, ColumnBackendSetup, ColumnVerifierContract, MaterializedColumnBackend,

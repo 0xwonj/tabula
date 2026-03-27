@@ -1,3 +1,5 @@
+//! Tests for frontend verification rejections.
+
 mod common;
 
 use common::prelude;

@@ -1,3 +1,5 @@
+//! Tests for IR relation reference validation.
+
 mod common;
 
 use common::{base_program, u64_literal};

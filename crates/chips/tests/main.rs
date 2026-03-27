@@ -1,3 +1,3 @@
 #![allow(missing_docs)]
-mod chips;
-mod infra;
+mod families;
+mod integration;

@@ -1,3 +1,5 @@
+//! Tests that compare compiler and runtime execution behavior.
+
 use tabula_compiler::{
     CompilerCatalogs, compile_and_register_program_source, compile_program_source_with_catalogs,
 };

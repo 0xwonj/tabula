@@ -1,3 +1,5 @@
+//! Tests for IR entry declaration validation.
+
 mod common;
 
 use common::{base_program, u64_literal};

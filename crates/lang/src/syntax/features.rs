@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use crate::error::{FrontendError, FrontendErrorKind};
 use crate::span::Span;
 

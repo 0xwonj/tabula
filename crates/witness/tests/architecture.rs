@@ -56,7 +56,7 @@ fn root_surface_does_not_reexport_old_witness_types() {
         );
     }
     for required in [
-        "pub use types::{",
+        "pub use model::{",
         "AccessEvent",
         "ColumnValueProfile",
         "ColumnWrite",
@@ -126,9 +126,9 @@ fn stark_module_keeps_low_level_memory_helpers_internal() {
     assert!(
         stark_mod.contains("pub mod execution_store;")
             && stark_mod.contains("pub mod lowering;")
-            && stark_mod.contains("pub mod root_store;")
+            && stark_mod.contains("mod roots;")
             && !stark_mod.contains("pub mod shared_store;"),
-        "witness::stark must expose split execution/root store kernels plus native lowering, and must not retain a shared_store module"
+        "witness::stark must expose split execution/lowering kernels, keep roots internal behind reexports, and must not retain a shared_store module"
     );
     assert!(
         stark_mod.contains("pub use execution_store::prepare_execution_store;")
@@ -137,8 +137,7 @@ fn stark_module_keeps_low_level_memory_helpers_internal() {
             && stark_mod.contains("TxLoweringOutput")
             && stark_mod.contains("lower_successful_tx")
             && stark_mod.contains("merge_lowering_outputs")
-            && stark_mod
-                .contains("pub use root_store::{SmtRootStoreContext, prepare_smt_root_store};"),
+            && stark_mod.contains("pub use roots::{SmtRootStoreContext, prepare_smt_root_store};"),
         "witness::stark must expose function-shaped execution/root store kernels and native lowering types"
     );
     for forbidden in ["ExecutionStoreBuilder", "SmtRootStoreBuilder"] {
@@ -178,6 +177,27 @@ fn stark_module_keeps_low_level_memory_helpers_internal() {
         assert!(
             !stark_mod.contains(forbidden),
             "logical proof-prep types must not be re-exported from the stark namespace: {forbidden}"
+        );
+    }
+
+    assert!(
+        crate_root().join("src/model.rs").exists()
+            && crate_root().join("src/relation_proof.rs").exists()
+            && crate_root().join("src/stark/lowering/mod.rs").exists()
+            && crate_root().join("src/stark/roots/mod.rs").exists(),
+        "witness must keep the final backend-neutral root plus stark/lowering and stark/roots subtrees"
+    );
+    for removed in [
+        "src/types.rs",
+        "src/relation.rs",
+        "src/stark/lowering.rs",
+        "src/stark/root_paths.rs",
+        "src/stark/root_store.rs",
+        "src/stark/rows.rs",
+    ] {
+        assert!(
+            !crate_root().join(removed).exists(),
+            "legacy witness path should be removed after the final refactor: {removed}"
         );
     }
 }

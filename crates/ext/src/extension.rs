@@ -1,149 +1,11 @@
+//! Extension bundle type and its fluent builder.
+
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
-use tabula_compiler::SourceCapabilityDescriptor;
-use tabula_core::{EncodingProfileId, TypeId};
-use tabula_profile::{EncodingProfile, SchemeProfile, TypeDescriptor};
-use tabula_types::{EncodingRuntime, TypeRuntime};
-
-#[cfg(feature = "verify")]
-use crate::scheme::ColumnBackendFactoryBundle;
+use crate::contribution::{Capability, EncodingContribution, SchemeContribution, TypeContribution};
 use crate::{ExtError, ExtResult};
 #[cfg(feature = "prove")]
 use crate::{RootBackend, root::RootBackendBundle};
-
-/// One public capability contribution bundled into an extension install.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Capability {
-    pub(crate) descriptor: SourceCapabilityDescriptor,
-}
-
-impl Capability {
-    pub fn new(descriptor: SourceCapabilityDescriptor) -> Self {
-        Self { descriptor }
-    }
-
-    pub fn descriptor(&self) -> &SourceCapabilityDescriptor {
-        &self.descriptor
-    }
-}
-
-/// One semantic type plus its runtime behavior.
-#[derive(Clone)]
-pub struct TypeContribution {
-    pub(crate) source_name: String,
-    pub(crate) descriptor: TypeDescriptor,
-    pub(crate) runtime: Arc<dyn TypeRuntime>,
-}
-
-impl TypeContribution {
-    pub fn new(
-        source_name: impl Into<String>,
-        descriptor: TypeDescriptor,
-        runtime: impl TypeRuntime + 'static,
-    ) -> Self {
-        Self {
-            source_name: source_name.into(),
-            descriptor,
-            runtime: Arc::new(runtime),
-        }
-    }
-
-    pub fn source_name(&self) -> &str {
-        &self.source_name
-    }
-
-    pub fn descriptor(&self) -> &TypeDescriptor {
-        &self.descriptor
-    }
-
-    pub fn runtime(&self) -> Arc<dyn TypeRuntime> {
-        Arc::clone(&self.runtime)
-    }
-}
-
-/// One semantic encoding plus its runtime behavior.
-#[derive(Clone)]
-pub struct EncodingContribution {
-    pub(crate) profile: EncodingProfile,
-    pub(crate) runtime: Arc<dyn EncodingRuntime>,
-    pub(crate) default_for_type: Option<TypeId>,
-}
-
-impl EncodingContribution {
-    pub fn new(profile: EncodingProfile, runtime: impl EncodingRuntime + 'static) -> Self {
-        Self {
-            profile,
-            runtime: Arc::new(runtime),
-            default_for_type: None,
-        }
-    }
-
-    pub fn with_default_for_type(mut self, type_id: TypeId) -> Self {
-        self.default_for_type = Some(type_id);
-        self
-    }
-
-    pub fn profile(&self) -> &EncodingProfile {
-        &self.profile
-    }
-
-    pub fn default_for_type(&self) -> Option<TypeId> {
-        self.default_for_type
-    }
-
-    pub fn runtime(&self) -> Arc<dyn EncodingRuntime> {
-        Arc::clone(&self.runtime)
-    }
-}
-
-/// One scheme family contribution plus its default selections and backend materializer.
-#[derive(Clone)]
-pub struct SchemeContribution {
-    pub(crate) source_name: String,
-    pub(crate) profile: SchemeProfile,
-    pub(crate) default_encodings: Vec<EncodingProfileId>,
-    #[cfg(feature = "verify")]
-    pub(crate) backend_bundle: ColumnBackendFactoryBundle,
-}
-
-impl SchemeContribution {
-    #[cfg(feature = "verify")]
-    pub fn new(
-        source_name: impl Into<String>,
-        profile: SchemeProfile,
-        backend_bundle: ColumnBackendFactoryBundle,
-    ) -> Self {
-        Self {
-            source_name: source_name.into(),
-            profile,
-            default_encodings: Vec::new(),
-            backend_bundle,
-        }
-    }
-
-    pub fn with_default_for_encoding(mut self, encoding_profile_id: EncodingProfileId) -> Self {
-        self.default_encodings.push(encoding_profile_id);
-        self
-    }
-
-    pub fn source_name(&self) -> &str {
-        &self.source_name
-    }
-
-    pub fn profile(&self) -> &SchemeProfile {
-        &self.profile
-    }
-
-    pub fn default_encodings(&self) -> &[EncodingProfileId] {
-        &self.default_encodings
-    }
-
-    #[cfg(feature = "verify")]
-    pub fn backend_bundle(&self) -> ColumnBackendFactoryBundle {
-        self.backend_bundle.clone()
-    }
-}
 
 /// Immutable atomic extension bundle.
 #[derive(Clone)]
@@ -158,30 +20,37 @@ pub struct Extension {
 }
 
 impl Extension {
+    /// Create a new [`ExtensionBuilder`] for the given extension name.
     pub fn builder(name: impl Into<String>) -> ExtensionBuilder {
         ExtensionBuilder::new(name)
     }
 
+    /// The name of this extension.
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// The type contributions registered by this extension.
     pub fn types(&self) -> &[TypeContribution] {
         &self.types
     }
 
+    /// The encoding contributions registered by this extension.
     pub fn encodings(&self) -> &[EncodingContribution] {
         &self.encodings
     }
 
+    /// The scheme contributions registered by this extension.
     pub fn schemes(&self) -> &[SchemeContribution] {
         &self.schemes
     }
 
+    /// The capability contributions registered by this extension.
     pub fn capabilities(&self) -> &[Capability] {
         &self.capabilities
     }
 
+    /// The root proof backend bundle provided by this extension, if any.
     #[cfg(feature = "prove")]
     pub fn root_backend_bundle(&self) -> Option<RootBackendBundle> {
         self.root_backend_bundle.clone()
@@ -212,6 +81,7 @@ pub struct ExtensionBuilder {
 }
 
 impl ExtensionBuilder {
+    /// Create a new builder with the given extension name.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -224,38 +94,45 @@ impl ExtensionBuilder {
         }
     }
 
+    /// Add a type contribution to the extension.
     pub fn add_type(mut self, contribution: TypeContribution) -> Self {
         self.types.push(contribution);
         self
     }
 
+    /// Add an encoding contribution to the extension.
     pub fn add_encoding(mut self, contribution: EncodingContribution) -> Self {
         self.encodings.push(contribution);
         self
     }
 
+    /// Add a scheme contribution to the extension.
     pub fn add_scheme(mut self, contribution: SchemeContribution) -> Self {
         self.schemes.push(contribution);
         self
     }
 
+    /// Add a capability contribution to the extension.
     pub fn add_capability(mut self, contribution: Capability) -> Self {
         self.capabilities.push(contribution);
         self
     }
 
+    /// Set the root proof backend for this extension.
     #[cfg(feature = "prove")]
     pub fn with_root_backend(mut self, backend: impl RootBackend + 'static) -> Self {
         self.root_backend_bundle = Some(RootBackendBundle::new(backend));
         self
     }
 
+    /// Set the root proof backend bundle directly for this extension.
     #[cfg(feature = "prove")]
     pub fn with_root_backend_bundle(mut self, bundle: RootBackendBundle) -> Self {
         self.root_backend_bundle = Some(bundle);
         self
     }
 
+    /// Validate and build the [`Extension`].
     pub fn build(self) -> ExtResult<Extension> {
         if self.name.trim().is_empty() {
             return Err(ExtError::validation("extension name must not be empty"));

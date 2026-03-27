@@ -1,3 +1,5 @@
+//! Entry-point functions for executing queries and transaction batches.
+
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
 use tabula_ir as ir;
@@ -12,6 +14,7 @@ use crate::surface::{
     TypedStateSnapshot, TypedStateWrite,
 };
 
+/// Execute a single query entry and return its result with all observed effects.
 pub fn execute_query<S: StateView>(
     program: &ResolvedExecutionProgram,
     entry_id: ir::EntryId,
@@ -58,6 +61,7 @@ pub fn execute_query<S: StateView>(
     })
 }
 
+/// Execute an ordered batch of transactions and return the execution journal.
 pub fn execute_batch<S: StateView>(
     program: &ResolvedExecutionProgram,
     txs: &[TxCall],

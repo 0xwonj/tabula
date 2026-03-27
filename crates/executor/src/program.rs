@@ -1,3 +1,5 @@
+//! Resolved program types: pre-indexed views over the IR program for efficient execution.
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -53,12 +55,15 @@ impl ResolvedEntry {
     }
 }
 
+/// A single state table with its fields pre-indexed by ID.
 #[derive(Debug, Clone)]
 pub struct ResolvedTable {
+    /// The table schema from the IR program.
     pub schema: ir::TableSchema,
     pub(crate) fields: BTreeMap<ir::FieldId, ir::FieldSchema>,
 }
 
+/// An IR program pre-indexed for efficient field, entry, relation, and capability lookups.
 #[derive(Debug, Clone)]
 pub struct ResolvedExecutionProgram {
     program: Arc<ir::ValidatedProgram>,
@@ -72,10 +77,12 @@ pub struct ResolvedExecutionProgram {
 }
 
 impl ResolvedExecutionProgram {
+    /// Build a resolved program from a validated program, taking ownership.
     pub fn from_validated_program(program: ir::ValidatedProgram) -> Result<Self, TabulaError> {
         Self::from_shared_program(Arc::new(program))
     }
 
+    /// Build a resolved program from a shared validated program reference.
     pub fn from_shared_program(program: Arc<ir::ValidatedProgram>) -> Result<Self, TabulaError> {
         let raw = program.as_program();
         let context_fields = raw
@@ -169,10 +176,12 @@ impl ResolvedExecutionProgram {
         })
     }
 
+    /// Borrow the underlying validated program.
     pub fn validated_program(&self) -> &ir::ValidatedProgram {
         self.program.as_ref()
     }
 
+    /// Borrow the raw IR program.
     pub fn program(&self) -> &ir::Program {
         self.program.as_program()
     }
@@ -183,16 +192,19 @@ impl ResolvedExecutionProgram {
             .ok_or_else(|| TabulaError::InvalidIr(format!("unknown entry ID {}", id.0)))
     }
 
+    /// Borrow the IR definition for the entry with the given ID.
     pub fn entry_definition(&self, id: ir::EntryId) -> Result<&ir::Entry, TabulaError> {
         Ok(&self.entry(id)?.definition)
     }
 
+    /// Borrow the resolved table for the given ID.
     pub fn table(&self, id: ir::TableId) -> Result<&ResolvedTable, TabulaError> {
         self.tables
             .get(&id)
             .ok_or_else(|| TabulaError::InvalidIr(format!("unknown table {}", id.0)))
     }
 
+    /// Return the type ID for a specific table field.
     pub fn field_type(
         &self,
         table: ir::TableId,
@@ -237,6 +249,7 @@ impl ResolvedExecutionProgram {
             .ok_or_else(|| TabulaError::InvalidIr(format!("unknown const {}", id.0)))
     }
 
+    /// Borrow the context field definition for the given ID.
     pub fn context_field(&self, id: ir::ContextFieldId) -> Result<&ir::ContextField, TabulaError> {
         self.context_fields
             .get(&id)

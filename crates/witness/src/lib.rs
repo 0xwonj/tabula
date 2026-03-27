@@ -4,12 +4,12 @@
 //! runtime-owned proof assembly. STARK-specific lowering and witness assembly
 //! helpers live under [`stark`].
 
-mod relation;
+mod model;
+mod relation_proof;
 pub mod stark;
-mod types;
 
-pub use relation::{PreparedRelationProof, PreparedRelationTableRow, prepare_relation_proof};
-pub use types::{
+pub use model::{
     AccessEvent, ColumnValueProfile, ColumnWrite, CommittedEntry, InitCell, PropertyReadClaim,
     RelationClaim, RelationClaimKind,
 };
+pub use relation_proof::{PreparedRelationProof, PreparedRelationTableRow, prepare_relation_proof};

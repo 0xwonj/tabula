@@ -6,9 +6,9 @@ use tabula_compiler::{CompilerCatalogs, compile_program_source_with_catalogs};
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BYTES32_ID, TYPE_U64_ID};
 use tabula_sdk::Sdk;
-use tabula_sdk::advanced::ArtifactExt;
+use tabula_sdk::interop::ArtifactExt;
 #[cfg(not(feature = "compile"))]
-use tabula_sdk::advanced::register_compiled;
+use tabula_sdk::interop::register_compiled;
 
 const NO_PROVE_SOURCE: &str = r#"
 program NoProve

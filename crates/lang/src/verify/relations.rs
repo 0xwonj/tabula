@@ -1,4 +1,5 @@
 #![allow(clippy::wildcard_imports)]
+#![allow(missing_docs)]
 
 use super::*;
 use tabula_profile::{is_i64_type, is_u64_type};

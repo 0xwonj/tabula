@@ -1,4 +1,6 @@
+//! HIR model types: the resolved in-memory representation after building.
 #![allow(clippy::wildcard_imports)]
+#![allow(missing_docs)]
 
 use tabula_core::{PortableValue, SchemeId};
 
