@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tabula_core::{PortableValue, RowKey, TypeId};
+use tabula_core::{CommittedKey, PortableValue, TypeId};
 
 /// Runtime-only value representation used by executor, witness preparation, and
 /// typed capability execution.
@@ -15,9 +15,9 @@ pub struct TypedValue {
 
 /// Typed committed-column entry used by runtime property resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypedColumnEntry {
-    /// Row key for the committed cell.
-    pub row_key: RowKey,
+pub struct CommittedColumnEntry {
+    /// Canonical committed key for the entry.
+    pub key: CommittedKey,
     /// Typed runtime value for this cell.
     pub value: TypedValue,
     /// Whether the cell is null/absent.
@@ -26,13 +26,26 @@ pub struct TypedColumnEntry {
 
 /// Typed result of resolving one structural property query.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypedPropertyQueryResult {
+pub struct TypedCommittedPropertyQueryResult {
     /// Typed runtime value produced by the query.
     pub value: TypedValue,
-    /// Row key at which the value was found, if any.
-    pub key: Option<RowKey>,
+    /// Committed key at which the value was found, if any.
+    pub key: Option<CommittedKey>,
     /// Whether the result is null.
     pub is_null: bool,
+}
+
+/// One logical keyed state cell used by authoring-facing layers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypedLogicalStateCell {
+    /// User-state table identifier.
+    pub table: tabula_core::TableId,
+    /// Logical key tuple in declaration order.
+    pub key: Vec<TypedValue>,
+    /// Column identifier.
+    pub col: tabula_core::ColId,
+    /// Typed runtime value.
+    pub value: TypedValue,
 }
 
 impl TypedValue {

@@ -3,14 +3,21 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use borsh::{BorshDeserialize, BorshSerialize};
-pub use tabula_contract::{PublicContextBinding, PublicStatement};
+use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
+use tabula_commitment::NativeDigest;
+use tabula_contract::PublicStatement;
+use tabula_contract::format::public_statement_transcript::{
+    EncodedTranscriptValue, event_arg_block, event_header_block, event_transcript_header_block,
+    public_context_header_block, public_context_item_block, tx_batch_header_block, tx_header_block,
+    tx_param_block,
+};
+use tabula_contract::format::typed_tuple::TupleEncodingDefaults;
 use tabula_core::error::TabulaError;
-use tabula_core::traits::Hasher;
 use tabula_core::{Digest, PortableValue};
 use tabula_executor as exec;
 use tabula_ir as ir;
-use tabula_types::TypeRuntimeRegistry;
+use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue};
 
 /// A state column slot in the proof layout, identifying a (table, field) pair.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,7 +217,7 @@ pub struct ProofRelationSlotJournal {
 
 /// The complete proof-visible journal for one executed batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProofJournal {
+pub(crate) struct ProofJournal {
     /// Committed public context values.
     pub public_context: Vec<PublicContextBinding>,
     /// Per-state-column effect journals in proof layout order.
@@ -220,17 +227,40 @@ pub struct ProofJournal {
     /// Per-relation effect journals in proof layout order.
     pub relation_slots: Vec<ProofRelationSlotJournal>,
     /// All event emissions in execution order.
-    pub event_effects: Vec<exec::TypedEventEffect>,
+    pub event_effects: Vec<ProofEventEffect>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-struct PortableEventRecord {
-    event: ir::EventId,
-    args: Vec<PortableValue>,
+/// Execution-derived values supplied by the runtime when materializing one public statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PublicStatementMaterialization {
+    /// Canonical digest of the applied transaction batch.
+    pub applied_tx_digest: Digest,
+    /// Root before batch execution.
+    pub old_state_root: Digest,
+    /// Root after batch execution.
+    pub new_state_root: Digest,
+}
+
+/// Proof-visible emitted event with its batch position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProofEventEffect {
+    /// Zero-based transaction index within the batch.
+    pub tx_index: u32,
+    /// The concrete emitted event effect.
+    pub effect: exec::TypedEventEffect,
+}
+
+/// Internal canonical public-context binding used while materializing proof-visible statements.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PublicContextBinding {
+    /// The context field identifier.
+    pub field: ir::ContextFieldId,
+    /// The portable serialized value.
+    pub value: PortableValue,
 }
 
 /// Reduce an execution journal into per-slot proof journals.
-pub fn reduce_execution_journal(
+pub(crate) fn reduce_execution_journal(
     resolved_program: &ResolvedProofProgram,
     context: &exec::ContextValues,
     execution_journal: &exec::ExecutionJournal,
@@ -295,7 +325,15 @@ pub fn reduce_execution_journal(
                 })?;
             state_slots[*slot].property_effects.push(effect.clone());
         }
-        event_effects.extend(tx.event_effects.iter().cloned());
+        event_effects.extend(
+            tx.event_effects
+                .iter()
+                .cloned()
+                .map(|effect| ProofEventEffect {
+                    tx_index: tx.tx_index,
+                    effect,
+                }),
+        );
         for effect in &tx.capability_effects {
             match resolved_program
                 .capability_visibility
@@ -346,33 +384,68 @@ pub fn reduce_execution_journal(
     })
 }
 
-/// Build the public proof statement from program, context, and execution journal.
-pub fn build_public_statement(
+/// Materialize the proved public statement from program, context, and execution journal.
+pub(crate) fn materialize_public_statement(
     resolved_program: &ResolvedProofProgram,
     context: &exec::ContextValues,
     execution_journal: &exec::ExecutionJournal,
-    hasher: &dyn Hasher,
+    materialization: PublicStatementMaterialization,
     type_runtimes: &TypeRuntimeRegistry,
+    encoding_runtimes: &EncodingRuntimeRegistry,
+    tuple_encoding_defaults: &TupleEncodingDefaults,
 ) -> Result<PublicStatement, TabulaError> {
     let proof_journal =
         reduce_execution_journal(resolved_program, context, execution_journal, type_runtimes)?;
-    build_public_statement_from_journal(&proof_journal, resolved_program, hasher)
+    build_public_statement_from_journal(
+        &proof_journal,
+        materialization,
+        type_runtimes,
+        encoding_runtimes,
+        tuple_encoding_defaults,
+    )
 }
 
-/// Build the public proof statement directly from a pre-reduced [`ProofJournal`].
-pub fn build_public_statement_from_journal(
+/// Build the proved public statement directly from one pre-reduced [`ProofJournal`].
+pub(crate) fn build_public_statement_from_journal(
     proof_journal: &ProofJournal,
-    resolved_program: &ResolvedProofProgram,
-    hasher: &dyn Hasher,
+    materialization: PublicStatementMaterialization,
+    type_runtimes: &TypeRuntimeRegistry,
+    encoding_runtimes: &EncodingRuntimeRegistry,
+    tuple_encoding_defaults: &TupleEncodingDefaults,
 ) -> Result<PublicStatement, TabulaError> {
+    let public_context_digest = compute_public_context_digest(
+        &proof_journal.public_context,
+        type_runtimes,
+        encoding_runtimes,
+        tuple_encoding_defaults,
+    )?;
     Ok(PublicStatement {
-        program_id: resolved_program.program().program_id,
-        public_context: proof_journal.public_context.clone(),
-        event_digest: compute_event_digest(hasher, &proof_journal.event_effects)?,
+        old_root: parse_native_digest(materialization.old_state_root, "old_state_root")?,
+        new_root: parse_native_digest(materialization.new_state_root, "new_state_root")?,
+        public_context_digest: parse_native_digest(public_context_digest, "public_context_digest")?,
+        applied_tx_digest: parse_native_digest(
+            materialization.applied_tx_digest,
+            "applied_tx_digest",
+        )?,
+        event_digest: parse_native_digest(
+            compute_event_digest(
+                &proof_journal.event_effects,
+                encoding_runtimes,
+                tuple_encoding_defaults,
+            )?,
+            "event_digest",
+        )?,
     })
 }
 
-fn encode_public_context(
+fn parse_native_digest(bytes: Digest, label: &'static str) -> Result<NativeDigest, TabulaError> {
+    NativeDigest::from_bytes(&bytes).map_err(|error| TabulaError::ProofError {
+        phase: label,
+        detail: error.to_string(),
+    })
+}
+
+pub(crate) fn encode_public_context(
     resolved_program: &ResolvedProofProgram,
     context: &exec::ContextValues,
     type_runtimes: &TypeRuntimeRegistry,
@@ -408,39 +481,188 @@ fn encode_public_context(
         .collect()
 }
 
-fn compute_event_digest(
-    hasher: &dyn Hasher,
-    events: &[exec::TypedEventEffect],
-) -> Result<Digest, TabulaError> {
-    let mut items = Vec::with_capacity(events.len() + 1);
-    items.push(b"tabula.runtime.statement.v1".to_vec());
-    for event in events {
-        let record = PortableEventRecord {
-            event: event.event,
-            args: event
-                .args
-                .iter()
-                .map(|arg| PortableValue::new(arg.type_id(), arg.payload().to_vec()))
-                .collect(),
-        };
-        items.push(
-            borsh::to_vec(&record)
-                .map_err(|error| TabulaError::BorshEncodingError(error.to_string()))?,
-        );
+pub(crate) fn canonical_public_context(
+    bindings: &[PublicContextBinding],
+) -> Result<Vec<PublicContextBinding>, TabulaError> {
+    let mut bindings = bindings.to_vec();
+    bindings.sort_unstable_by_key(|binding| binding.field);
+    for window in bindings.windows(2) {
+        if window[0].field == window[1].field {
+            return Err(TabulaError::ProofError {
+                phase: "public_context_digest",
+                detail: format!(
+                    "duplicate public context binding for field {}",
+                    window[0].field.0
+                ),
+            });
+        }
     }
-    let refs = items.iter().map(Vec::as_slice).collect::<Vec<_>>();
-    Ok(hasher.hash_many(&refs))
+    Ok(bindings)
+}
+
+/// Canonical field-block payload for the public-context commitment.
+pub(crate) fn canonical_public_context_payload(
+    bindings: &[PublicContextBinding],
+    type_runtimes: &TypeRuntimeRegistry,
+    encoding_runtimes: &EncodingRuntimeRegistry,
+    tuple_encoding_defaults: &TupleEncodingDefaults,
+) -> Result<Vec<[KoalaBear; 8]>, TabulaError> {
+    let bindings = canonical_public_context(bindings)?;
+    let mut blocks = Vec::with_capacity(bindings.len() + 1);
+    blocks.push(public_context_header_block(bindings.len()));
+    for binding in &bindings {
+        let typed = type_runtimes.decode_portable(&binding.value)?;
+        let encoded =
+            encode_public_statement_value(&typed, encoding_runtimes, tuple_encoding_defaults)?;
+        blocks.push(public_context_item_block(binding.field, &encoded));
+    }
+    Ok(blocks)
+}
+
+/// Compute the canonical public-context digest from canonicalized context bindings.
+pub(crate) fn compute_public_context_digest(
+    bindings: &[PublicContextBinding],
+    type_runtimes: &TypeRuntimeRegistry,
+    encoding_runtimes: &EncodingRuntimeRegistry,
+    tuple_encoding_defaults: &TupleEncodingDefaults,
+) -> Result<Digest, TabulaError> {
+    Ok(digest_from_blocks(&canonical_public_context_payload(
+        bindings,
+        type_runtimes,
+        encoding_runtimes,
+        tuple_encoding_defaults,
+    )?))
+}
+
+/// Canonical field-block payload for the applied transaction batch commitment.
+pub fn canonical_batch_payload(
+    batch: &ir::EntryBatch,
+    type_runtimes: &TypeRuntimeRegistry,
+    encoding_runtimes: &EncodingRuntimeRegistry,
+    tuple_encoding_defaults: &TupleEncodingDefaults,
+) -> Result<Vec<[KoalaBear; 8]>, TabulaError> {
+    let mut blocks = Vec::new();
+    blocks.push(tx_batch_header_block(batch.calls.len()));
+    for (tx_index, call) in batch.calls.iter().enumerate() {
+        blocks.push(tx_header_block(
+            tx_index as u32,
+            call.entry_id,
+            call.params.len(),
+        ));
+        for (param_index, value) in call.params.iter().enumerate() {
+            let typed = type_runtimes.decode_portable(value)?;
+            let encoded =
+                encode_public_statement_value(&typed, encoding_runtimes, tuple_encoding_defaults)?;
+            blocks.push(tx_param_block(tx_index as u32, param_index, &encoded));
+        }
+    }
+    Ok(blocks)
+}
+
+/// Compute the canonical applied transaction digest for one batch input.
+pub fn compute_applied_tx_digest(
+    batch: &ir::EntryBatch,
+    type_runtimes: &TypeRuntimeRegistry,
+    encoding_runtimes: &EncodingRuntimeRegistry,
+    tuple_encoding_defaults: &TupleEncodingDefaults,
+) -> Result<Digest, TabulaError> {
+    Ok(digest_from_blocks(&canonical_batch_payload(
+        batch,
+        type_runtimes,
+        encoding_runtimes,
+        tuple_encoding_defaults,
+    )?))
+}
+
+/// Canonical field-block payload for the emitted-event commitment.
+pub fn canonical_event_log_payload(
+    events: &[ProofEventEffect],
+    encoding_runtimes: &EncodingRuntimeRegistry,
+    tuple_encoding_defaults: &TupleEncodingDefaults,
+) -> Result<Vec<[KoalaBear; 8]>, TabulaError> {
+    let mut blocks = Vec::new();
+    blocks.push(event_transcript_header_block(events.len()));
+    for event in events {
+        blocks.push(event_header_block(
+            event.tx_index,
+            event.effect.op_index,
+            event.effect.effect_ordinal_in_entry,
+            event.effect.event,
+            event.effect.args.len(),
+        ));
+        for (arg_index, value) in event.effect.args.iter().enumerate() {
+            let encoded =
+                encode_public_statement_value(value, encoding_runtimes, tuple_encoding_defaults)?;
+            blocks.push(event_arg_block(
+                event.tx_index,
+                event.effect.effect_ordinal_in_entry,
+                arg_index,
+                &encoded,
+            ));
+        }
+    }
+    Ok(blocks)
+}
+
+/// Compute the canonical emitted-event digest for one proof journal.
+pub fn compute_event_digest(
+    events: &[ProofEventEffect],
+    encoding_runtimes: &EncodingRuntimeRegistry,
+    tuple_encoding_defaults: &TupleEncodingDefaults,
+) -> Result<Digest, TabulaError> {
+    Ok(digest_from_blocks(&canonical_event_log_payload(
+        events,
+        encoding_runtimes,
+        tuple_encoding_defaults,
+    )?))
+}
+
+pub(crate) fn encode_public_statement_value(
+    value: &TypedValue,
+    encoding_runtimes: &EncodingRuntimeRegistry,
+    tuple_encoding_defaults: &TupleEncodingDefaults,
+) -> Result<EncodedTranscriptValue, TabulaError> {
+    let encoding_profile_id = tuple_encoding_defaults.resolve(value.type_id())?;
+    let mut field_elements =
+        encoding_runtimes.encode_field_elements_for_profile(encoding_profile_id, value)?;
+    if field_elements.len() > 3 {
+        return Err(TabulaError::ProofError {
+            phase: "public_statement_transcript",
+            detail: format!(
+                "value type {} encoded width {} exceeds public-statement transcript width 3",
+                value.type_id().0,
+                field_elements.len()
+            ),
+        });
+    }
+    field_elements.resize(3, KoalaBear::ZERO);
+    Ok(EncodedTranscriptValue {
+        type_id: value.type_id(),
+        field_elements: [field_elements[0], field_elements[1], field_elements[2]],
+    })
+}
+
+fn digest_from_blocks(blocks: &[[KoalaBear; 8]]) -> Digest {
+    tabula_contract::format::public_statement_transcript::compute_public_statement_transcript_digest(
+        blocks.iter(),
+    )
+    .to_bytes()
 }
 
 #[cfg(test)]
 mod tests {
     use borsh::to_vec;
+    use tabula_contract::{TupleEncodingDefaults, TupleEncodingSelection};
     use tabula_core::traits::Hasher;
-    use tabula_core::{CellKey, InMemoryState, PortableValue, RowKey};
-    use tabula_profile::TYPE_U64_ID;
-    use tabula_types::{TypeRuntimeRegistry, TypedColumnEntry, TypedValue, u64_typed};
-
-    use crate::host::V1PropertyReads;
+    use tabula_core::{
+        ColId, CommittedCellKey, CommittedKey, CommittedPropertyQuery, InMemoryState,
+        PortableValue, TableId,
+    };
+    use tabula_profile::{ENCODING_U64_ID, TYPE_U64_ID};
+    use tabula_types::{
+        CommittedColumnEntry, EncodingRuntimeRegistry, NativeKeyPayload, TypeRuntimeRegistry,
+        TypedValue, u64_typed,
+    };
 
     use super::*;
 
@@ -489,6 +711,173 @@ mod tests {
         PortableValue::new(TYPE_U64_ID, to_vec(&value).unwrap())
     }
 
+    fn test_encoding_runtimes() -> EncodingRuntimeRegistry {
+        EncodingRuntimeRegistry::seeded().expect("seeded encoding runtimes")
+    }
+
+    fn test_tuple_encoding_defaults() -> TupleEncodingDefaults {
+        TupleEncodingDefaults::new(vec![TupleEncodingSelection {
+            type_id: TYPE_U64_ID,
+            encoding_profile_id: ENCODING_U64_ID,
+        }])
+        .expect("tuple encoding defaults")
+    }
+
+    #[derive(Default)]
+    struct TestStateRuntime;
+
+    impl exec::StateRuntimeView for TestStateRuntime {
+        fn encode_cell_key(
+            &self,
+            table: ir::TableId,
+            field: ir::FieldId,
+            key: &[TypedValue],
+        ) -> Result<CommittedCellKey, TabulaError> {
+            Ok(CommittedCellKey {
+                table: TableId(table.0),
+                col: ColId(field.0),
+                key: self.encode_committed_key(table, key)?,
+            })
+        }
+
+        fn encode_committed_key(
+            &self,
+            _table: ir::TableId,
+            key: &[TypedValue],
+        ) -> Result<CommittedKey, TabulaError> {
+            let [value] = key else {
+                return Err(TabulaError::InvalidIr(
+                    "test state runtime only supports single-component state keys".into(),
+                ));
+            };
+            if value.type_id() != TYPE_U64_ID {
+                return Err(TabulaError::InvalidIr(format!(
+                    "test state runtime expects state keys to be u64, got {}",
+                    value.type_id().0
+                )));
+            }
+            Ok(CommittedKey(value.payload().to_vec()))
+        }
+
+        fn decode_committed_key(
+            &self,
+            _table: ir::TableId,
+            key: &CommittedKey,
+        ) -> Result<Vec<TypedValue>, TabulaError> {
+            if key.0.len() != std::mem::size_of::<u64>() {
+                return Err(TabulaError::InvalidIr(format!(
+                    "expected 8 committed key bytes, got {}",
+                    key.0.len()
+                )));
+            }
+            Ok(vec![u64_typed(u64::from_le_bytes(
+                key.0.clone().try_into().expect("u64 bytes"),
+            ))])
+        }
+
+        fn encode_key_payload(
+            &self,
+            _table: ir::TableId,
+            key: &CommittedKey,
+        ) -> Result<NativeKeyPayload, TabulaError> {
+            if key.0.len() != std::mem::size_of::<u64>() {
+                return Err(TabulaError::InvalidIr(format!(
+                    "expected 8 committed key bytes, got {}",
+                    key.0.len()
+                )));
+            }
+            let limbs = tabula_commitment::primitives::encode_u64_limbs(u64::from_le_bytes(
+                key.0.clone().try_into().expect("u64 bytes"),
+            ));
+            let mut payload = tabula_types::zero_key_payload();
+            payload[0] = limbs[2];
+            payload[1] = limbs[1];
+            payload[2] = limbs[0];
+            Ok(payload)
+        }
+
+        fn compare_keys(
+            &self,
+            _table: ir::TableId,
+            lhs: &CommittedKey,
+            rhs: &CommittedKey,
+        ) -> Result<std::cmp::Ordering, TabulaError> {
+            Ok(lhs.cmp(rhs))
+        }
+
+        fn key_component_types(
+            &self,
+            _table: ir::TableId,
+        ) -> Result<Vec<tabula_core::TypeId>, TabulaError> {
+            Ok(vec![TYPE_U64_ID])
+        }
+
+        fn column_type(
+            &self,
+            _table: ir::TableId,
+            _field: ir::FieldId,
+        ) -> Result<tabula_core::TypeId, TabulaError> {
+            Ok(TYPE_U64_ID)
+        }
+
+        fn resolve_property(
+            &self,
+            _table: ir::TableId,
+            _field: ir::FieldId,
+            query: &CommittedPropertyQuery,
+            state: &[CommittedColumnEntry],
+        ) -> Result<tabula_types::TypedCommittedPropertyQueryResult, TabulaError> {
+            let pick = match query {
+                CommittedPropertyQuery::Minimum => state
+                    .iter()
+                    .filter(|entry| !entry.is_null)
+                    .min_by(|lhs, rhs| lhs.key.cmp(&rhs.key)),
+                CommittedPropertyQuery::Maximum => state
+                    .iter()
+                    .filter(|entry| !entry.is_null)
+                    .max_by(|lhs, rhs| lhs.key.cmp(&rhs.key)),
+                CommittedPropertyQuery::Successor { key } => state
+                    .iter()
+                    .filter(|entry| !entry.is_null)
+                    .filter(|entry| entry.key > *key)
+                    .min_by(|lhs, rhs| lhs.key.cmp(&rhs.key)),
+                CommittedPropertyQuery::Predecessor { key } => state
+                    .iter()
+                    .filter(|entry| !entry.is_null)
+                    .filter(|entry| entry.key < *key)
+                    .max_by(|lhs, rhs| lhs.key.cmp(&rhs.key)),
+                CommittedPropertyQuery::Aggregate { .. } => {
+                    return Err(TabulaError::InvalidIr(
+                        "Aggregate is not yet supported in test state runtime".into(),
+                    ));
+                }
+                CommittedPropertyQuery::NonExistenceRange { .. } => {
+                    return Err(TabulaError::InvalidIr(
+                        "NonExistenceRange is not yet supported in test state runtime".into(),
+                    ));
+                }
+            };
+            Ok(if let Some(entry) = pick {
+                tabula_types::TypedCommittedPropertyQueryResult {
+                    value: entry.value.clone(),
+                    key: Some(entry.key.clone()),
+                    is_null: false,
+                }
+            } else {
+                tabula_types::TypedCommittedPropertyQueryResult {
+                    value: u64_typed(0),
+                    key: None,
+                    is_null: true,
+                }
+            })
+        }
+    }
+
+    fn test_state_runtime() -> &'static TestStateRuntime {
+        static RUNTIME: std::sync::OnceLock<TestStateRuntime> = std::sync::OnceLock::new();
+        RUNTIME.get_or_init(TestStateRuntime::default)
+    }
+
     fn validated_program() -> ir::ValidatedProgram {
         ir::ValidatedProgram::try_from(ir::Program {
             program_id: ir::ProgramId(99),
@@ -496,7 +885,10 @@ mod tests {
                 tables: vec![ir::TableSchema {
                     id: ir::TableId(1),
                     symbol: "accounts".into(),
-                    key_tys: vec![TYPE_U64_ID],
+                    keys: vec![tabula_core::KeyComponentSchema {
+                        symbol: "id".into(),
+                        ty: TYPE_U64_ID,
+                    }],
                     fields: vec![
                         ir::FieldSchema {
                             id: ir::FieldId(0),
@@ -661,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_reduction_builds_proof_journal_and_statement() {
+    fn runtime_reduction_builds_proof_journal_and_public_statement() {
         let runtimes = TypeRuntimeRegistry::seeded().expect("seeded runtimes");
         let runtime_program =
             RuntimeProgram::from_validated_program(validated_program()).expect("runtime program");
@@ -671,7 +1063,7 @@ mod tests {
             hasher: &XorHasher,
             type_runtimes: &runtimes,
             capability_executor: Some(&capabilities),
-            property_reads: None,
+            state_runtime: test_state_runtime(),
         };
         let state = InMemoryState::new();
         let mut context = exec::ContextValues::new();
@@ -692,12 +1084,20 @@ mod tests {
         let proof_journal =
             reduce_execution_journal(runtime_program.proof(), &context, &journal, &runtimes)
                 .expect("proof journal");
-        let statement = build_public_statement(
+        let encoding_runtimes = test_encoding_runtimes();
+        let tuple_encoding_defaults = test_tuple_encoding_defaults();
+        let public_statement = materialize_public_statement(
             runtime_program.proof(),
             &context,
             &journal,
-            &XorHasher,
+            PublicStatementMaterialization {
+                applied_tx_digest: [0x22; 32],
+                old_state_root: [0x33; 32],
+                new_state_root: [0x44; 32],
+            },
             &runtimes,
+            &encoding_runtimes,
+            &tuple_encoding_defaults,
         )
         .expect("public statement");
 
@@ -715,9 +1115,20 @@ mod tests {
         assert_eq!(proof_journal.relation_slots[0].effects.len(), 1);
         assert_eq!(proof_journal.relation_slots[1].effects.len(), 1);
         assert_eq!(proof_journal.event_effects.len(), 1);
-        assert_ne!(statement.event_digest, [0u8; 32]);
-        assert_eq!(statement.program_id, ir::ProgramId(99));
-        assert_eq!(statement.public_context, proof_journal.public_context);
+        assert_ne!(public_statement.event_digest.to_bytes(), [0u8; 32]);
+        assert_eq!(public_statement.applied_tx_digest.to_bytes(), [0x22; 32]);
+        assert_eq!(public_statement.old_root.to_bytes(), [0x33; 32]);
+        assert_eq!(public_statement.new_root.to_bytes(), [0x44; 32]);
+        assert_eq!(
+            public_statement.public_context_digest.to_bytes(),
+            compute_public_context_digest(
+                &proof_journal.public_context,
+                &runtimes,
+                &encoding_runtimes,
+                &tuple_encoding_defaults,
+            )
+            .expect("context digest"),
+        );
     }
 
     #[test]
@@ -736,7 +1147,7 @@ mod tests {
             hasher: &XorHasher,
             type_runtimes: &runtimes,
             capability_executor: Some(&capabilities),
-            property_reads: None,
+            state_runtime: test_state_runtime(),
         };
         let state = InMemoryState::new();
         let mut context = exec::ContextValues::new();
@@ -772,7 +1183,10 @@ mod tests {
                 tables: vec![ir::TableSchema {
                     id: ir::TableId(1),
                     symbol: "accounts".into(),
-                    key_tys: vec![TYPE_U64_ID],
+                    keys: vec![tabula_core::KeyComponentSchema {
+                        symbol: "id".into(),
+                        ty: TYPE_U64_ID,
+                    }],
                     fields: vec![ir::FieldSchema {
                         id: ir::FieldId(0),
                         symbol: "balance".into(),
@@ -810,7 +1224,9 @@ mod tests {
                     ops: vec![
                         ir::Op::ReadStateProperty {
                             guard: None,
-                            dsts: vec![ir::LocalId(0), ir::LocalId(1), ir::LocalId(2)],
+                            dst_value: ir::LocalId(0),
+                            dst_key_components: vec![ir::LocalId(1)],
+                            dst_is_null: ir::LocalId(2),
                             table: ir::TableId(1),
                             field: ir::FieldId(0),
                             query: ir::StatePropertyQuery::Maximum,
@@ -825,29 +1241,29 @@ mod tests {
         .expect("property program");
         let runtime_program =
             RuntimeProgram::from_validated_program(property_program).expect("runtime program");
-        let committed_columns = V1PropertyReads::new().with_column(
-            ir::TableId(1),
-            ir::FieldId(0),
-            vec![
-                TypedColumnEntry {
-                    row_key: RowKey(1),
-                    value: u64_typed(5),
-                    is_null: false,
-                },
-                TypedColumnEntry {
-                    row_key: RowKey(3),
-                    value: u64_typed(8),
-                    is_null: false,
-                },
-            ],
-        );
         let exec_ctx = exec::ExecContext {
             hasher: &XorHasher,
             type_runtimes: &runtimes,
             capability_executor: None,
-            property_reads: Some(&committed_columns),
+            state_runtime: test_state_runtime(),
         };
-        let state = InMemoryState::new();
+        let mut state = InMemoryState::new();
+        state.set(
+            CommittedCellKey {
+                table: TableId(1),
+                col: ColId(0),
+                key: CommittedKey(1u64.to_le_bytes().to_vec()),
+            },
+            portable_u64(5),
+        );
+        state.set(
+            CommittedCellKey {
+                table: TableId(1),
+                col: ColId(0),
+                key: CommittedKey(3u64.to_le_bytes().to_vec()),
+            },
+            portable_u64(8),
+        );
         let context = exec::ContextValues::new();
 
         let journal = exec::execute_batch(
@@ -869,13 +1285,17 @@ mod tests {
         assert!(proof_journal.state_slots[0].state_effects.is_empty());
         assert_eq!(proof_journal.state_slots[0].property_effects.len(), 1);
         assert_eq!(
-            proof_journal.state_slots[0].property_effects[0].outputs,
-            vec![u64_typed(8), u64_typed(3), tabula_types::bool_typed(false)]
+            proof_journal.state_slots[0].property_effects[0].result,
+            tabula_types::TypedCommittedPropertyQueryResult {
+                value: u64_typed(8),
+                key: Some(CommittedKey(3u64.to_le_bytes().to_vec())),
+                is_null: false,
+            }
         );
     }
 
     #[test]
-    fn public_statement_is_deterministic_for_same_journal() {
+    fn public_statement_materialization_is_deterministic_for_same_journal() {
         let runtimes = TypeRuntimeRegistry::seeded().expect("seeded runtimes");
         let runtime_program =
             RuntimeProgram::from_validated_program(validated_program()).expect("runtime program");
@@ -885,14 +1305,14 @@ mod tests {
             hasher: &XorHasher,
             type_runtimes: &runtimes,
             capability_executor: Some(&capabilities),
-            property_reads: None,
+            state_runtime: test_state_runtime(),
         };
         let mut state = InMemoryState::new();
         state.set(
-            CellKey {
-                table: tabula_core::TableId(1),
-                col: tabula_core::ColId(0),
-                row: RowKey(2),
+            CommittedCellKey {
+                table: TableId(1),
+                col: ColId(0),
+                key: CommittedKey(2u64.to_le_bytes().to_vec()),
             },
             portable_u64(1),
         );
@@ -911,22 +1331,36 @@ mod tests {
         )
         .expect("batch executes");
 
-        let first = build_public_statement(
+        let encoding_runtimes = test_encoding_runtimes();
+        let tuple_encoding_defaults = test_tuple_encoding_defaults();
+        let first = materialize_public_statement(
             runtime_program.proof(),
             &context,
             &journal,
-            &XorHasher,
+            PublicStatementMaterialization {
+                applied_tx_digest: [1; 32],
+                old_state_root: [2; 32],
+                new_state_root: [3; 32],
+            },
             &runtimes,
+            &encoding_runtimes,
+            &tuple_encoding_defaults,
         )
-        .expect("statement");
-        let second = build_public_statement(
+        .expect("public statement");
+        let second = materialize_public_statement(
             runtime_program.proof(),
             &context,
             &journal,
-            &XorHasher,
+            PublicStatementMaterialization {
+                applied_tx_digest: [1; 32],
+                old_state_root: [2; 32],
+                new_state_root: [3; 32],
+            },
             &runtimes,
+            &encoding_runtimes,
+            &tuple_encoding_defaults,
         )
-        .expect("statement");
+        .expect("public statement");
 
         assert_eq!(first, second);
     }

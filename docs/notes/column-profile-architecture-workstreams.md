@@ -3,7 +3,7 @@
 > **Status**: Design note
 > **Date**: 2026-03-22
 > **Scope**: Defines the top-level design bundles and subordinate execution workstreams for migrating Tabula to a column-profile-driven architecture.
-> **Related**: [canonical-vocabulary.md](canonical-vocabulary.md), [proof-hierarchy-and-grouping.md](proof-hierarchy-and-grouping.md), [../archive/master-roadmap.md](../archive/master-roadmap.md), [../archive/column-scheme-refactor-roadmap.md](../archive/column-scheme-refactor-roadmap.md), [../archive/extensibility-architecture.md](../archive/extensibility-architecture.md)
+> **Related**: [verification vocabulary](../design/architecture.md#verification-vocabulary), [proof-hierarchy-and-grouping.md](proof-hierarchy-and-grouping.md), [../archive/master-roadmap.md](../archive/master-roadmap.md), [../archive/column-scheme-refactor-roadmap.md](../archive/column-scheme-refactor-roadmap.md), [../archive/extensibility-architecture.md](../archive/extensibility-architecture.md)
 
 ---
 

@@ -222,20 +222,28 @@ impl<'a> LowerCx<'a> {
                     field: *field,
                 }),
                 Op::ReadStateProperty {
-                    dsts,
+                    dst_value,
+                    dst_key_components,
+                    dst_is_null,
                     table,
                     field,
                     query,
                 } => {
-                    let mut canonical_dsts = Vec::new();
-                    for dst in dsts {
+                    let canonical_value = builder.alloc_local(env.local_type(*dst_value)?);
+                    env.bind_local(*dst_value, ir::ValueRef::Local(canonical_value))?;
+                    let mut canonical_key_components = Vec::with_capacity(dst_key_components.len());
+                    for dst in dst_key_components {
                         let local = builder.alloc_local(env.local_type(*dst)?);
-                        canonical_dsts.push(local);
+                        canonical_key_components.push(local);
                         env.bind_local(*dst, ir::ValueRef::Local(local))?;
                     }
+                    let canonical_is_null = builder.alloc_local(env.local_type(*dst_is_null)?);
+                    env.bind_local(*dst_is_null, ir::ValueRef::Local(canonical_is_null))?;
                     builder.ops.push(ir::Op::ReadStateProperty {
                         guard: current_guard.map(ir::GuardRef),
-                        dsts: canonical_dsts,
+                        dst_value: canonical_value,
+                        dst_key_components: canonical_key_components,
+                        dst_is_null: canonical_is_null,
                         table: *table,
                         field: *field,
                         query: Self::resolve_property_query(query, env)?,

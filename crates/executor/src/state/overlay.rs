@@ -10,8 +10,8 @@
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
-use tabula_core::{CellKey, TypeId};
-use tabula_types::{TypeRuntimeRegistry, TypedValue};
+use tabula_core::{ColId, CommittedCellKey, CommittedKey, TableId, TypeId};
+use tabula_types::{CommittedColumnEntry, TypeRuntimeRegistry, TypedValue};
 
 use crate::state::execution_state::ExecutionState;
 use crate::surface::{TypedStateSnapshot, TypedStateWrite};
@@ -49,7 +49,7 @@ impl<'a, S: StateView> Overlay<'a, S> {
     /// Read a cell: checks write buffer, then read cache, then snapshot.
     pub fn read(
         &mut self,
-        key: &CellKey,
+        key: &CommittedCellKey,
         col_type: TypeId,
     ) -> Result<Option<TypedValue>, TabulaError> {
         if let Some(entry) = self.state.read_from_buffer(key) {
@@ -67,7 +67,7 @@ impl<'a, S: StateView> Overlay<'a, S> {
     /// Buffer a write to a cell.
     pub fn write(
         &mut self,
-        key: &CellKey,
+        key: &CommittedCellKey,
         value: Option<TypedValue>,
         col_type: TypeId,
     ) -> Result<(), TabulaError> {
@@ -90,6 +90,69 @@ impl<'a, S: StateView> Overlay<'a, S> {
         self.state.discard_checkpoint();
     }
 
+    /// Materialize the current live committed state for one `(table, column)` pair.
+    pub fn committed_column_entries(
+        &self,
+        table: TableId,
+        col: ColId,
+        col_type: TypeId,
+    ) -> Result<Vec<CommittedColumnEntry>, TabulaError> {
+        let mut merged = self
+            .state
+            .snapshot
+            .column_entries(table, col)?
+            .into_iter()
+            .map(|(key, value)| {
+                if value.type_id() != col_type {
+                    return Err(TabulaError::TypeMismatch {
+                        expected: format!("type_id {}", col_type.0),
+                        actual: format!("type_id {}", value.type_id().0),
+                    });
+                }
+                Ok((
+                    key.clone(),
+                    CommittedColumnEntry {
+                        key,
+                        value: self.type_runtimes.decode_portable(&value)?,
+                        is_null: false,
+                    },
+                ))
+            })
+            .collect::<Result<std::collections::BTreeMap<CommittedKey, CommittedColumnEntry>, _>>(
+            )?;
+
+        for (key, value) in self
+            .state
+            .write_buffer
+            .iter()
+            .filter(|(key, _)| key.table == table && key.col == col)
+        {
+            if value.type_id != col_type {
+                return Err(TabulaError::TypeMismatch {
+                    expected: format!("type_id {}", col_type.0),
+                    actual: format!("type_id {}", value.type_id.0),
+                });
+            }
+            match &value.value {
+                Some(value) => {
+                    merged.insert(
+                        key.key.clone(),
+                        CommittedColumnEntry {
+                            key: key.key.clone(),
+                            value: value.clone(),
+                            is_null: false,
+                        },
+                    );
+                }
+                None => {
+                    merged.remove(&key.key);
+                }
+            }
+        }
+
+        Ok(merged.into_values().collect())
+    }
+
     /// Finalize the overlay into typed state results.
     pub fn into_result(self) -> Result<OverlayResult, TabulaError> {
         let (read_set_old, write_set_final) = self.state.into_sets(self.type_runtimes)?;
@@ -108,7 +171,7 @@ mod tests {
 
     use tabula_core::error::TabulaError;
     use tabula_core::traits::StateView;
-    use tabula_core::{CellKey, ColId, PortableValue, RowKey, TableId};
+    use tabula_core::{ColId, CommittedCellKey, CommittedKey, PortableValue, TableId};
     use tabula_profile::TYPE_U64_ID;
     use tabula_types::{TypeRuntimeRegistry, bool_portable, u64_portable, u64_typed};
 
@@ -121,21 +184,21 @@ mod tests {
         TYPE_RUNTIMES.get_or_init(|| TypeRuntimeRegistry::seeded().expect("seeded type runtimes"))
     }
 
-    fn cell(t: u32, r: u64, c: u16) -> CellKey {
-        CellKey {
+    fn cell(t: u32, r: u64, c: u16) -> CommittedCellKey {
+        CommittedCellKey {
             table: TableId(t),
             col: ColId(c),
-            row: RowKey(r),
+            key: CommittedKey(r.to_le_bytes().to_vec()),
         }
     }
 
     struct CountingSnapshot {
-        data: BTreeMap<CellKey, PortableValue>,
+        data: BTreeMap<CommittedCellKey, PortableValue>,
         call_count: AtomicU32,
     }
 
     impl CountingSnapshot {
-        fn new(data: BTreeMap<CellKey, u64>) -> Self {
+        fn new(data: BTreeMap<CommittedCellKey, u64>) -> Self {
             Self {
                 data: data
                     .into_iter()
@@ -151,13 +214,22 @@ mod tests {
     }
 
     impl StateView for CountingSnapshot {
-        fn read(&self, key: &CellKey) -> Result<Option<PortableValue>, TabulaError> {
+        fn read(&self, key: &CommittedCellKey) -> Result<Option<PortableValue>, TabulaError> {
             self.call_count.fetch_add(1, Ordering::Relaxed);
             Ok(self.data.get(key).cloned())
         }
 
-        fn table_exists(&self, _: TableId) -> bool {
-            true
+        fn column_entries(
+            &self,
+            table: TableId,
+            col: ColId,
+        ) -> Result<Vec<(CommittedKey, PortableValue)>, TabulaError> {
+            Ok(self
+                .data
+                .iter()
+                .filter(|(key, _)| key.table == table && key.col == col)
+                .map(|(key, value)| (key.key.clone(), value.clone()))
+                .collect())
         }
     }
 
@@ -179,7 +251,7 @@ mod tests {
     fn execution_state_cache_and_snapshot() {
         let mut data = BTreeMap::new();
         let k = cell(1, 0, 0);
-        data.insert(k, 100);
+        data.insert(k.clone(), 100);
         let snap = CountingSnapshot::new(data);
         let mut state = ExecutionState::new(&snap);
 
@@ -214,7 +286,7 @@ mod tests {
     fn execution_state_rollback_clears_new_cache() {
         let mut data = BTreeMap::new();
         let k = cell(1, 0, 0);
-        data.insert(k, 100);
+        data.insert(k.clone(), 100);
         let snap = CountingSnapshot::new(data);
         let mut state = ExecutionState::new(&snap);
 
@@ -230,7 +302,7 @@ mod tests {
         let mut data = BTreeMap::new();
         let k1 = cell(1, 0, 0);
         let k2 = cell(1, 1, 0);
-        data.insert(k1, 100);
+        data.insert(k1.clone(), 100);
         let snap = CountingSnapshot::new(data);
         let mut state = ExecutionState::new(&snap);
 
@@ -252,7 +324,7 @@ mod tests {
     fn execution_state_snapshot_type_mismatch_fails_closed() {
         let k = cell(1, 0, 0);
         let snap = CountingSnapshot {
-            data: BTreeMap::from([(k, bool_portable(true))]),
+            data: BTreeMap::from([(k.clone(), bool_portable(true))]),
             call_count: AtomicU32::new(0),
         };
         let mut state = ExecutionState::new(&snap);

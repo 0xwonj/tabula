@@ -41,8 +41,9 @@ pub struct StateSetArgs {
     /// Source-level table symbol.
     pub table: String,
 
-    /// Row key.
-    pub row: u64,
+    /// Logical key tuple as a JSON array, for example `[1]` or `[42, 7]`.
+    #[arg(long)]
+    pub key: String,
 
     /// Source-level field symbol.
     pub field: String,

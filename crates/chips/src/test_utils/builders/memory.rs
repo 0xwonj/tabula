@@ -4,7 +4,9 @@
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
+use tabula_types::NativeKeyPayload;
 
+use crate::execution::u64_to_native_key_payload;
 use crate::shards::state::trace::EntrySource;
 
 // ── Shared value helper ──
@@ -16,6 +18,10 @@ fn fe_vals(v: [u32; 3]) -> Vec<KoalaBear> {
 
 fn fe_zeros() -> Vec<KoalaBear> {
     vec![KoalaBear::ZERO; 3]
+}
+
+fn key_payload(key: u64) -> NativeKeyPayload {
+    u64_to_native_key_payload(key)
 }
 
 // ── MemoryShard builder ──
@@ -32,7 +38,7 @@ impl MemoryShardRowBuilder {
     pub fn new(key: u64) -> Self {
         Self {
             inner: MemoryShardRow {
-                key,
+                key: key_payload(key),
                 tx_index: 0,
                 is_init: false,
                 has_read: false,
@@ -152,7 +158,7 @@ use crate::shards::state::trace::StateShardRow;
 /// Entry: old_only for state shard. old_val=new_val.
 pub fn ss_old_only(key: u64, val: [u32; 3]) -> StateShardRow {
     StateShardRow {
-        key,
+        key: key_payload(key),
         is_gap: false,
         source: EntrySource::OldOnly,
         old_val: fe_vals(val),
@@ -162,15 +168,15 @@ pub fn ss_old_only(key: u64, val: [u32; 3]) -> StateShardRow {
         new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
-        prev_old_key: 0,
-        next_old_key: 0,
+        prev_old_key: key_payload(0),
+        next_old_key: key_payload(0),
     }
 }
 
 /// Entry: write_only for state shard. New chain only.
 pub fn ss_write_only(key: u64, val: [u32; 3]) -> StateShardRow {
     StateShardRow {
-        key,
+        key: key_payload(key),
         is_gap: false,
         source: EntrySource::WriteOnly,
         old_val: fe_zeros(),
@@ -180,15 +186,15 @@ pub fn ss_write_only(key: u64, val: [u32; 3]) -> StateShardRow {
         new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
-        prev_old_key: 0,
-        next_old_key: 0,
+        prev_old_key: key_payload(0),
+        next_old_key: key_payload(0),
     }
 }
 
 /// Entry: both for state shard. Both chains with different values.
 pub fn ss_both(key: u64, old: [u32; 3], new: [u32; 3]) -> StateShardRow {
     StateShardRow {
-        key,
+        key: key_payload(key),
         is_gap: false,
         source: EntrySource::Both,
         old_val: fe_vals(old),
@@ -198,15 +204,15 @@ pub fn ss_both(key: u64, old: [u32; 3], new: [u32; 3]) -> StateShardRow {
         new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
-        prev_old_key: 0,
-        next_old_key: 0,
+        prev_old_key: key_payload(0),
+        next_old_key: key_payload(0),
     }
 }
 
 /// Entry: delete for state shard. Old chain only.
 pub fn ss_delete(key: u64, old: [u32; 3]) -> StateShardRow {
     StateShardRow {
-        key,
+        key: key_payload(key),
         is_gap: false,
         source: EntrySource::Delete,
         old_val: fe_vals(old),
@@ -216,15 +222,15 @@ pub fn ss_delete(key: u64, old: [u32; 3]) -> StateShardRow {
         new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
-        prev_old_key: 0,
-        next_old_key: 0,
+        prev_old_key: key_payload(0),
+        next_old_key: key_payload(0),
     }
 }
 
 /// Gap row for state shard.
 pub fn ss_gap(key: u64) -> StateShardRow {
     StateShardRow {
-        key,
+        key: key_payload(key),
         is_gap: true,
         source: EntrySource::OldOnly,
         old_val: fe_zeros(),
@@ -234,8 +240,8 @@ pub fn ss_gap(key: u64) -> StateShardRow {
         new_hash_acc: [KoalaBear::ZERO; 8],
         read_mult: false,
         write_mult: false,
-        prev_old_key: 0,
-        next_old_key: 0,
+        prev_old_key: key_payload(0),
+        next_old_key: key_payload(0),
     }
 }
 

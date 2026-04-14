@@ -1333,6 +1333,7 @@ dependencies = [
  "tabula-contract",
  "tabula-core",
  "tabula-gadgets",
+ "tabula-ir",
  "tabula-profile",
  "tabula-stark",
  "tabula-types",
@@ -1347,6 +1348,7 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "tabula-commitment",
  "tabula-profile",
  "tabula-sdk",
  "toml",
@@ -1401,6 +1403,7 @@ dependencies = [
  "tabula-commitment",
  "tabula-core",
  "tabula-ir",
+ "tabula-stark",
  "thiserror",
 ]
 
@@ -1561,6 +1564,7 @@ dependencies = [
  "borsh",
  "serde",
  "serde_json",
+ "tabula-commitment",
  "tabula-compiler",
  "tabula-contract",
  "tabula-core",
@@ -1603,6 +1607,7 @@ dependencies = [
  "tabula-ir",
  "tabula-profile",
  "tabula-runtime",
+ "tabula-types",
  "tempfile",
 ]
 

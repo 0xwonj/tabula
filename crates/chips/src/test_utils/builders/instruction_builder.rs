@@ -6,7 +6,7 @@
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
-use crate::execution::{InstructionRecord, Opcode, u64_to_limbs};
+use crate::execution::{InstructionRecord, Opcode, u64_to_limbs, u64_to_native_key_payload};
 use tabula_gadgets::bool_fe;
 
 /// Fluent builder for constructing `InstructionRecord` instances.
@@ -82,7 +82,7 @@ impl InstructionBuilder {
     pub fn access(mut self, t: u32, c: u16, r: u64) -> Self {
         self.inner.access_t = Some(t);
         self.inner.access_c = Some(c);
-        self.inner.access_r = Some(r);
+        self.inner.access_r = Some(u64_to_native_key_payload(r));
         self
     }
 

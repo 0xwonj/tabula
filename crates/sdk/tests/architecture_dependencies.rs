@@ -83,7 +83,7 @@ fn removed_sdk_compatibility_files_stay_deleted() {
     for rel in ["crates/sdk/src/execution.rs", "crates/sdk/src/ext/mod.rs"] {
         assert!(
             !workspace_root().join(rel).exists(),
-            "{rel} must stay deleted after the SDK cutover"
+            "{rel} must stay deleted in the final SDK surface"
         );
     }
 }

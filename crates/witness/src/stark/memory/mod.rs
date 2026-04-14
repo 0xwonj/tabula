@@ -1,11 +1,9 @@
 //! Memory-layer chip input preparation from explicit per-column parts.
 
-use std::collections::BTreeMap;
-
 use tabula_commitment::ColumnRootBinding;
 use tabula_core::error::TabulaError;
 use tabula_core::{ColId, TableId};
-use tabula_types::{EncodingRuntime, TypeRuntime, encode_value_with_null_flag};
+use tabula_types::{EncodingRuntime, TableKeyCodec, TypeRuntime, encode_value_with_null_flag};
 
 use crate::{AccessEvent, InitCell};
 
@@ -18,7 +16,8 @@ pub(crate) mod state;
 
 use chain::populate_state_chain_accumulators;
 use inter_tx::build_inter_tx_rows_for_parts;
-use state::{build_state_rows_for_parts, sort_state_rows};
+pub(crate) use state::OrderedStateEntry;
+use state::build_state_rows_for_parts;
 
 use tabula_chips::shards::memory::trace::MemoryShardRow;
 use tabula_chips::shards::meta::trace::MetaShardRow;
@@ -28,12 +27,13 @@ use tabula_chips::shards::state::trace::StateShardRow;
 /// Explicit parts needed to assemble one SSMC column witness.
 pub(crate) struct SsmcColumnWitnessParts<'a> {
     pub column: (TableId, ColId),
+    pub key_codec: &'a TableKeyCodec,
     pub type_runtime: &'a dyn TypeRuntime,
     pub encoding_runtime: &'a dyn EncodingRuntime,
     pub init_cells: &'a [InitCell],
     pub access_events: &'a [AccessEvent],
-    pub old_entries: &'a BTreeMap<tabula_core::RowKey, Vec<p3_koala_bear::KoalaBear>>,
-    pub new_entries: &'a BTreeMap<tabula_core::RowKey, Vec<p3_koala_bear::KoalaBear>>,
+    pub old_entries: &'a [OrderedStateEntry],
+    pub new_entries: &'a [OrderedStateEntry],
     pub root_binding: &'a ColumnRootBinding,
     pub has_commitment_proof: bool,
 }
@@ -42,15 +42,17 @@ pub(crate) struct SsmcColumnWitnessParts<'a> {
 pub(crate) fn prepare_memory_shard_rows_from_parts<const W: usize>(
     table: TableId,
     col: ColId,
+    key_codec: &TableKeyCodec,
     type_runtime: &dyn TypeRuntime,
     encoding_runtime: &dyn EncodingRuntime,
     init_cells: &[InitCell],
     access_events: &[AccessEvent],
 ) -> Result<Vec<MemoryShardRow>, TabulaError> {
-    let init_rows = encode_init_cells(type_runtime, encoding_runtime, init_cells)?;
-    let access_rows = encode_access_events(type_runtime, encoding_runtime, access_events)?;
+    let init_rows = encode_init_cells(key_codec, type_runtime, encoding_runtime, init_cells)?;
+    let access_rows =
+        encode_access_events(key_codec, type_runtime, encoding_runtime, access_events)?;
     Ok(
-        build_inter_tx_rows_for_parts::<W>(table, col, &init_rows, &access_rows)?
+        build_inter_tx_rows_for_parts::<W>(table, col, key_codec, &init_rows, &access_rows)?
             .into_iter()
             .map(MemoryShardRow::from)
             .collect(),
@@ -89,12 +91,14 @@ pub(crate) fn prepare_ssmc_column_witness_from_parts<const W: usize>(
     let memory_rows = prepare_memory_shard_rows_from_parts::<W>(
         table,
         col,
+        parts.key_codec,
         parts.type_runtime,
         parts.encoding_runtime,
         parts.init_cells,
         parts.access_events,
     )?;
     let access_rows = encode_access_events(
+        parts.key_codec,
         parts.type_runtime,
         parts.encoding_runtime,
         parts.access_events,
@@ -103,12 +107,12 @@ pub(crate) fn prepare_ssmc_column_witness_from_parts<const W: usize>(
     let mut sc_rows = build_state_rows_for_parts::<W>(
         table,
         col,
+        parts.key_codec,
         &access_rows,
         parts.old_entries,
         parts.new_entries,
         parts.root_binding.is_touched,
     )?;
-    sort_state_rows(&mut sc_rows);
     populate_state_chain_accumulators::<W>(&mut sc_rows);
 
     let state_rows: Vec<StateShardRow> = sc_rows.into_iter().map(StateShardRow::from).collect();
@@ -126,6 +130,7 @@ pub(crate) fn prepare_ssmc_column_witness_from_parts<const W: usize>(
 }
 
 fn encode_init_cells(
+    key_codec: &TableKeyCodec,
     type_runtime: &dyn TypeRuntime,
     encoding_runtime: &dyn EncodingRuntime,
     init_cells: &[InitCell],
@@ -140,7 +145,8 @@ fn encode_init_cells(
                 cell.is_null,
             )?;
             Ok(InitRow {
-                key: cell.key,
+                key: cell.key.clone(),
+                key_payload: key_codec.encode_padded_proof_payload(&cell.key.key)?,
                 value_fes,
                 val_is_null,
             })
@@ -149,6 +155,7 @@ fn encode_init_cells(
 }
 
 fn encode_access_events(
+    key_codec: &TableKeyCodec,
     type_runtime: &dyn TypeRuntime,
     encoding_runtime: &dyn EncodingRuntime,
     access_events: &[AccessEvent],
@@ -163,7 +170,8 @@ fn encode_access_events(
                 event.is_null,
             )?;
             Ok(AccessRow {
-                key: event.key,
+                key: event.key.clone(),
+                key_payload: key_codec.encode_padded_proof_payload(&event.key.key)?,
                 time: event.time,
                 is_write: event.is_write,
                 value_fes,

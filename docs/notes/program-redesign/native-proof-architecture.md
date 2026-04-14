@@ -1,5 +1,10 @@
 # Post-Cutover Proof Architecture
 
+> Historical note: this document predates the final statement-first verifier
+> boundary in the live codebase.
+> Current canonical verification vocabulary and verifier model live in
+> [`../../design/architecture.md#verification-vocabulary`](../../design/architecture.md#verification-vocabulary).
+
 > **Status**: Canonical current-state proof architecture for the core-first rewritten path
 > **Date**: 2026-03-25
 > **Scope**: Summarizes the final post-cutover proof boundary for the rewritten pipeline

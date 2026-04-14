@@ -11,6 +11,7 @@ prove = ["verify", "tabula-sdk/prove"]
 
 [dependencies]
 tabula-sdk = { workspace = true }
+tabula-commitment = { workspace = true }
 tabula-profile = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 anyhow = { workspace = true }

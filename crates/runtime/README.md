@@ -5,26 +5,24 @@ sits between sealed program semantics and the lower execution/proof backends,
 and it owns the policy for turning a registered program into concrete runtime
 resources.
 
-For normal application embedding, the default product-facing surface is now
+For normal application embedding, the default product-facing surface is
 `tabula-sdk`. `tabula-runtime` remains the expert-oriented runtime layer below
 that SDK boundary.
 
-The rewritten path is now explicitly split into:
+The current path is explicitly split into:
 
 - `tabula_runtime::semantics` for semantic execution-journal reduction and
-  semantic public-statement construction
+  public-statement materialization
 - crate-root `tabula_runtime::{RuntimeBuilder, TabulaRuntime, Verifier,
-  StateSnapshot, ProofStatement, ...}` for native runtime setup,
-  execution, proving, and verification orchestration
-  `ProofStatement` is re-exported from `tabula-contract`; runtime consumes it
-  but no longer owns the canonical type.
+  CommittedStateSnapshot, PublicStatement, BoundStatement, ...}` for
+  native runtime setup, execution, proving, and verification orchestration
 
 ## Role
 
 This crate exists to answer two questions:
 
 - "How should a sealed program be executed?"
-- "How should its proof-related requirements be materialized and checked?"
+- "How should its proved public statement be materialized and checked?"
 
 The exact API split may evolve. The lasting boundary is that this crate is the
 policy-and-orchestration layer above execution and backend proving.
@@ -33,14 +31,12 @@ policy-and-orchestration layer above execution and backend proving.
 
 - the default caller-facing execution and proof orchestration surface
 - policy for turning a sealed program into runtime resources
-- runtime registries and scheme backends at the runtime boundary, while
-  capability execution/proof contracts are consumed from sealed compiler data
-- binding between sealed program expectations and backend verification inputs
+- runtime registries and scheme backends at the runtime boundary
+- materialization of `PublicStatement` from execution truth
+- verification that a proof certifies an expected `PublicStatement`
 - preparation of backend-ready inputs from already registered semantics
-- native runtime/proving setup from
-  `tabula_compiler::RegisteredProgram`
-- construction and validation of contract-owned proof statements whose digest is
-  bound into the machine transcript
+- native runtime/proving setup from `tabula_compiler::RegisteredProgram`
+- recomputation of artifact-derived verifier invariants from the sealed program
 
 ## Does Not Own
 
@@ -48,7 +44,7 @@ policy-and-orchestration layer above execution and backend proving.
 - low-level execution semantics implemented by the executor
 - native commitment semantics
 - backend proof implementation details once inputs are prepared
-- the canonical `ProofStatement` or `proof.bin` outer schema
+- the canonical `proof.bin` outer schema
 - authoring-language concerns
 
 ## Design Intent
@@ -65,14 +61,19 @@ policy-and-orchestration layer above execution and backend proving.
 - Runtime is where sealed semantics become concrete execution and proof policy.
 - Lower backend crates should receive prepared inputs, not ownership of runtime
   registry policy.
-- Statement or binding checks that connect sealed program expectations to proof
-  verification belong here, not in the machine layer, even when the statement
-  type itself is contract-owned.
-- Convenience surfaces may evolve, but this crate should remain the default
-  integration boundary for applications.
-- AIR public values stay minimal: only old/new state roots belong in the AIR
-  statement. Richer native semantic proof meaning belongs in the runtime
-  proof-statement digest bound through the transcript.
+- Statement checks and artifact-derived binding checks that connect sealed
+  program expectations to proof verification belong here, not in the machine
+  layer.
+- The secure verification surface is statement-first:
+  `verify_public_statement(proof, expected_public_statement)`.
+- `verify_proof(proof)` is only a convenience wrapper around the proof's own
+  carried `PublicStatement` and the configured sealed artifact.
+- `PublicStatement` is the proved object.
+- `BoundStatement` is the verifier-side outer binding over artifact
+  invariants plus the proved public statement.
+- AIR public values remain fixed-size:
+  `old_root`, `new_root`, `public_context_digest`, `applied_tx_digest`,
+  `event_digest`.
 - Query execution is supported on the rewritten path, but query proving remains
   intentionally absent.
 
@@ -81,8 +82,9 @@ policy-and-orchestration layer above execution and backend proving.
 - This crate may depend on compiler outputs and the executor.
 - It may assemble lower proof-backend crates, but it should remain a consumer
   of semantic facts rather than a second semantic authority.
-- If a change is primarily about caller policy, resource wiring, statement
-  binding, or extension registration, it likely belongs here.
+- If a change is primarily about caller policy, resource wiring,
+  public-statement materialization, or verifier-side artifact binding, it
+  likely belongs here.
 
 ## How To Change This Crate Safely
 
@@ -91,7 +93,7 @@ policy-and-orchestration layer above execution and backend proving.
 - Keep semantic authority above. Avoid letting runtime rediscover or repair
   semantic facts that should already be sealed by the compiler.
 - If APIs change, preserve the conceptual split between execution-only use,
-  verification against a sealed binding, and long-lived runtime setup.
+  statement-first verification, and long-lived runtime setup.
 - When in doubt, optimize for one clear integration boundary rather than many
   partially overlapping entry points.
 
@@ -107,12 +109,13 @@ Preserve the behaviors that prove this crate still owns the runtime boundary:
 - binding mismatches are rejected at the runtime/verifier boundary
 - default integration paths continue to cover execution and proof workflows
 - native proving stays legacy-bridge free
-- semantic public statements remain public-context plus event-digest only
+- public-statement materialization remains execution-derived, while
+  artifact-derived verifier context is recomputed from the sealed program
 
 ## Related Crates
 
 - `tabula-compiler` produces the sealed inputs consumed here
-- `tabula-contract` owns the proof-visible statement and envelope contracts
+- `tabula-contract` owns the public-statement and outer-binding contracts
 - `tabula-executor` performs deterministic execution
 - `tabula-witness` prepares proof-oriented logical inputs
 - `tabula-machine` performs backend proving and verification

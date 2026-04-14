@@ -216,8 +216,12 @@ pub enum Op {
     ReadStateProperty {
         /// Optional guard.
         guard: Option<GuardRef>,
-        /// Destination locals for the query outputs.
-        dsts: Vec<LocalId>,
+        /// Destination local for the query value.
+        dst_value: LocalId,
+        /// Destination locals for the resolved key components.
+        dst_key_components: Vec<LocalId>,
+        /// Destination local for the null flag.
+        dst_is_null: LocalId,
         /// Target table.
         table: TableId,
         /// Target column field.

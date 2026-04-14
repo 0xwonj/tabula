@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 pub use tabula_compiler::{
     CompileDiagnostic, CompiledProgram, CompilerCatalogs, RegisteredProgram,
-    SourceCapabilityDescriptor, StateFieldSchemeBinding,
+    SourceCapabilityDescriptor,
 };
-pub use tabula_core::{CellKey, PortableValue};
+pub use tabula_core::{CommittedCellKey, CommittedKey, CommittedPropertyQuery, PortableValue};
 use tabula_profile::SemanticRegistry;
 use tabula_runtime::{HostEnvironment, RuntimeRegistries};
 use tabula_types::{EncodingRuntime, TypeRuntime};
@@ -28,7 +28,9 @@ use tabula_ext::root::RootBackendBundle;
 pub use tabula_ext::scheme::ColumnBackendFactoryBundle;
 #[cfg(feature = "execute")]
 use tabula_machine::TabulaStarkConfig;
-pub use tabula_types::TypedValue;
+#[cfg(feature = "execute")]
+pub use tabula_runtime::TabulaRuntime;
+pub use tabula_types::{TypedCommittedPropertyQueryResult, TypedValue};
 
 use crate::{
     Artifact, Context, ExecutionReceipt, Sdk, SdkBuilder, SdkError, State, TransactionBatch,
@@ -36,15 +38,37 @@ use crate::{
 
 pub use tabula_compiler;
 pub use tabula_contract::{
-    ProofEncodingId, ProofEnvelopeV2, ProofStatement, ProofSystemId, PublicContextBinding,
-    PublicStatement,
+    BoundStatement, ProofEncodingId, ProofEnvelope, ProofSystemId, PublicStatement,
+    decode_proof_envelope, encode_proof_envelope,
 };
 pub use tabula_ir::{
     CapabilityId, CapabilityProofVisibility, CapabilityQueryPolicy, CapabilityTotality,
     ContextFieldId, ContextInput, EntryBatch, EntryCall, EntryId, EntryKind, EventId, FieldId,
     HashFamily, RelationId, StatePropertyQuery, TableId, TypeRef,
 };
-pub use tabula_runtime::StateSnapshot;
+pub use tabula_runtime::CommittedStateSnapshot;
+
+/// Raw runtime-owned parts needed to construct one SDK execution receipt.
+#[cfg(feature = "execute")]
+pub struct RawExecutionReceiptParts {
+    #[cfg(feature = "prove")]
+    /// Canonical program digest carried by prove-capable receipts.
+    pub program_digest: String,
+    /// Logical state before execution.
+    pub state_before: State,
+    /// Exact committed snapshot before execution.
+    pub snapshot: tabula_runtime::CommittedStateSnapshot,
+    /// Executed transaction batch.
+    pub batch: tabula_ir::EntryBatch,
+    /// Context input supplied to execution.
+    pub context: tabula_ir::ContextInput,
+    /// Logical state after execution.
+    pub state_after: State,
+    /// Exact committed snapshot after execution.
+    pub state_after_snapshot: tabula_runtime::CommittedStateSnapshot,
+    /// Runtime execution journal captured during execution.
+    pub journal: tabula_executor::ExecutionJournal,
+}
 
 /// Extension trait for [`SdkBuilder`] exposing advanced configuration options.
 pub trait SdkBuilderExt {
@@ -160,13 +184,13 @@ impl ArtifactExt for Artifact {
 
 /// Extension trait for [`State`] providing access to the raw state snapshot.
 pub trait StateExt {
-    /// Borrow the underlying [`StateSnapshot`].
-    fn snapshot(&self) -> &StateSnapshot;
+    /// Borrow the underlying logical keyed cells.
+    fn cells(&self) -> &[crate::types::LogicalStateCell];
 }
 
 impl StateExt for State {
-    fn snapshot(&self) -> &StateSnapshot {
-        self.as_raw()
+    fn cells(&self) -> &[crate::types::LogicalStateCell] {
+        self.cells_raw()
     }
 }
 
@@ -197,12 +221,24 @@ impl TransactionBatchExt for TransactionBatch {
 /// Extension trait for [`ExecutionReceipt`] providing access to the raw execution journal.
 #[cfg(feature = "execute")]
 pub trait ExecutionReceiptExt {
+    /// Borrow the committed pre-state snapshot used by the runtime.
+    fn snapshot(&self) -> &CommittedStateSnapshot;
+    /// Borrow the committed post-state snapshot produced by the runtime.
+    fn state_after_snapshot(&self) -> &CommittedStateSnapshot;
     /// Borrow the raw [`ExecutionJournal`] produced by the executor.
     fn journal(&self) -> &ExecutionJournal;
 }
 
 #[cfg(feature = "execute")]
 impl ExecutionReceiptExt for ExecutionReceipt {
+    fn snapshot(&self) -> &CommittedStateSnapshot {
+        &self.inner.snapshot
+    }
+
+    fn state_after_snapshot(&self) -> &CommittedStateSnapshot {
+        &self.inner.state_after
+    }
+
     fn journal(&self) -> &ExecutionJournal {
         &self.inner.journal
     }
@@ -248,26 +284,30 @@ pub fn share_encoding_runtime(runtime: impl EncodingRuntime + 'static) -> Arc<dy
     Arc::new(runtime)
 }
 
+/// Prepare the cached native runtime for one artifact.
+#[cfg(feature = "execute")]
+pub fn prepare_runtime(
+    sdk: &Sdk,
+    artifact: &Artifact,
+) -> Result<Arc<tabula_runtime::TabulaRuntime>, SdkError> {
+    sdk.prepare_runtime(artifact)
+}
+
 /// Construct one SDK execution receipt from raw runtime-owned parts.
 #[cfg(feature = "execute")]
-pub fn execution_receipt_from_raw_parts(
-    #[cfg(feature = "prove")] program_digest: String,
-    snapshot: tabula_runtime::StateSnapshot,
-    batch: tabula_ir::EntryBatch,
-    context: tabula_ir::ContextInput,
-    state_after: tabula_runtime::StateSnapshot,
-    journal: tabula_executor::ExecutionJournal,
-) -> ExecutionReceipt {
+pub fn execution_receipt_from_raw_parts(parts: RawExecutionReceiptParts) -> ExecutionReceipt {
     let inner = tabula_runtime::ExecutionReceipt {
-        snapshot,
-        batch,
-        context,
-        journal,
-        state_after,
+        snapshot: parts.snapshot,
+        batch: parts.batch,
+        context: parts.context,
+        journal: parts.journal,
+        state_after: parts.state_after_snapshot,
     };
     ExecutionReceipt::from_runtime(
         #[cfg(feature = "prove")]
-        program_digest,
+        parts.program_digest,
+        parts.state_before,
+        parts.state_after,
         inner,
     )
 }

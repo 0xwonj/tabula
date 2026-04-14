@@ -8,7 +8,7 @@
 > **Related**: [proof-front-end-journal-architecture.md](proof-front-end-journal-architecture.md),
 > [execution-proof-redesign-workplan.md](execution-proof-redesign-workplan.md),
 > [profile-native-runtime-migration-plan.md](profile-native-runtime-migration-plan.md),
-> [canonical-vocabulary.md](canonical-vocabulary.md),
+> [verification vocabulary](../design/architecture.md#verification-vocabulary),
 > [proof-hierarchy-and-grouping.md](proof-hierarchy-and-grouping.md),
 > [../research/symbolic-air-compilation.md](../research/symbolic-air-compilation.md)
 

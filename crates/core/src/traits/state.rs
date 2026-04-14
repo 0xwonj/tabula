@@ -1,16 +1,21 @@
 //! State access trait abstractions: snapshots and static (lookup) tables.
 
 use crate::error::TabulaError;
-use crate::{CellKey, ColId, PortableValue, RowKey, TableId};
+use crate::{ColId, CommittedCellKey, CommittedKey, PortableValue, RowKey, TableId};
 
 /// Read-only access to the committed state (snapshot).
 ///
 /// The executor uses this to resolve reads that miss the overlay.
 pub trait StateView: Send + Sync {
     /// Read a cell from committed state. Returns `None` if absent.
-    fn read(&self, key: &CellKey) -> Result<Option<PortableValue>, TabulaError>;
-    /// Check whether a table exists.
-    fn table_exists(&self, table: TableId) -> bool;
+    fn read(&self, key: &CommittedCellKey) -> Result<Option<PortableValue>, TabulaError>;
+
+    /// Iterate all committed cells for one `(table, column)` pair.
+    fn column_entries(
+        &self,
+        table: TableId,
+        col: ColId,
+    ) -> Result<Vec<(CommittedKey, PortableValue)>, TabulaError>;
 }
 
 /// Provides read-only access to static (fixed) tables.

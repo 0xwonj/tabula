@@ -9,14 +9,16 @@
 //!     execution,
 //!     columns,
 //!     root,
-//!     air_statement,
-//!     semantic_statement_digest: [0u8; 32],
+//!     public_statement,
+//!     binding_digest: [0u8; 32],
 //! })?;
 //! machine.verify(&proof)?;
 //! ```
 
 use std::fmt;
 use std::sync::Arc;
+
+use tabula_stark::chips::ChipId;
 
 use crate::backend::ProofColumn;
 use crate::config::TabulaStarkConfig;
@@ -94,5 +96,16 @@ impl TabulaMachine {
     /// Verify a proof against this machine's configured backend setup.
     pub fn verify(&self, proof: &TabulaProof) -> Result<(), VerificationError> {
         crate::proof::verifier::Verifier::new(&self.topology).verify(proof)
+    }
+
+    /// Return the execution-tier public-value arity declared for one chip.
+    #[must_use]
+    pub fn execution_chip_public_value_arity(&self, chip_id: ChipId) -> Option<usize> {
+        self.topology
+            .proof_topology()
+            .execution
+            .verification_metadata
+            .get(chip_id)
+            .map(|metadata| metadata.num_public_values)
     }
 }

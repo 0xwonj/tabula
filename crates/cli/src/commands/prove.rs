@@ -1,6 +1,8 @@
 //! `tabula prove`
 
 use anyhow::Context as _;
+use tabula_sdk::PublicStatementFile;
+use tabula_sdk::interop::prepare_runtime;
 
 use crate::app::AppContext;
 use crate::cli::ProveArgs;
@@ -14,14 +16,18 @@ pub(crate) fn run(ctx: &AppContext, args: &ProveArgs) -> anyhow::Result<()> {
     let receipt_bytes = std::fs::read(&args.receipt)
         .with_context(|| format!("failed to read {}", args.receipt.display()))?;
     let bridge = decode_receipt_bridge(&receipt_bytes)?;
-    let receipt = sdk_receipt_from_bridge(bridge)?;
+    let runtime = prepare_runtime(ctx.sdk()?, &loaded.artifact)?;
+    let receipt = sdk_receipt_from_bridge(runtime.as_ref(), bridge)?;
     let proof = loaded.program.runner().prove(&receipt)?;
 
     ensure_parent_dir(&args.proof_out)?;
     write_bytes(&args.proof_out, &proof.encode_binary()?)?;
 
-    ensure_parent_dir(&args.statement_out)?;
-    write_json(&args.statement_out, proof.statement())?;
+    ensure_parent_dir(&args.public_statement_out)?;
+    write_json(
+        &args.public_statement_out,
+        &PublicStatementFile::from_public_statement(proof.public_statement()),
+    )?;
 
     ensure_parent_dir(&args.summary_out)?;
     write_json(&args.summary_out, proof.summary())?;

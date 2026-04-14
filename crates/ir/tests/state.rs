@@ -66,7 +66,7 @@ fn rejects_empty_key_schema() {
             }],
         },
     });
-    program.state.tables[0].key_tys.clear();
+    program.state.tables[0].keys.clear();
     assert!(validate_program(&program).is_err());
 }
 
@@ -180,7 +180,9 @@ fn rejects_property_query_embedded_key_type_mismatch() {
             ops: vec![
                 Op::ReadStateProperty {
                     guard: None,
-                    dsts: vec![LocalId(0), LocalId(1), LocalId(2)],
+                    dst_value: LocalId(0),
+                    dst_key_components: vec![LocalId(1)],
+                    dst_is_null: LocalId(2),
                     table: TableId(1),
                     field: FieldId(0),
                     query: StatePropertyQuery::Successor {
@@ -209,7 +211,7 @@ fn accepts_multi_component_key_schema_for_row_property_queries() {
         symbol: "multi_key_property".into(),
         kind: EntryKind::Query,
         params: vec![],
-        returns: vec![TYPE_U64_ID, TYPE_U64_ID, TYPE_BOOL_ID],
+        returns: vec![TYPE_U64_ID, TYPE_U64_ID, TYPE_U64_ID, TYPE_BOOL_ID],
         return_policy: ReturnPolicy::Explicit,
         body: Body {
             locals: vec![
@@ -223,13 +225,19 @@ fn accepts_multi_component_key_schema_for_row_property_queries() {
                 },
                 LocalDecl {
                     id: LocalId(2),
+                    ty: TYPE_U64_ID,
+                },
+                LocalDecl {
+                    id: LocalId(3),
                     ty: TYPE_BOOL_ID,
                 },
             ],
             ops: vec![
                 Op::ReadStateProperty {
                     guard: None,
-                    dsts: vec![LocalId(0), LocalId(1), LocalId(2)],
+                    dst_value: LocalId(0),
+                    dst_key_components: vec![LocalId(1), LocalId(2)],
+                    dst_is_null: LocalId(3),
                     table: TableId(1),
                     field: FieldId(0),
                     query: StatePropertyQuery::Minimum,
@@ -239,11 +247,21 @@ fn accepts_multi_component_key_schema_for_row_property_queries() {
                         ValueRef::Local(LocalId(0)),
                         ValueRef::Local(LocalId(1)),
                         ValueRef::Local(LocalId(2)),
+                        ValueRef::Local(LocalId(3)),
                     ]),
                 },
             ],
         },
     });
-    program.state.tables[0].key_tys = vec![TYPE_U64_ID, TYPE_U64_ID];
+    program.state.tables[0].keys = vec![
+        tabula_core::KeyComponentSchema {
+            symbol: "a".into(),
+            ty: TYPE_U64_ID,
+        },
+        tabula_core::KeyComponentSchema {
+            symbol: "b".into(),
+            ty: TYPE_U64_ID,
+        },
+    ];
     assert!(validate_program(&program).is_ok());
 }

@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use rayon::prelude::*;
 
 use crate::input::ColumnSlotKey;
@@ -30,8 +28,33 @@ impl Verifier<'_> {
         let config = self.topology.config();
         let proof_topology = self.topology.proof_topology();
 
+        if proof.columns.len() != proof_topology.columns.len() {
+            return Err(VerificationError::ColumnProofCountMismatch {
+                expected: proof_topology.columns.len(),
+                got: proof.columns.len(),
+            });
+        }
+        for (index, (column, ((table_id, col_id), _))) in proof
+            .columns
+            .iter()
+            .zip(&proof_topology.columns)
+            .enumerate()
+        {
+            let expected_key = ColumnSlotKey {
+                table: *table_id,
+                col: *col_id,
+            };
+            if column.key != expected_key {
+                return Err(VerificationError::ColumnOrderMismatch {
+                    index,
+                    expected_key,
+                    proof_key: column.key,
+                });
+            }
+        }
+
         let mut transcript = MachineTranscript::new(config);
-        transcript.observe_statement_binding(&proof.statement, &proof.statement_digest);
+        transcript.observe_public_statement_binding(&proof.public_statement, &proof.binding_digest);
         transcript.observe_envelope_commitment(&proof.execution);
         for column in &proof.columns {
             transcript.observe_envelope_commitment(&column.proof);
@@ -39,21 +62,6 @@ impl Verifier<'_> {
         transcript.observe_envelope_commitment(&proof.root);
 
         let logup_challenges = transcript.sample_logup_challenges();
-
-        let setup_index: BTreeMap<_, _> = proof_topology
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(i, ((table_id, col_id), _))| {
-                (
-                    ColumnSlotKey {
-                        table: *table_id,
-                        col: *col_id,
-                    },
-                    i,
-                )
-            })
-            .collect();
 
         let mut verify_tasks: Vec<(&ChipRegistry, &TierVerificationMetadata, _)> =
             Vec::with_capacity(2 + proof.columns.len());
@@ -64,15 +72,7 @@ impl Verifier<'_> {
             &proof.execution,
         ));
 
-        for (index, column) in proof.columns.iter().enumerate() {
-            let setup_idx =
-                setup_index
-                    .get(&column.key)
-                    .ok_or(VerificationError::ColumnKeyMismatch {
-                        index,
-                        proof_key: column.key,
-                    })?;
-            let topology = &proof_topology.columns[*setup_idx].1;
+        for (column, (_, topology)) in proof.columns.iter().zip(&proof_topology.columns) {
             verify_tasks.push((
                 &topology.registry,
                 &topology.verification_metadata,

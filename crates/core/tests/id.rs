@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
-use tabula_core::{CellKey, ColId, RowKey, StateRoot, TableId, TxTypeId};
+use tabula_core::ids::address::CellKey;
+use tabula_core::{ColId, CommittedCellKey, CommittedKey, RowKey, StateRoot, TableId, TxTypeId};
 
 #[test]
 fn cellkey_ordering() {
@@ -69,6 +70,17 @@ fn display_types() {
             }
         ),
         "(1:2:3)"
+    );
+    assert_eq!(
+        format!(
+            "{}",
+            CommittedCellKey {
+                table: TableId(1),
+                col: ColId(2),
+                key: CommittedKey(vec![1, 2, 3]),
+            }
+        ),
+        "(1:2:key:3b)"
     );
 }
 

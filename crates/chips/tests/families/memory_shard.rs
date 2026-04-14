@@ -4,6 +4,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
+use tabula_chips::execution::u64_to_native_key_payload;
 use tabula_chips::shards::memory::air::MemoryShardChip;
 use tabula_chips::shards::memory::columns::{
     MEMORY_SHARD_STANDARD_WIDTH, MemoryShardCols, memory_shard_width,
@@ -232,7 +233,7 @@ fn invalid_no_read_no_write() {
     let rows = vec![
         ms_init(100, [50, 0, 0], false),
         MemoryShardRow {
-            key: 100,
+            key: u64_to_native_key_payload(100),
             tx_index: 0,
             is_init: false,
             has_read: false,

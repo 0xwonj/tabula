@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Stable JSON contract for `tabula check --json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CheckOutputV1 {
+pub struct CheckOutput {
     /// Contract version tag.
     pub version: String,
     /// Whether the input was source or artifact.
@@ -23,24 +23,24 @@ pub struct CheckOutputV1 {
 
 /// Stable JSON contract for `tabula schema --json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SchemaOutputV1 {
+pub struct SchemaOutput {
     /// Contract version tag.
     pub version: String,
     /// Canonical artifact digest.
     pub artifact_digest: String,
     /// State tables in declaration order.
-    pub tables: Vec<TableOutputV1>,
+    pub tables: Vec<TableOutput>,
     /// Transactions in declaration order.
-    pub transactions: Vec<EntryOutputV1>,
+    pub transactions: Vec<EntryOutput>,
     /// Queries in declaration order.
-    pub queries: Vec<QueryOutputV1>,
+    pub queries: Vec<QueryOutput>,
     /// Public context fields in declaration order.
-    pub context_fields: Vec<NamedTypeOutputV1>,
+    pub context_fields: Vec<NamedTypeOutput>,
 }
 
 /// Stable JSON contract for `tabula query --json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct QueryRunOutputV1 {
+pub struct QueryRunOutput {
     /// Contract version tag.
     pub version: String,
     /// Canonical artifact digest.
@@ -48,40 +48,40 @@ pub struct QueryRunOutputV1 {
     /// Query symbol as requested by the caller.
     pub query: String,
     /// Returned values in declaration order.
-    pub returns: Vec<ValueOutputV1>,
+    pub returns: Vec<ValueOutput>,
 }
 
 /// Stable JSON contract for `tabula execute --json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecutionReportV1 {
+pub struct ExecutionReport {
     /// Contract version tag.
     pub version: String,
     /// Canonical artifact digest.
     pub artifact_digest: String,
     /// Per-transaction outcomes in batch order.
-    pub outcomes: Vec<TxOutcomeOutputV1>,
+    pub outcomes: Vec<TxOutcomeOutput>,
     /// Number of distinct state cells read from pre-state.
     pub read_count: usize,
     /// Number of distinct state cells written into post-state.
     pub write_count: usize,
-    /// Final committed state snapshot rendered for automation.
-    pub state_after: StateInspectOutputV1,
+    /// Final logical user-state rendered for automation.
+    pub state_after: StateInspectOutput,
 }
 
 /// Stable JSON contract for `tabula state inspect --json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StateInspectOutputV1 {
+pub struct StateInspectOutput {
     /// Contract version tag.
     pub version: String,
     /// Number of rendered cells.
     pub cell_count: usize,
     /// Rendered cells in canonical order.
-    pub cells: Vec<StateCellOutputV1>,
+    pub cells: Vec<StateCellOutput>,
 }
 
 /// Stable JSON contract for `tabula env doctor --json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EnvDoctorOutputV1 {
+pub struct EnvDoctorOutput {
     /// Contract version tag.
     pub version: String,
     /// Resolved config file path, when one was loaded.
@@ -91,7 +91,7 @@ pub struct EnvDoctorOutputV1 {
     /// Build failure detail when the environment is not usable.
     pub build_error: Option<String>,
     /// Parsed extension bundle reports.
-    pub extensions: Vec<ExtensionBundleOutputV1>,
+    pub extensions: Vec<ExtensionBundleOutput>,
     /// Whether this build enables verifier support.
     pub verify_feature_enabled: bool,
     /// Whether this build enables prover support.
@@ -101,13 +101,13 @@ pub struct EnvDoctorOutputV1 {
 /// Stable JSON contract for `tabula prove --json`.
 #[cfg(feature = "prove")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProveOutputV1 {
+pub struct ProveOutput {
     /// Contract version tag.
     pub version: String,
     /// Canonical artifact digest.
     pub artifact_digest: String,
-    /// Statement digest bound into the proof transcript.
-    pub statement_hash_hex: String,
+    /// Binding digest bound into the proof transcript.
+    pub binding_digest_hex: String,
     /// Proof system identifier.
     pub proof_system: String,
     /// Proof encoding identifier.
@@ -119,77 +119,93 @@ pub struct ProveOutputV1 {
 /// Stable JSON contract for `tabula verify --json`.
 #[cfg(feature = "verify")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VerifyOutputV1 {
+pub struct VerifyOutput {
     /// Contract version tag.
     pub version: String,
     /// Canonical artifact digest.
     pub artifact_digest: String,
-    /// Statement digest bound into the proof transcript.
-    pub statement_hash_hex: String,
+    /// Binding digest bound into the proof transcript.
+    pub binding_digest_hex: String,
     /// Whether verification succeeded.
     pub verified: bool,
 }
 
+/// Stable JSON contract for `tabula inspect-proof --json`.
+#[cfg(feature = "verify")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InspectProofOutput {
+    /// Contract version tag.
+    pub version: String,
+    /// Binding digest bound into the proof transcript.
+    pub binding_digest_hex: String,
+    /// Proof system identifier.
+    pub proof_system: String,
+    /// Proof encoding identifier.
+    pub proof_encoding: String,
+    /// Verbatim stable `public_statement.json` payload derived from the machine proof.
+    pub public_statement_file: tabula_sdk::PublicStatementFile,
+}
+
 /// One named schema value carrying a type reference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NamedTypeOutputV1 {
+pub struct NamedTypeOutput {
     /// Source-level symbol.
     pub symbol: String,
     /// Stable type metadata.
-    pub ty: TypeOutputV1,
+    pub ty: TypeOutput,
 }
 
 /// One field schema in a state table.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TableFieldOutputV1 {
+pub struct TableFieldOutput {
     /// Stable numeric field identifier.
     pub id: u32,
     /// Source-level field symbol.
     pub symbol: String,
     /// Stable type metadata.
-    pub ty: TypeOutputV1,
+    pub ty: TypeOutput,
 }
 
 /// One state table schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TableOutputV1 {
+pub struct TableOutput {
     /// Stable numeric table identifier.
     pub id: u32,
     /// Source-level table symbol.
     pub symbol: String,
-    /// Number of key columns.
-    pub key_arity: usize,
+    /// Logical key components in declaration order.
+    pub key_components: Vec<NamedTypeOutput>,
     /// Declared fields in source order.
-    pub fields: Vec<TableFieldOutputV1>,
+    pub fields: Vec<TableFieldOutput>,
 }
 
 /// One transaction entry schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EntryOutputV1 {
+pub struct EntryOutput {
     /// Stable numeric entry identifier.
     pub id: u32,
     /// Source-level entry symbol.
     pub symbol: String,
     /// Parameters in declaration order.
-    pub params: Vec<NamedTypeOutputV1>,
+    pub params: Vec<NamedTypeOutput>,
 }
 
 /// One query entry schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct QueryOutputV1 {
+pub struct QueryOutput {
     /// Stable numeric entry identifier.
     pub id: u32,
     /// Source-level entry symbol.
     pub symbol: String,
     /// Parameters in declaration order.
-    pub params: Vec<NamedTypeOutputV1>,
+    pub params: Vec<NamedTypeOutput>,
     /// Return values in declaration order.
-    pub returns: Vec<TypeOutputV1>,
+    pub returns: Vec<TypeOutput>,
 }
 
 /// Stable type metadata used by CLI JSON output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TypeOutputV1 {
+pub struct TypeOutput {
     /// Stable numeric type identifier.
     pub id: u32,
     /// Human-friendly display name when known.
@@ -199,7 +215,7 @@ pub struct TypeOutputV1 {
 /// Structured CLI rendering of one portable value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ValueOutputV1 {
+pub enum ValueOutput {
     /// Boolean value.
     Bool { value: bool },
     /// Unsigned 64-bit integer.
@@ -214,24 +230,24 @@ pub enum ValueOutputV1 {
 
 /// One rendered state cell.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StateCellOutputV1 {
+pub struct StateCellOutput {
     /// Numeric table identifier.
     pub table_id: u32,
     /// Source-level table symbol when available.
     pub table: Option<String>,
-    /// Concrete row key.
-    pub row: u64,
+    /// Logical key tuple in declaration order.
+    pub key: Vec<ValueOutput>,
     /// Numeric field identifier.
     pub field_id: u32,
     /// Source-level field symbol when available.
     pub field: Option<String>,
     /// Rendered cell value.
-    pub value: ValueOutputV1,
+    pub value: ValueOutput,
 }
 
 /// One executed transaction outcome.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TxOutcomeOutputV1 {
+pub struct TxOutcomeOutput {
     /// Batch-local transaction index.
     pub tx_index: u32,
     /// Numeric entry identifier.
@@ -239,7 +255,7 @@ pub struct TxOutcomeOutputV1 {
     /// Source-level transaction symbol when available.
     pub entry: Option<String>,
     /// Outcome status.
-    pub status: TxOutcomeStatusV1,
+    pub status: TxOutcomeStatus,
     /// Number of state effects on success.
     pub state_effect_count: usize,
     /// Number of event effects on success.
@@ -253,7 +269,7 @@ pub struct TxOutcomeOutputV1 {
 /// Success/failure discriminator for one executed transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TxOutcomeStatusV1 {
+pub enum TxOutcomeStatus {
     /// Transaction completed successfully.
     Success,
     /// Transaction failed with an optional failing op index.
@@ -267,7 +283,7 @@ pub enum TxOutcomeStatusV1 {
 
 /// One parsed extension bundle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExtensionBundleOutputV1 {
+pub struct ExtensionBundleOutput {
     /// Absolute bundle path.
     pub path: String,
     /// Human-readable bundle name.

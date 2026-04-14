@@ -2,17 +2,19 @@
 
 use std::fmt::Write as _;
 
-#[cfg(feature = "prove")]
-use super::ProveOutputV1;
 #[cfg(feature = "verify")]
-use super::VerifyOutputV1;
+use super::InspectProofOutput;
+#[cfg(feature = "prove")]
+use super::ProveOutput;
+#[cfg(feature = "verify")]
+use super::VerifyOutput;
 use super::{
-    CheckOutputV1, EnvDoctorOutputV1, ExecutionReportV1, QueryRunOutputV1, SchemaOutputV1,
-    StateInspectOutputV1, TxOutcomeStatusV1, ValueOutputV1,
+    CheckOutput, EnvDoctorOutput, ExecutionReport, QueryRunOutput, SchemaOutput,
+    StateInspectOutput, TxOutcomeStatus, ValueOutput,
 };
 
 /// Render `check` output for humans.
-pub(crate) fn render_check(output: &CheckOutputV1) -> String {
+pub(crate) fn render_check(output: &CheckOutput) -> String {
     let mut text = String::new();
     let _ = writeln!(
         &mut text,
@@ -47,7 +49,7 @@ pub(crate) fn render_check(output: &CheckOutputV1) -> String {
 }
 
 /// Render `schema` output for humans.
-pub(crate) fn render_schema(output: &SchemaOutputV1) -> String {
+pub(crate) fn render_schema(output: &SchemaOutput) -> String {
     let mut text = String::new();
     let _ = writeln!(&mut text, "Artifact digest: {}", output.artifact_digest);
     let _ = writeln!(&mut text, "Tables");
@@ -55,10 +57,20 @@ pub(crate) fn render_schema(output: &SchemaOutputV1) -> String {
         let _ = writeln!(&mut text, "  (none)");
     } else {
         for table in &output.tables {
+            let key_components = if table.key_components.is_empty() {
+                "()".to_string()
+            } else {
+                table
+                    .key_components
+                    .iter()
+                    .map(|component| format!("{}: {}", component.symbol, component.ty.display))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
             let _ = writeln!(
                 &mut text,
-                "  {} (id={}, keys={})",
-                table.symbol, table.id, table.key_arity
+                "  {} (id={}, key=[{}])",
+                table.symbol, table.id, key_components
             );
             for field in &table.fields {
                 let _ = writeln!(
@@ -126,7 +138,7 @@ pub(crate) fn render_schema(output: &SchemaOutputV1) -> String {
 }
 
 /// Render `query` output for humans.
-pub(crate) fn render_query(output: &QueryRunOutputV1) -> String {
+pub(crate) fn render_query(output: &QueryRunOutput) -> String {
     let mut text = String::new();
     let _ = writeln!(
         &mut text,
@@ -141,12 +153,12 @@ pub(crate) fn render_query(output: &QueryRunOutputV1) -> String {
 }
 
 /// Render `execute` output for humans.
-pub(crate) fn render_execution(output: &ExecutionReportV1) -> String {
+pub(crate) fn render_execution(output: &ExecutionReport) -> String {
     let mut text = String::new();
     let _ = writeln!(&mut text, "Execution summary");
     for outcome in &output.outcomes {
         match &outcome.status {
-            TxOutcomeStatusV1::Success => {
+            TxOutcomeStatus::Success => {
                 let label = outcome.entry.as_deref().unwrap_or("<unknown>");
                 let _ = writeln!(
                     &mut text,
@@ -159,7 +171,7 @@ pub(crate) fn render_execution(output: &ExecutionReportV1) -> String {
                     outcome.relation_effect_count
                 );
             }
-            TxOutcomeStatusV1::Failed {
+            TxOutcomeStatus::Failed {
                 reason,
                 failed_op_index,
             } => {
@@ -183,7 +195,7 @@ pub(crate) fn render_execution(output: &ExecutionReportV1) -> String {
 }
 
 /// Render `state inspect` output for humans.
-pub(crate) fn render_state(output: &StateInspectOutputV1) -> String {
+pub(crate) fn render_state(output: &StateInspectOutput) -> String {
     let mut text = String::new();
     let _ = writeln!(&mut text, "State: {} cell(s)", output.cell_count);
     append_state_cells(&mut text, output, false);
@@ -191,7 +203,7 @@ pub(crate) fn render_state(output: &StateInspectOutputV1) -> String {
 }
 
 /// Render `env doctor` output for humans.
-pub(crate) fn render_env_doctor(output: &EnvDoctorOutputV1) -> String {
+pub(crate) fn render_env_doctor(output: &EnvDoctorOutput) -> String {
     let mut text = String::new();
     let _ = writeln!(
         &mut text,
@@ -234,11 +246,11 @@ pub(crate) fn render_env_doctor(output: &EnvDoctorOutputV1) -> String {
 
 /// Render `prove` output for humans.
 #[cfg(feature = "prove")]
-pub(crate) fn render_prove(output: &ProveOutputV1) -> String {
+pub(crate) fn render_prove(output: &ProveOutput) -> String {
     format!(
-        "Proof generated\nArtifact digest: {}\nStatement hash: {}\nProof system: {}\nProof encoding: {}\nChip count: {}",
+        "Proof generated\nArtifact digest: {}\nBinding digest: {}\nProof system: {}\nProof encoding: {}\nChip count: {}",
         output.artifact_digest,
-        output.statement_hash_hex,
+        output.binding_digest_hex,
         output.proof_system,
         output.proof_encoding,
         output.chip_count
@@ -247,14 +259,27 @@ pub(crate) fn render_prove(output: &ProveOutputV1) -> String {
 
 /// Render `verify` output for humans.
 #[cfg(feature = "verify")]
-pub(crate) fn render_verify(output: &VerifyOutputV1) -> String {
+pub(crate) fn render_verify(output: &VerifyOutput) -> String {
     format!(
-        "Proof verified\nArtifact digest: {}\nStatement hash: {}",
-        output.artifact_digest, output.statement_hash_hex
+        "Proof verified\nArtifact digest: {}\nBinding digest: {}",
+        output.artifact_digest, output.binding_digest_hex
     )
 }
 
-fn append_state_cells(text: &mut String, output: &StateInspectOutputV1, leading_blank_line: bool) {
+/// Render `inspect-proof` output for humans.
+#[cfg(feature = "verify")]
+pub(crate) fn render_inspect_proof(output: &InspectProofOutput) -> String {
+    format!(
+        "Embedded proof statement\nBinding digest: {}\nProof system: {}\nProof encoding: {}\nPublic-context digest: {}\nEvent digest: {}",
+        output.binding_digest_hex,
+        output.proof_system,
+        output.proof_encoding,
+        output.public_statement_file.public_context_digest_hex,
+        output.public_statement_file.event_digest_hex,
+    )
+}
+
+fn append_state_cells(text: &mut String, output: &StateInspectOutput, leading_blank_line: bool) {
     if leading_blank_line && !output.cells.is_empty() {
         let _ = writeln!(text);
     }
@@ -265,24 +290,30 @@ fn append_state_cells(text: &mut String, output: &StateInspectOutputV1, leading_
     for cell in &output.cells {
         let table = cell.table.as_deref().unwrap_or("<unknown_table>");
         let field = cell.field.as_deref().unwrap_or("<unknown_field>");
+        let key = cell
+            .key
+            .iter()
+            .map(display_value)
+            .collect::<Vec<_>>()
+            .join(", ");
         let _ = writeln!(
             text,
             "  {}[{}].{} = {}",
             table,
-            cell.row,
+            key,
             field,
             display_value(&cell.value)
         );
     }
 }
 
-fn display_value(value: &ValueOutputV1) -> String {
+fn display_value(value: &ValueOutput) -> String {
     match value {
-        ValueOutputV1::Bool { value } => value.to_string(),
-        ValueOutputV1::U64 { value } => value.to_string(),
-        ValueOutputV1::I64 { value } => value.to_string(),
-        ValueOutputV1::Bytes32 { hex } => hex.clone(),
-        ValueOutputV1::Portable {
+        ValueOutput::Bool { value } => value.to_string(),
+        ValueOutput::U64 { value } => value.to_string(),
+        ValueOutput::I64 { value } => value.to_string(),
+        ValueOutput::Bytes32 { hex } => hex.clone(),
+        ValueOutput::Portable {
             type_id,
             payload_hex,
         } => format!("portable(type#{type_id}, {payload_hex})"),

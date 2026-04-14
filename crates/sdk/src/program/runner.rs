@@ -77,29 +77,35 @@ impl TxOutcomeSummary {
 pub struct ExecutionReceipt {
     #[cfg(feature = "prove")]
     pub(crate) program_digest: String,
+    pub(crate) state_before: State,
+    pub(crate) state_after: State,
     pub(crate) inner: tabula_runtime::ExecutionReceipt,
 }
 
 impl ExecutionReceipt {
     pub(crate) fn from_runtime(
         #[cfg(feature = "prove")] program_digest: String,
+        state_before: State,
+        state_after: State,
         inner: tabula_runtime::ExecutionReceipt,
     ) -> Self {
         Self {
             #[cfg(feature = "prove")]
             program_digest,
+            state_before,
+            state_after,
             inner,
         }
     }
 
     /// The state snapshot that was provided as input to the batch.
     pub fn state_before(&self) -> State {
-        State::from_raw(self.inner.snapshot.clone())
+        self.state_before.clone()
     }
 
     /// The state snapshot resulting from applying all successful transactions.
     pub fn state_after(&self) -> State {
-        State::from_raw(self.inner.state_after.clone())
+        self.state_after.clone()
     }
 
     /// The transaction batch that was executed.
@@ -225,14 +231,34 @@ impl Runner {
         batch: &TransactionBatch,
         context: &Context,
     ) -> Result<ExecutionReceipt, SdkError> {
-        let receipt = self.runtime()?.execute_batch_receipt(
-            state.as_raw(),
-            batch.as_raw(),
-            context.as_raw(),
+        let runtime = self.runtime()?;
+        let snapshot = runtime.materialize_logical_state(
+            state
+                .cells_raw()
+                .iter()
+                .cloned()
+                .map(|cell| (cell.table, cell.key, cell.field, cell.value)),
         )?;
+        let receipt = runtime.execute_batch_receipt(&snapshot, batch.as_raw(), context.as_raw())?;
+        let state_after = State::from_cells(
+            runtime
+                .project_logical_state(&receipt.state_after)?
+                .into_iter()
+                .map(
+                    |(table, key, field, value)| crate::types::LogicalStateCell {
+                        table,
+                        key,
+                        field,
+                        value,
+                    },
+                )
+                .collect(),
+        );
         Ok(ExecutionReceipt::from_runtime(
             #[cfg(feature = "prove")]
             self.program.artifact().digest().to_string(),
+            state.clone(),
+            state_after,
             receipt,
         ))
     }
@@ -250,8 +276,14 @@ impl Runner {
     {
         let params = params.encode_args(query.params())?;
         let runtime = self.runtime()?;
-        let result =
-            runtime.execute_query(state.as_raw(), query.id(), &params, context.as_raw())?;
+        let snapshot = runtime.materialize_logical_state(
+            state
+                .cells_raw()
+                .iter()
+                .cloned()
+                .map(|cell| (cell.table, cell.key, cell.field, cell.value)),
+        )?;
+        let result = runtime.execute_query(&snapshot, query.id(), &params, context.as_raw())?;
         let returns = result
             .returns
             .iter()
@@ -286,7 +318,8 @@ impl Runner {
         if receipt.program_digest != self.program.artifact().digest() {
             return Err(SdkError::ExecutionProgramMismatch);
         }
-        let result = self.runtime()?.prove(&tabula_runtime::ProveInput {
+        let runtime = self.runtime()?;
+        let result = runtime.prove(&tabula_runtime::ProveInput {
             snapshot: &receipt.inner.snapshot,
             batch: &receipt.inner.batch,
             context: &receipt.inner.context,

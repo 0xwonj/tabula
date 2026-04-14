@@ -15,8 +15,6 @@ use tabula_core::TableId;
 use tabula_core::error::TabulaError;
 
 use tabula_chips::smt_path::trace::{SmtPathWitness, SmtTablePathWitness};
-use tabula_stark::air::statement::PublicStatement;
-
 pub(crate) fn validate_smt_path_shapes(
     smt_col_paths: &[SmtPathWitness],
     smt_table_paths: &[SmtTablePathWitness],
@@ -68,15 +66,15 @@ pub(crate) fn validate_smt_path_shapes(
     Ok(())
 }
 
-/// Build a [`PublicStatement`] from batch proof state roots.
-pub(crate) fn smt_table_public_statement(
+/// Build the SMT-table public values consumed by `SmtTablePathChip`.
+pub(crate) fn smt_table_public_values(
     old_root: &NativeDigest,
     new_root: &NativeDigest,
-) -> PublicStatement {
-    PublicStatement {
-        old_root: *old_root,
-        new_root: *new_root,
-    }
+) -> Vec<KoalaBear> {
+    let mut pvs = Vec::with_capacity(16);
+    pvs.extend_from_slice(&old_root.0);
+    pvs.extend_from_slice(&new_root.0);
+    pvs
 }
 
 // ── Public library function ─────────────────────────────────────────────────

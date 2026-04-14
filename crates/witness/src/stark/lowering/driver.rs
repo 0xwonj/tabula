@@ -1,6 +1,8 @@
 //! Next-native witness lowering from canonical `tabula_ir` execution.
 use std::collections::{BTreeMap, BTreeSet};
 
+use p3_koala_bear::KoalaBear;
+
 use tabula_chips::execution::trace::InstructionRecord;
 use tabula_chips::ir_hash::IrHashCall;
 use tabula_chips::relation_transcript::RelationTranscriptCall;
@@ -10,7 +12,7 @@ use tabula_core::error::TabulaError;
 use tabula_core::traits::Hasher;
 use tabula_executor as exec;
 use tabula_ir as ir;
-use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
+use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue};
 
 use super::context::LoweringCx;
 use crate::RelationClaim;
@@ -32,6 +34,8 @@ pub struct LowerSuccessfulTxInput<'a> {
     pub state_effects: &'a [exec::TypedStateEffect],
     /// Proof-relevant event effects emitted by the executor.
     pub event_effects: &'a [exec::TypedEventEffect],
+    /// Proof-relevant property effects emitted by the executor.
+    pub property_effects: &'a [exec::StatePropertyEffect],
     /// Proof-relevant relation effects emitted by the executor.
     pub relation_effects: &'a [exec::RelationEffect],
     /// Columns known to be empty in the committed pre-state.
@@ -45,6 +49,42 @@ pub struct LowerSuccessfulTxInput<'a> {
     pub tuple_encoding_defaults: &'a TupleEncodingDefaults,
     /// Installed canonical IR hash family implementation.
     pub hasher: &'a dyn Hasher,
+    /// Installed user-state runtime view used by execution and proof lowering.
+    pub state_runtime: &'a dyn exec::StateRuntimeView,
+    /// Preloaded public-context slots reserved by the runtime-wide claim layout.
+    pub context_slots: &'a [ContextPreludeSlot],
+    /// Preloaded tx-parameter slots reserved by the runtime-wide claim layout.
+    pub param_slots: &'a [ParamPreludeSlot],
+    /// Exclusive upper bound for aux-slot allocation inside the tx body.
+    pub aux_slot_limit: usize,
+    /// Global event-transcript item index assigned to each active emit op.
+    pub event_item_bases: &'a BTreeMap<usize, u32>,
+}
+
+/// One reserved execution slot preloaded with a canonical public-context value.
+#[derive(Debug, Clone)]
+pub struct ContextPreludeSlot {
+    /// Context field identifier.
+    pub field_id: ir::ContextFieldId,
+    /// Reserved execution slot index.
+    pub slot: usize,
+    /// Typed value carried by the slot.
+    pub value: TypedValue,
+    /// Canonical execution-width encoding stored in the slot.
+    pub encoded: Vec<KoalaBear>,
+}
+
+/// One reserved execution slot preloaded with a canonical tx-parameter value.
+#[derive(Debug, Clone)]
+pub struct ParamPreludeSlot {
+    /// Entry parameter identifier.
+    pub param_id: ir::ParamId,
+    /// Reserved execution slot index.
+    pub slot: usize,
+    /// Typed value carried by the slot.
+    pub value: TypedValue,
+    /// Canonical execution-width encoding stored in the slot.
+    pub encoded: Vec<KoalaBear>,
 }
 
 /// Output of full native execution lowering.
@@ -60,6 +100,12 @@ pub struct LoweringOutput {
     pub relation_transcript_calls: Vec<RelationTranscriptCall>,
     /// Relation claims aggregated across all successful txs.
     pub relation_claims: Vec<RelationClaim>,
+    /// Canonical public-context transcript items excluding the header block.
+    pub public_context_transcript_items: Vec<[KoalaBear; 8]>,
+    /// Canonical tx-batch transcript items excluding the header block.
+    pub tx_batch_transcript_items: Vec<[KoalaBear; 8]>,
+    /// Canonical event transcript items excluding the header block.
+    pub event_transcript_items: Vec<[KoalaBear; 8]>,
 }
 
 /// Output of lowering one successful native transaction.
@@ -107,6 +153,9 @@ pub fn merge_lowering_outputs<'a>(
         ir_hash_calls,
         relation_transcript_calls,
         relation_claims,
+        public_context_transcript_items: Vec::new(),
+        tx_batch_transcript_items: Vec::new(),
+        event_transcript_items: Vec::new(),
     }
 }
 

@@ -10,9 +10,11 @@ use p3_matrix::dense::RowMajorMatrix;
 use tabula_gadgets::bool_fe;
 use tabula_stark::air::columns::borrow_cols_mut;
 use tabula_stark::trace::generator::TraceGenerator;
+use tabula_types::{NativeKeyPayload, zero_key_payload};
 
 use super::air::MemoryShardChip;
 use super::columns::{MemoryShardCols, memory_shard_width};
+use crate::execution::native_key_payload_prefix3;
 
 /// A single row for building the MemoryShard trace.
 ///
@@ -20,8 +22,8 @@ use super::columns::{MemoryShardCols, memory_shard_width};
 /// Init rows have `is_init=true` and appear first for each key.
 #[derive(Debug, Clone)]
 pub struct MemoryShardRow {
-    /// Row key (u64).
-    pub key: u64,
+    /// Native committed-key payload.
+    pub key: NativeKeyPayload,
     /// Transaction index within the batch (0 for init rows).
     pub tx_index: u32,
     /// True if this is an init row (base state seed).
@@ -86,7 +88,8 @@ fn populate_base_columns<const W: usize>(
         cols.is_real = KoalaBear::ONE;
         cols.table_id = KoalaBear::new(table_id);
         cols.col_id = KoalaBear::new(col_id as u32);
-        cols.key.populate(row.key);
+        cols.key
+            .populate_payload(&native_key_payload_prefix3(&row.key));
         cols.tx_index = KoalaBear::new(row.tx_index);
         cols.is_init = bool_fe(row.is_init);
         cols.has_read = bool_fe(row.has_read);
@@ -156,19 +159,21 @@ fn populate_ordering_witnesses<const W: usize>(
     for i in 0..num_rows {
         let next_idx = (i + 1) % num_rows;
 
-        let cur_key = if i < num_real { rows[i].key } else { 0 };
+        let cur_key = if i < num_real {
+            rows[i].key
+        } else {
+            zero_key_payload()
+        };
         let next_key = if next_idx < num_real {
             rows[next_idx].key
         } else {
-            0
+            zero_key_payload()
         };
-
-        let limb0_diff = KoalaBear::new((next_key & 0x3FFF_FFFF) as u32)
-            - KoalaBear::new((cur_key & 0x3FFF_FFFF) as u32);
-        let limb1_diff = KoalaBear::new(((next_key >> 30) & 0x3FFF_FFFF) as u32)
-            - KoalaBear::new(((cur_key >> 30) & 0x3FFF_FFFF) as u32);
-        let limb2_diff =
-            KoalaBear::new((next_key >> 60) as u32) - KoalaBear::new((cur_key >> 60) as u32);
+        let cur_key_prefix = native_key_payload_prefix3(&cur_key);
+        let next_key_prefix = native_key_payload_prefix3(&next_key);
+        let limb0_diff = next_key_prefix[0] - cur_key_prefix[0];
+        let limb1_diff = next_key_prefix[1] - cur_key_prefix[1];
+        let limb2_diff = next_key_prefix[2] - cur_key_prefix[2];
 
         let cur_offset = i * width;
         let cols: &mut MemoryShardCols<KoalaBear, W> =
@@ -182,7 +187,8 @@ fn populate_ordering_witnesses<const W: usize>(
         let is_real_next = next_idx < num_real;
 
         if is_real_cur && is_real_next && cur_key != next_key {
-            cols.key_ordering.populate(cur_key, next_key);
+            cols.key_ordering
+                .populate_payload(&cur_key_prefix, &next_key_prefix);
         }
 
         if is_real_cur && is_real_next && cur_key == next_key {

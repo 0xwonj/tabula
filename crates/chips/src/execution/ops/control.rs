@@ -45,3 +45,27 @@ pub(crate) fn constrain_select<AB: AirBuilder, const W: usize>(
         builder.assert_zero(gate * local.slot_is_null[s].into());
     }
 }
+
+/// Immediate-load constraint used by `LoadParam` and `LoadContext`.
+///
+/// For each written slot s:
+///   `slots[s][i] = src1_val[i]`
+///   `slot_is_null[s] = 0`
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn constrain_load_immediate<AB: AirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+    is_real: AB::Expr,
+) {
+    let gate: AB::Expr = is_real * (local.op_load_param.into() + local.op_load_context.into());
+
+    for s in 0..MAX_SLOTS {
+        let slot_gate: AB::Expr = gate.clone() * local.slot_written[s].into();
+        for i in 0..W {
+            builder.assert_zero(
+                slot_gate.clone() * (local.slots[s][i].into() - local.src1_val[i].into()),
+            );
+        }
+        builder.assert_zero(slot_gate * local.slot_is_null[s].into());
+    }
+}

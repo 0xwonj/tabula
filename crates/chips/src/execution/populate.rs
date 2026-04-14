@@ -35,6 +35,11 @@ pub(super) fn set_opcode_selectors<T: PrimeCharacteristicRing, const W: usize>(
         Opcode::CapabilityCall => cols.op_capability_call = T::ONE,
         Opcode::PropertyRead => cols.op_property_read = T::ONE,
         Opcode::RelationProof => cols.op_relation_table = T::ONE,
+        Opcode::TxBegin => cols.op_tx_begin = T::ONE,
+        Opcode::LoadParam => cols.op_load_param = T::ONE,
+        Opcode::LoadContext => cols.op_load_context = T::ONE,
+        Opcode::EmitEventHeader => cols.op_emit_event_header = T::ONE,
+        Opcode::EmitEventArg => cols.op_emit_event_arg = T::ONE,
     }
 }
 

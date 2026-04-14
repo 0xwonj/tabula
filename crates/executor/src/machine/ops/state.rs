@@ -19,7 +19,7 @@ pub(in crate::machine) fn execute<S: StateView>(
             key,
             field,
         } => {
-            let field_ty = fatal(machine.program.field_type(*table, *field))?;
+            let field_ty = fatal(machine.exec.state_runtime.column_type(*table, *field))?;
             if !semantic(machine.guard_active(*guard))? {
                 fatal(
                     machine.assign_local(*dst_value, semantic(machine.inactive_default(field_ty))?),
@@ -58,12 +58,12 @@ pub(in crate::machine) fn execute<S: StateView>(
             value,
         } => {
             if semantic(machine.guard_active(*guard))? {
-                let field_ty = fatal(machine.program.field_type(*table, *field))?;
+                let field_ty = fatal(machine.exec.state_runtime.column_type(*table, *field))?;
                 let key = fatal(machine.resolve_cell_key(*table, *field, key))?;
                 let value = semantic(machine.eval_value(value))?;
                 machine.effects.record_state(
                     op_index,
-                    key,
+                    key.clone(),
                     field_ty,
                     StateEffectKind::Write,
                     Some(value.clone()),
@@ -78,11 +78,11 @@ pub(in crate::machine) fn execute<S: StateView>(
             field,
         } => {
             if semantic(machine.guard_active(*guard))? {
-                let field_ty = fatal(machine.program.field_type(*table, *field))?;
+                let field_ty = fatal(machine.exec.state_runtime.column_type(*table, *field))?;
                 let key = fatal(machine.resolve_cell_key(*table, *field, key))?;
                 machine.effects.record_state(
                     op_index,
-                    key,
+                    key.clone(),
                     field_ty,
                     StateEffectKind::Delete,
                     None,

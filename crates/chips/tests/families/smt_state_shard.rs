@@ -6,6 +6,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
+use tabula_chips::execution::u64_to_native_key_payload;
 use tabula_chips::shards::smt_state::air::SmtStateShardChip;
 use tabula_chips::shards::smt_state::trace::{
     SmtStatePathWitness, SmtStateWitness, generate_smt_state_shard_trace,
@@ -76,7 +77,7 @@ fn build_witness(
             let new_val = new_map.get(key).copied().unwrap_or([KoalaBear::ZERO; W]);
 
             SmtStatePathWitness {
-                key: *key,
+                key: u64_to_native_key_payload(*key),
                 old_val,
                 new_val,
                 old_is_null: !old_map.contains_key(key),

@@ -4,14 +4,14 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use tabula_core::error::TabulaError;
 pub use tabula_core::{
-    ColId, ColumnLayoutKind, Digest, PropertyQueryKind, RootProfileId, SchemeId, TableId,
+    ColId, ColumnLayoutKind, CommittedPropertyQuery, Digest, PropertyQueryKind, RootProfileId,
+    SchemeId, StateColumnContract, StateTableContract, TableId,
 };
-pub use tabula_ir::StatePropertyQuery;
 #[cfg(feature = "verify")]
 use tabula_profile::{ResolvedColumnProfileRef, VerifierDigestFormat};
+use tabula_types::{CommittedColumnEntry, TypedCommittedPropertyQueryResult};
 #[cfg(feature = "verify")]
-use tabula_types::{EncodingRuntime, TypeRuntime};
-use tabula_types::{TypedColumnEntry, TypedPropertyQueryResult};
+use tabula_types::{EncodingRuntime, TableKeyCodec, TypeRuntime};
 
 #[cfg(feature = "verify")]
 use crate::backend::ProofColumn;
@@ -33,9 +33,9 @@ pub trait RuntimeColumn: Send + Sync {
     /// Resolve a structural property query over one committed column snapshot.
     fn resolve_property(
         &self,
-        query: &StatePropertyQuery,
-        state: &[TypedColumnEntry],
-    ) -> Result<TypedPropertyQueryResult, TabulaError> {
+        query: &CommittedPropertyQuery,
+        state: &[CommittedColumnEntry],
+    ) -> Result<TypedCommittedPropertyQueryResult, TabulaError> {
         let _ = state;
         Err(TabulaError::InvalidIr(format!(
             "column scheme '{}' does not support property query {:?}",
@@ -49,18 +49,18 @@ pub trait RuntimeColumn: Send + Sync {
 #[cfg(feature = "verify")]
 #[derive(Clone)]
 pub struct ColumnBackendSetup<'a> {
-    /// Table identifier for the concrete column slot.
-    pub table_id: TableId,
-    /// Column identifier for the concrete column slot.
-    pub col_id: ColId,
+    /// Sealed table contract for the concrete column slot.
+    pub table: &'a StateTableContract,
+    /// Sealed column contract for the concrete column slot.
+    pub column: &'a StateColumnContract,
     /// Canonical resolved per-column profile.
     pub profile: ResolvedColumnProfileRef<'a>,
     /// Resolved runtime type behavior for this column.
     pub type_runtime: Arc<dyn TypeRuntime>,
     /// Resolved runtime encoding behavior for this column.
     pub encoding_runtime: Arc<dyn EncodingRuntime>,
-    /// Exact structural property kinds required by the program for this slot.
-    pub required_property_query_kinds: &'a BTreeSet<PropertyQueryKind>,
+    /// Resolved table-key codec for this column's table.
+    pub key_codec: Arc<TableKeyCodec>,
 }
 
 /// Verifier-visible contract exported by one materialized column backend.

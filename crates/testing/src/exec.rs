@@ -5,10 +5,10 @@ use tabula_compiler::{
     CompiledProgram, CompilerCatalogs, RegisteredProgram, compile_and_register_program_source,
     compile_program_source_with_catalogs,
 };
-use tabula_core::{PortableValue, RowKey};
+use tabula_core::PortableValue;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BYTES32_ID, TYPE_U64_ID};
-use tabula_runtime::StateSnapshot;
+use tabula_runtime::{CommittedStateSnapshot, TabulaRuntime};
 
 pub fn compile_program_from_source(source: &str) -> CompiledProgram {
     compile_program_from_source_with_catalogs(source, &standard_catalogs())
@@ -32,12 +32,21 @@ pub fn register_program_from_source_with_catalogs(
     compile_and_register_program_source(source, catalogs).expect("compile and register source")
 }
 
-pub fn state_snapshot(
+pub fn logical_state_snapshot(
     registered_program: &RegisteredProgram,
-    cells: &[(ir::TableId, RowKey, ir::FieldId, PortableValue)],
-) -> StateSnapshot {
-    StateSnapshot::from_cells(registered_program.program(), cells.iter().cloned())
-        .expect("build state snapshot")
+    cells: &[(ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue)],
+) -> CommittedStateSnapshot {
+    let runtime = TabulaRuntime::builder(registered_program.clone())
+        .expect("build runtime builder")
+        .build()
+        .expect("build runtime");
+    runtime
+        .materialize_logical_state(
+            cells
+                .iter()
+                .map(|(table, key, field, value)| (*table, key.clone(), *field, value.clone())),
+        )
+        .expect("build committed state snapshot")
 }
 
 pub fn tx_batch(calls: Vec<ir::EntryCall>) -> ir::EntryBatch {

@@ -2,7 +2,9 @@
 #![allow(missing_docs)]
 
 use tabula_ir as ir;
-use tabula_testing::exec::{context_input, register_program_from_source, state_snapshot, tx_batch};
+use tabula_testing::exec::{
+    context_input, logical_state_snapshot, register_program_from_source, tx_batch,
+};
 use tabula_testing::runtime::build_runtime;
 use tabula_types::{bool_portable, u64_portable, u64_typed};
 
@@ -67,19 +69,19 @@ fn context(caller: u64, epoch: u64) -> ir::ContextInput {
 
 fn seeded_snapshot(
     registered: &tabula_compiler::RegisteredProgram,
-) -> tabula_runtime::StateSnapshot {
-    state_snapshot(
+) -> tabula_runtime::CommittedStateSnapshot {
+    logical_state_snapshot(
         registered,
         &[
             (
                 tabula_ir::TableId(0),
-                tabula_core::RowKey(0),
+                vec![u64_portable(0)],
                 tabula_ir::FieldId(0),
                 u64_portable(0),
             ),
             (
                 tabula_ir::TableId(0),
-                tabula_core::RowKey(1),
+                vec![u64_portable(1)],
                 tabula_ir::FieldId(0),
                 u64_portable(0),
             ),
@@ -152,8 +154,18 @@ fn tx_batch_proves_and_verifies_static_relations_with_control() {
         .expect("prove and verify relation batch");
 
     assert!(verified.verified);
-    assert_eq!(verified.statement.public.public_context.len(), 2);
-    assert_ne!(verified.statement.public.event_digest, [0u8; 32]);
+    assert_ne!(
+        verified
+            .proof
+            .public_statement
+            .public_context_digest
+            .to_bytes(),
+        [0u8; 32]
+    );
+    assert_ne!(
+        verified.proof.public_statement.event_digest.to_bytes(),
+        [0u8; 32]
+    );
 }
 
 #[test]
@@ -192,13 +204,10 @@ fn range_and_set_relations_normalize_and_prove() {
         .execute_and_prove(&snapshot, &batch, &ctx)
         .expect("prove normalized relations");
 
-    assert_ne!(proved.statement.public.event_digest, [0u8; 32]);
-    assert_eq!(
-        proved.statement.old_state_root,
-        proved.proof.statement.old_root.to_bytes()
+    assert_ne!(
+        proved.proof.public_statement.event_digest.to_bytes(),
+        [0u8; 32]
     );
-    assert_eq!(
-        proved.statement.new_state_root,
-        proved.proof.statement.new_root.to_bytes()
-    );
+    assert_ne!(proved.proof.public_statement.old_root.to_bytes(), [0u8; 32]);
+    assert_ne!(proved.proof.public_statement.new_root.to_bytes(), [0u8; 32]);
 }

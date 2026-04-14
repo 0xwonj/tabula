@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use tabula_compiler::RegisteredProgram;
+use tabula_core::KeyComponentSchema;
 use tabula_ir as ir;
 
 use crate::error::SdkError;
@@ -59,10 +61,36 @@ impl FieldHandle {
 
 /// Handle to a state table, carrying its ID, name, key arity, and fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyComponentHandle {
+    symbol: String,
+    ty: ir::TypeRef,
+}
+
+impl KeyComponentHandle {
+    /// Source-level key component name.
+    pub fn symbol(&self) -> &str {
+        &self.symbol
+    }
+
+    /// Key component value type.
+    pub fn ty(&self) -> ir::TypeRef {
+        self.ty
+    }
+
+    pub(crate) fn as_parameter_handle(&self) -> ParameterHandle {
+        ParameterHandle {
+            symbol: self.symbol.clone(),
+            ty: self.ty,
+        }
+    }
+}
+
+/// Handle to a state table, carrying its ID, name, key components, and fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableHandle {
     id: ir::TableId,
     symbol: String,
-    key_arity: usize,
+    key_components: Vec<KeyComponentHandle>,
     fields: Vec<FieldHandle>,
 }
 
@@ -79,7 +107,12 @@ impl TableHandle {
 
     /// Number of key columns in the table's primary key.
     pub fn key_arity(&self) -> usize {
-        self.key_arity
+        self.key_components.len()
+    }
+
+    /// Ordered logical key components for the table.
+    pub fn key_components(&self) -> &[KeyComponentHandle] {
+        &self.key_components
     }
 
     /// All non-key fields declared on the table.
@@ -201,25 +234,35 @@ struct SchemaInner {
 }
 
 impl Schema {
-    pub(crate) fn from_program(program: &ir::Program) -> Self {
-        let tables = program
+    pub(crate) fn from_registered(registered: &RegisteredProgram) -> Result<Self, SdkError> {
+        let program = registered.program();
+        let tables = registered
+            .execution_contract()
             .state
             .tables
             .iter()
-            .map(|table| TableHandle {
-                id: table.id,
-                symbol: table.symbol.clone(),
-                key_arity: table.key_tys.len(),
-                fields: table
-                    .fields
+            .map(|table| {
+                let fields = table
+                    .columns
                     .iter()
-                    .map(|field| FieldHandle {
-                        table_id: table.id,
-                        field_id: field.id,
-                        symbol: field.symbol.clone(),
-                        ty: field.ty,
+                    .map(|column| FieldHandle {
+                        table_id: ir::TableId(table.id.0),
+                        field_id: ir::FieldId(column.id.0),
+                        symbol: column.name.clone(),
+                        ty: column.ty,
                     })
-                    .collect(),
+                    .collect::<Vec<_>>();
+                TableHandle {
+                    id: ir::TableId(table.id.0),
+                    symbol: table.name.clone(),
+                    key_components: table
+                        .key
+                        .components
+                        .iter()
+                        .map(key_component_handle)
+                        .collect(),
+                    fields,
+                }
             })
             .collect::<Vec<_>>();
         let tables_by_symbol = tables
@@ -279,7 +322,7 @@ impl Schema {
             .map(|(index, field)| (field.symbol.clone(), index))
             .collect();
 
-        Self {
+        Ok(Self {
             inner: Arc::new(SchemaInner {
                 tables,
                 txs,
@@ -290,7 +333,7 @@ impl Schema {
                 queries_by_symbol,
                 context_fields_by_symbol,
             }),
-        }
+        })
     }
 
     /// Total number of state tables declared by the program.
@@ -369,5 +412,12 @@ impl Schema {
             .ok_or_else(|| SdkError::SchemaLookup {
                 detail: format!("unknown context field `{symbol}`"),
             })
+    }
+}
+
+fn key_component_handle(component: &KeyComponentSchema) -> KeyComponentHandle {
+    KeyComponentHandle {
+        symbol: component.symbol.clone(),
+        ty: component.ty,
     }
 }

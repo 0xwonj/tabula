@@ -7,7 +7,7 @@
 > **Related**: [executor-proof-codesign-architecture.md](executor-proof-codesign-architecture.md),
 > [proof-front-end-journal-architecture.md](proof-front-end-journal-architecture.md),
 > [profile-native-runtime-migration-plan.md](profile-native-runtime-migration-plan.md),
-> [canonical-vocabulary.md](canonical-vocabulary.md)
+> [verification vocabulary](../design/architecture.md#verification-vocabulary)
 
 ---
 

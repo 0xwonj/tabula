@@ -187,7 +187,7 @@ impl<'a> VerifyCx<'a> {
                 field,
             } => {
                 let key_tys = table_key_tys(*table, self.program)?;
-                validate_tuple(key, key_tys, params, locals, available, self.program)?;
+                validate_tuple(key, &key_tys, params, locals, available, self.program)?;
                 let field_ty = field_type(*table, *field, self.program)?;
                 assign_local(*dst_value, field_ty, locals, assigned)?;
                 assign_local(*dst_present, TYPE_BOOL_ID, locals, assigned)?;
@@ -199,7 +199,7 @@ impl<'a> VerifyCx<'a> {
                 value,
             } => {
                 let key_tys = table_key_tys(*table, self.program)?;
-                validate_tuple(key, key_tys, params, locals, available, self.program)?;
+                validate_tuple(key, &key_tys, params, locals, available, self.program)?;
                 ensure_type(
                     value_type(value, params, locals, available, self.program)?,
                     field_type(*table, *field, self.program)?,
@@ -209,10 +209,12 @@ impl<'a> VerifyCx<'a> {
             Op::DeleteState { table, key, field } => {
                 let _ = field_type(*table, *field, self.program)?;
                 let key_tys = table_key_tys(*table, self.program)?;
-                validate_tuple(key, key_tys, params, locals, available, self.program)?;
+                validate_tuple(key, &key_tys, params, locals, available, self.program)?;
             }
             Op::ReadStateProperty {
-                dsts,
+                dst_value,
+                dst_key_components,
+                dst_is_null,
                 table,
                 field,
                 query,
@@ -221,16 +223,26 @@ impl<'a> VerifyCx<'a> {
                 let key_tys = table_key_tys(*table, self.program)?;
                 validate_state_property_query(
                     query,
-                    key_tys,
+                    &key_tys,
                     params,
                     locals,
                     available,
                     self.program,
                 )?;
-                validate_property_dsts(query, dsts, field_ty, key_tys, locals)?;
-                for dst in dsts {
-                    assign_local(*dst, local_type(*dst, locals)?, locals, assigned)?;
+                validate_property_dsts(
+                    query,
+                    *dst_value,
+                    dst_key_components,
+                    *dst_is_null,
+                    field_ty,
+                    &key_tys,
+                    locals,
+                )?;
+                assign_local(*dst_value, field_ty, locals, assigned)?;
+                for (dst, key_ty) in dst_key_components.iter().zip(key_tys.iter()) {
+                    assign_local(*dst, *key_ty, locals, assigned)?;
                 }
+                assign_local(*dst_is_null, TYPE_BOOL_ID, locals, assigned)?;
             }
             Op::Assert { cond } => {
                 ensure_type(
@@ -557,7 +569,9 @@ fn validate_state_property_query(
 
 fn validate_property_dsts(
     query: &StatePropertyQuery,
-    dsts: &[LocalId],
+    dst_value: LocalId,
+    dst_key_components: &[LocalId],
+    dst_is_null: LocalId,
     field_ty: TypeRef,
     key_tys: &[TypeRef],
     locals: &BTreeMap<LocalId, TypeRef>,
@@ -567,42 +581,65 @@ fn validate_property_dsts(
         | StatePropertyQuery::Maximum
         | StatePropertyQuery::Successor { .. }
         | StatePropertyQuery::Predecessor { .. } => {
-            if key_tys.len() != 1 || dsts.len() != 3 {
+            if dst_key_components.len() != key_tys.len() {
                 return Err(TabulaError::InvalidIr(
-                    "row-oriented property reads require exactly three destinations".into(),
+                    "property reads require one key destination per key component".into(),
                 ));
             }
             ensure_type(
-                local_type(dsts[0], locals)?,
+                local_type(dst_value, locals)?,
                 field_ty,
                 "property value dst type mismatch",
             )?;
+            for (dst, key_ty) in dst_key_components.iter().zip(key_tys.iter()) {
+                ensure_type(
+                    local_type(*dst, locals)?,
+                    *key_ty,
+                    "property key dst type mismatch",
+                )?;
+            }
             ensure_type(
-                local_type(dsts[1], locals)?,
-                key_tys[0],
-                "property key dst type mismatch",
-            )?;
-            ensure_type(
-                local_type(dsts[2], locals)?,
+                local_type(dst_is_null, locals)?,
                 TYPE_BOOL_ID,
                 "property null-flag dst type mismatch",
             )
         }
         StatePropertyQuery::Aggregate { .. } => {
-            if dsts.len() != 1 {
+            if !dst_key_components.is_empty() {
                 return Err(TabulaError::InvalidIr(
-                    "aggregate property reads require exactly one destination".into(),
+                    "aggregate property reads may not bind key destinations".into(),
                 ));
             }
             ensure_type(
-                local_type(dsts[0], locals)?,
+                local_type(dst_is_null, locals)?,
+                TYPE_BOOL_ID,
+                "aggregate null-flag dst type mismatch",
+            )?;
+            ensure_type(
+                local_type(dst_value, locals)?,
                 field_ty,
                 "aggregate dst type mismatch",
             )
         }
-        StatePropertyQuery::NonExistenceRange { .. } => Err(TabulaError::InvalidIr(
-            "non-existence range property reads are not supported in MIR V1".into(),
-        )),
+        StatePropertyQuery::NonExistenceRange { .. } => {
+            if !dst_key_components.is_empty() {
+                return Err(TabulaError::InvalidIr(
+                    "non-existence range property reads may not bind key destinations".into(),
+                ));
+            }
+            ensure_type(
+                local_type(dst_value, locals)?,
+                TYPE_BOOL_ID,
+                "non-existence range result dst type mismatch",
+            )
+            .and_then(|_| {
+                ensure_type(
+                    local_type(dst_is_null, locals)?,
+                    TYPE_BOOL_ID,
+                    "non-existence range null-flag dst type mismatch",
+                )
+            })
+        }
     }
 }
 
@@ -719,14 +756,14 @@ fn value_type(
     }
 }
 
-fn table_key_tys(table: TableId, program: &Program) -> Result<&[TypeRef], TabulaError> {
+fn table_key_tys(table: TableId, program: &Program) -> Result<Vec<TypeRef>, TabulaError> {
     let table = program
         .state
         .tables
         .iter()
         .find(|candidate| candidate.id == table)
         .ok_or_else(|| TabulaError::InvalidIr(format!("unknown table ID {}", table.0)))?;
-    Ok(&table.key_tys)
+    Ok(table.keys.iter().map(|key| key.ty).collect())
 }
 
 fn field_type(table: TableId, field: FieldId, program: &Program) -> Result<TypeRef, TabulaError> {

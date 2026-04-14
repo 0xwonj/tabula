@@ -63,14 +63,14 @@ fn context(program: &Program, caller: u64) -> Context {
 }
 
 #[test]
-fn verification_only_sdk_builds_and_warms_verifier_for_artifacts() {
+fn verification_only_sdk_prepares_verifier_for_artifacts() {
     let sdk = Sdk::standard().expect("build standard sdk");
     let artifact = compile_artifact(&sdk);
     let program = sdk.open(artifact.clone()).expect("open artifact");
     let reopened = sdk.open(artifact).expect("reopen artifact");
 
-    reopened.verifier().warm().expect("warm verifier");
-    program.verifier().warm().expect("warm verifier");
+    reopened.verifier().expect("prepare verifier");
+    program.verifier().expect("prepare verifier");
 }
 
 #[test]

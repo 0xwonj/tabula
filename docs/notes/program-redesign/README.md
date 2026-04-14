@@ -50,6 +50,6 @@ for `EnumSet` and `Map` is now part of the implemented native proof path.
 Shared notes that remain one level up in `docs/notes/` are intentionally not
 duplicated here, because they are referenced by multiple note clusters:
 
-- [../canonical-vocabulary.md](../canonical-vocabulary.md)
+- [verification vocabulary](../../design/architecture.md#verification-vocabulary)
 - [../executor-proof-codesign-architecture.md](../executor-proof-codesign-architecture.md)
 - [../proof-front-end-journal-architecture.md](../proof-front-end-journal-architecture.md)

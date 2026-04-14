@@ -7,6 +7,7 @@ use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 
 use tabula_gadgets::integer::MASK_30;
+use tabula_types::{NativeKeyPayload, zero_key_payload};
 
 /// Reconstruct a u64 from limb-encoded KoalaBear values.
 pub(super) fn reconstruct_u64_from_limbs(limbs: &[KoalaBear]) -> u64 {
@@ -30,6 +31,26 @@ pub fn u64_to_limbs(val: u64) -> [KoalaBear; 3] {
         KoalaBear::new(((val >> 30) & MASK_30) as u32),
         KoalaBear::new((val >> 60) as u32),
     ]
+}
+
+/// Helper: create a padded native key payload from a u64 limb encoding.
+pub fn u64_to_native_key_payload(val: u64) -> NativeKeyPayload {
+    let mut payload = zero_key_payload();
+    let limbs = u64_to_limbs(val);
+    payload[0] = limbs[2];
+    payload[1] = limbs[1];
+    payload[2] = limbs[0];
+    payload
+}
+
+/// Helper: extract the legacy 3-limb prefix from a native key payload.
+pub fn native_key_payload_prefix3(payload: &NativeKeyPayload) -> [KoalaBear; 3] {
+    [payload[2], payload[1], payload[0]]
+}
+
+/// Helper: reconstruct a u64 from the legacy 3-limb prefix of a native key payload.
+pub fn native_key_payload_to_u64(payload: &NativeKeyPayload) -> u64 {
+    limbs_to_u64(&native_key_payload_prefix3(payload))
 }
 
 /// Helper: reconstruct u64 from limb KoalaBear values.

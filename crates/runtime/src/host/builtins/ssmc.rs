@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -6,7 +7,7 @@ use tabula_chips::shards::meta::MetaShardChip;
 use tabula_chips::shards::property::SsmcPropertyChip;
 use tabula_chips::shards::state::StateShardChip;
 use tabula_commitment::{PoseidonHasher, compute_column_root_binding_prefix_digest};
-use tabula_core::{ColumnLayoutKind, PropertyQueryKind, SchemeId};
+use tabula_core::{ColumnLayoutKind, CommittedPropertyQuery, PropertyQueryKind, SchemeId};
 use tabula_ext::ExtError;
 #[cfg(feature = "prove")]
 use tabula_ext::backend::column::{ColumnProofBackend, ColumnProofContext, PreparedColumnProof};
@@ -15,15 +16,15 @@ use tabula_ext::scheme::{
     ColumnBackendFactory, ColumnBackendSetup, ColumnVerifierContract, MaterializedColumnBackend,
     RootBindingContract,
 };
-use tabula_ir::{StatePropertyQuery, ValueRef, ValueTupleRef};
 use tabula_machine::SetupError;
 use tabula_machine::backend::{AnyRap, ColumnChipSet, ProofColumn};
-use tabula_profile::TYPE_U64_ID;
 use tabula_stark::chips::ChipIdAllocator;
 use tabula_stark::trace::DynChip;
 #[cfg(feature = "prove")]
 use tabula_types::EncodingRuntime;
-use tabula_types::{TypeRuntime, TypedColumnEntry, TypedPropertyQueryResult};
+use tabula_types::{
+    CommittedColumnEntry, TableKeyCodec, TypeRuntime, TypedCommittedPropertyQueryResult,
+};
 #[cfg(feature = "prove")]
 use tabula_witness::stark::schemes::ssmc::{PreparedSsmcProof, SsmcProofInput, prepare_ssmc_proof};
 /// SSMC commitment scheme factory.
@@ -42,6 +43,8 @@ struct SsmcBackendState {
     type_runtime: Arc<dyn TypeRuntime>,
     #[cfg(feature = "prove")]
     encoding_runtime: Arc<dyn EncodingRuntime>,
+    #[cfg(feature = "prove")]
+    key_codec: Arc<TableKeyCodec>,
     required_property_query_kinds: BTreeSet<PropertyQueryKind>,
     receives_commitment: bool,
     root_binding_contract: RootBindingContract,
@@ -74,6 +77,7 @@ struct SsmcRuntimeState {
     table_id: tabula_core::TableId,
     col_id: tabula_core::ColId,
     type_runtime: Arc<dyn TypeRuntime>,
+    key_codec: Arc<TableKeyCodec>,
 }
 
 impl std::fmt::Debug for SsmcRuntimeState {
@@ -82,6 +86,7 @@ impl std::fmt::Debug for SsmcRuntimeState {
             .field("table_id", &self.table_id)
             .field("col_id", &self.col_id)
             .field("type_id", &self.type_runtime.type_id())
+            .field("key_contract", self.key_codec.contract())
             .finish()
     }
 }
@@ -105,8 +110,8 @@ impl<const W: usize> ColumnBackendFactory for SsmcScheme<W> {
             column_profile_hash: setup.profile.column_profile.profile_hash,
             binding_digest: compute_column_root_binding_prefix_digest(
                 &PoseidonHasher::new(),
-                setup.table_id,
-                setup.col_id,
+                setup.table.id,
+                setup.column.id,
                 setup.profile.root_binding_family(),
                 &setup.profile.column_profile.profile_hash,
             ),
@@ -118,27 +123,30 @@ impl<const W: usize> ColumnBackendFactory for SsmcScheme<W> {
             verifier_digest_format: setup.profile.verifier_digest_format(),
         };
         let state = SsmcBackendState {
-            table_id: setup.table_id,
-            col_id: setup.col_id,
+            table_id: setup.table.id,
+            col_id: setup.column.id,
             scheme_id: setup.profile.scheme_profile.scheme_family_id,
             #[cfg(feature = "prove")]
             type_runtime: Arc::clone(&setup.type_runtime),
             #[cfg(feature = "prove")]
             encoding_runtime: Arc::clone(&setup.encoding_runtime),
-            required_property_query_kinds: setup.required_property_query_kinds.clone(),
+            #[cfg(feature = "prove")]
+            key_codec: Arc::clone(&setup.key_codec),
+            required_property_query_kinds: setup.column.required_property_queries.clone(),
             receives_commitment: setup.profile.receives_commitment(),
             root_binding_contract: root_binding_contract.clone(),
         };
 
         Ok(MaterializedColumnBackend {
-            table_id: setup.table_id,
-            col_id: setup.col_id,
-            required_property_query_kinds: setup.required_property_query_kinds.clone(),
+            table_id: setup.table.id,
+            col_id: setup.column.id,
+            required_property_query_kinds: setup.column.required_property_queries.clone(),
             runtime_column: Arc::new(SsmcRuntimeColumn {
                 state: SsmcRuntimeState {
-                    table_id: setup.table_id,
-                    col_id: setup.col_id,
+                    table_id: setup.table.id,
+                    col_id: setup.column.id,
                     type_runtime: Arc::clone(&setup.type_runtime),
+                    key_codec: Arc::clone(&setup.key_codec),
                 },
             }),
             proof_column: Arc::new(SsmcProofColumn::<W> {
@@ -166,13 +174,14 @@ fn validate_profile_setup(
         )));
     }
     if let Some(kind) = setup
-        .required_property_query_kinds
+        .column
+        .required_property_queries
         .iter()
         .find(|kind| !SSMC_SUPPORTED_QUERY_KINDS.contains(kind))
     {
         return Err(ExtError::validation(format!(
             "scheme '{scheme_name}' does not support property query {:?} for table {} col {}",
-            kind, setup.table_id.0, setup.col_id.0,
+            kind, setup.table.id.0, setup.column.id.0,
         )));
     }
     Ok(())
@@ -194,38 +203,59 @@ impl RuntimeColumn for SsmcRuntimeColumn {
 
     fn resolve_property(
         &self,
-        query: &StatePropertyQuery,
-        state: &[TypedColumnEntry],
-    ) -> Result<TypedPropertyQueryResult, tabula_core::error::TabulaError> {
+        query: &CommittedPropertyQuery,
+        state: &[CommittedColumnEntry],
+    ) -> Result<TypedCommittedPropertyQueryResult, tabula_core::error::TabulaError> {
         let non_null = || state.iter().filter(|entry| !entry.is_null);
 
         let resolved = match query {
-            StatePropertyQuery::Successor { key } => {
-                let key = single_row_key(key)?;
-                non_null()
-                    .filter(|entry| entry.row_key > key)
-                    .min_by_key(|entry| entry.row_key)
-                    .map(|entry| TypedPropertyQueryResult {
-                        value: entry.value.clone(),
-                        key: Some(entry.row_key),
-                        is_null: false,
-                    })
+            CommittedPropertyQuery::Successor { key } => {
+                let mut best: Option<&CommittedColumnEntry> = None;
+                for entry in non_null() {
+                    if self.state.key_codec.compare(&entry.key, key)? != Ordering::Greater {
+                        continue;
+                    }
+                    if let Some(current) = best {
+                        if self.state.key_codec.compare(&entry.key, &current.key)? == Ordering::Less
+                        {
+                            best = Some(entry);
+                        }
+                    } else {
+                        best = Some(entry);
+                    }
+                }
+                best.map(|entry| TypedCommittedPropertyQueryResult {
+                    value: entry.value.clone(),
+                    key: Some(entry.key.clone()),
+                    is_null: false,
+                })
             }
-            StatePropertyQuery::Predecessor { key } => {
-                let key = single_row_key(key)?;
-                non_null()
-                    .filter(|entry| entry.row_key < key)
-                    .max_by_key(|entry| entry.row_key)
-                    .map(|entry| TypedPropertyQueryResult {
-                        value: entry.value.clone(),
-                        key: Some(entry.row_key),
-                        is_null: false,
-                    })
+            CommittedPropertyQuery::Predecessor { key } => {
+                let mut best: Option<&CommittedColumnEntry> = None;
+                for entry in non_null() {
+                    if self.state.key_codec.compare(&entry.key, key)? != Ordering::Less {
+                        continue;
+                    }
+                    if let Some(current) = best {
+                        if self.state.key_codec.compare(&entry.key, &current.key)?
+                            == Ordering::Greater
+                        {
+                            best = Some(entry);
+                        }
+                    } else {
+                        best = Some(entry);
+                    }
+                }
+                best.map(|entry| TypedCommittedPropertyQueryResult {
+                    value: entry.value.clone(),
+                    key: Some(entry.key.clone()),
+                    is_null: false,
+                })
             }
-            StatePropertyQuery::Minimum
-            | StatePropertyQuery::Maximum
-            | StatePropertyQuery::NonExistenceRange { .. }
-            | StatePropertyQuery::Aggregate { .. } => {
+            CommittedPropertyQuery::Minimum
+            | CommittedPropertyQuery::Maximum
+            | CommittedPropertyQuery::NonExistenceRange { .. }
+            | CommittedPropertyQuery::Aggregate { .. } => {
                 return Err(tabula_core::error::TabulaError::InvalidIr(format!(
                     "column scheme '{}' does not implement property query {:?} for table {} col {}",
                     self.name(),
@@ -236,7 +266,7 @@ impl RuntimeColumn for SsmcRuntimeColumn {
             }
         };
 
-        Ok(resolved.unwrap_or(TypedPropertyQueryResult {
+        Ok(resolved.unwrap_or(TypedCommittedPropertyQueryResult {
             value: self.state.type_runtime.zero_typed(),
             key: None,
             is_null: true,
@@ -244,40 +274,14 @@ impl RuntimeColumn for SsmcRuntimeColumn {
     }
 }
 
-fn single_row_key(
-    tuple: &ValueTupleRef,
-) -> Result<tabula_core::RowKey, tabula_core::error::TabulaError> {
-    let values = &tuple.0;
-    if values.len() != 1 {
-        return Err(tabula_core::error::TabulaError::InvalidIr(format!(
-            "SSMC runtime expects one row-key literal, got tuple of arity {}",
-            values.len()
-        )));
-    }
-    let ValueRef::Literal(value) = &values[0] else {
-        return Err(tabula_core::error::TabulaError::InvalidIr(format!(
-            "SSMC runtime does not support non-literal row-key property queries: {tuple:?}",
-        )));
-    };
-    if value.type_id() != TYPE_U64_ID {
-        return Err(tabula_core::error::TabulaError::InvalidIr(format!(
-            "SSMC runtime expects one u64 row key literal, got type {}",
-            value.type_id().0
-        )));
-    }
-    let row = borsh::from_slice::<u64>(value.payload())
-        .map_err(|error| tabula_core::error::TabulaError::BorshEncodingError(error.to_string()))?;
-    Ok(tabula_core::RowKey(row))
-}
-
-fn property_query_kind(query: &StatePropertyQuery) -> PropertyQueryKind {
+fn property_query_kind(query: &CommittedPropertyQuery) -> PropertyQueryKind {
     match query {
-        StatePropertyQuery::Minimum => PropertyQueryKind::Minimum,
-        StatePropertyQuery::Maximum => PropertyQueryKind::Maximum,
-        StatePropertyQuery::Successor { .. } => PropertyQueryKind::Successor,
-        StatePropertyQuery::Predecessor { .. } => PropertyQueryKind::Predecessor,
-        StatePropertyQuery::NonExistenceRange { .. } => PropertyQueryKind::NonExistenceRange,
-        StatePropertyQuery::Aggregate { .. } => PropertyQueryKind::Aggregate,
+        CommittedPropertyQuery::Minimum => PropertyQueryKind::Minimum,
+        CommittedPropertyQuery::Maximum => PropertyQueryKind::Maximum,
+        CommittedPropertyQuery::Successor { .. } => PropertyQueryKind::Successor,
+        CommittedPropertyQuery::Predecessor { .. } => PropertyQueryKind::Predecessor,
+        CommittedPropertyQuery::NonExistenceRange { .. } => PropertyQueryKind::NonExistenceRange,
+        CommittedPropertyQuery::Aggregate { .. } => PropertyQueryKind::Aggregate,
     }
 }
 
@@ -369,6 +373,7 @@ impl<const W: usize> ColumnProofBackend for SsmcProofBackend<W> {
             col: context.column.col,
             type_runtime: self.state.type_runtime.as_ref(),
             encoding_runtime: self.state.encoding_runtime.as_ref(),
+            key_codec: self.state.key_codec.as_ref(),
             old_entries: &context.old_entries,
             init_cells: &context.column.init_cells,
             access_events: &context.column.access_events,

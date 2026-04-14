@@ -70,7 +70,9 @@ fn root_help_lists_beta_surface() {
     assert!(stdout.contains("context"));
     assert!(stdout.contains("batch"));
     assert!(stdout.contains("env"));
-    assert!(!stdout.contains("inspect"));
+    if cfg!(feature = "verify") {
+        assert!(stdout.contains("inspect-proof"));
+    }
     if cfg!(feature = "prove") {
         assert!(stdout.contains("prove"));
     } else {
@@ -138,8 +140,9 @@ fn membership_query_and_execute_workflow_is_cli_complete() {
             program.to_str().unwrap(),
             "--state",
             state.to_str().unwrap(),
+            "--key",
+            "[1]",
             "members",
-            "1",
             "tier",
             "0",
         ],
@@ -272,7 +275,7 @@ fn membership_prove_and_verify_round_trip() {
     let batch = dir.join("batch.json");
     let receipt = dir.join("receipt.bin");
     let proof = dir.join("proof.bin");
-    let statement = dir.join("statement.json");
+    let public_statement = dir.join("public_statement.json");
     let summary = dir.join("proof_summary.json");
 
     run_ok(
@@ -295,8 +298,9 @@ fn membership_prove_and_verify_round_trip() {
             program.to_str().unwrap(),
             "--state",
             state.to_str().unwrap(),
+            "--key",
+            "[1]",
             "members",
-            "1",
             "tier",
             "0",
         ],
@@ -380,8 +384,8 @@ fn membership_prove_and_verify_round_trip() {
             receipt.to_str().unwrap(),
             "--proof-out",
             proof.to_str().unwrap(),
-            "--statement-out",
-            statement.to_str().unwrap(),
+            "--public-statement-out",
+            public_statement.to_str().unwrap(),
             "--summary-out",
             summary.to_str().unwrap(),
             "--json",
@@ -390,8 +394,14 @@ fn membership_prove_and_verify_round_trip() {
     let prove_json: serde_json::Value = serde_json::from_slice(&prove.stdout).unwrap();
     assert_eq!(prove_json["version"], "tabula.cli.prove.v1");
     assert!(proof.is_file());
-    assert!(statement.is_file());
+    assert!(public_statement.is_file());
     assert!(summary.is_file());
+    let public_statement_json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&public_statement).unwrap()).unwrap();
+    assert_eq!(
+        public_statement_json["version"],
+        serde_json::json!(tabula_sdk::PublicStatementFile::VERSION)
+    );
 
     let verify = run_ok(
         None,
@@ -401,6 +411,8 @@ fn membership_prove_and_verify_round_trip() {
             program.to_str().unwrap(),
             "--proof",
             proof.to_str().unwrap(),
+            "--statement",
+            public_statement.to_str().unwrap(),
             "--json",
         ],
     );
@@ -468,6 +480,118 @@ fn env_doctor_and_dex_example_support_declarative_capabilities() {
         ],
     );
     assert!(String::from_utf8_lossy(&execute.stdout).contains("swap_exact_base_for_quote"));
+}
+
+#[test]
+fn bank_example_runs_end_to_end() {
+    let dir = temp_dir("bank");
+    let state_after = dir.join("state_after.json");
+
+    run_ok(None, &["example", "bank", "--dir", dir.to_str().unwrap()]);
+
+    let schema = run_ok(
+        None,
+        &[
+            "schema",
+            dir.join("program.tab").to_str().unwrap(),
+            "--json",
+        ],
+    );
+    let schema_json: serde_json::Value = serde_json::from_slice(&schema.stdout).unwrap();
+    assert_eq!(schema_json["transactions"][0]["symbol"], "transfer");
+    assert_eq!(schema_json["transactions"][1]["symbol"], "freeze_account");
+    assert_eq!(schema_json["queries"][0]["symbol"], "balance_of");
+    assert_eq!(schema_json["queries"][2]["symbol"], "can_transfer");
+
+    let balance = run_ok(
+        None,
+        &[
+            "query",
+            "balance_of",
+            "--program",
+            dir.join("program.tab").to_str().unwrap(),
+            "--state",
+            dir.join("state.json").to_str().unwrap(),
+            "--context",
+            dir.join("context.json").to_str().unwrap(),
+            "--args",
+            "[10]",
+            "--json",
+        ],
+    );
+    let balance_json: serde_json::Value = serde_json::from_slice(&balance.stdout).unwrap();
+    assert_eq!(
+        balance_json["returns"][0],
+        serde_json::json!({"kind":"u64","value":900})
+    );
+
+    let can_transfer = run_ok(
+        None,
+        &[
+            "query",
+            "can_transfer",
+            "--program",
+            dir.join("program.tab").to_str().unwrap(),
+            "--state",
+            dir.join("state.json").to_str().unwrap(),
+            "--context",
+            dir.join("context.json").to_str().unwrap(),
+            "--args",
+            "[10,150]",
+            "--json",
+        ],
+    );
+    let can_transfer_json: serde_json::Value =
+        serde_json::from_slice(&can_transfer.stdout).unwrap();
+    assert_eq!(
+        can_transfer_json["returns"][0],
+        serde_json::json!({"kind":"bool","value":true})
+    );
+
+    let execute = run_ok(
+        None,
+        &[
+            "execute",
+            "--program",
+            dir.join("program.tab").to_str().unwrap(),
+            "--state",
+            dir.join("state.json").to_str().unwrap(),
+            "--batch",
+            dir.join("batch.json").to_str().unwrap(),
+            "--context",
+            dir.join("context.json").to_str().unwrap(),
+            "--state-out",
+            state_after.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    let execute_json: serde_json::Value = serde_json::from_slice(&execute.stdout).unwrap();
+    assert_eq!(execute_json["outcomes"][0]["entry"], "transfer");
+    assert_eq!(execute_json["outcomes"][0]["status"]["kind"], "success");
+    assert_eq!(execute_json["outcomes"][0]["event_effect_count"], 1);
+
+    let final_balance = run_ok(
+        None,
+        &[
+            "query",
+            "balance_of",
+            "--program",
+            dir.join("program.tab").to_str().unwrap(),
+            "--state",
+            state_after.to_str().unwrap(),
+            "--context",
+            dir.join("context.json").to_str().unwrap(),
+            "--args",
+            "[10]",
+            "--json",
+        ],
+    );
+    let final_balance_json: serde_json::Value =
+        serde_json::from_slice(&final_balance.stdout).unwrap();
+    assert_eq!(
+        final_balance_json["returns"][0],
+        serde_json::json!({"kind":"u64","value":750})
+    );
 }
 
 #[test]

@@ -5,7 +5,7 @@ pub mod commitments;
 pub mod profiles;
 pub mod tx;
 
-pub use address::{CellKey, ColId, RowKey, TableId};
+pub use address::{ColId, CommittedCellKey, CommittedKey, RowKey, TableId};
 pub use commitments::{ColumnCommitmentId, Digest, StateRoot, TableCommitmentId};
 pub use profiles::{
     ColumnLayoutKind, ColumnProfileId, EncodingProfileId, RootProfileId, RootProofFamilyId,

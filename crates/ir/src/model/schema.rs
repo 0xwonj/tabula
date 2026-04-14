@@ -2,7 +2,7 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
-use tabula_core::PortableValue;
+use tabula_core::{KeyComponentSchema, PortableValue};
 
 use super::{ConstId, ContextFieldId, FieldId, TableId, TypeRef};
 
@@ -20,8 +20,8 @@ pub struct TableSchema {
     pub id: TableId,
     /// Source-level table name.
     pub symbol: String,
-    /// Types of the composite primary key columns (in order).
-    pub key_tys: Vec<TypeRef>,
+    /// Named key components of the composite primary key (in order).
+    pub keys: Vec<KeyComponentSchema>,
     /// Non-key value column definitions.
     pub fields: Vec<FieldSchema>,
 }

@@ -1,7 +1,6 @@
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
 
-use tabula_core::RowKey;
 use tabula_core::error::TabulaError;
 use tabula_profile::{GenericIrFamily, HostValueFamily};
 
@@ -28,32 +27,6 @@ pub fn typed_bool(
         }
         _ => Err(TabulaError::TypeMismatch {
             expected: "Boolean".to_string(),
-            actual: format!("type {}", value.type_id().0),
-        }),
-    }
-}
-
-/// Interpret one typed value as a row key.
-pub fn typed_row_key(
-    value: &TypedValue,
-    type_runtimes: &TypeRuntimeRegistry,
-) -> Result<RowKey, TabulaError> {
-    let runtime = type_runtimes.resolve(value.type_id())?;
-    let descriptor = runtime.descriptor();
-    match (&descriptor.generic_ir_family, &descriptor.host_value_family) {
-        (GenericIrFamily::UnsignedInteger, HostValueFamily::UnsignedInt { bits: 64 }) => {
-            let payload: [u8; 8] =
-                value
-                    .payload()
-                    .try_into()
-                    .map_err(|_| TabulaError::TypeMismatch {
-                        expected: "UnsignedInteger(64)".to_string(),
-                        actual: format!("type {}", value.type_id().0),
-                    })?;
-            Ok(RowKey(u64::from_le_bytes(payload)))
-        }
-        _ => Err(TabulaError::TypeMismatch {
-            expected: "UnsignedInteger(64)".to_string(),
             actual: format!("type {}", value.type_id().0),
         }),
     }

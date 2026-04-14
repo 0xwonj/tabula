@@ -185,7 +185,9 @@ pub(super) fn validate_op(
             }
         }
         Op::ReadStateProperty {
-            dsts,
+            dst_value,
+            dst_key_components,
+            dst_is_null,
             table,
             field,
             query,
@@ -196,11 +198,20 @@ pub(super) fn validate_op(
             validate_state_property_query(
                 query, key_tys, context, consts, params, locals, assigned,
             )?;
-            validate_property_dsts(query, dsts, field_ty, key_tys, locals)?;
-            for dst in dsts {
-                let local_ty = types::local_type(*dst, locals)?;
-                types::assign_local(*dst, local_ty, locals, assigned)?;
+            validate_property_dsts(
+                query,
+                *dst_value,
+                dst_key_components,
+                *dst_is_null,
+                field_ty,
+                key_tys,
+                locals,
+            )?;
+            types::assign_local(*dst_value, field_ty, locals, assigned)?;
+            for (dst, key_ty) in dst_key_components.iter().zip(key_tys.iter()) {
+                types::assign_local(*dst, *key_ty, locals, assigned)?;
             }
+            types::assign_local(*dst_is_null, TYPE_BOOL_ID, locals, assigned)?;
         }
         Op::Assert { cond, .. } => {
             types::ensure_type(
@@ -354,7 +365,9 @@ pub(super) fn validate_state_property_query(
 
 pub(super) fn validate_property_dsts(
     query: &StatePropertyQuery,
-    dsts: &[LocalId],
+    dst_value: LocalId,
+    dst_key_components: &[LocalId],
+    dst_is_null: LocalId,
     field_ty: TypeRef,
     key_tys: &[TypeRef],
     locals: &BTreeMap<LocalId, TypeRef>,
@@ -364,25 +377,25 @@ pub(super) fn validate_property_dsts(
         | StatePropertyQuery::Maximum
         | StatePropertyQuery::Successor { .. }
         | StatePropertyQuery::Predecessor { .. } => {
-            if dsts.len() != 3 {
+            if dst_key_components.len() != key_tys.len() {
                 return Err(TabulaError::InvalidIr(
-                    "row-oriented property reads require exactly 3 destinations".into(),
+                    "property reads must declare one key destination per key component".into(),
                 ));
             }
             types::ensure_type(
-                types::local_type(dsts[0], locals)?,
+                types::local_type(dst_value, locals)?,
                 field_ty,
                 "property value dst type mismatch",
             )?;
-            if let [key_ty] = key_tys {
+            for (dst, key_ty) in dst_key_components.iter().zip(key_tys.iter()) {
                 types::ensure_type(
-                    types::local_type(dsts[1], locals)?,
+                    types::local_type(*dst, locals)?,
                     *key_ty,
                     "property key dst type mismatch",
                 )?;
             }
             types::ensure_type(
-                types::local_type(dsts[2], locals)?,
+                types::local_type(dst_is_null, locals)?,
                 TYPE_BOOL_ID,
                 "property null-flag dst type mismatch",
             )?;

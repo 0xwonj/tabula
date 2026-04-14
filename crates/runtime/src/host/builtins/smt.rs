@@ -4,21 +4,21 @@ use tabula_chips::shards::memory::MemoryShardChip;
 use tabula_chips::shards::meta::MetaShardChip;
 use tabula_chips::shards::smt_state::SmtStateShardChip;
 use tabula_commitment::{PoseidonHasher, compute_column_root_binding_prefix_digest};
-use tabula_core::{ColumnLayoutKind, PropertyQueryKind, SchemeId};
+use tabula_core::{ColumnLayoutKind, CommittedPropertyQuery, PropertyQueryKind, SchemeId};
 use tabula_ext::ExtError;
 use tabula_ext::scheme::RuntimeColumn;
 use tabula_ext::scheme::{
     ColumnBackendFactory, ColumnBackendSetup, ColumnVerifierContract, MaterializedColumnBackend,
     RootBindingContract,
 };
-use tabula_ir::StatePropertyQuery;
 use tabula_machine::SetupError;
 use tabula_machine::backend::{AnyRap, ColumnChipSet, ProofColumn};
+use tabula_profile::{ENCODING_BOOL_ID, ENCODING_I64_ID, ENCODING_U64_ID};
 use tabula_stark::chips::ChipIdAllocator;
 use tabula_stark::trace::DynChip;
+use tabula_types::{CommittedColumnEntry, TypeRuntime, TypedCommittedPropertyQueryResult};
 #[cfg(feature = "prove")]
-use tabula_types::EncodingRuntime;
-use tabula_types::{TypeRuntime, TypedColumnEntry, TypedPropertyQueryResult};
+use tabula_types::{EncodingRuntime, TableKeyCodec};
 #[cfg(feature = "prove")]
 use tabula_witness::stark::schemes::smt::{PreparedSmtProof, SmtProofInput, prepare_smt_proof};
 
@@ -37,6 +37,8 @@ struct SmtBackendState {
     type_runtime: Arc<dyn TypeRuntime>,
     #[cfg(feature = "prove")]
     encoding_runtime: Arc<dyn EncodingRuntime>,
+    #[cfg(feature = "prove")]
+    key_codec: Arc<TableKeyCodec>,
     receives_commitment: bool,
     root_binding_contract: RootBindingContract,
 }
@@ -90,13 +92,14 @@ impl<const W: usize> ColumnBackendFactory for SmtScheme<W> {
         setup: ColumnBackendSetup<'_>,
     ) -> Result<MaterializedColumnBackend, ExtError> {
         validate_profile_setup(&setup, self.name(), ColumnLayoutKind::SMT_V1)?;
+        validate_private_tree_locator_setup(&setup, self.name())?;
         let root_binding_contract = RootBindingContract {
             root_binding_family: setup.profile.root_binding_family(),
             column_profile_hash: setup.profile.column_profile.profile_hash,
             binding_digest: compute_column_root_binding_prefix_digest(
                 &PoseidonHasher::new(),
-                setup.table_id,
-                setup.col_id,
+                setup.table.id,
+                setup.column.id,
                 setup.profile.root_binding_family(),
                 &setup.profile.column_profile.profile_hash,
             ),
@@ -108,25 +111,27 @@ impl<const W: usize> ColumnBackendFactory for SmtScheme<W> {
             verifier_digest_format: setup.profile.verifier_digest_format(),
         };
         let state = SmtBackendState {
-            table_id: setup.table_id,
-            col_id: setup.col_id,
+            table_id: setup.table.id,
+            col_id: setup.column.id,
             scheme_id: setup.profile.scheme_profile.scheme_family_id,
             #[cfg(feature = "prove")]
             type_runtime: Arc::clone(&setup.type_runtime),
             #[cfg(feature = "prove")]
             encoding_runtime: Arc::clone(&setup.encoding_runtime),
+            #[cfg(feature = "prove")]
+            key_codec: Arc::clone(&setup.key_codec),
             receives_commitment: setup.profile.receives_commitment(),
             root_binding_contract: root_binding_contract.clone(),
         };
 
         Ok(MaterializedColumnBackend {
-            table_id: setup.table_id,
-            col_id: setup.col_id,
-            required_property_query_kinds: setup.required_property_query_kinds.clone(),
+            table_id: setup.table.id,
+            col_id: setup.column.id,
+            required_property_query_kinds: setup.column.required_property_queries.clone(),
             runtime_column: Arc::new(SmtRuntimeColumn {
                 state: SmtRuntimeState {
-                    table_id: setup.table_id,
-                    col_id: setup.col_id,
+                    table_id: setup.table.id,
+                    col_id: setup.column.id,
                     type_runtime: Arc::clone(&setup.type_runtime),
                 },
             }),
@@ -154,10 +159,34 @@ fn validate_profile_setup(
             setup.profile.proof_layout_family().0,
         )));
     }
-    if let Some(kind) = setup.required_property_query_kinds.iter().next() {
+    if let Some(kind) = setup.column.required_property_queries.iter().next() {
         return Err(ExtError::validation(format!(
             "scheme '{scheme_name}' does not support property query {:?} for table {} col {}",
-            kind, setup.table_id.0, setup.col_id.0,
+            kind, setup.table.id.0, setup.column.id.0,
+        )));
+    }
+    Ok(())
+}
+
+fn validate_private_tree_locator_setup(
+    setup: &ColumnBackendSetup<'_>,
+    scheme_name: &str,
+) -> Result<(), ExtError> {
+    let unsupported = setup
+        .key_codec
+        .contract()
+        .component_encoding_profile_ids
+        .iter()
+        .find(|encoding_profile_id| {
+            !matches!(
+                **encoding_profile_id,
+                ENCODING_U64_ID | ENCODING_I64_ID | ENCODING_BOOL_ID
+            )
+        });
+    if let Some(encoding_profile_id) = unsupported {
+        return Err(ExtError::validation(format!(
+            "scheme '{scheme_name}' only supports private u64-decodable key payload locators; unsupported key encoding {} for table {}",
+            encoding_profile_id.0, setup.table.id.0,
         )));
     }
     Ok(())
@@ -175,9 +204,9 @@ impl RuntimeColumn for SmtRuntimeColumn {
 
     fn resolve_property(
         &self,
-        query: &StatePropertyQuery,
-        _state: &[TypedColumnEntry],
-    ) -> Result<TypedPropertyQueryResult, tabula_core::error::TabulaError> {
+        query: &CommittedPropertyQuery,
+        _state: &[CommittedColumnEntry],
+    ) -> Result<TypedCommittedPropertyQueryResult, tabula_core::error::TabulaError> {
         Err(tabula_core::error::TabulaError::InvalidIr(format!(
             "column scheme '{}' does not implement property query {:?} for table {} col {}",
             self.name(),
@@ -192,14 +221,14 @@ impl RuntimeColumn for SmtRuntimeColumn {
     }
 }
 
-fn property_query_kind(query: &StatePropertyQuery) -> PropertyQueryKind {
+fn property_query_kind(query: &CommittedPropertyQuery) -> PropertyQueryKind {
     match query {
-        StatePropertyQuery::Minimum => PropertyQueryKind::Minimum,
-        StatePropertyQuery::Maximum => PropertyQueryKind::Maximum,
-        StatePropertyQuery::Successor { .. } => PropertyQueryKind::Successor,
-        StatePropertyQuery::Predecessor { .. } => PropertyQueryKind::Predecessor,
-        StatePropertyQuery::NonExistenceRange { .. } => PropertyQueryKind::NonExistenceRange,
-        StatePropertyQuery::Aggregate { .. } => PropertyQueryKind::Aggregate,
+        CommittedPropertyQuery::Minimum => PropertyQueryKind::Minimum,
+        CommittedPropertyQuery::Maximum => PropertyQueryKind::Maximum,
+        CommittedPropertyQuery::Successor { .. } => PropertyQueryKind::Successor,
+        CommittedPropertyQuery::Predecessor { .. } => PropertyQueryKind::Predecessor,
+        CommittedPropertyQuery::NonExistenceRange { .. } => PropertyQueryKind::NonExistenceRange,
+        CommittedPropertyQuery::Aggregate { .. } => PropertyQueryKind::Aggregate,
     }
 }
 
@@ -296,6 +325,7 @@ impl<const W: usize> ColumnProofBackend for SmtProofBackend<W> {
             col: context.column.col,
             type_runtime: self.state.type_runtime.as_ref(),
             encoding_runtime: self.state.encoding_runtime.as_ref(),
+            key_codec: self.state.key_codec.as_ref(),
             old_entries: &context.old_entries,
             init_cells: &context.column.init_cells,
             access_events: &context.column.access_events,

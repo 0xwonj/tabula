@@ -11,8 +11,10 @@ use tabula_stark::air::columns::borrow_cols_mut;
 use tabula_stark::trace::TraceGenerator;
 use tabula_stark::trace::contributor::{TraceContributor, TracePhase, WitnessStore};
 use tabula_stark::trace::trace_map::TraceMap;
+use tabula_types::NativeKeyPayload;
 
 use crate::ChipSpec;
+use crate::execution::native_key_payload_prefix3;
 use crate::poseidon::constants::poseidon2_permutation;
 
 use super::air::SmtStateShardChip;
@@ -27,8 +29,8 @@ pub const SMT_STATE_WITNESS_LABEL: &str = "smt_state_witness";
 /// Witness for one row-level SMT path.
 #[derive(Debug, Clone)]
 pub struct SmtStatePathWitness<const W: usize> {
-    /// Row key proved by this path.
-    pub key: u64,
+    /// Canonical committed-key payload proved by this path.
+    pub key: NativeKeyPayload,
     /// Old value at the key, or zeros when absent.
     pub old_val: [KoalaBear; W],
     /// New value at the key, or zeros when absent.
@@ -121,7 +123,8 @@ pub fn generate_smt_state_shard_trace<const W: usize>(
             cols.is_real = KoalaBear::ONE;
             cols.table_id = KoalaBear::new(witness.table_id);
             cols.col_id = KoalaBear::new(witness.col_id as u32);
-            cols.key.populate(path.key);
+            cols.key
+                .populate_payload(&native_key_payload_prefix3(&path.key));
             cols.old_val = path.old_val;
             cols.new_val = path.new_val;
             cols.old_is_null = bool_fe(path.old_is_null);

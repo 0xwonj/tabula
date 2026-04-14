@@ -3,7 +3,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::{PortableValue, RowKey};
+use crate::{CommittedKey, PortableValue};
 
 /// Kind of structural property query on committed column state.
 ///
@@ -38,6 +38,28 @@ pub enum PropertyQueryKind {
     Aggregate,
 }
 
+/// Kind of aggregate property query over an ordered column.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub enum PropertyAggregateKind {
+    /// Sum of all values in the column.
+    Sum,
+    /// Count of rows in the column.
+    Count,
+}
+
 impl PropertyQueryKind {
     /// Canonical proof-time ordinal used in execution/property traces.
     pub const fn ordinal(self) -> u8 {
@@ -52,13 +74,44 @@ impl PropertyQueryKind {
     }
 }
 
+/// Canonical committed-key structural query over one state column.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub enum CommittedPropertyQuery {
+    /// The minimum key in the column.
+    Minimum,
+    /// The maximum key in the column.
+    Maximum,
+    /// The successor of a given committed key.
+    Successor {
+        /// The committed key whose successor should be resolved.
+        key: CommittedKey,
+    },
+    /// The predecessor of a given committed key.
+    Predecessor {
+        /// The committed key whose predecessor should be resolved.
+        key: CommittedKey,
+    },
+    /// Prove that no keys exist in the given committed-key range.
+    NonExistenceRange {
+        /// Inclusive lower bound.
+        lower: CommittedKey,
+        /// Exclusive upper bound.
+        upper: CommittedKey,
+    },
+    /// Aggregate over the entire column.
+    Aggregate {
+        /// The aggregate operation to compute.
+        kind: PropertyAggregateKind,
+    },
+}
+
 /// Canonical result of evaluating a property query against committed state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PropertyQueryResult {
     /// The resolved value.
     pub value: PortableValue,
-    /// The key at which the value was found (None if not applicable).
-    pub key: Option<RowKey>,
+    /// The committed key at which the value was found (None if not applicable).
+    pub key: Option<CommittedKey>,
     /// Whether the result is null (no matching row).
     pub is_null: bool,
 }
@@ -68,10 +121,12 @@ pub struct PropertyQueryResult {
 pub struct PropertyReadResult {
     /// Zero-based index of the instruction within the tx body.
     pub instruction_index: usize,
+    /// The committed structural query.
+    pub query: CommittedPropertyQuery,
     /// The resolved value.
     pub value: PortableValue,
-    /// The key at which the value was found (None if not applicable).
-    pub key: Option<RowKey>,
+    /// The committed key at which the value was found (None if not applicable).
+    pub key: Option<CommittedKey>,
     /// Whether the result is null (no matching row).
     pub is_null: bool,
 }

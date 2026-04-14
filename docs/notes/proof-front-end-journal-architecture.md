@@ -5,7 +5,7 @@
 > **Scope**: Defines the ideal post-migration proof front-end architecture for
 > runtime-owned proving preparation.
 > **Related**: [profile-native-runtime-migration-plan.md](profile-native-runtime-migration-plan.md),
-> [canonical-vocabulary.md](canonical-vocabulary.md),
+> [verification vocabulary](../design/architecture.md#verification-vocabulary),
 > [executor-proof-codesign-architecture.md](executor-proof-codesign-architecture.md),
 > [execution-proof-redesign-workplan.md](execution-proof-redesign-workplan.md),
 > [witness-partition-and-batch-proof-plan-architecture.md](witness-partition-and-batch-proof-plan-architecture.md),

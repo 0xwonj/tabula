@@ -11,6 +11,7 @@ tabula-core = { workspace = true, features = ["test-utils"] }
 tabula-ir = { workspace = true }
 tabula-profile = { workspace = true }
 tabula-runtime = { workspace = true, features = ["prove"] }
+tabula-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"

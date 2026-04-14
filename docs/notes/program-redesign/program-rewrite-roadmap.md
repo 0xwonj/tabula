@@ -1,5 +1,10 @@
 # Program Rewrite Roadmap
 
+> Historical note: this roadmap contains intermediate claim-first terminology in
+> some later sections.
+> Current canonical verification vocabulary and verifier model live in
+> [`../../design/architecture.md#verification-vocabulary`](../../design/architecture.md#verification-vocabulary).
+
 > **Status**: Updated implementation roadmap through V3 structured control and
 > core-first native proving
 > **Date**: 2026-03-25
@@ -16,7 +21,7 @@
 > [program-canonical-ir-contract-and-data-model.md](program-canonical-ir-contract-and-data-model.md),
 > [program-typing-and-effect-system.md](program-typing-and-effect-system.md),
 > [program-final-seam-decisions.md](program-final-seam-decisions.md),
-> [../canonical-vocabulary.md](../canonical-vocabulary.md)
+> [verification vocabulary](../../design/architecture.md#verification-vocabulary)
 
 ---
 

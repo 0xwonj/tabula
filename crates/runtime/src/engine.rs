@@ -1,162 +1,256 @@
 //! Native execution and proving runtime built on `tabula_ir`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(feature = "prove")]
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use borsh::{BorshDeserialize, BorshSerialize};
-use serde::{Deserialize, Serialize};
+use borsh::BorshSerialize;
 use sha2::Digest as _;
-use tabula_chips::relation_table::RELATION_TABLE_CHIP_ID;
-use tabula_commitment::NativeDigest;
-#[cfg(feature = "verify")]
+#[cfg(feature = "prove")]
+use tabula_chips::execution::MAX_SLOTS;
+#[cfg(feature = "prove")]
+use tabula_chips::execution::trace::InstructionRecord;
 use tabula_commitment::PoseidonHasher;
 use tabula_compiler::RegisteredProgram;
 #[cfg(feature = "prove")]
 use tabula_contract::TupleEncodingDefaults;
-use tabula_contract::{ProgramBinding, ProofStatement, StaticTableArtifact};
+use tabula_contract::{
+    ArtifactContext, BoundStatement, ProgramBinding, PublicStatement, StaticTableArtifact,
+};
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
-use tabula_core::{CellKey, ColId, Digest, PortableValue, RootProfileId, RowKey, TableId};
+use tabula_core::{ColId, CommittedCellKey, CommittedKey, Digest, PortableValue, TableId};
 use tabula_executor as exec;
 #[cfg(feature = "prove")]
 use tabula_ext::backend::column::{ColumnProofContext, PreparedColumnDelta, PreparedColumnProof};
-use tabula_ext::backend::execution::{IrHashExecutionBackend, RelationExecutionBackend};
 #[cfg(feature = "prove")]
 use tabula_ext::root::{RootBackendBundle, RootWitnessContext};
 #[cfg(all(feature = "verify", not(feature = "prove")))]
 use tabula_ext::root::{RootProofBackend, SmtRootProofBackend};
-use tabula_ext::scheme::{ColumnBackendSetup, MaterializedColumnBackend};
 use tabula_ir as ir;
 #[cfg(feature = "prove")]
-use tabula_machine::{
-    ColumnSlotKey, PreparedColumnInput, PreparedMachineInput, PreparedTierInput, PublicStatement,
-};
+use tabula_machine::{ColumnSlotKey, PreparedColumnInput, PreparedMachineInput, PreparedTierInput};
 use tabula_machine::{TabulaMachine, TabulaProof, TabulaStarkConfig};
-use tabula_profile::ResolvedColumnProfileRef;
-use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedColumnEntry, TypedValue};
+#[cfg(feature = "prove")]
+use tabula_types::CommittedColumnEntry;
+use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue};
 #[cfg(feature = "prove")]
 use tabula_witness::stark::prepare_execution_store;
 #[cfg(feature = "prove")]
-use tabula_witness::stark::{LowerSuccessfulTxInput, lower_successful_tx, merge_lowering_outputs};
+use tabula_witness::stark::{
+    ContextPreludeSlot, LowerSuccessfulTxInput, ParamPreludeSlot, lower_successful_tx,
+    merge_lowering_outputs,
+};
 #[cfg(feature = "prove")]
-use tabula_witness::{AccessEvent, ColumnWrite, CommittedEntry, InitCell, prepare_relation_proof};
+use tabula_witness::{
+    AccessEvent, ColumnWrite, CommittedEntry, InitCell, PropertyReadClaim, prepare_relation_proof,
+};
 
-use crate::bootstrap::machine::{
-    attach_execution_backend, build_machine_builder, supported_root_binding_families,
+use crate::bootstrap::program::{
+    RelationPolicy, build_registered_program_machine, resolve_program_setup,
+    validate_core_first_program,
 };
 use crate::error::RuntimeError;
-use crate::host::{HostEnvironment, SchemeFactoryMap, V1PropertyReads};
+use crate::host::HostEnvironment;
 #[cfg(feature = "prove")]
 use crate::proof_summary::ProofSummary;
 use crate::semantics as runtime_ir;
+use crate::state_runtime::ResolvedStateRuntime;
+use crate::verifier::{verify_proof_with_context, verify_public_statement_with_context};
 
-#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+type LogicalStateCell = (ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue);
+
+#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize)]
 struct SnapshotCellRecord {
-    key: CellKey,
+    key: CommittedCellKey,
     value: PortableValue,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct SnapshotCellJson {
-    table: ir::TableId,
-    row: RowKey,
-    field: ir::FieldId,
-    value: PortableValue,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct StateSnapshotJson {
-    known_tables: Vec<ir::TableId>,
-    cells: Vec<SnapshotCellJson>,
 }
 
 /// Proof-capable committed state input for the native runtime.
-#[derive(Debug, Clone, Default, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub struct StateSnapshot {
-    known_tables: BTreeSet<TableId>,
-    cells: BTreeMap<CellKey, PortableValue>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommittedStateSnapshot {
+    cells: BTreeMap<CommittedCellKey, PortableValue>,
 }
 
-impl StateSnapshot {
-    /// Create an empty state snapshot for one validated program.
-    pub fn empty(program: &ir::Program) -> Self {
+impl CommittedStateSnapshot {
+    /// Create an empty committed snapshot.
+    pub(crate) fn empty() -> Self {
         Self {
-            known_tables: program
-                .state
-                .tables
-                .iter()
-                .map(|table| table.id.into())
-                .collect(),
             cells: BTreeMap::new(),
         }
     }
 
-    /// Build one state snapshot from explicit committed cells.
-    pub fn from_cells<I>(program: &ir::Program, cells: I) -> Result<Self, RuntimeError>
+    /// Build one committed snapshot from logical key tuples.
+    pub(crate) fn from_cells<I>(
+        state_runtime: &ResolvedStateRuntime,
+        type_runtimes: &TypeRuntimeRegistry,
+        cells: I,
+    ) -> Result<Self, RuntimeError>
     where
-        I: IntoIterator<Item = (ir::TableId, RowKey, ir::FieldId, PortableValue)>,
+        I: IntoIterator<Item = (ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue)>,
     {
-        let mut snapshot = Self::empty(program);
-        for (table, row, field, value) in cells {
-            snapshot.insert(program, table, row, field, value)?;
+        let mut snapshot = Self::empty();
+        for (table, key, field, value) in cells {
+            snapshot.insert(state_runtime, type_runtimes, table, &key, field, value)?;
         }
         Ok(snapshot)
     }
 
-    /// Insert one committed cell after validating it against the sealed program schema.
-    pub fn insert(
+    fn from_committed_cells<I>(
+        state_runtime: &ResolvedStateRuntime,
+        type_runtimes: &TypeRuntimeRegistry,
+        cells: I,
+    ) -> Result<Self, RuntimeError>
+    where
+        I: IntoIterator<Item = (ir::TableId, Vec<u8>, ir::FieldId, PortableValue)>,
+    {
+        let mut snapshot = Self::empty();
+        for (table, key, field, value) in cells {
+            let cell_key = CommittedCellKey {
+                table: table.into(),
+                col: field.into(),
+                key: CommittedKey(key),
+            };
+            if snapshot.cells.contains_key(&cell_key) {
+                return Err(RuntimeError::ValidationFailed {
+                    detail: format!(
+                        "duplicate committed cell {}.{} key {} in external snapshot payload",
+                        cell_key.table.0, cell_key.col.0, cell_key.key
+                    ),
+                });
+            }
+            snapshot.insert_materialized(cell_key, value);
+        }
+        snapshot.validate(state_runtime, type_runtimes)?;
+        Ok(snapshot)
+    }
+
+    /// Insert one committed cell after validating it against the sealed state contract.
+    pub(crate) fn insert(
         &mut self,
-        program: &ir::Program,
+        state_runtime: &ResolvedStateRuntime,
+        type_runtimes: &TypeRuntimeRegistry,
         table: ir::TableId,
-        row: RowKey,
+        key: &[PortableValue],
         field: ir::FieldId,
         value: PortableValue,
     ) -> Result<(), RuntimeError> {
-        let field_schema = program
-            .state
-            .tables
-            .iter()
-            .find(|schema| schema.id == table)
-            .and_then(|schema| schema.fields.iter().find(|candidate| candidate.id == field))
-            .ok_or_else(|| RuntimeError::ValidationFailed {
-                detail: format!("unknown state field {}.{}", table.0, field.0),
+        let field_schema = state_runtime
+            .column_contract(table.into(), field.into())
+            .map_err(|error| RuntimeError::ValidationFailed {
+                detail: error.to_string(),
             })?;
+        let table_key_codec = state_runtime.key_codec(table.into()).map_err(|error| {
+            RuntimeError::ValidationFailed {
+                detail: error.to_string(),
+            }
+        })?;
+        let typed_key = key
+            .iter()
+            .map(|value| type_runtimes.decode_portable(value))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| RuntimeError::ValidationFailed {
+                detail: error.to_string(),
+            })?;
+        let committed_key = table_key_codec.encode_tuple(&typed_key).map_err(|error| {
+            RuntimeError::ValidationFailed {
+                detail: error.to_string(),
+            }
+        })?;
         if value.type_id() != field_schema.ty {
             return Err(RuntimeError::ValidationFailed {
                 detail: format!(
-                    "state cell {}.{} row {} stores type {} but field expects {}",
+                    "state cell {}.{} key {} stores type {} but field expects {}",
                     table.0,
                     field.0,
-                    row.0,
+                    committed_key,
                     value.type_id().0,
                     field_schema.ty.0,
                 ),
             });
         }
-        self.known_tables.insert(table.into());
         self.cells.insert(
-            CellKey {
+            CommittedCellKey {
                 table: table.into(),
                 col: field.into(),
-                row,
+                key: committed_key,
             },
             value,
         );
         Ok(())
     }
 
-    /// Iterate committed cells in canonical `(table, col, row)` order.
-    pub fn cells(&self) -> impl Iterator<Item = (&CellKey, &PortableValue)> {
-        self.cells.iter()
+    fn insert_materialized(&mut self, key: CommittedCellKey, value: PortableValue) {
+        self.cells.insert(key, value);
     }
 
-    /// Remove one committed cell from the snapshot.
-    pub fn remove(&mut self, table: ir::TableId, row: RowKey, field: ir::FieldId) {
-        self.cells.remove(&CellKey {
+    fn remove_materialized(&mut self, table: ir::TableId, key: &CommittedKey, field: ir::FieldId) {
+        self.cells.remove(&CommittedCellKey {
             table: table.into(),
             col: field.into(),
-            row,
+            key: key.clone(),
         });
+    }
+
+    fn validate(
+        &self,
+        state_runtime: &ResolvedStateRuntime,
+        type_runtimes: &TypeRuntimeRegistry,
+    ) -> Result<(), RuntimeError> {
+        for (key, value) in &self.cells {
+            let column = state_runtime
+                .column_contract(key.table, key.col)
+                .map_err(|error| RuntimeError::ValidationFailed {
+                    detail: error.to_string(),
+                })?;
+            if value.type_id() != column.ty {
+                return Err(RuntimeError::ValidationFailed {
+                    detail: format!(
+                        "committed cell {}.{} key {} stores type {} but field expects {}",
+                        key.table.0,
+                        key.col.0,
+                        key.key,
+                        value.type_id().0,
+                        column.ty.0,
+                    ),
+                });
+            }
+            let table_key_codec = state_runtime.key_codec(key.table).map_err(|error| {
+                RuntimeError::ValidationFailed {
+                    detail: error.to_string(),
+                }
+            })?;
+            let decoded = table_key_codec.decode_key(&key.key).map_err(|error| {
+                RuntimeError::ValidationFailed {
+                    detail: error.to_string(),
+                }
+            })?;
+            let reencoded = table_key_codec.encode_tuple(&decoded).map_err(|error| {
+                RuntimeError::ValidationFailed {
+                    detail: error.to_string(),
+                }
+            })?;
+            if reencoded != key.key {
+                return Err(RuntimeError::ValidationFailed {
+                    detail: format!(
+                        "committed cell {}.{} key {} is not canonical",
+                        key.table.0, key.col.0, key.key
+                    ),
+                });
+            }
+            type_runtimes.decode_portable(value).map_err(|error| {
+                RuntimeError::ValidationFailed {
+                    detail: error.to_string(),
+                }
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Iterate committed cells in canonical `(table, col, committed_key)` order.
+    pub fn cells(&self) -> impl Iterator<Item = (&CommittedCellKey, &PortableValue)> {
+        self.cells.iter()
     }
 
     /// Serialize the snapshot canonically for transcript or external binding.
@@ -165,11 +259,11 @@ impl StateSnapshot {
             .cells
             .iter()
             .map(|(key, value)| SnapshotCellRecord {
-                key: *key,
+                key: key.clone(),
                 value: value.clone(),
             })
             .collect::<Vec<_>>();
-        let mut bytes = b"tabula.runtime.state_snapshot.v1".to_vec();
+        let mut bytes = b"tabula.runtime.committed_state_snapshot.v1".to_vec();
         bytes.extend(
             borsh::to_vec(&records).map_err(|error| RuntimeError::ValidationFailed {
                 detail: format!("failed to encode state snapshot: {error}"),
@@ -184,27 +278,28 @@ impl StateSnapshot {
         Ok(sha2::Sha256::digest(bytes).into())
     }
 
-    fn typed_column_entries(
+    #[cfg(feature = "prove")]
+    fn committed_column_entries(
         &self,
         table: TableId,
         col: ColId,
         type_runtimes: &TypeRuntimeRegistry,
-    ) -> Result<Vec<TypedColumnEntry>, RuntimeError> {
+    ) -> Result<Vec<CommittedColumnEntry>, RuntimeError> {
         self.cells
             .iter()
             .filter(|(key, _)| key.table == table && key.col == col)
             .map(|(key, value)| {
                 type_runtimes
                     .decode_portable(value)
-                    .map(|typed| TypedColumnEntry {
-                        row_key: key.row,
+                    .map(|typed| CommittedColumnEntry {
+                        key: key.key.clone(),
                         value: typed,
                         is_null: false,
                     })
                     .map_err(|error| RuntimeError::ValidationFailed {
                         detail: format!(
                             "failed to decode committed cell ({}, {}, {}): {error}",
-                            key.table.0, key.col.0, key.row.0
+                            key.table.0, key.col.0, key.key
                         ),
                     })
             })
@@ -218,11 +313,11 @@ impl StateSnapshot {
         col: ColId,
         type_runtimes: &TypeRuntimeRegistry,
     ) -> Result<Vec<CommittedEntry>, RuntimeError> {
-        self.typed_column_entries(table, col, type_runtimes)?
+        self.committed_column_entries(table, col, type_runtimes)?
             .into_iter()
             .map(|entry| {
                 Ok(CommittedEntry {
-                    row: entry.row_key,
+                    key: entry.key,
                     value: entry.value,
                     is_null: entry.is_null,
                 })
@@ -231,70 +326,22 @@ impl StateSnapshot {
     }
 }
 
-impl Serialize for StateSnapshot {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let json = StateSnapshotJson {
-            known_tables: self
-                .known_tables
-                .iter()
-                .copied()
-                .map(|table| ir::TableId(table.0))
-                .collect(),
-            cells: self
-                .cells
-                .iter()
-                .map(|(key, value)| SnapshotCellJson {
-                    table: ir::TableId(key.table.0),
-                    row: key.row,
-                    field: ir::FieldId(key.col.0),
-                    value: value.clone(),
-                })
-                .collect(),
-        };
-        json.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for StateSnapshot {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let json = StateSnapshotJson::deserialize(deserializer)?;
-        Ok(Self {
-            known_tables: json
-                .known_tables
-                .into_iter()
-                .map(|table| TableId(table.0))
-                .collect(),
-            cells: json
-                .cells
-                .into_iter()
-                .map(|cell| {
-                    (
-                        CellKey {
-                            table: TableId(cell.table.0),
-                            col: ColId(cell.field.0),
-                            row: cell.row,
-                        },
-                        cell.value,
-                    )
-                })
-                .collect(),
-        })
-    }
-}
-
-impl StateView for StateSnapshot {
-    fn read(&self, key: &CellKey) -> Result<Option<PortableValue>, TabulaError> {
+impl StateView for CommittedStateSnapshot {
+    fn read(&self, key: &CommittedCellKey) -> Result<Option<PortableValue>, TabulaError> {
         Ok(self.cells.get(key).cloned())
     }
 
-    fn table_exists(&self, table: TableId) -> bool {
-        self.known_tables.contains(&table)
+    fn column_entries(
+        &self,
+        table: TableId,
+        col: ColId,
+    ) -> Result<Vec<(CommittedKey, PortableValue)>, TabulaError> {
+        Ok(self
+            .cells
+            .iter()
+            .filter(|(key, _)| key.table == table && key.col == col)
+            .map(|(key, value)| (key.key.clone(), value.clone()))
+            .collect())
     }
 }
 
@@ -302,7 +349,7 @@ impl StateView for StateSnapshot {
 #[cfg(feature = "prove")]
 pub struct ProveInput<'a> {
     /// Committed pre-state.
-    pub snapshot: &'a StateSnapshot,
+    pub snapshot: &'a CommittedStateSnapshot,
     /// Applied transactions.
     pub batch: &'a ir::EntryBatch,
     /// Public context values.
@@ -316,8 +363,6 @@ pub struct ProveInput<'a> {
 pub struct ProveResult {
     /// Generated STARK proof.
     pub proof: TabulaProof,
-    /// Transcript-bound native proof statement.
-    pub statement: ProofStatement,
     /// Human-readable machine summary.
     pub summary: ProofSummary,
 }
@@ -327,8 +372,6 @@ pub struct ProveResult {
 pub struct VerifiedResult {
     /// Generated STARK proof.
     pub proof: TabulaProof,
-    /// Transcript-bound native proof statement.
-    pub statement: ProofStatement,
     /// Whether verification passed.
     pub verified: bool,
     /// Human-readable machine summary.
@@ -340,13 +383,13 @@ pub struct VerifiedResult {
 #[derive(Debug, Clone)]
 pub struct ExecutionReceipt {
     /// The committed pre-state used for execution.
-    pub snapshot: StateSnapshot,
+    pub snapshot: CommittedStateSnapshot,
     /// The exact portable entry batch that was executed.
     pub batch: ir::EntryBatch,
     /// The exact portable context input used for execution.
     pub context: ir::ContextInput,
     /// The committed post-state after applying the journal's final writes.
-    pub state_after: StateSnapshot,
+    pub state_after: CommittedStateSnapshot,
     /// The underlying native execution journal.
     pub journal: exec::ExecutionJournal,
 }
@@ -360,14 +403,13 @@ struct ColumnProofSlot {
 }
 
 #[derive(Clone)]
-struct RuntimeCoreProgram {
+struct RuntimeProgramState {
     semantic: runtime_ir::RuntimeProgram,
-    #[cfg(feature = "prove")]
-    column_backends: BTreeMap<(TableId, ColId), MaterializedColumnBackend>,
+    state: ResolvedStateRuntime,
     #[cfg(feature = "prove")]
     column_slots: Vec<ColumnProofSlot>,
-    binding: ProgramBinding,
-    uses_relations: bool,
+    artifact_context: ArtifactContext,
+    relation_policy: RelationPolicy,
     static_table_artifact: StaticTableArtifact,
     #[cfg(feature = "prove")]
     tuple_encoding_defaults: TupleEncodingDefaults,
@@ -386,27 +428,11 @@ pub struct RuntimeBuilder {
     root_proof_backend: Arc<dyn RootProofBackend>,
 }
 
-/// Verifier built once per registered native program.
-pub struct Verifier {
-    binding: ProgramBinding,
-    uses_relations: bool,
-    static_table_artifact: StaticTableArtifact,
-    machine: TabulaMachine,
-}
-
-/// Fluent builder for [`Verifier`].
-pub struct VerifierBuilder {
-    registered_program: RegisteredProgram,
-    host_environment: HostEnvironment,
-    machine_stark_config: TabulaStarkConfig,
-    #[cfg(feature = "prove")]
-    root_backend_bundle: RootBackendBundle,
-    #[cfg(not(feature = "prove"))]
-    root_proof_backend: Arc<dyn RootProofBackend>,
-}
-
 impl RuntimeBuilder {
     fn new(registered_program: RegisteredProgram) -> Result<Self, RuntimeError> {
+        registered_program
+            .validate_sealed_artifact()
+            .map_err(RuntimeError::CompilerValidation)?;
         Ok(Self {
             registered_program,
             host_environment: HostEnvironment::standard()?,
@@ -474,27 +500,27 @@ impl RuntimeBuilder {
         let proof_backend = self.root_backend_bundle.proof_backend();
         #[cfg(not(feature = "prove"))]
         let proof_backend = Arc::clone(&self.root_proof_backend);
-        let resolved_columns = materialize_registered_column_backends(
+        #[cfg(feature = "prove")]
+        let accepted_root_binding_families =
+            self.root_backend_bundle.supported_root_binding_families();
+        #[cfg(not(feature = "prove"))]
+        let accepted_root_binding_families = proof_backend.supported_root_binding_families();
+        let program_setup = resolve_program_setup(
             &self.registered_program,
             self.host_environment.schemes().factories(),
             &type_runtimes,
             &encoding_runtimes,
-            supported_root_binding_families(&proof_backend),
+            accepted_root_binding_families,
         )?;
         #[cfg(feature = "prove")]
-        let column_slots = resolved_columns
-            .column_backends
-            .values()
+        let column_slots = program_setup
+            .resolved_state
+            .backends()
             .map(|backend| ColumnProofSlot {
                 table: backend.table_id,
                 col: backend.col_id,
                 proof_backend: Arc::clone(&backend.proof_backend),
             })
-            .collect::<Vec<_>>();
-        let proof_columns = resolved_columns
-            .column_backends
-            .values()
-            .map(|backend| Arc::clone(&backend.proof_column))
             .collect::<Vec<_>>();
 
         let semantic = runtime_ir::RuntimeProgram::from_validated_program(
@@ -504,29 +530,19 @@ impl RuntimeBuilder {
             detail: error.to_string(),
         })?;
 
-        let uses_relations = program_uses_relations(self.registered_program.program());
-        let mut machine_builder = build_machine_builder(&self.machine_stark_config, proof_backend)
-            .with_columns(proof_columns);
-        if program_uses_hash(self.registered_program.program()) {
-            machine_builder =
-                attach_execution_backend(machine_builder, Arc::new(IrHashExecutionBackend));
-        }
-        if uses_relations {
-            machine_builder =
-                attach_execution_backend(machine_builder, Arc::new(RelationExecutionBackend));
-        }
-        let machine = machine_builder
-            .build()
-            .map_err(RuntimeError::MachineSetup)?;
+        let machine = build_registered_program_machine(
+            &program_setup,
+            &self.machine_stark_config,
+            proof_backend,
+        )?;
 
-        let runtime_program = RuntimeCoreProgram {
+        let runtime_program = RuntimeProgramState {
             semantic,
-            #[cfg(feature = "prove")]
-            column_backends: resolved_columns.column_backends,
+            state: program_setup.resolved_state.clone(),
             #[cfg(feature = "prove")]
             column_slots,
-            binding: self.registered_program.binding().clone(),
-            uses_relations,
+            artifact_context: program_setup.artifact_context,
+            relation_policy: program_setup.relation_policy,
             static_table_artifact: self.registered_program.static_table_artifact().clone(),
             #[cfg(feature = "prove")]
             tuple_encoding_defaults: self.registered_program.tuple_encoding_defaults().clone(),
@@ -543,196 +559,9 @@ impl RuntimeBuilder {
     }
 }
 
-impl Verifier {
-    /// Create a builder for one registered native program.
-    pub fn builder(registered_program: RegisteredProgram) -> Result<VerifierBuilder, RuntimeError> {
-        VerifierBuilder::new(registered_program)
-    }
-
-    /// Borrow the transcript-bound program binding.
-    pub fn binding(&self) -> &ProgramBinding {
-        &self.binding
-    }
-
-    /// The STARK machine backing this verifier.
-    pub fn machine(&self) -> &TabulaMachine {
-        &self.machine
-    }
-
-    /// Verify one native proof against this verifier's binding.
-    pub fn verify(
-        &self,
-        proof: &TabulaProof,
-        statement: &ProofStatement,
-    ) -> Result<(), RuntimeError> {
-        if statement.binding != self.binding {
-            return Err(RuntimeError::ValidationFailed {
-                detail: "proof statement binding does not match the verifier binding".to_string(),
-            });
-        }
-        let expected_digest =
-            statement
-                .statement_hash_bytes()
-                .map_err(|error| RuntimeError::StatementBuild {
-                    detail: error.to_string(),
-                })?;
-        if proof.statement_digest != expected_digest {
-            return Err(RuntimeError::ValidationFailed {
-                detail: "proof statement digest does not match the proof transcript binding"
-                    .to_string(),
-            });
-        }
-        if proof.statement.old_root.to_bytes() != statement.old_state_root
-            || proof.statement.new_root.to_bytes() != statement.new_state_root
-        {
-            return Err(RuntimeError::ValidationFailed {
-                detail: "AIR roots do not match the proof statement".to_string(),
-            });
-        }
-        if statement.static_table_root != self.static_table_artifact.root {
-            return Err(RuntimeError::ValidationFailed {
-                detail: "static table root does not match the verifier's registered program"
-                    .to_string(),
-            });
-        }
-        match relation_table_root_from_proof(proof)? {
-            Some(root) if self.uses_relations => {
-                if root != statement.static_table_root {
-                    return Err(RuntimeError::ValidationFailed {
-                        detail: "relation table chip root does not match the proof statement"
-                            .to_string(),
-                    });
-                }
-            }
-            None if self.uses_relations => {
-                return Err(RuntimeError::ValidationFailed {
-                    detail: "relation table chip opening is missing from the execution proof"
-                        .to_string(),
-                });
-            }
-            _ => {}
-        }
-        self.machine
-            .verify(proof)
-            .map_err(RuntimeError::Verification)
-    }
-}
-
-impl VerifierBuilder {
-    fn new(registered_program: RegisteredProgram) -> Result<Self, RuntimeError> {
-        Ok(Self {
-            registered_program,
-            host_environment: HostEnvironment::standard()?,
-            machine_stark_config: tabula_machine::default_config(),
-            #[cfg(feature = "prove")]
-            root_backend_bundle: RootBackendBundle::standard(),
-            #[cfg(not(feature = "prove"))]
-            root_proof_backend: Arc::new(SmtRootProofBackend),
-        })
-    }
-
-    /// Replace the host-owned runtime registries and scheme factories.
-    pub fn with_host_environment(mut self, host_environment: HostEnvironment) -> Self {
-        self.host_environment = host_environment;
-        self
-    }
-
-    /// Override the machine STARK configuration.
-    pub fn with_machine_stark_config(mut self, machine_stark_config: TabulaStarkConfig) -> Self {
-        self.machine_stark_config = machine_stark_config;
-        self
-    }
-
-    /// Override the root proof backend bundle.
-    #[cfg(feature = "prove")]
-    pub fn with_root_backend_bundle(mut self, root_backend_bundle: RootBackendBundle) -> Self {
-        self.root_backend_bundle = root_backend_bundle;
-        self
-    }
-
-    /// Override the proof-side root backend.
-    #[cfg(not(feature = "prove"))]
-    pub fn with_root_proof_backend(
-        mut self,
-        root_proof_backend: impl RootProofBackend + 'static,
-    ) -> Self {
-        self.root_proof_backend = Arc::new(root_proof_backend);
-        self
-    }
-
-    /// Override the proof-side root backend using a shared backend object.
-    #[cfg(not(feature = "prove"))]
-    pub fn with_root_proof_backend_arc(
-        mut self,
-        root_proof_backend: Arc<dyn RootProofBackend>,
-    ) -> Self {
-        self.root_proof_backend = root_proof_backend;
-        self
-    }
-
-    /// Build the native verifier.
-    pub fn build(self) -> Result<Verifier, RuntimeError> {
-        validate_core_first_program(self.registered_program.program())?;
-        #[cfg(feature = "prove")]
-        let proof_backend = self.root_backend_bundle.proof_backend();
-        #[cfg(not(feature = "prove"))]
-        let proof_backend = Arc::clone(&self.root_proof_backend);
-        let resolved_columns = materialize_registered_column_backends(
-            &self.registered_program,
-            self.host_environment.schemes().factories(),
-            self.host_environment.runtime_registries().type_runtimes(),
-            self.host_environment
-                .runtime_registries()
-                .encoding_runtimes(),
-            supported_root_binding_families(&proof_backend),
-        )?;
-        let proof_columns = resolved_columns
-            .column_backends
-            .into_values()
-            .map(|backend| backend.proof_column)
-            .collect::<Vec<_>>();
-        let uses_relations = program_uses_relations(self.registered_program.program());
-        let mut machine_builder = build_machine_builder(&self.machine_stark_config, proof_backend)
-            .with_columns(proof_columns);
-        if program_uses_hash(self.registered_program.program()) {
-            machine_builder =
-                attach_execution_backend(machine_builder, Arc::new(IrHashExecutionBackend));
-        }
-        if uses_relations {
-            machine_builder =
-                attach_execution_backend(machine_builder, Arc::new(RelationExecutionBackend));
-        }
-        let machine = machine_builder
-            .build()
-            .map_err(RuntimeError::MachineSetup)?;
-        Ok(Verifier {
-            binding: self.registered_program.binding().clone(),
-            uses_relations,
-            static_table_artifact: self.registered_program.static_table_artifact().clone(),
-            machine,
-        })
-    }
-}
-
-fn relation_table_root_from_proof(proof: &TabulaProof) -> Result<Option<Digest>, RuntimeError> {
-    let Some(values) = proof.execution_chip_public_values(RELATION_TABLE_CHIP_ID) else {
-        return Ok(None);
-    };
-    let public_values: [p3_koala_bear::KoalaBear; 8] =
-        values
-            .try_into()
-            .map_err(|_| RuntimeError::ValidationFailed {
-                detail: format!(
-                    "relation table chip exposed {} public values; expected 8",
-                    values.len()
-                ),
-            })?;
-    Ok(Some(NativeDigest(public_values).to_bytes()))
-}
-
 /// Native execution and proving runtime.
 pub struct TabulaRuntime {
-    runtime_program: RuntimeCoreProgram,
+    runtime_program: RuntimeProgramState,
     #[cfg(feature = "prove")]
     root_backend_bundle: RootBackendBundle,
     machine: TabulaMachine,
@@ -761,12 +590,12 @@ impl TabulaRuntime {
 
     /// Borrow the transcript-bound program binding.
     pub fn binding(&self) -> &ProgramBinding {
-        &self.runtime_program.binding
+        &self.runtime_program.artifact_context.binding
     }
 
     /// Borrow the transcript-bound static relation table root.
     pub fn static_table_root(&self) -> Digest {
-        self.runtime_program.static_table_artifact.root
+        self.runtime_program.artifact_context.static_table_root
     }
 
     /// The machine backing native proving and verification.
@@ -785,14 +614,76 @@ impl TabulaRuntime {
     }
 
     /// Create an empty committed state snapshot for this runtime's program.
-    pub fn empty_state_snapshot(&self) -> StateSnapshot {
-        StateSnapshot::empty(self.execution_program().program())
+    pub fn empty_state_snapshot(&self) -> CommittedStateSnapshot {
+        CommittedStateSnapshot::empty()
+    }
+
+    /// Materialize one logical keyed state input into a committed snapshot.
+    pub fn materialize_logical_state<I>(
+        &self,
+        cells: I,
+    ) -> Result<CommittedStateSnapshot, RuntimeError>
+    where
+        I: IntoIterator<Item = (ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue)>,
+    {
+        CommittedStateSnapshot::from_cells(&self.runtime_program.state, self.type_runtimes(), cells)
+    }
+
+    /// Decode and validate one committed snapshot payload against this runtime's sealed state contract.
+    pub fn decode_committed_snapshot<I>(
+        &self,
+        cells: I,
+    ) -> Result<CommittedStateSnapshot, RuntimeError>
+    where
+        I: IntoIterator<Item = (ir::TableId, Vec<u8>, ir::FieldId, PortableValue)>,
+    {
+        CommittedStateSnapshot::from_committed_cells(
+            &self.runtime_program.state,
+            self.type_runtimes(),
+            cells,
+        )
+    }
+
+    /// Project one committed snapshot back into logical keyed cells.
+    pub fn project_logical_state(
+        &self,
+        snapshot: &CommittedStateSnapshot,
+    ) -> Result<Vec<LogicalStateCell>, RuntimeError> {
+        snapshot.validate(&self.runtime_program.state, self.type_runtimes())?;
+        snapshot
+            .cells()
+            .map(|(key, value)| {
+                let logical_key = self
+                    .runtime_program
+                    .state
+                    .key_codec(key.table)?
+                    .decode_key(&key.key)
+                    .map_err(|error| RuntimeError::ValidationFailed {
+                        detail: error.to_string(),
+                    })?
+                    .into_iter()
+                    .map(|value| {
+                        self.type_runtimes().encode_typed(&value).map_err(|source| {
+                            RuntimeError::ValidationFailed {
+                                detail: source.to_string(),
+                            }
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((
+                    ir::TableId(key.table.0),
+                    logical_key,
+                    ir::FieldId(key.col.0),
+                    value.clone(),
+                ))
+            })
+            .collect()
     }
 
     /// Execute a canonical tx batch.
     pub fn execute_batch(
         &self,
-        snapshot: &StateSnapshot,
+        snapshot: &CommittedStateSnapshot,
         batch: &ir::EntryBatch,
         context: &ir::ContextInput,
     ) -> Result<exec::ExecutionJournal, RuntimeError> {
@@ -804,17 +695,12 @@ impl TabulaRuntime {
     /// Execute a canonical tx batch and return a runtime-owned receipt.
     pub fn execute_batch_receipt(
         &self,
-        snapshot: &StateSnapshot,
+        snapshot: &CommittedStateSnapshot,
         batch: &ir::EntryBatch,
         context: &ir::ContextInput,
     ) -> Result<ExecutionReceipt, RuntimeError> {
         let journal = self.execute_batch(snapshot, batch, context)?;
-        let state_after = materialize_post_state(
-            self.execution_program().program(),
-            snapshot,
-            &journal,
-            self.type_runtimes(),
-        )?;
+        let state_after = materialize_post_state(snapshot, &journal, self.type_runtimes())?;
         Ok(ExecutionReceipt {
             snapshot: snapshot.clone(),
             batch: batch.clone(),
@@ -826,11 +712,11 @@ impl TabulaRuntime {
 
     fn execute_batch_typed(
         &self,
-        snapshot: &StateSnapshot,
+        snapshot: &CommittedStateSnapshot,
         txs: &[exec::TxCall],
         context: &exec::ContextValues,
     ) -> Result<exec::ExecutionJournal, RuntimeError> {
-        let property_reads = self.property_reads(snapshot)?;
+        snapshot.validate(&self.runtime_program.state, self.type_runtimes())?;
         exec::execute_batch(
             self.execution_program(),
             txs,
@@ -840,9 +726,7 @@ impl TabulaRuntime {
                 hasher: &PoseidonHasher::new(),
                 type_runtimes: self.type_runtimes(),
                 capability_executor: None,
-                property_reads: property_reads
-                    .as_ref()
-                    .map(|reads| reads as &dyn exec::PropertyReadExecutor),
+                state_runtime: &self.runtime_program.state,
             },
         )
         .map_err(|source| RuntimeError::Execution {
@@ -855,7 +739,7 @@ impl TabulaRuntime {
     /// Execute one query entry. Query proving remains intentionally absent.
     pub fn execute_query(
         &self,
-        snapshot: &StateSnapshot,
+        snapshot: &CommittedStateSnapshot,
         entry_id: ir::EntryId,
         params: &[PortableValue],
         context: &ir::ContextInput,
@@ -867,12 +751,12 @@ impl TabulaRuntime {
 
     fn execute_query_typed(
         &self,
-        snapshot: &StateSnapshot,
+        snapshot: &CommittedStateSnapshot,
         entry_id: ir::EntryId,
         params: &[TypedValue],
         context: &exec::ContextValues,
     ) -> Result<exec::QueryExecutionResult, RuntimeError> {
-        let property_reads = self.property_reads(snapshot)?;
+        snapshot.validate(&self.runtime_program.state, self.type_runtimes())?;
         exec::execute_query(
             self.execution_program(),
             entry_id,
@@ -883,9 +767,7 @@ impl TabulaRuntime {
                 hasher: &PoseidonHasher::new(),
                 type_runtimes: self.type_runtimes(),
                 capability_executor: None,
-                property_reads: property_reads
-                    .as_ref()
-                    .map(|reads| reads as &dyn exec::PropertyReadExecutor),
+                state_runtime: &self.runtime_program.state,
             },
         )
         .map_err(|error| RuntimeError::Execution {
@@ -895,140 +777,71 @@ impl TabulaRuntime {
         })
     }
 
-    /// Build the semantic native public statement from executed batch truth.
-    pub fn build_public_statement(
-        &self,
-        context: &ir::ContextInput,
-        execution_journal: &exec::ExecutionJournal,
-    ) -> Result<runtime_ir::PublicStatement, RuntimeError> {
-        let context = self.decode_context_input(context)?;
-        self.build_public_statement_typed(&context, execution_journal)
-    }
-
-    fn build_public_statement_typed(
+    #[cfg(feature = "prove")]
+    fn materialize_public_statement_typed(
         &self,
         context: &exec::ContextValues,
+        materialization: runtime_ir::PublicStatementMaterialization,
         execution_journal: &exec::ExecutionJournal,
-    ) -> Result<runtime_ir::PublicStatement, RuntimeError> {
-        runtime_ir::build_public_statement(
+    ) -> Result<PublicStatement, RuntimeError> {
+        runtime_ir::materialize_public_statement(
             self.proof_program(),
             context,
             execution_journal,
-            &PoseidonHasher::new(),
+            materialization,
             self.type_runtimes(),
+            &self.runtime_program.encoding_runtimes,
+            &self.runtime_program.tuple_encoding_defaults,
         )
         .map_err(|error| RuntimeError::StatementBuild {
             detail: error.to_string(),
         })
     }
 
-    fn property_reads(
-        &self,
-        snapshot: &StateSnapshot,
-    ) -> Result<Option<V1PropertyReads>, RuntimeError> {
-        if !program_uses_property_reads(self.execution_program().program()) {
-            return Ok(None);
-        }
-
-        let mut reads = V1PropertyReads::new();
-        for table in &self.execution_program().program().state.tables {
-            for field in &table.fields {
-                reads = reads.with_column(
-                    table.id,
-                    field.id,
-                    snapshot.typed_column_entries(
-                        table.id.into(),
-                        field.id.into(),
-                        self.type_runtimes(),
-                    )?,
-                );
-            }
-        }
-        Ok(Some(reads))
-    }
-
     /// Generate a proof for one already-executed tx batch.
     #[cfg(feature = "prove")]
     pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, RuntimeError> {
-        let (statement, machine_input) = self.prepare_proof_request(input)?;
+        let machine_input = self.prepare_proof_request(input)?;
         let proof = self
             .machine
             .prove(machine_input)
             .map_err(RuntimeError::Proving)?;
         let summary = ProofSummary::from_proof(&proof);
-        Ok(ProveResult {
-            proof,
-            statement,
-            summary,
-        })
+        Ok(ProveResult { proof, summary })
     }
 
-    /// Verify a native proof against this runtime's machine and binding.
-    pub fn verify(
+    /// Verify a native proof against an externally supplied expected public statement.
+    pub fn verify_public_statement(
         &self,
         proof: &TabulaProof,
-        statement: &ProofStatement,
+        expected_public_statement: &PublicStatement,
     ) -> Result<(), RuntimeError> {
-        if statement.binding != self.runtime_program.binding {
-            return Err(RuntimeError::ValidationFailed {
-                detail: "proof statement binding does not match the runtime binding".to_string(),
-            });
-        }
-        let expected_digest =
-            statement
-                .statement_hash_bytes()
-                .map_err(|error| RuntimeError::StatementBuild {
-                    detail: error.to_string(),
-                })?;
-        if proof.statement_digest != expected_digest {
-            return Err(RuntimeError::ValidationFailed {
-                detail: "proof statement digest does not match the proof transcript binding"
-                    .to_string(),
-            });
-        }
-        if proof.statement.old_root.to_bytes() != statement.old_state_root
-            || proof.statement.new_root.to_bytes() != statement.new_state_root
-        {
-            return Err(RuntimeError::ValidationFailed {
-                detail: "AIR roots do not match the proof statement".to_string(),
-            });
-        }
-        if statement.static_table_root != self.runtime_program.static_table_artifact.root {
-            return Err(RuntimeError::ValidationFailed {
-                detail: "static table root does not match the runtime's registered program"
-                    .to_string(),
-            });
-        }
-        match relation_table_root_from_proof(proof)? {
-            Some(root) if self.runtime_program.uses_relations => {
-                if root != statement.static_table_root {
-                    return Err(RuntimeError::ValidationFailed {
-                        detail: "relation table chip root does not match the proof statement"
-                            .to_string(),
-                    });
-                }
-            }
-            None if self.runtime_program.uses_relations => {
-                return Err(RuntimeError::ValidationFailed {
-                    detail: "relation table chip opening is missing from the execution proof"
-                        .to_string(),
-                });
-            }
-            _ => {}
-        }
-        self.machine
-            .verify(proof)
-            .map_err(RuntimeError::Verification)
+        verify_public_statement_with_context(
+            &self.artifact_context(),
+            self.runtime_program.relation_policy,
+            &self.machine,
+            proof,
+            expected_public_statement,
+        )
+    }
+
+    /// Verify a native proof against the public statement carried inside the proof.
+    pub fn verify_proof(&self, proof: &TabulaProof) -> Result<(), RuntimeError> {
+        verify_proof_with_context(
+            &self.artifact_context(),
+            self.runtime_program.relation_policy,
+            &self.machine,
+            proof,
+        )
     }
 
     /// Generate and verify a proof in one call.
     #[cfg(feature = "prove")]
     pub fn prove_and_verify(&self, input: &ProveInput<'_>) -> Result<VerifiedResult, RuntimeError> {
         let prove_result = self.prove(input)?;
-        self.verify(&prove_result.proof, &prove_result.statement)?;
+        self.verify_proof(&prove_result.proof)?;
         Ok(VerifiedResult {
             proof: prove_result.proof,
-            statement: prove_result.statement,
             verified: true,
             summary: prove_result.summary,
         })
@@ -1038,7 +851,7 @@ impl TabulaRuntime {
     #[cfg(feature = "prove")]
     pub fn execute_and_prove(
         &self,
-        snapshot: &StateSnapshot,
+        snapshot: &CommittedStateSnapshot,
         batch: &ir::EntryBatch,
         context: &ir::ContextInput,
     ) -> Result<VerifiedResult, RuntimeError> {
@@ -1055,11 +868,18 @@ impl TabulaRuntime {
     fn prepare_proof_request(
         &self,
         input: &ProveInput<'_>,
-    ) -> Result<(ProofStatement, PreparedMachineInput), RuntimeError> {
+    ) -> Result<PreparedMachineInput, RuntimeError> {
         let typed_context = self.decode_context_input(input.context)?;
         let typed_txs = self.decode_entry_batch(input.batch)?;
-        let public = self.build_public_statement_typed(&typed_context, input.executed)?;
-        let applied_tx_digest = digest_entry_batch(input.batch)?;
+        let applied_tx_digest = runtime_ir::compute_applied_tx_digest(
+            input.batch,
+            self.type_runtimes(),
+            &self.runtime_program.encoding_runtimes,
+            &self.runtime_program.tuple_encoding_defaults,
+        )
+        .map_err(|error| RuntimeError::StatementBuild {
+            detail: error.to_string(),
+        })?;
         let proof_artifacts = prepare_proof_artifacts(
             &self.runtime_program,
             &self.root_backend_bundle,
@@ -1068,22 +888,32 @@ impl TabulaRuntime {
             &typed_context,
             input.executed,
         )?;
-        let statement = ProofStatement::new(
-            self.runtime_program.binding.clone(),
-            public,
-            applied_tx_digest,
-            self.runtime_program.static_table_artifact.root,
-            proof_artifacts.air_statement.old_root.to_bytes(),
-            proof_artifacts.air_statement.new_root.to_bytes(),
-        );
-        let statement_digest =
-            statement
-                .statement_hash_bytes()
-                .map_err(|error| RuntimeError::StatementBuild {
-                    detail: error.to_string(),
-                })?;
-        let machine_input = proof_artifacts.into_prepared_machine_input(statement_digest);
-        Ok((statement, machine_input))
+        let public_statement = self.materialize_public_statement_typed(
+            &typed_context,
+            runtime_ir::PublicStatementMaterialization {
+                applied_tx_digest,
+                old_state_root: proof_artifacts.public_statement.old_root.to_bytes(),
+                new_state_root: proof_artifacts.public_statement.new_root.to_bytes(),
+            },
+            input.executed,
+        )?;
+        let binding_digest = self
+            .bound_statement(&public_statement)
+            .binding_digest()
+            .map_err(|error| RuntimeError::StatementBuild {
+                detail: error.to_string(),
+            })?;
+        Ok(proof_artifacts
+            .with_public_statement(public_statement)
+            .into_prepared_machine_input(binding_digest))
+    }
+
+    fn bound_statement(&self, public_statement: &PublicStatement) -> BoundStatement {
+        BoundStatement::new(self.artifact_context(), public_statement.clone())
+    }
+
+    fn artifact_context(&self) -> ArtifactContext {
+        self.runtime_program.artifact_context.clone()
     }
 
     fn decode_entry_batch(
@@ -1207,11 +1037,10 @@ impl TabulaRuntime {
 }
 
 fn materialize_post_state(
-    program: &ir::Program,
-    snapshot: &StateSnapshot,
+    snapshot: &CommittedStateSnapshot,
     journal: &exec::ExecutionJournal,
     type_runtimes: &TypeRuntimeRegistry,
-) -> Result<StateSnapshot, RuntimeError> {
+) -> Result<CommittedStateSnapshot, RuntimeError> {
     let mut state_after = snapshot.clone();
     for write in &journal.state_summary.write_set_final {
         let table = ir::TableId(write.key.table.0);
@@ -1223,182 +1052,12 @@ fn materialize_post_state(
                         detail: source.to_string(),
                     }
                 })?;
-                state_after.insert(program, table, write.key.row, field, portable)?;
+                state_after.insert_materialized(write.key.clone(), portable);
             }
-            None => state_after.remove(table, write.key.row, field),
+            None => state_after.remove_materialized(table, &write.key.key, field),
         }
     }
     Ok(state_after)
-}
-
-struct ResolvedRuntimeColumns {
-    column_backends: BTreeMap<(TableId, ColId), MaterializedColumnBackend>,
-}
-
-fn materialize_registered_column_backends(
-    registered_program: &RegisteredProgram,
-    backend_factories: &SchemeFactoryMap,
-    type_runtimes: &TypeRuntimeRegistry,
-    encoding_runtimes: &EncodingRuntimeRegistry,
-    accepted_root_binding_families: &[RootProfileId],
-) -> Result<ResolvedRuntimeColumns, RuntimeError> {
-    let mut column_backends = BTreeMap::new();
-    let required_property_query_kinds = BTreeSet::new();
-
-    for schema in registered_program.table_schemas() {
-        for column in &schema.columns {
-            let resolved = registered_program
-                .resolve_field_profile(ir::TableId(schema.id.0), ir::FieldId(column.id.0))
-                .map_err(|detail| RuntimeError::ValidationFailed { detail })?;
-            let scheme_id = resolved.scheme_profile.scheme_family_id;
-            let type_runtime = type_runtimes
-                .resolve(resolved.type_descriptor.type_id)
-                .map_err(|detail| RuntimeError::ValidationFailed {
-                    detail: detail.to_string(),
-                })?
-                .clone();
-            let encoding_runtime = encoding_runtimes
-                .resolve(resolved.encoding_profile.encoding_profile_id)
-                .map_err(|detail| RuntimeError::ValidationFailed {
-                    detail: detail.to_string(),
-                })?
-                .clone();
-            let Some(factory) = backend_factories.get(&scheme_id) else {
-                return Err(RuntimeError::ValidationFailed {
-                    detail: format!(
-                        "no canonical backend factory registered for scheme id {}",
-                        scheme_id.0
-                    ),
-                });
-            };
-            let backend = factory
-                .materialize_backend(ColumnBackendSetup {
-                    table_id: schema.id,
-                    col_id: column.id,
-                    profile: resolved,
-                    type_runtime,
-                    encoding_runtime,
-                    required_property_query_kinds: &required_property_query_kinds,
-                })
-                .map_err(RuntimeError::from_extension_setup)?;
-            validate_materialized_backend(&backend, resolved, accepted_root_binding_families)?;
-            let key = (schema.id, column.id);
-            column_backends.insert(key, backend);
-        }
-    }
-
-    Ok(ResolvedRuntimeColumns { column_backends })
-}
-
-fn validate_materialized_backend(
-    backend: &MaterializedColumnBackend,
-    resolved: ResolvedColumnProfileRef<'_>,
-    accepted_root_binding_families: &[RootProfileId],
-) -> Result<(), RuntimeError> {
-    if backend.verifier_contract.scheme_id != resolved.scheme_profile.scheme_family_id {
-        return Err(RuntimeError::ValidationFailed {
-            detail: format!(
-                "materialized backend for scheme {} reported verifier contract scheme {}",
-                resolved.scheme_profile.scheme_family_id.0, backend.verifier_contract.scheme_id.0
-            ),
-        });
-    }
-    if backend.verifier_contract.proof_layout_family != resolved.proof_layout_family() {
-        return Err(RuntimeError::ValidationFailed {
-            detail: format!(
-                "materialized backend proof layout mismatch: profile={} backend={}",
-                resolved.proof_layout_family().0,
-                backend.verifier_contract.proof_layout_family.0
-            ),
-        });
-    }
-    if backend.verifier_contract.verifier_digest_format != resolved.verifier_digest_format() {
-        return Err(RuntimeError::ValidationFailed {
-            detail: "materialized backend verifier digest format does not match scheme profile"
-                .to_string(),
-        });
-    }
-    if backend.root_binding_contract.root_binding_family != resolved.root_binding_family() {
-        return Err(RuntimeError::ValidationFailed {
-            detail: format!(
-                "materialized backend root binding family mismatch: profile={} backend={}",
-                resolved.root_binding_family().0,
-                backend.root_binding_contract.root_binding_family.0
-            ),
-        });
-    }
-    if backend.root_binding_contract.column_profile_hash != resolved.column_profile.profile_hash {
-        return Err(RuntimeError::ValidationFailed {
-            detail: "materialized backend root binding contract does not match column profile hash"
-                .to_string(),
-        });
-    }
-    if !accepted_root_binding_families.contains(&backend.root_binding_contract.root_binding_family)
-    {
-        return Err(RuntimeError::ValidationFailed {
-            detail: format!(
-                "root backend does not support binding family {} for table {} col {}",
-                backend.root_binding_contract.root_binding_family.0,
-                backend.table_id.0,
-                backend.col_id.0,
-            ),
-        });
-    }
-    Ok(())
-}
-
-fn validate_core_first_program(program: &ir::Program) -> Result<(), RuntimeError> {
-    for entry in &program.entries {
-        for op in &entry.body.ops {
-            match op {
-                ir::Op::ReadStateProperty { .. } => {
-                    return Err(RuntimeError::ValidationFailed {
-                        detail:
-                            "native proving core-first cutover does not yet support property-read proving"
-                                .to_string(),
-                    });
-                }
-                ir::Op::CallCapability { .. } => {
-                    return Err(RuntimeError::ValidationFailed {
-                        detail:
-                            "native proving core-first cutover encountered a deferred proof feature"
-                                .to_string(),
-                    });
-                }
-                _ => {}
-            }
-        }
-    }
-    Ok(())
-}
-
-fn program_uses_hash(program: &ir::Program) -> bool {
-    program
-        .entries
-        .iter()
-        .flat_map(|entry| entry.body.ops.iter())
-        .any(|op| matches!(op, ir::Op::Hash { .. }))
-}
-
-fn program_uses_property_reads(program: &ir::Program) -> bool {
-    program
-        .entries
-        .iter()
-        .flat_map(|entry| entry.body.ops.iter())
-        .any(|op| matches!(op, ir::Op::ReadStateProperty { .. }))
-}
-
-fn program_uses_relations(program: &ir::Program) -> bool {
-    program
-        .entries
-        .iter()
-        .flat_map(|entry| entry.body.ops.iter())
-        .any(|op| {
-            matches!(
-                op,
-                ir::Op::AssertRelation { .. } | ir::Op::EvalRelation { .. }
-            )
-        })
 }
 
 #[cfg(feature = "prove")]
@@ -1410,6 +1069,7 @@ struct PreparedColumnSlot {
     init_cells: Vec<InitCell>,
     access_events: Vec<AccessEvent>,
     writes: Vec<ColumnWrite>,
+    property_reads: Vec<PropertyReadClaim>,
 }
 
 #[cfg(feature = "prove")]
@@ -1419,7 +1079,7 @@ struct PreparedColumnArtifacts {
 
 #[cfg(feature = "prove")]
 struct PreparedArtifacts {
-    air_statement: PublicStatement,
+    public_statement: PublicStatement,
     execution: PreparedTierInput,
     columns: Vec<PreparedColumnArtifacts>,
     root: PreparedTierInput,
@@ -1427,10 +1087,12 @@ struct PreparedArtifacts {
 
 #[cfg(feature = "prove")]
 impl PreparedArtifacts {
-    fn into_prepared_machine_input(
-        self,
-        semantic_statement_digest: [u8; 32],
-    ) -> PreparedMachineInput {
+    fn with_public_statement(mut self, public_statement: PublicStatement) -> Self {
+        self.public_statement = public_statement;
+        self
+    }
+
+    fn into_prepared_machine_input(self, binding_digest: [u8; 32]) -> PreparedMachineInput {
         PreparedMachineInput {
             execution: self.execution,
             columns: self
@@ -1439,17 +1101,240 @@ impl PreparedArtifacts {
                 .map(|column| column.input)
                 .collect(),
             root: self.root,
-            air_statement: self.air_statement,
-            semantic_statement_digest,
+            public_statement: self.public_statement,
+            binding_digest,
         }
     }
 }
 
 #[cfg(feature = "prove")]
+struct PublicStatementSlotLayout {
+    aux_slot_limit: usize,
+    context_slots: Vec<(ir::ContextFieldId, usize)>,
+    param_slot_base: usize,
+}
+
+#[cfg(feature = "prove")]
+type ContextPreludeArtifacts = (
+    Vec<ContextPreludeSlot>,
+    Vec<InstructionRecord>,
+    Vec<[p3_koala_bear::KoalaBear; 8]>,
+);
+
+#[cfg(feature = "prove")]
+fn build_public_statement_slot_layout(
+    context_field_ids: &[ir::ContextFieldId],
+    max_param_count: usize,
+) -> Result<PublicStatementSlotLayout, RuntimeError> {
+    let reserved_slots = context_field_ids
+        .len()
+        .checked_add(max_param_count)
+        .ok_or_else(|| RuntimeError::ValidationFailed {
+            detail: "reserved public-statement slot count overflowed usize".to_string(),
+        })?;
+    if reserved_slots > MAX_SLOTS {
+        return Err(RuntimeError::ValidationFailed {
+            detail: format!(
+                "proof-visible public-statement prelude requires {reserved_slots} reserved slots, exceeding the machine ceiling of {MAX_SLOTS}"
+            ),
+        });
+    }
+    let aux_slot_limit = MAX_SLOTS - reserved_slots;
+    let context_slots = context_field_ids
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, field_id)| (field_id, aux_slot_limit + index))
+        .collect::<Vec<_>>();
+    Ok(PublicStatementSlotLayout {
+        aux_slot_limit,
+        context_slots,
+        param_slot_base: aux_slot_limit + context_field_ids.len(),
+    })
+}
+
+#[cfg(feature = "prove")]
+fn context_public_statement_bindings(
+    runtime_program: &RuntimeProgramState,
+    context: &exec::ContextValues,
+) -> Result<Vec<runtime_ir::PublicContextBinding>, RuntimeError> {
+    runtime_ir::encode_public_context(
+        runtime_program.semantic.proof(),
+        context,
+        &runtime_program.type_runtimes,
+    )
+    .map_err(|error| RuntimeError::StatementBuild {
+        detail: error.to_string(),
+    })
+}
+
+#[cfg(feature = "prove")]
+fn build_context_prelude(
+    runtime_program: &RuntimeProgramState,
+    context_bindings: &[runtime_ir::PublicContextBinding],
+    layout: &PublicStatementSlotLayout,
+) -> Result<ContextPreludeArtifacts, RuntimeError> {
+    let canonical_bindings =
+        runtime_ir::canonical_public_context(context_bindings).map_err(|error| {
+            RuntimeError::StatementBuild {
+                detail: error.to_string(),
+            }
+        })?;
+    let item_blocks = runtime_ir::canonical_public_context_payload(
+        context_bindings,
+        &runtime_program.type_runtimes,
+        &runtime_program.encoding_runtimes,
+        &runtime_program.tuple_encoding_defaults,
+    )
+    .map_err(|error| RuntimeError::StatementBuild {
+        detail: error.to_string(),
+    })?
+    .into_iter()
+    .skip(1)
+    .collect::<Vec<_>>();
+
+    let mut slots = Vec::with_capacity(canonical_bindings.len());
+    let mut records = Vec::with_capacity(canonical_bindings.len());
+    for (item_index, binding) in canonical_bindings.iter().enumerate() {
+        let slot = layout
+            .context_slots
+            .iter()
+            .find_map(|(field_id, slot)| (*field_id == binding.field).then_some(*slot))
+            .ok_or_else(|| RuntimeError::ValidationFailed {
+                detail: format!(
+                    "missing reserved execution slot for context field {}",
+                    binding.field.0
+                ),
+            })?;
+        let typed = runtime_program
+            .type_runtimes
+            .decode_portable(&binding.value)
+            .map_err(|source| RuntimeError::StatementBuild {
+                detail: source.to_string(),
+            })?;
+        let encoded = runtime_ir::encode_public_statement_value(
+            &typed,
+            &runtime_program.encoding_runtimes,
+            &runtime_program.tuple_encoding_defaults,
+        )
+        .map_err(|source| RuntimeError::StatementBuild {
+            detail: source.to_string(),
+        })?;
+        slots.push(ContextPreludeSlot {
+            field_id: binding.field,
+            slot,
+            value: typed.clone(),
+            encoded: encoded.field_elements.to_vec(),
+        });
+        records.push(InstructionRecord {
+            opcode: tabula_chips::execution::trace::Opcode::LoadContext,
+            tx_index: 0,
+            proof_meta0: Some(item_index as u32),
+            proof_meta1: Some(binding.field.0),
+            proof_meta2: Some(encoded.type_id.0),
+            written_slots: vec![slot],
+            src1_val: encoded.field_elements.to_vec(),
+            writes: vec![(slot, encoded.field_elements.to_vec(), false)],
+            ..InstructionRecord::default()
+        });
+    }
+    Ok((slots, records, item_blocks))
+}
+
+#[cfg(feature = "prove")]
+fn build_param_prelude(
+    runtime_program: &RuntimeProgramState,
+    layout: &PublicStatementSlotLayout,
+    entry: &ir::Entry,
+    call: &exec::TxCall,
+    tx_item_index_base: u32,
+    tx_index: u32,
+) -> Result<(Vec<ParamPreludeSlot>, Vec<InstructionRecord>), RuntimeError> {
+    let mut slots = Vec::with_capacity(entry.params.len());
+    let mut records = Vec::with_capacity(entry.params.len() + 1);
+
+    records.push(InstructionRecord {
+        opcode: tabula_chips::execution::trace::Opcode::TxBegin,
+        tx_index,
+        proof_meta0: Some(tx_item_index_base),
+        proof_meta1: Some(call.entry_id.0),
+        proof_meta2: Some(entry.params.len() as u32),
+        ..InstructionRecord::default()
+    });
+
+    for (param_index, param) in entry.params.iter().enumerate() {
+        let value = call.params.get(param_index).cloned().ok_or_else(|| {
+            RuntimeError::ValidationFailed {
+                detail: format!(
+                    "tx {tx_index} is missing parameter {} for entry {}",
+                    param.symbol, entry.symbol
+                ),
+            }
+        })?;
+        let encoded = runtime_ir::encode_public_statement_value(
+            &value,
+            &runtime_program.encoding_runtimes,
+            &runtime_program.tuple_encoding_defaults,
+        )
+        .map_err(|source| RuntimeError::StatementBuild {
+            detail: source.to_string(),
+        })?;
+        let slot = layout.param_slot_base + param_index;
+        slots.push(ParamPreludeSlot {
+            param_id: param.id,
+            slot,
+            value: value.clone(),
+            encoded: encoded.field_elements.to_vec(),
+        });
+
+        records.push(InstructionRecord {
+            opcode: tabula_chips::execution::trace::Opcode::LoadParam,
+            tx_index,
+            proof_meta0: Some(tx_item_index_base + 1 + param_index as u32),
+            proof_meta1: Some(param_index as u32),
+            proof_meta2: Some(encoded.type_id.0),
+            written_slots: vec![slot],
+            src1_val: encoded.field_elements.to_vec(),
+            writes: vec![(slot, encoded.field_elements.to_vec(), false)],
+            ..InstructionRecord::default()
+        });
+    }
+
+    Ok((slots, records))
+}
+
+#[cfg(feature = "prove")]
+fn build_event_item_bases(
+    executed: &exec::ExecutionJournal,
+) -> (
+    BTreeMap<u32, BTreeMap<usize, u32>>,
+    Vec<runtime_ir::ProofEventEffect>,
+) {
+    let mut per_tx = BTreeMap::new();
+    let mut events = Vec::new();
+    let mut next_item_index = 0u32;
+
+    for tx in executed.successful_txs() {
+        let mut per_op = BTreeMap::new();
+        for effect in &tx.event_effects {
+            per_op.insert(effect.op_index, next_item_index);
+            next_item_index += 1 + effect.args.len() as u32;
+            events.push(runtime_ir::ProofEventEffect {
+                tx_index: tx.tx_index,
+                effect: effect.clone(),
+            });
+        }
+        per_tx.insert(tx.tx_index, per_op);
+    }
+
+    (per_tx, events)
+}
+
+#[cfg(feature = "prove")]
 fn prepare_proof_artifacts(
-    runtime_program: &RuntimeCoreProgram,
+    runtime_program: &RuntimeProgramState,
     root_backend_bundle: &RootBackendBundle,
-    snapshot: &StateSnapshot,
+    snapshot: &CommittedStateSnapshot,
     txs: &[exec::TxCall],
     context: &exec::ContextValues,
     executed: &exec::ExecutionJournal,
@@ -1467,6 +1352,7 @@ fn prepare_proof_artifacts(
             init_cells: Vec::new(),
             access_events: Vec::new(),
             writes: Vec::new(),
+            property_reads: Vec::new(),
         });
     }
     let column_index = runtime_program
@@ -1506,7 +1392,7 @@ fn prepare_proof_artifacts(
                 })?,
         };
         column_slots[slot].init_cells.push(InitCell {
-            key: entry.key,
+            key: entry.key.clone(),
             value,
             is_null: entry.value.is_none(),
         });
@@ -1521,12 +1407,94 @@ fn prepare_proof_artifacts(
                 ),
             })?;
         column_slots[slot].writes.push(ColumnWrite {
-            row: entry.key.row,
+            key: entry.key.key.clone(),
             value: entry.value.clone(),
         });
     }
 
-    let mut lowered_txs = Vec::new();
+    let context_bindings = context_public_statement_bindings(runtime_program, context)?;
+    let canonical_context_ids = runtime_ir::canonical_public_context(&context_bindings)
+        .map_err(|error| RuntimeError::StatementBuild {
+            detail: error.to_string(),
+        })?
+        .into_iter()
+        .map(|binding| binding.field)
+        .collect::<Vec<_>>();
+    let max_param_count = txs.iter().map(|call| call.params.len()).max().unwrap_or(0);
+    let statement_slot_layout =
+        build_public_statement_slot_layout(&canonical_context_ids, max_param_count)?;
+    let (context_slots, context_records, public_context_transcript_items) =
+        build_context_prelude(runtime_program, &context_bindings, &statement_slot_layout)?;
+
+    let (event_item_bases_by_tx, proof_events) = build_event_item_bases(executed);
+    let event_transcript_items = runtime_ir::canonical_event_log_payload(
+        &proof_events,
+        &runtime_program.encoding_runtimes,
+        &runtime_program.tuple_encoding_defaults,
+    )
+    .map_err(|error| RuntimeError::StatementBuild {
+        detail: error.to_string(),
+    })?
+    .into_iter()
+    .skip(1)
+    .collect::<Vec<_>>();
+
+    let portable_batch = ir::EntryBatch {
+        calls: txs
+            .iter()
+            .map(|call| {
+                let params = call
+                    .params
+                    .iter()
+                    .map(|value| runtime_program.type_runtimes.encode_typed(value))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|source| RuntimeError::StatementBuild {
+                        detail: source.to_string(),
+                    })?;
+                Ok(ir::EntryCall {
+                    entry_id: call.entry_id,
+                    params,
+                })
+            })
+            .collect::<Result<Vec<_>, RuntimeError>>()?,
+    };
+    let tx_batch_transcript_items = runtime_ir::canonical_batch_payload(
+        &portable_batch,
+        &runtime_program.type_runtimes,
+        &runtime_program.encoding_runtimes,
+        &runtime_program.tuple_encoding_defaults,
+    )
+    .map_err(|error| RuntimeError::StatementBuild {
+        detail: error.to_string(),
+    })?
+    .into_iter()
+    .skip(1)
+    .collect::<Vec<_>>();
+
+    let mut tx_prelude_by_index = BTreeMap::new();
+    let mut next_tx_item_index = 0u32;
+    for (tx_index, call) in txs.iter().enumerate() {
+        let entry = runtime_program
+            .semantic
+            .execution()
+            .entry_definition(call.entry_id)
+            .map_err(|error| RuntimeError::ValidationFailed {
+                detail: error.to_string(),
+            })?;
+        let (param_slots, records) = build_param_prelude(
+            runtime_program,
+            &statement_slot_layout,
+            entry,
+            call,
+            next_tx_item_index,
+            tx_index as u32,
+        )?;
+        next_tx_item_index += 1 + call.params.len() as u32;
+        tx_prelude_by_index.insert(tx_index as u32, (param_slots, records));
+    }
+
+    let mut lowered_txs = BTreeMap::new();
+    let empty_event_item_bases = BTreeMap::new();
     for tx in executed.successful_txs() {
         for effect in &tx.state_effects {
             let slot = *column_index
@@ -1547,7 +1515,7 @@ fn prepare_proof_artifacts(
                     })?,
             };
             column_slots[slot].access_events.push(AccessEvent {
-                key: effect.key,
+                key: effect.key.clone(),
                 time: effect.logical_time,
                 is_write: matches!(
                     effect.kind,
@@ -1557,6 +1525,20 @@ fn prepare_proof_artifacts(
                 is_null: effect.value.is_none(),
                 tx_index: tx.tx_index,
                 effect_ordinal_in_tx: effect.effect_ordinal_in_entry,
+            });
+        }
+        for effect in &tx.property_effects {
+            let slot = *column_index
+                .get(&(effect.table.into(), effect.field.into()))
+                .ok_or_else(|| RuntimeError::ValidationFailed {
+                    detail: format!(
+                        "property effect column ({}, {}) missing from the proof plan",
+                        effect.table.0, effect.field.0
+                    ),
+                })?;
+            column_slots[slot].property_reads.push(PropertyReadClaim {
+                query: effect.query.clone(),
+                result: effect.result.clone(),
             });
         }
 
@@ -1572,7 +1554,16 @@ fn prepare_proof_artifacts(
             .map_err(|error| RuntimeError::ValidationFailed {
                 detail: error.to_string(),
             })?;
-        lowered_txs.push(
+        let (param_slots, _) = tx_prelude_by_index.get(&tx.tx_index).ok_or_else(|| {
+            RuntimeError::ValidationFailed {
+                detail: format!(
+                    "missing reserved parameter prelude for tx {} during witness lowering",
+                    tx.tx_index
+                ),
+            }
+        })?;
+        lowered_txs.insert(
+            tx.tx_index,
             lower_successful_tx::<3>(LowerSuccessfulTxInput {
                 tx_index: tx.tx_index,
                 program: runtime_program.semantic.execution().program(),
@@ -1581,18 +1572,43 @@ fn prepare_proof_artifacts(
                 context,
                 state_effects: &tx.state_effects,
                 event_effects: &tx.event_effects,
+                property_effects: &tx.property_effects,
                 relation_effects: &tx.relation_effects,
                 empty_columns: &empty_columns,
                 type_runtimes: &runtime_program.type_runtimes,
                 encoding_runtimes: &runtime_program.encoding_runtimes,
                 tuple_encoding_defaults: &runtime_program.tuple_encoding_defaults,
                 hasher: &PoseidonHasher::new(),
+                state_runtime: &runtime_program.state,
+                context_slots: context_slots.as_slice(),
+                param_slots: param_slots.as_slice(),
+                aux_slot_limit: statement_slot_layout.aux_slot_limit,
+                event_item_bases: event_item_bases_by_tx
+                    .get(&tx.tx_index)
+                    .unwrap_or(&empty_event_item_bases),
             })
             .map_err(RuntimeError::TraceBuild)?,
         );
     }
 
-    let lowered = merge_lowering_outputs(lowered_txs.iter());
+    let mut lowered = merge_lowering_outputs(lowered_txs.values());
+    let mut instruction_records = context_records;
+    for tx_index in 0..txs.len() {
+        let (_, prelude_records) =
+            tx_prelude_by_index.get(&(tx_index as u32)).ok_or_else(|| {
+                RuntimeError::ValidationFailed {
+                    detail: format!("missing tx prelude for tx {tx_index}"),
+                }
+            })?;
+        instruction_records.extend(prelude_records.iter().cloned());
+        if let Some(lowered_tx) = lowered_txs.get(&(tx_index as u32)) {
+            instruction_records.extend(lowered_tx.instruction_records.iter().cloned());
+        }
+    }
+    lowered.instruction_records = instruction_records;
+    lowered.public_context_transcript_items = public_context_transcript_items;
+    lowered.tx_batch_transcript_items = tx_batch_transcript_items;
+    lowered.event_transcript_items = event_transcript_items;
     let relation_proof = prepare_relation_proof(
         runtime_program.semantic.execution().program(),
         &runtime_program.static_table_artifact,
@@ -1638,10 +1654,10 @@ fn prepare_proof_artifacts(
             },
             other => other,
         })?;
-    let (air_statement, root_store) = prepared_root.into_parts();
+    let (public_statement, root_store) = prepared_root.into_parts();
 
     Ok(PreparedArtifacts {
-        air_statement,
+        public_statement,
         execution: PreparedTierInput {
             store: execution_store,
         },
@@ -1660,55 +1676,38 @@ fn prepare_proof_artifacts(
 
 #[cfg(feature = "prove")]
 fn synthesize_missing_init_cells(
-    runtime_program: &RuntimeCoreProgram,
+    runtime_program: &RuntimeProgramState,
     slot: &ColumnProofSlot,
     prepared: &mut PreparedColumnSlot,
 ) -> Result<(), RuntimeError> {
     let mut present_rows = prepared
         .init_cells
         .iter()
-        .map(|cell| cell.key.row)
+        .map(|cell| cell.key.key.clone())
         .collect::<BTreeSet<_>>();
     let touched_rows = prepared
         .access_events
         .iter()
-        .map(|event| event.key.row)
-        .chain(prepared.writes.iter().map(|write| write.row))
+        .map(|event| event.key.key.clone())
+        .chain(prepared.writes.iter().map(|write| write.key.clone()))
         .collect::<BTreeSet<_>>();
     let old_entries = prepared
         .old_entries
         .iter()
-        .map(|entry| (entry.row, (entry.value.clone(), entry.is_null)))
+        .map(|entry| (entry.key.clone(), (entry.value.clone(), entry.is_null)))
         .collect::<BTreeMap<_, _>>();
     let required_rows = old_entries
         .keys()
-        .copied()
-        .chain(touched_rows.iter().copied())
+        .cloned()
+        .chain(touched_rows.iter().cloned())
         .collect::<BTreeSet<_>>();
     if required_rows.is_empty() {
         return Ok(());
     }
     let field_ty = runtime_program
-        .semantic
-        .execution()
-        .program()
         .state
-        .tables
-        .iter()
-        .find(|table| table.id.0 == slot.table.0)
-        .and_then(|table| {
-            table
-                .fields
-                .iter()
-                .find(|field| field.id.0 == slot.col.0)
-                .map(|field| field.ty)
-        })
-        .ok_or_else(|| RuntimeError::ValidationFailed {
-            detail: format!(
-                "missing state field schema for touched proof column ({}, {})",
-                slot.table.0, slot.col.0
-            ),
-        })?;
+        .column_contract(slot.table, slot.col)?
+        .ty;
 
     for row in required_rows {
         if present_rows.contains(&row) {
@@ -1727,35 +1726,27 @@ fn synthesize_missing_init_cells(
             ),
         };
         prepared.init_cells.push(InitCell {
-            key: tabula_core::CellKey {
+            key: tabula_core::CommittedCellKey {
                 table: slot.table,
                 col: slot.col,
-                row,
+                key: row.clone(),
             },
             value,
             is_null,
         });
         present_rows.insert(row);
     }
-    prepared.init_cells.sort_by_key(|cell| cell.key.row);
+    prepared.init_cells.sort_by_key(|cell| cell.key.key.clone());
     Ok(())
 }
 
 #[cfg(feature = "prove")]
 fn prepare_column_slot(
-    runtime_program: &RuntimeCoreProgram,
+    runtime_program: &RuntimeProgramState,
     slot: &ColumnProofSlot,
     prepared: PreparedColumnSlot,
 ) -> Result<(TableId, ColId, PreparedColumnProof), RuntimeError> {
-    let backend = runtime_program
-        .column_backends
-        .get(&(slot.table, slot.col))
-        .ok_or_else(|| RuntimeError::ValidationFailed {
-            detail: format!(
-                "missing materialized backend for table {} col {}",
-                slot.table.0, slot.col.0
-            ),
-        })?;
+    let backend = runtime_program.state.backend(slot.table, slot.col)?;
     let proof = slot
         .proof_backend
         .prepare_column(ColumnProofContext {
@@ -1768,7 +1759,7 @@ fn prepare_column_slot(
                 is_touched: !prepared.writes.is_empty(),
             },
             old_entries: prepared.old_entries,
-            property_reads: Vec::new(),
+            property_reads: prepared.property_reads,
         })
         .map_err(RuntimeError::from_extension_proof)?;
     match (
@@ -1811,40 +1802,41 @@ fn prepare_column_slot(
     Ok((slot.table, slot.col, proof))
 }
 
-#[cfg(feature = "prove")]
-fn digest_entry_batch(batch: &ir::EntryBatch) -> Result<Digest, RuntimeError> {
-    let mut bytes = b"tabula.runtime.applied_txs.v1".to_vec();
-    bytes.extend(
-        borsh::to_vec(batch).map_err(|error| RuntimeError::StatementBuild {
-            detail: format!("failed to encode entry batch: {error}"),
-        })?,
-    );
-    Ok(sha2::Sha256::digest(bytes).into())
-}
-
 #[cfg(all(test, feature = "prove"))]
 mod relation_proof_tests {
     use super::*;
+    use crate::Verifier;
+    use crate::verifier::relation_table_root_from_proof;
 
     use std::cmp::Ordering;
+    use std::sync::Arc;
 
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
+    use tabula_chips::event_transcript::EVENT_TRANSCRIPT_WITNESS_LABEL;
     use tabula_chips::execution::EXECUTION_STANDARD_VALUE_WIDTH;
     use tabula_chips::execution::trace::{InstructionRecord, Opcode};
+    use tabula_chips::relation_table::RELATION_TABLE_CHIP_ID;
     use tabula_chips::relation_table::{RELATION_TABLE_WITNESS_LABEL, RelationTableWitnessRow};
     use tabula_chips::relation_transcript::{
         RELATION_TRANSCRIPT_WITNESS_LABEL, RelationTranscriptCall,
     };
     use tabula_contract::format::typed_tuple::{TypedTupleRole, compute_typed_tuple_digest};
     use tabula_core::{EncodingProfileId, PortableValue, TypeId};
+    use tabula_ext::root::{
+        RootBackend, RootBackendBundle, RootWitnessPreparer, SmtRootWitnessPreparer,
+    };
+    use tabula_machine::{RootProofBackend, SmtRootProofBackend};
     use tabula_profile::{
         CanonicalNullEncoding, EncodingClass, EncodingProfile, FieldFamily, GenericIrFamily,
         HostValueFamily, NullSemantics, TranscriptSerialization, TypeCapabilities, TypeDescriptor,
         ZeroValueSpec,
     };
     use tabula_stark::trace::witness_labels;
-    use tabula_testing::exec::{context_input, register_program_from_source, tx_batch};
+    use tabula_testing::exec::{
+        context_input, register_program_from_source, register_program_from_source_with_catalogs,
+        tx_batch,
+    };
     use tabula_types::{
         ArithmeticOp, EncodingRuntime, TypeRuntime, TypedValue, bool_portable, u64_portable,
         u64_typed,
@@ -1894,6 +1886,64 @@ tx enroll(flag: bool, id: u64, tier: u64) {
 "#
     }
 
+    fn event_debug_source() -> &'static str {
+        r#"
+program EventTranscriptDebug
+
+context {
+  caller: u64;
+}
+
+event Registered(id: u64, actor: u64);
+
+tx register(id: u64) {
+  emit Registered(id, caller);
+  return;
+}
+"#
+    }
+
+    fn extract_event_items(records: &[InstructionRecord]) -> Vec<(u32, [KoalaBear; 8])> {
+        let mut items = records
+            .iter()
+            .filter_map(|record| match record.opcode {
+                Opcode::EmitEventHeader => Some((
+                    record.proof_meta0.expect("event header item index"),
+                    [
+                        KoalaBear::ONE,
+                        KoalaBear::new(record.tx_index),
+                        KoalaBear::new(
+                            record
+                                .instruction_index
+                                .expect("event header instruction index"),
+                        ),
+                        KoalaBear::new(record.proof_meta1.expect("event header ordinal")),
+                        KoalaBear::new(record.proof_meta2.expect("event header id")),
+                        KoalaBear::new(record.proof_meta3.expect("event header arg count")),
+                        KoalaBear::ZERO,
+                        KoalaBear::ZERO,
+                    ],
+                )),
+                Opcode::EmitEventArg => Some((
+                    record.proof_meta0.expect("event arg item index"),
+                    [
+                        KoalaBear::new(2),
+                        KoalaBear::new(record.tx_index),
+                        KoalaBear::new(record.proof_meta1.expect("event arg ordinal")),
+                        KoalaBear::new(record.proof_meta2.expect("event arg index")),
+                        KoalaBear::new(record.proof_meta3.expect("event arg type id")),
+                        *record.src1_val.first().expect("event arg limb 0"),
+                        *record.src1_val.get(1).expect("event arg limb 1"),
+                        *record.src1_val.get(2).expect("event arg limb 2"),
+                    ],
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        items.sort_unstable_by_key(|(item_index, _)| *item_index);
+        items
+    }
+
     fn guarded_relation_source() -> &'static str {
         r#"
 program GuardedRelation
@@ -1926,6 +1976,20 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
 "#
     }
 
+    fn capability_source() -> &'static str {
+        r#"
+use capability demo_hash;
+
+program DeferredCapability
+
+tx scan(id: u64) {
+  let digest = demo_hash(id);
+  assert true;
+  return;
+}
+"#
+    }
+
     fn relation_context(caller: u64, epoch: u64) -> ir::ContextInput {
         context_input([
             (ir::ContextFieldId(0), u64_portable(caller)),
@@ -1937,15 +2001,27 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
         context_input([(ir::ContextFieldId(0), u64_portable(caller))])
     }
 
-    fn relation_snapshot(registered: &RegisteredProgram) -> StateSnapshot {
-        StateSnapshot::from_cells(
-            registered.program(),
-            [
-                (ir::TableId(0), RowKey(0), ir::FieldId(0), u64_portable(0)),
-                (ir::TableId(0), RowKey(1), ir::FieldId(0), u64_portable(0)),
-            ],
-        )
-        .expect("build relation snapshot")
+    fn relation_snapshot(registered: &RegisteredProgram) -> CommittedStateSnapshot {
+        let runtime = TabulaRuntime::builder(registered.clone())
+            .expect("create runtime builder")
+            .build()
+            .expect("build runtime");
+        runtime
+            .materialize_logical_state([
+                (
+                    ir::TableId(0),
+                    vec![u64_portable(0)],
+                    ir::FieldId(0),
+                    u64_portable(0),
+                ),
+                (
+                    ir::TableId(0),
+                    vec![u64_portable(1)],
+                    ir::FieldId(0),
+                    u64_portable(0),
+                ),
+            ])
+            .expect("build relation snapshot")
     }
 
     fn runtime_for_source(source: &str) -> (RegisteredProgram, TabulaRuntime) {
@@ -1955,6 +2031,72 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
             .build()
             .expect("build runtime");
         (registered, runtime)
+    }
+
+    #[derive(Debug)]
+    struct EmptyFamilyRootProofBackend;
+
+    impl RootProofBackend for EmptyFamilyRootProofBackend {
+        fn name(&self) -> &str {
+            "empty_family_root_proof"
+        }
+
+        fn supported_root_binding_families(&self) -> &'static [tabula_core::RootProfileId] {
+            &[]
+        }
+
+        fn airs(&self) -> Vec<Box<dyn tabula_machine::backend::AnyRap>> {
+            SmtRootProofBackend.airs()
+        }
+
+        fn dyn_chips(&self) -> Vec<Box<dyn tabula_stark::trace::DynChip>> {
+            SmtRootProofBackend.dyn_chips()
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Default)]
+    struct EmptyFamilyRootBackend;
+
+    impl RootBackend for EmptyFamilyRootBackend {
+        fn name(&self) -> &str {
+            "empty_family_root"
+        }
+
+        fn proof_backend(&self) -> Arc<dyn RootProofBackend> {
+            Arc::new(EmptyFamilyRootProofBackend)
+        }
+
+        fn witness_preparer(&self) -> Arc<dyn RootWitnessPreparer> {
+            Arc::new(SmtRootWitnessPreparer)
+        }
+    }
+
+    #[test]
+    fn committed_snapshot_decode_rejects_duplicate_cells() {
+        let (_registered, runtime) = runtime_for_source(relation_source());
+        let error = runtime
+            .decode_committed_snapshot([
+                (
+                    ir::TableId(0),
+                    0u64.to_le_bytes().to_vec(),
+                    ir::FieldId(0),
+                    u64_portable(1),
+                ),
+                (
+                    ir::TableId(0),
+                    0u64.to_le_bytes().to_vec(),
+                    ir::FieldId(0),
+                    u64_portable(2),
+                ),
+            ])
+            .expect_err("duplicate committed cells must fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate committed cell 0.0 key"),
+            "unexpected error: {error}"
+        );
     }
 
     fn entry_id(runtime: &TabulaRuntime, symbol: &str) -> ir::EntryId {
@@ -1968,7 +2110,7 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
     }
 
     fn prove_input<'a>(
-        snapshot: &'a StateSnapshot,
+        snapshot: &'a CommittedStateSnapshot,
         batch: &'a ir::EntryBatch,
         context: &'a ir::ContextInput,
         executed: &'a exec::ExecutionJournal,
@@ -2091,8 +2233,10 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
                 EncodingClass::FieldElementArray,
                 FieldFamily::KoalaBear31,
                 2,
+                Some(8),
                 CanonicalNullEncoding::SeparateNullFlagWithZeroValue,
                 TranscriptSerialization::FieldElementsWithNullFlag,
+                true,
                 true,
             )
             .expect("build extra encoding profile");
@@ -2203,6 +2347,9 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
             .execution_program()
             .entry_definition(enroll)
             .expect("resolved entry");
+        let context_slots = Vec::new();
+        let param_slots = Vec::new();
+        let event_item_bases = BTreeMap::new();
 
         let error = lower_successful_tx::<EXECUTION_STANDARD_VALUE_WIDTH>(LowerSuccessfulTxInput {
             tx_index: tx.tx_index,
@@ -2212,12 +2359,18 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
             context: &typed_context,
             state_effects: &tx.state_effects,
             event_effects: &tx.event_effects,
+            property_effects: &tx.property_effects,
             relation_effects: &duplicated_effects,
             empty_columns: &BTreeSet::new(),
             type_runtimes: runtime.type_runtimes(),
             encoding_runtimes: runtime.encoding_runtimes(),
             tuple_encoding_defaults: &runtime.runtime_program.tuple_encoding_defaults,
             hasher: &PoseidonHasher::new(),
+            state_runtime: &runtime.runtime_program.state,
+            context_slots: &context_slots,
+            param_slots: &param_slots,
+            aux_slot_limit: tabula_chips::execution::MAX_SLOTS,
+            event_item_bases: &event_item_bases,
         })
         .expect_err("duplicate relation effects must fail");
 
@@ -2240,7 +2393,7 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute guarded batch");
 
-        let (_statement, machine_input) = runtime
+        let machine_input = runtime
             .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
             .expect("prepare proof request");
 
@@ -2275,7 +2428,7 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute batch");
 
-        let (_statement, mut machine_input) = runtime
+        let mut machine_input = runtime
             .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
             .expect("prepare proof request");
 
@@ -2315,7 +2468,7 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute batch");
 
-        let (_statement, mut machine_input) = runtime
+        let mut machine_input = runtime
             .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
             .expect("prepare proof request");
 
@@ -2355,7 +2508,7 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute batch");
 
-        let (_statement, mut machine_input) = runtime
+        let mut machine_input = runtime
             .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
             .expect("prepare proof request");
 
@@ -2441,11 +2594,11 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
         let proved = runtime
             .execute_and_prove(&snapshot, &batch, &context)
             .expect("prove relation batch");
-        let chip_root =
-            relation_table_root_from_proof(&proved.proof).expect("extract relation chip root");
+        let chip_root = relation_table_root_from_proof(&proved.proof, &runtime.machine)
+            .expect("extract relation chip root");
 
         assert_eq!(
-            proved.statement.static_table_root,
+            runtime.runtime_program.static_table_artifact.root,
             registered.static_table_artifact().root
         );
         assert_eq!(
@@ -2454,13 +2607,290 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
             "relation table chip root must match the registered artifact root",
         );
         assert_eq!(
-            digest_entry_batch(&batch).expect("batch digest"),
-            proved.statement.applied_tx_digest
+            runtime_ir::compute_applied_tx_digest(
+                &batch,
+                runtime.type_runtimes(),
+                runtime.encoding_runtimes(),
+                &runtime.runtime_program.tuple_encoding_defaults,
+            )
+            .expect("batch digest"),
+            proved.proof.public_statement.applied_tx_digest.to_bytes()
         );
         assert_eq!(
             executed.successful_txs().count(),
             1,
             "sanity-check proof came from the expected execution batch",
+        );
+    }
+
+    #[test]
+    fn relation_chip_public_values_truncation_fails_runtime_verification() {
+        let (registered, runtime) = runtime_for_source(relation_source());
+        let snapshot = relation_snapshot(&registered);
+        let verifier = Verifier::builder(registered)
+            .expect("create verifier builder")
+            .build()
+            .expect("build verifier");
+        let batch = tx_batch(vec![ir::EntryCall {
+            entry_id: entry_id(&runtime, "enroll"),
+            params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
+        }]);
+        let context = relation_context(7, 11);
+        let mut proved = runtime
+            .execute_and_prove(&snapshot, &batch, &context)
+            .expect("prove relation batch");
+        let relation_opening = proved
+            .proof
+            .execution
+            .chip_openings
+            .iter_mut()
+            .find(|opening| opening.chip_id == RELATION_TABLE_CHIP_ID)
+            .expect("relation chip opening");
+        relation_opening.public_values.pop();
+
+        let runtime_err = runtime
+            .verify_proof(&proved.proof)
+            .expect_err("truncated relation chip public values must fail runtime verification");
+        assert!(
+            runtime_err
+                .to_string()
+                .contains("machine metadata requires 8"),
+            "unexpected runtime error: {runtime_err}"
+        );
+
+        let verifier_err = verifier
+            .verify_proof(&proved.proof)
+            .expect_err("truncated relation chip public values must fail verifier validation");
+        assert!(
+            verifier_err
+                .to_string()
+                .contains("machine metadata requires 8"),
+            "unexpected verifier error: {verifier_err}"
+        );
+    }
+
+    #[test]
+    fn relation_chip_public_values_append_fails_runtime_verification() {
+        let (registered, runtime) = runtime_for_source(relation_source());
+        let snapshot = relation_snapshot(&registered);
+        let verifier = Verifier::builder(registered)
+            .expect("create verifier builder")
+            .build()
+            .expect("build verifier");
+        let batch = tx_batch(vec![ir::EntryCall {
+            entry_id: entry_id(&runtime, "enroll"),
+            params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
+        }]);
+        let context = relation_context(7, 11);
+        let mut proved = runtime
+            .execute_and_prove(&snapshot, &batch, &context)
+            .expect("prove relation batch");
+        let relation_opening = proved
+            .proof
+            .execution
+            .chip_openings
+            .iter_mut()
+            .find(|opening| opening.chip_id == RELATION_TABLE_CHIP_ID)
+            .expect("relation chip opening");
+        relation_opening.public_values.push(KoalaBear::ZERO);
+
+        let runtime_err = runtime
+            .verify_proof(&proved.proof)
+            .expect_err("extended relation chip public values must fail runtime verification");
+        assert!(
+            runtime_err
+                .to_string()
+                .contains("machine metadata requires 8"),
+            "unexpected runtime error: {runtime_err}"
+        );
+
+        let verifier_err = verifier
+            .verify_proof(&proved.proof)
+            .expect_err("extended relation chip public values must fail verifier validation");
+        assert!(
+            verifier_err
+                .to_string()
+                .contains("machine metadata requires 8"),
+            "unexpected verifier error: {verifier_err}"
+        );
+    }
+
+    #[test]
+    fn missing_relation_chip_opening_still_fails_runtime_verification() {
+        let (registered, runtime) = runtime_for_source(relation_source());
+        let snapshot = relation_snapshot(&registered);
+        let verifier = Verifier::builder(registered)
+            .expect("create verifier builder")
+            .build()
+            .expect("build verifier");
+        let batch = tx_batch(vec![ir::EntryCall {
+            entry_id: entry_id(&runtime, "enroll"),
+            params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
+        }]);
+        let context = relation_context(7, 11);
+        let mut proved = runtime
+            .execute_and_prove(&snapshot, &batch, &context)
+            .expect("prove relation batch");
+        proved
+            .proof
+            .execution
+            .chip_openings
+            .retain(|opening| opening.chip_id != RELATION_TABLE_CHIP_ID);
+
+        let runtime_err = runtime
+            .verify_proof(&proved.proof)
+            .expect_err("missing relation chip opening must fail runtime verification");
+        assert!(
+            runtime_err
+                .to_string()
+                .contains("relation table chip opening is missing"),
+            "unexpected runtime error: {runtime_err}"
+        );
+
+        let verifier_err = verifier
+            .verify_proof(&proved.proof)
+            .expect_err("missing relation chip opening must fail verifier validation");
+        assert!(
+            verifier_err
+                .to_string()
+                .contains("relation table chip opening is missing"),
+            "unexpected verifier error: {verifier_err}"
+        );
+    }
+
+    #[test]
+    fn bundled_root_authority_rejects_unsupported_binding_families() {
+        let registered = register_program_from_source(relation_source());
+        let err = TabulaRuntime::builder(registered.clone())
+            .expect("create runtime builder")
+            .with_root_backend_bundle(RootBackendBundle::new(EmptyFamilyRootBackend))
+            .build()
+            .err()
+            .expect("runtime build must reject unsupported bundled root families");
+        assert!(
+            err.to_string()
+                .contains("bundled root authority does not support binding family"),
+            "unexpected runtime build error: {err}"
+        );
+
+        let err = Verifier::builder(registered)
+            .expect("create verifier builder")
+            .with_root_backend_bundle(RootBackendBundle::new(EmptyFamilyRootBackend))
+            .build()
+            .err()
+            .expect("verifier build must reject unsupported bundled root families");
+        assert!(
+            err.to_string()
+                .contains("bundled root authority does not support binding family"),
+            "unexpected verifier build error: {err}"
+        );
+    }
+
+    #[test]
+    fn event_transcript_witness_matches_execution_event_rows() {
+        let registered = register_program_from_source(event_debug_source());
+        let runtime = TabulaRuntime::builder(registered)
+            .expect("create runtime builder")
+            .build()
+            .expect("build runtime");
+        let snapshot = runtime.empty_state_snapshot();
+        let register = runtime
+            .execution_program()
+            .program()
+            .entries
+            .iter()
+            .find(|entry| entry.symbol == "register")
+            .map(|entry| entry.id)
+            .expect("register entry");
+        let batch = tx_batch(vec![ir::EntryCall {
+            entry_id: register,
+            params: vec![u64_portable(1)],
+        }]);
+        let context = context_input([(ir::ContextFieldId(0), u64_portable(7))]);
+        let executed = runtime
+            .execute_batch(&snapshot, &batch, &context)
+            .expect("execute event batch");
+        let typed_context = runtime
+            .decode_context_input(&context)
+            .expect("decode context");
+        let typed_txs = runtime.decode_entry_batch(&batch).expect("decode batch");
+
+        let prepared = prepare_proof_artifacts(
+            &runtime.runtime_program,
+            &runtime.root_backend_bundle,
+            &snapshot,
+            &typed_txs,
+            &typed_context,
+            &executed,
+        )
+        .expect("prepare proof artifacts");
+
+        let records = prepared
+            .execution
+            .store
+            .get::<Vec<InstructionRecord>>(witness_labels::EXECUTION_RECORDS)
+            .expect("execution records");
+        let transcript_items = prepared
+            .execution
+            .store
+            .get::<Vec<[KoalaBear; 8]>>(EVENT_TRANSCRIPT_WITNESS_LABEL)
+            .expect("event transcript items");
+
+        let execution_items = extract_event_items(records);
+        let witness_items = transcript_items
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, block)| (index as u32, block))
+            .collect::<Vec<_>>();
+
+        assert_eq!(execution_items, witness_items);
+    }
+
+    #[test]
+    fn native_runtime_rejects_capability_calls_with_explicit_subset_error() {
+        let catalogs = tabula_compiler::CompilerCatalogs::standard()
+            .expect("standard catalogs")
+            .with_capability_descriptor(tabula_compiler::SourceCapabilityDescriptor {
+                path: "demo_hash".into(),
+                inputs: vec![tabula_profile::TYPE_U64_ID],
+                outputs: vec![tabula_profile::TYPE_BYTES32_ID],
+                totality: ir::CapabilityTotality::Total,
+                query_policy: ir::CapabilityQueryPolicy::QuerySafe,
+                proof_visibility: ir::CapabilityProofVisibility::OpaqueRuntimeOnly,
+                hash_family: None,
+            })
+            .expect("demo hash capability descriptor");
+        let registered = register_program_from_source_with_catalogs(capability_source(), &catalogs);
+
+        let err = TabulaRuntime::builder(registered.clone())
+            .expect("create runtime builder")
+            .build()
+            .err()
+            .expect("capability-backed program must be rejected before native proving");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("outside the current native proving subset"),
+            "unexpected runtime build error: {rendered}"
+        );
+        assert!(
+            rendered.contains("CallCapability"),
+            "unexpected runtime build error: {rendered}"
+        );
+
+        let err = Verifier::builder(registered)
+            .expect("create verifier builder")
+            .build()
+            .err()
+            .expect("capability-backed verifier must be rejected before native proving");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("outside the current native proving subset"),
+            "unexpected verifier build error: {rendered}"
+        );
+        assert!(
+            rendered.contains("CallCapability"),
+            "unexpected verifier build error: {rendered}"
         );
     }
 
@@ -2502,11 +2932,11 @@ tx maybe_promote(flag: bool, id: u64, tier: u64) {
             .expect("prove relation batch under custom host environment");
 
         assert_eq!(
-            proved.statement.static_table_root,
+            runtime.runtime_program.static_table_artifact.root,
             registered.static_table_artifact().root
         );
         verifier
-            .verify(&proved.proof, &proved.statement)
+            .verify_proof(&proved.proof)
             .expect("verify proof under custom host environment");
     }
 }

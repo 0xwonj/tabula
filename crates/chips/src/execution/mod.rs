@@ -25,4 +25,7 @@ pub use columns::{
     execution_width,
 };
 pub use trace::{CmpOp, InstructionRecord, Opcode, generate_execution_trace};
-pub use trace_utils::{limbs_to_u64, u64_add_limbs, u64_sub_limbs, u64_to_limbs};
+pub use trace_utils::{
+    limbs_to_u64, native_key_payload_prefix3, native_key_payload_to_u64, u64_add_limbs,
+    u64_sub_limbs, u64_to_limbs, u64_to_native_key_payload,
+};

@@ -9,6 +9,17 @@ use tabula_profile::EncodingProfile;
 
 use crate::TypedValue;
 
+/// Ordered proof-comparison family for one key-eligible encoding segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderedKeySegmentKind {
+    /// Boolean segment encoded as one field element.
+    Bool1,
+    /// Unsigned 64-bit segment encoded as three field elements.
+    U64Limbs3,
+    /// Signed 64-bit offset segment encoded as three field elements.
+    I64OffsetLimbs3,
+}
+
 /// Runtime encoding behavior for one registered encoding profile.
 pub trait EncodingRuntime: Send + Sync {
     /// Encoding profile identifier.
@@ -20,6 +31,17 @@ pub trait EncodingRuntime: Send + Sync {
     /// Encode one typed value into machine field elements.
     fn encode_field_elements(&self, value: &TypedValue) -> Result<Vec<KoalaBear>, TabulaError>;
 
+    /// Encode one typed value into the canonical proof-visible key segment payload.
+    ///
+    /// For key-eligible encodings this may differ from [`Self::encode_field_elements`] when the
+    /// execution/value encoding is not lexicographically order-preserving for proof purposes.
+    fn encode_key_payload_elements(
+        &self,
+        value: &TypedValue,
+    ) -> Result<Vec<KoalaBear>, TabulaError> {
+        self.encode_field_elements(value)
+    }
+
     /// Decode machine field elements into one typed value.
     fn decode_field_elements(
         &self,
@@ -29,8 +51,33 @@ pub trait EncodingRuntime: Send + Sync {
     /// Encode the transcript payload atoms for this value.
     fn encode_transcript_atoms(&self, value: &TypedValue) -> Result<Vec<KoalaBear>, TabulaError>;
 
+    /// Encode the canonical committed-byte representation for this value.
+    ///
+    /// This must be fixed-width whenever the descriptor is key-eligible.
+    fn encode_committed_bytes(&self, value: &TypedValue) -> Result<Vec<u8>, TabulaError> {
+        let _ = value;
+        Err(TabulaError::Custom(format!(
+            "encoding profile {} does not implement committed-byte encoding",
+            self.encoding_profile_id().0
+        )))
+    }
+
+    /// Decode the canonical committed-byte representation for this value.
+    fn decode_committed_bytes(&self, bytes: &[u8]) -> Result<TypedValue, TabulaError> {
+        let _ = bytes;
+        Err(TabulaError::Custom(format!(
+            "encoding profile {} does not implement committed-byte decoding",
+            self.encoding_profile_id().0
+        )))
+    }
+
     /// Fixed trace width contributed by this encoding profile.
     fn trace_width(&self) -> usize;
+
+    /// Ordered proof-comparison family for this encoding when used in a key segment.
+    fn ordered_key_segment_kind(&self) -> Option<OrderedKeySegmentKind> {
+        None
+    }
 }
 
 /// Process-local registry of runtime encoding behavior.
@@ -98,6 +145,27 @@ impl EncodingRuntimeRegistry {
             });
         }
         runtime.encode_field_elements(value)
+    }
+
+    /// Encode one typed value through an explicitly selected committed-key
+    /// encoding profile.
+    pub fn encode_committed_bytes_for_profile(
+        &self,
+        encoding_profile_id: EncodingProfileId,
+        value: &TypedValue,
+    ) -> Result<Vec<u8>, TabulaError> {
+        let runtime = self.resolve(encoding_profile_id)?;
+        if runtime.descriptor().type_id != value.type_id() {
+            return Err(TabulaError::TypeMismatch {
+                expected: format!(
+                    "encoding profile {} for type {}",
+                    encoding_profile_id.0,
+                    runtime.descriptor().type_id.0
+                ),
+                actual: format!("type {}", value.type_id().0),
+            });
+        }
+        runtime.encode_committed_bytes(value)
     }
 
     /// Snapshot all registered encoding runtimes.

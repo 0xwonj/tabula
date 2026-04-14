@@ -2,16 +2,15 @@
 
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
-use tabula_core::{CellKey, RowKey, TypeId};
+use tabula_core::{CommittedCellKey, TypeId};
 use tabula_ir as ir;
-use tabula_profile::is_u64_type;
 use tabula_types::{TypedValue, typed_bool};
 
 use crate::machine::effects::EffectRecorder;
 use crate::machine::frame::LocalFrame;
 use crate::machine::ops;
 use crate::program::{ResolvedEntry, ResolvedExecutionProgram};
-use crate::state::{Overlay, decode_row_key};
+use crate::state::Overlay;
 use crate::surface::{
     CapabilityEffect, ContextValues, ExecContext, RelationEffect, StatePropertyEffect,
     TypedEventEffect, TypedStateEffect,
@@ -248,14 +247,11 @@ impl<'a, 'snap, 'exec, S: StateView> EntryMachineCore<'a, 'snap, 'exec, S> {
         table: ir::TableId,
         field: ir::FieldId,
         key: &ir::ValueTupleRef,
-    ) -> Result<CellKey, TabulaError> {
+    ) -> Result<CommittedCellKey, TabulaError> {
         let values = self.eval_tuple(key)?;
-        let row = self.decode_table_row_key(table, &values)?;
-        Ok(CellKey {
-            table: table.into(),
-            col: field.into(),
-            row,
-        })
+        self.exec
+            .state_runtime
+            .encode_cell_key(table, field, &values)
     }
 
     pub(in crate::machine) fn inactive_default(
@@ -263,31 +259,5 @@ impl<'a, 'snap, 'exec, S: StateView> EntryMachineCore<'a, 'snap, 'exec, S> {
         ty: TypeId,
     ) -> Result<TypedValue, TabulaError> {
         self.exec.type_runtimes.zero_of(ty)
-    }
-
-    fn decode_table_row_key(
-        &self,
-        table: ir::TableId,
-        values: &[TypedValue],
-    ) -> Result<RowKey, TabulaError> {
-        let key_ty = self.v1_single_key_type(table)?;
-        if values.len() != 1 {
-            return Err(TabulaError::InvalidIr(
-                "V1 canonical executor only supports single-component state keys".into(),
-            ));
-        }
-        decode_row_key(&values[0], key_ty, self.exec.type_runtimes)
-    }
-
-    fn v1_single_key_type(&self, table: ir::TableId) -> Result<TypeId, TabulaError> {
-        let schema = &self.program.table(table)?.schema;
-        if schema.key_tys.len() != 1 || !is_u64_type(schema.key_tys[0]) {
-            return Err(TabulaError::InvalidIr(format!(
-                "V1 canonical executor only supports [u64] key schema, table {} declared {:?}",
-                table.0,
-                schema.key_tys.iter().map(|ty| ty.0).collect::<Vec<_>>()
-            )));
-        }
-        Ok(schema.key_tys[0])
     }
 }

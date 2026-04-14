@@ -7,9 +7,11 @@
 pub mod test_utils;
 
 pub mod capability_transcript;
+pub mod event_transcript;
 pub mod execution;
 pub mod ir_hash;
 pub mod poseidon;
+pub mod public_context_transcript;
 pub mod range_check;
 mod registry;
 pub mod relation_table;
@@ -17,6 +19,7 @@ pub mod relation_transcript;
 pub mod shards;
 pub mod smt_path;
 pub mod static_table;
+pub mod tx_batch_transcript;
 
 // Re-export core chip identification types from tabula-stark.
 pub use registry::{core_bus_consumers, core_dyn_chips};

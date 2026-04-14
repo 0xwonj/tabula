@@ -1,14 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
-use tabula_chips::shards::memory::trace::MemoryShardRow;
-use tabula_core::RowKey;
-use tabula_core::error::TabulaError;
-use tabula_core::{ColId, TableId};
-
 use crate::stark::{AccessRow, InitRow};
+use tabula_chips::shards::memory::trace::MemoryShardRow;
+use tabula_core::error::TabulaError;
+use tabula_core::{ColId, CommittedKey, TableId};
+use tabula_types::{NativeKeyPayload, TableKeyCodec};
 
 /// A single row for building inter-tx ordering data.
 ///
@@ -16,8 +15,8 @@ use crate::stark::{AccessRow, InitRow};
 /// Init rows have `is_init=true` and appear first for each key.
 #[derive(Debug, Clone)]
 pub(crate) struct InterTxOrderRow {
-    /// Row key (u64).
-    pub key: u64,
+    /// Native committed-key payload.
+    pub key: NativeKeyPayload,
     /// Transaction index within the batch (0 for init rows).
     pub tx_index: u32,
     /// True if this is an init row (base state seed).
@@ -55,12 +54,12 @@ impl From<InterTxOrderRow> for MemoryShardRow {
 pub(super) fn build_inter_tx_rows_for_parts<const W: usize>(
     table: TableId,
     col: ColId,
+    key_codec: &TableKeyCodec,
     init_rows: &[InitRow],
     access_rows: &[AccessRow],
 ) -> Result<Vec<InterTxOrderRow>, TabulaError> {
-    let mut keys = BTreeSet::new();
-
-    let mut init_by_key: BTreeMap<RowKey, (Vec<KoalaBear>, bool)> = BTreeMap::new();
+    let mut init_by_key: BTreeMap<CommittedKey, (NativeKeyPayload, Vec<KoalaBear>, bool)> =
+        BTreeMap::new();
     for init in init_rows {
         if init.value_fes.len() != W {
             return Err(TabulaError::ProofError {
@@ -74,11 +73,23 @@ pub(super) fn build_inter_tx_rows_for_parts<const W: usize>(
                 ),
             });
         }
-        keys.insert(init.key.row);
-        init_by_key.insert(init.key.row, (init.value_fes.clone(), init.val_is_null));
+        if init_by_key
+            .insert(
+                init.key.key.clone(),
+                (init.key_payload, init.value_fes.clone(), init.val_is_null),
+            )
+            .is_some()
+        {
+            return Err(TabulaError::ProofError {
+                phase: "memory",
+                detail: format!(
+                    "duplicate init key while building inter-tx rows for ({table:?}, {col:?})"
+                ),
+            });
+        }
     }
 
-    let mut by_key_tx: BTreeMap<RowKey, BTreeMap<u32, Vec<&AccessRow>>> = BTreeMap::new();
+    let mut by_key_tx: BTreeMap<CommittedKey, BTreeMap<u32, Vec<&AccessRow>>> = BTreeMap::new();
     for access in access_rows {
         if access.value_fes.len() != W {
             return Err(TabulaError::ProofError {
@@ -92,26 +103,27 @@ pub(super) fn build_inter_tx_rows_for_parts<const W: usize>(
                 ),
             });
         }
-        keys.insert(access.key.row);
         by_key_tx
-            .entry(access.key.row)
+            .entry(access.key.key.clone())
             .or_default()
             .entry(access.tx_index)
             .or_default()
             .push(access);
     }
 
+    let ordered_keys = ordered_keys(key_codec, init_rows, access_rows)?;
+
     let zero = vec![KoalaBear::ZERO; W];
     let mut rows = Vec::new();
 
-    for key in keys {
-        let (init_val, init_is_null) = init_by_key
-            .get(&key)
-            .cloned()
-            .unwrap_or_else(|| (zero.clone(), true));
+    for (key, payload) in ordered_keys {
+        let (init_val, init_is_null) = init_by_key.get(&key).map_or_else(
+            || (zero.clone(), true),
+            |(_, value, is_null)| (value.clone(), *is_null),
+        );
 
         rows.push(InterTxOrderRow {
-            key: key.0,
+            key: payload,
             tx_index: 0,
             is_init: true,
             has_read: false,
@@ -148,7 +160,7 @@ pub(super) fn build_inter_tx_rows_for_parts<const W: usize>(
                     };
 
                 rows.push(InterTxOrderRow {
-                    key: key.0,
+                    key: payload,
                     tx_index: *tx_index,
                     is_init: false,
                     has_read,
@@ -166,4 +178,55 @@ pub(super) fn build_inter_tx_rows_for_parts<const W: usize>(
     }
 
     Ok(rows)
+}
+
+fn ordered_keys(
+    key_codec: &TableKeyCodec,
+    init_rows: &[InitRow],
+    access_rows: &[AccessRow],
+) -> Result<Vec<(CommittedKey, NativeKeyPayload)>, TabulaError> {
+    let mut ordered = Vec::with_capacity(init_rows.len() + access_rows.len());
+    ordered.extend(
+        init_rows
+            .iter()
+            .map(|row| (row.key.key.clone(), row.key_payload)),
+    );
+    ordered.extend(
+        access_rows
+            .iter()
+            .map(|row| (row.key.key.clone(), row.key_payload)),
+    );
+    ordered.sort_by(|(lhs, _), (rhs, _)| {
+        key_codec
+            .compare(lhs, rhs)
+            .expect("validated state-key ordering must remain available")
+    });
+
+    let mut deduped = Vec::with_capacity(ordered.len());
+    for (key, payload) in ordered {
+        if let Some((prev_key, prev_payload)) = deduped.last() {
+            match key_codec.compare(prev_key, &key)? {
+                std::cmp::Ordering::Less => deduped.push((key, payload)),
+                std::cmp::Ordering::Equal => {
+                    if *prev_payload != payload {
+                        return Err(TabulaError::ProofError {
+                            phase: "memory",
+                            detail:
+                                "conflicting payloads for equal committed keys in inter-tx ordering"
+                                    .into(),
+                        });
+                    }
+                }
+                std::cmp::Ordering::Greater => {
+                    return Err(TabulaError::ProofError {
+                        phase: "memory",
+                        detail: "unordered committed keys while building inter-tx rows".into(),
+                    });
+                }
+            }
+        } else {
+            deduped.push((key, payload));
+        }
+    }
+    Ok(deduped)
 }

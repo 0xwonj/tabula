@@ -7,21 +7,25 @@ use tabula_sdk::{Artifact, Program, QueryResult, State};
 use crate::environment::EnvironmentStatus;
 use crate::io::ProgramInputKind;
 
-#[cfg(feature = "prove")]
-use super::ProveOutputV1;
 #[cfg(feature = "verify")]
-use super::VerifyOutputV1;
+use super::InspectProofOutput;
+#[cfg(feature = "prove")]
+use super::ProveOutput;
+#[cfg(feature = "verify")]
+use super::VerifyOutput;
 use super::{
-    CheckOutputV1, EntryOutputV1, EnvDoctorOutputV1, ExecutionReportV1, ExtensionBundleOutputV1,
-    NamedTypeOutputV1, QueryOutputV1, QueryRunOutputV1, SchemaOutputV1, StateCellOutputV1,
-    StateInspectOutputV1, TableFieldOutputV1, TableOutputV1, TxOutcomeOutputV1, TxOutcomeStatusV1,
-    TypeOutputV1,
+    CheckOutput, EntryOutput, EnvDoctorOutput, ExecutionReport, ExtensionBundleOutput,
+    NamedTypeOutput, QueryOutput, QueryRunOutput, SchemaOutput, StateCellOutput,
+    StateInspectOutput, TableFieldOutput, TableOutput, TxOutcomeOutput, TxOutcomeStatus,
+    TypeOutput,
 };
 use crate::output::{type_name, value_output};
+#[cfg(feature = "verify")]
+use tabula_sdk::PublicStatementFile;
 
-pub(crate) fn check_output(artifact: &Artifact, input_kind: ProgramInputKind) -> CheckOutputV1 {
+pub(crate) fn check_output(artifact: &Artifact, input_kind: ProgramInputKind) -> CheckOutput {
     let schema = artifact.schema();
-    CheckOutputV1 {
+    CheckOutput {
         version: "tabula.cli.check.v1".to_string(),
         input_kind: match input_kind {
             ProgramInputKind::Source => "source".to_string(),
@@ -51,22 +55,29 @@ pub(crate) fn check_output(artifact: &Artifact, input_kind: ProgramInputKind) ->
     }
 }
 
-pub(crate) fn schema_output(artifact: &Artifact) -> SchemaOutputV1 {
+pub(crate) fn schema_output(artifact: &Artifact) -> SchemaOutput {
     let schema = artifact.schema();
-    SchemaOutputV1 {
+    SchemaOutput {
         version: "tabula.cli.schema.v1".to_string(),
         artifact_digest: artifact.digest().to_string(),
         tables: schema
             .tables()
             .iter()
-            .map(|table| TableOutputV1 {
+            .map(|table| TableOutput {
                 id: table.id().0,
                 symbol: table.symbol().to_string(),
-                key_arity: table.key_arity(),
+                key_components: table
+                    .key_components()
+                    .iter()
+                    .map(|component| NamedTypeOutput {
+                        symbol: component.symbol().to_string(),
+                        ty: type_output(component.ty()),
+                    })
+                    .collect(),
                 fields: table
                     .fields()
                     .iter()
-                    .map(|field| TableFieldOutputV1 {
+                    .map(|field| TableFieldOutput {
                         id: u32::from(field.id().0),
                         symbol: field.symbol().to_string(),
                         ty: type_output(field.ty()),
@@ -77,13 +88,13 @@ pub(crate) fn schema_output(artifact: &Artifact) -> SchemaOutputV1 {
         transactions: schema
             .txs()
             .iter()
-            .map(|entry| EntryOutputV1 {
+            .map(|entry| EntryOutput {
                 id: entry.id().0,
                 symbol: entry.symbol().to_string(),
                 params: entry
                     .params()
                     .iter()
-                    .map(|param| NamedTypeOutputV1 {
+                    .map(|param| NamedTypeOutput {
                         symbol: param.symbol().to_string(),
                         ty: type_output(param.ty()),
                     })
@@ -93,13 +104,13 @@ pub(crate) fn schema_output(artifact: &Artifact) -> SchemaOutputV1 {
         queries: schema
             .queries()
             .iter()
-            .map(|query| QueryOutputV1 {
+            .map(|query| QueryOutput {
                 id: query.id().0,
                 symbol: query.symbol().to_string(),
                 params: query
                     .params()
                     .iter()
-                    .map(|param| NamedTypeOutputV1 {
+                    .map(|param| NamedTypeOutput {
                         symbol: param.symbol().to_string(),
                         ty: type_output(param.ty()),
                     })
@@ -110,7 +121,7 @@ pub(crate) fn schema_output(artifact: &Artifact) -> SchemaOutputV1 {
         context_fields: schema
             .context_fields()
             .iter()
-            .map(|field| NamedTypeOutputV1 {
+            .map(|field| NamedTypeOutput {
                 symbol: field.symbol().to_string(),
                 ty: type_output(field.ty()),
             })
@@ -122,8 +133,8 @@ pub(crate) fn query_run_output(
     artifact: &Artifact,
     query: &str,
     result: &QueryResult,
-) -> QueryRunOutputV1 {
-    QueryRunOutputV1 {
+) -> QueryRunOutput {
+    QueryRunOutput {
         version: "tabula.cli.query.v1".to_string(),
         artifact_digest: artifact.digest().to_string(),
         query: query.to_string(),
@@ -139,29 +150,29 @@ pub(crate) fn execution_report(
     program: &Program,
     receipt: &tabula_sdk::ExecutionReceipt,
     raw: bool,
-) -> ExecutionReportV1 {
+) -> ExecutionReport {
     let entry_names = program
         .schema()
         .txs()
         .iter()
         .map(|tx| (tx.id().0, tx.symbol().to_string()))
         .collect::<BTreeMap<_, _>>();
-    ExecutionReportV1 {
+    ExecutionReport {
         version: "tabula.cli.execute.v1".to_string(),
         artifact_digest: program.artifact().digest().to_string(),
         outcomes: receipt
             .outcomes()
             .iter()
-            .map(|outcome| TxOutcomeOutputV1 {
+            .map(|outcome| TxOutcomeOutput {
                 tx_index: outcome.tx_index(),
                 entry_id: outcome.entry_id().0,
                 entry: (!raw)
                     .then(|| entry_names.get(&outcome.entry_id().0).cloned())
                     .flatten(),
                 status: if outcome.success() {
-                    TxOutcomeStatusV1::Success
+                    TxOutcomeStatus::Success
                 } else {
-                    TxOutcomeStatusV1::Failed {
+                    TxOutcomeStatus::Failed {
                         reason: outcome.reason().unwrap_or("unknown failure").to_string(),
                         failed_op_index: outcome.failed_op_index(),
                     }
@@ -183,7 +194,7 @@ pub(crate) fn state_output(
     state: &State,
     table_filter: Option<&str>,
     raw: bool,
-) -> StateInspectOutputV1 {
+) -> StateInspectOutput {
     let tables_by_id = program.map_or_else(SymbolMaps::default, symbol_maps);
 
     let requested_table_id = table_filter.and_then(|value| {
@@ -196,42 +207,42 @@ pub(crate) fn state_output(
 
     let cells = state
         .cells()
-        .filter(|(key, _)| requested_table_id.is_none_or(|id| key.table.0 == id))
-        .map(|(key, value)| StateCellOutputV1 {
-            table_id: key.table.0,
+        .filter(|cell| requested_table_id.is_none_or(|id| cell.table.0 == id))
+        .map(|cell| StateCellOutput {
+            table_id: cell.table.0,
             table: (!raw)
-                .then(|| tables_by_id.table_names.get(&key.table.0).cloned())
+                .then(|| tables_by_id.table_names.get(&cell.table.0).cloned())
                 .flatten(),
-            row: key.row.0,
-            field_id: u32::from(key.col.0),
+            key: cell.key.iter().map(value_output).collect(),
+            field_id: u32::from(cell.field.0),
             field: (!raw)
                 .then(|| {
                     tables_by_id
                         .field_names
-                        .get(&(key.table.0, u32::from(key.col.0)))
+                        .get(&(cell.table.0, u32::from(cell.field.0)))
                         .cloned()
                 })
                 .flatten(),
-            value: value_output(value),
+            value: value_output(&cell.value),
         })
         .collect::<Vec<_>>();
 
-    StateInspectOutputV1 {
+    StateInspectOutput {
         version: "tabula.cli.state.v1".to_string(),
         cell_count: cells.len(),
         cells,
     }
 }
 
-pub(crate) fn type_output(ty: tabula_sdk::interop::TypeRef) -> TypeOutputV1 {
-    TypeOutputV1 {
+pub(crate) fn type_output(ty: tabula_sdk::interop::TypeRef) -> TypeOutput {
+    TypeOutput {
         id: ty.0,
         display: type_name(ty),
     }
 }
 
-pub(crate) fn environment_status_output(status: &EnvironmentStatus) -> EnvDoctorOutputV1 {
-    EnvDoctorOutputV1 {
+pub(crate) fn environment_status_output(status: &EnvironmentStatus) -> EnvDoctorOutput {
+    EnvDoctorOutput {
         version: "tabula.cli.env.v1".to_string(),
         config_path: status.config_path.clone(),
         sdk_ready: status.sdk_ready,
@@ -239,7 +250,7 @@ pub(crate) fn environment_status_output(status: &EnvironmentStatus) -> EnvDoctor
         extensions: status
             .extensions
             .iter()
-            .map(|extension| ExtensionBundleOutputV1 {
+            .map(|extension| ExtensionBundleOutput {
                 path: extension.path.clone(),
                 name: extension.name.clone(),
                 capability_paths: extension.capability_paths.clone(),
@@ -255,19 +266,14 @@ pub(crate) fn environment_status_output(status: &EnvironmentStatus) -> EnvDoctor
 pub(crate) fn prove_output(
     artifact: &Artifact,
     proof: &tabula_sdk::Proof,
-) -> anyhow::Result<ProveOutputV1> {
+) -> anyhow::Result<ProveOutput> {
     let envelope = proof
         .to_envelope()
         .map_err(|error| anyhow::anyhow!(error))?;
-    Ok(ProveOutputV1 {
+    Ok(ProveOutput {
         version: "tabula.cli.prove.v1".to_string(),
         artifact_digest: artifact.digest().to_string(),
-        statement_hash_hex: hex_encode(
-            &proof
-                .statement()
-                .statement_hash_bytes()
-                .map_err(|error| anyhow::anyhow!(error))?,
-        ),
+        binding_digest_hex: hex_encode(proof.binding_digest()),
         proof_system: envelope.proof_system.name().to_string(),
         proof_encoding: envelope.proof_encoding.name().to_string(),
         chip_count: proof.summary().chip_count,
@@ -278,18 +284,27 @@ pub(crate) fn prove_output(
 pub(crate) fn verify_output(
     artifact: &Artifact,
     proof: &tabula_sdk::Proof,
-) -> anyhow::Result<VerifyOutputV1> {
-    Ok(VerifyOutputV1 {
+) -> anyhow::Result<VerifyOutput> {
+    Ok(VerifyOutput {
         version: "tabula.cli.verify.v1".to_string(),
         artifact_digest: artifact.digest().to_string(),
-        statement_hash_hex: hex_encode(
-            &proof
-                .statement()
-                .statement_hash_bytes()
-                .map_err(|error| anyhow::anyhow!(error))?,
-        ),
+        binding_digest_hex: hex_encode(proof.binding_digest()),
         verified: true,
     })
+}
+
+#[cfg(feature = "verify")]
+pub(crate) fn inspect_proof_output(
+    proof: &tabula_sdk::Proof,
+    envelope: &tabula_sdk::interop::ProofEnvelope,
+) -> InspectProofOutput {
+    InspectProofOutput {
+        version: "tabula.cli.inspect_proof.v1".to_string(),
+        binding_digest_hex: hex_encode(proof.binding_digest()),
+        proof_system: envelope.proof_system.name().to_string(),
+        proof_encoding: envelope.proof_encoding.name().to_string(),
+        public_statement_file: PublicStatementFile::from_public_statement(proof.public_statement()),
+    }
 }
 
 #[derive(Debug, Clone, Default)]

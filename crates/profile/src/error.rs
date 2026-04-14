@@ -70,6 +70,10 @@ pub enum ProfileError {
     #[error("type {0} has no registered default encoding profile")]
     MissingDefaultEncoding(TypeId),
 
+    /// A type is missing its default key encoding.
+    #[error("type {0} has no registered default key encoding profile")]
+    MissingDefaultKeyEncoding(TypeId),
+
     /// A `(scheme family, encoding)` pair is missing its default scheme profile.
     #[error(
         "scheme family {scheme_id} with encoding profile {encoding_profile_id} has no registered default scheme profile"

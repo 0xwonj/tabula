@@ -1,6 +1,7 @@
 //! `tabula verify`
 
 use anyhow::Context as _;
+use tabula_sdk::PublicStatementFile;
 
 use crate::app::AppContext;
 use crate::cli::VerifyArgs;
@@ -13,7 +14,16 @@ pub(crate) fn run(ctx: &AppContext, args: &VerifyArgs) -> anyhow::Result<()> {
     let bytes = std::fs::read(&args.proof)
         .with_context(|| format!("failed to read {}", args.proof.display()))?;
     let proof = tabula_sdk::Proof::decode_binary(&bytes)?;
-    loaded.program.verifier().verify(&proof)?;
+    let statement_bytes = std::fs::read(&args.statement)
+        .with_context(|| format!("failed to read {}", args.statement.display()))?;
+    let statement = PublicStatementFile::from_json_bytes(&statement_bytes)
+        .with_context(|| format!("failed to decode {}", args.statement.display()))?
+        .to_public_statement()
+        .with_context(|| format!("failed to validate {}", args.statement.display()))?;
+    loaded
+        .program
+        .verifier()?
+        .verify_public_statement(&proof, &statement)?;
 
     let output = verify_output(&loaded.artifact, &proof)?;
     if ctx.wants_json(args.json) {

@@ -2,7 +2,8 @@
 
 use p3_koala_bear::KoalaBear;
 
-use tabula_core::{CellKey, LogicalTime};
+use tabula_core::{CommittedCellKey, LogicalTime};
+use tabula_types::NativeKeyPayload;
 
 /// An init row seeding base-state values into the sorted memory table.
 ///
@@ -11,7 +12,9 @@ use tabula_core::{CellKey, LogicalTime};
 #[derive(Clone, Debug, PartialEq)]
 pub struct InitRow {
     /// The cell address.
-    pub key: CellKey,
+    pub key: CommittedCellKey,
+    /// Native proof-visible committed-key payload.
+    pub key_payload: NativeKeyPayload,
     /// Tier 1 ComEnc value (w(T) field elements). Canonical zero if null.
     pub value_fes: Vec<KoalaBear>,
     /// Whether the cell was absent in base state.
@@ -22,7 +25,9 @@ pub struct InitRow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AccessRow {
     /// The cell address.
-    pub key: CellKey,
+    pub key: CommittedCellKey,
+    /// Native proof-visible committed-key payload.
+    pub key_payload: NativeKeyPayload,
     /// Logical time of this access (`τ = clk + 1`).
     pub time: LogicalTime,
     /// Whether this is a write (`true`) or read (`false`).

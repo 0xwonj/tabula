@@ -7,6 +7,10 @@ fn crate_root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
+fn read(rel: &str) -> String {
+    fs::read_to_string(crate_root().join(rel)).expect("read source file")
+}
+
 #[test]
 fn root_surface_stays_native_only() {
     let lib = fs::read_to_string(crate_root().join("src/lib.rs")).expect("read lib.rs");
@@ -83,8 +87,7 @@ fn binding_surface_stays_canonical_only() {
 
 #[test]
 fn ssmc_public_surface_does_not_expose_mutators() {
-    let ssmc =
-        fs::read_to_string(crate_root().join("src/schemes/ssmc/mod.rs")).expect("read ssmc mod");
+    let ssmc = read("src/schemes/ssmc/mod.rs");
 
     for forbidden in ["pub fn new(", "pub fn insert(", "pub fn remove("] {
         assert!(
@@ -92,6 +95,30 @@ fn ssmc_public_surface_does_not_expose_mutators() {
             "SSMC mutator '{forbidden}' should not remain public"
         );
     }
+}
+
+#[test]
+fn production_ssmc_commitment_layer_does_not_define_semantic_ordering() {
+    let ssmc = read("src/schemes/ssmc/mod.rs");
+    assert!(
+        ssmc.contains("Semantic key ordering must be decided before constructing an `SsmcList`."),
+        "SSMC commitment docs must state that semantic ordering is decided above the commitment layer"
+    );
+    assert!(
+        ssmc.contains("#[cfg(test)]\nmod merge;"),
+        "payload-order merge helpers must stay test-only"
+    );
+    assert!(
+        ssmc.contains(
+            "pub fn from_entries(table: TableId, col: ColId, entries: Vec<SsmcEntry>) -> Self"
+        ),
+        "production SSMC must accept already-ordered entries from the upper semantic layer"
+    );
+    assert!(
+        ssmc.contains("#[cfg(test)]\n    pub fn from_sorted(")
+            && ssmc.contains("#[cfg(test)]\n    pub fn apply_writes"),
+        "sortedness validation and merge application must remain test-only helpers"
+    );
 }
 
 #[test]

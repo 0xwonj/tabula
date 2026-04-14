@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 use tabula_core::{
-    AccessEvent, BatchReport, CellKey, ColId, OpKind, PortableValue, RowKey, TableId, TxResult,
-    TypeId,
+    AccessEvent, BatchReport, ColId, CommittedCellKey, CommittedKey, OpKind, PortableValue,
+    TableId, TxResult, TypeId,
 };
 
 fn portable_u64(value: u64) -> PortableValue {
@@ -11,10 +11,10 @@ fn portable_u64(value: u64) -> PortableValue {
 #[test]
 fn test_execution_event_borsh_round_trip() {
     let event = AccessEvent {
-        key: CellKey {
+        key: CommittedCellKey {
             table: TableId(1),
             col: ColId(0),
-            row: RowKey(0),
+            key: CommittedKey(vec![0; 8]),
         },
         op: OpKind::Read,
         value: portable_u64(100),
@@ -41,10 +41,10 @@ fn test_batch_result_construction() {
 #[test]
 fn test_batch_result_successful_events() {
     let event = AccessEvent {
-        key: CellKey {
+        key: CommittedCellKey {
             table: TableId(1),
             col: ColId(0),
-            row: RowKey(0),
+            key: CommittedKey(vec![0; 8]),
         },
         op: OpKind::Read,
         value: portable_u64(42),

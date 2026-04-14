@@ -4,7 +4,7 @@ mod common;
 
 use common::{
     FailOnInputCapability, WrongArityCapability, WrongTypeCapability, XorHasher, resolved_program,
-    resolved_program_with_capability, type_runtimes,
+    resolved_program_with_capability, test_state_runtime, type_runtimes,
 };
 use tabula_executor as exec;
 use tabula_ir as ir;
@@ -21,7 +21,7 @@ fn checked_capability_failure_rolls_back_only_one_tx() {
         hasher: &XorHasher,
         type_runtimes: &runtimes,
         capability_executor: Some(&capabilities),
-        property_reads: None,
+        state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
     let mut context = exec::ContextValues::new();
@@ -70,7 +70,7 @@ fn total_capability_failure_aborts_batch() {
         hasher: &XorHasher,
         type_runtimes: &runtimes,
         capability_executor: Some(&capabilities),
-        property_reads: None,
+        state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
     let mut context = exec::ContextValues::new();
@@ -103,7 +103,7 @@ fn capability_output_arity_mismatch_is_fatal() {
         hasher: &XorHasher,
         type_runtimes: &runtimes,
         capability_executor: Some(&capabilities),
-        property_reads: None,
+        state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
     let mut context = exec::ContextValues::new();
@@ -133,7 +133,7 @@ fn capability_output_type_mismatch_is_fatal() {
         hasher: &XorHasher,
         type_runtimes: &runtimes,
         capability_executor: Some(&capabilities),
-        property_reads: None,
+        state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
     let mut context = exec::ContextValues::new();

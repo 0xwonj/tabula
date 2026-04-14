@@ -1,5 +1,9 @@
 //! SSMC: Sorted Sparse Map Commitment for small columns.
+//!
+//! This crate owns only the payload-level commitment container and hash logic.
+//! Semantic key ordering must be decided before constructing an `SsmcList`.
 
+#[cfg(test)]
 mod merge;
 
 use p3_field::PrimeCharacteristicRing;
@@ -8,18 +12,19 @@ use p3_koala_bear::default_koalabear_poseidon2_16;
 use p3_symmetric::Permutation;
 
 use tabula_core::error::TabulaError;
-use tabula_core::{ColId, RowKey, TableId};
+use tabula_core::{ColId, TableId};
+use tabula_types::NativeKeyPayload;
 
 use crate::primitives::FieldHasher;
-use crate::primitives::{DOMAIN_SSMC, NativeDigest, encode_u64_limbs};
+use crate::primitives::{DOMAIN_SSMC, NativeDigest};
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
 /// A single entry in an SSMC list.
 #[derive(Clone, Debug)]
 pub struct SsmcEntry {
-    /// The row key.
-    pub key: RowKey,
+    /// The canonical committed-key proof payload.
+    pub key: NativeKeyPayload,
     /// The ComEnc-encoded value (w(T) field elements).
     pub value: Vec<KoalaBear>,
 }
@@ -42,6 +47,10 @@ pub struct SsmcList {
 pub struct SsmcCommitment<D>(pub D);
 
 const SSMC_MAX_VALUE_FES: usize = 5;
+
+fn native_key_payload_prefix3(payload: &NativeKeyPayload) -> [KoalaBear; 3] {
+    [payload[2], payload[1], payload[0]]
+}
 
 fn build_proof_hash_input(
     table: TableId,
@@ -119,11 +128,10 @@ fn proof_commitment(
             });
         }
 
-        let key_limbs = encode_u64_limbs(entry.key.0);
         prev = Some(proof_step(build_proof_hash_input(
             table,
             col,
-            &key_limbs,
+            &native_key_payload_prefix3(&entry.key),
             &entry.value,
             prev.as_ref(),
         )));
@@ -145,7 +153,20 @@ impl SsmcList {
         }
     }
 
+    /// Create from already-ordered entries.
+    ///
+    /// The caller is responsible for providing entries in the canonical order
+    /// chosen above the commitment layer.
+    pub fn from_entries(table: TableId, col: ColId, entries: Vec<SsmcEntry>) -> Self {
+        Self {
+            table,
+            col,
+            entries,
+        }
+    }
+
     /// Create from pre-sorted entries. Validates sorted + unique keys.
+    #[cfg(test)]
     pub fn from_sorted(
         table: TableId,
         col: ColId,
@@ -169,7 +190,7 @@ impl SsmcList {
 
     /// Insert a single entry, maintaining sort order. Overwrites if key exists.
     #[cfg(test)]
-    pub(crate) fn insert(&mut self, key: RowKey, value: Vec<KoalaBear>) {
+    pub(crate) fn insert(&mut self, key: NativeKeyPayload, value: Vec<KoalaBear>) {
         match self.entries.binary_search_by_key(&key, |e| e.key) {
             Ok(i) => self.entries[i].value = value,
             Err(i) => self.entries.insert(i, SsmcEntry { key, value }),
@@ -178,7 +199,7 @@ impl SsmcList {
 
     /// Remove a key. Returns true if it was present.
     #[cfg(test)]
-    pub(crate) fn remove(&mut self, key: RowKey) -> bool {
+    pub(crate) fn remove(&mut self, key: NativeKeyPayload) -> bool {
         match self.entries.binary_search_by_key(&key, |e| e.key) {
             Ok(i) => {
                 self.entries.remove(i);
@@ -204,9 +225,10 @@ impl SsmcList {
     }
 
     /// Apply writes to produce a new list and native commitment.
+    #[cfg(test)]
     pub fn apply_writes<H: FieldHasher<F = KoalaBear>>(
         &self,
-        writes: &[(RowKey, Option<Vec<KoalaBear>>)],
+        writes: &[(NativeKeyPayload, Option<Vec<KoalaBear>>)],
         hasher: &H,
     ) -> (SsmcList, SsmcCommitment<H::Digest>) {
         merge::merge(self, writes, self.table, self.col, hasher)
@@ -215,17 +237,6 @@ impl SsmcList {
     /// Compute the proof-visible commitment for this list.
     pub fn proof_commitment(&self) -> Result<NativeDigest, TabulaError> {
         proof_commitment(self.table, self.col, self)
-    }
-
-    /// Create from pre-sorted entries without validation.
-    ///
-    /// Used internally by the merge algorithm, which guarantees sorted output.
-    pub(crate) fn from_entries(table: TableId, col: ColId, entries: Vec<SsmcEntry>) -> Self {
-        Self {
-            table,
-            col,
-            entries,
-        }
     }
 
     /// Compute the SSMC commitment.
@@ -237,8 +248,7 @@ impl SsmcList {
         input.push(KoalaBear::new(self.col.0 as u32));
         input.push(KoalaBear::new(self.entries.len() as u32));
         for entry in &self.entries {
-            let key_limbs = encode_u64_limbs(entry.key.0);
-            input.extend_from_slice(&key_limbs);
+            input.extend_from_slice(&entry.key);
             input.extend_from_slice(&entry.value);
         }
         SsmcCommitment(hasher.hash_domain(DOMAIN_SSMC, &input))
@@ -250,14 +260,23 @@ mod tests {
     use super::*;
     use crate::primitives::MockFieldHasher;
     use p3_koala_bear::KoalaBear;
+    use tabula_types::zero_key_payload;
 
     fn val(n: u32) -> Vec<KoalaBear> {
         vec![KoalaBear::new(n)]
     }
 
-    fn entry(key: u64, n: u32) -> SsmcEntry {
+    fn key(n: u64) -> NativeKeyPayload {
+        let mut payload = zero_key_payload();
+        payload[0] = KoalaBear::new((n >> 60) as u32);
+        payload[1] = KoalaBear::new(((n >> 30) & 0x3fff_ffff) as u32);
+        payload[2] = KoalaBear::new((n & 0x3fff_ffff) as u32);
+        payload
+    }
+
+    fn entry(key_num: u64, n: u32) -> SsmcEntry {
         SsmcEntry {
-            key: RowKey(key),
+            key: key(key_num),
             value: val(n),
         }
     }
@@ -274,7 +293,7 @@ mod tests {
     fn single_entry_commit() {
         let h = MockFieldHasher;
         let mut list = SsmcList::new(TableId(1), ColId(0));
-        list.insert(RowKey(0), val(42));
+        list.insert(key(0), val(42));
         let c1 = list.commit(&h);
         let c2 = list.commit(&h);
         assert_eq!(c1, c2);
@@ -304,18 +323,18 @@ mod tests {
     #[test]
     fn insert_maintains_order() {
         let mut list = SsmcList::new(TableId(1), ColId(0));
-        list.insert(RowKey(5), val(5));
-        list.insert(RowKey(1), val(1));
-        list.insert(RowKey(3), val(3));
-        let keys: Vec<u64> = list.entries().iter().map(|e| e.key.0).collect();
-        assert_eq!(keys, vec![1, 3, 5]);
+        list.insert(key(5), val(5));
+        list.insert(key(1), val(1));
+        list.insert(key(3), val(3));
+        let keys: Vec<NativeKeyPayload> = list.entries().iter().map(|e| e.key).collect();
+        assert_eq!(keys, vec![key(1), key(3), key(5)]);
     }
 
     #[test]
     fn insert_overwrites_existing() {
         let mut list = SsmcList::new(TableId(1), ColId(0));
-        list.insert(RowKey(1), val(10));
-        list.insert(RowKey(1), val(20));
+        list.insert(key(1), val(10));
+        list.insert(key(1), val(20));
         assert_eq!(list.len(), 1);
         assert_eq!(list.entries()[0].value, val(20));
     }
@@ -323,7 +342,7 @@ mod tests {
     #[test]
     fn remove_nonexistent_returns_false() {
         let mut list = SsmcList::new(TableId(1), ColId(0));
-        assert!(!list.remove(RowKey(0)));
+        assert!(!list.remove(key(0)));
     }
 
     #[test]

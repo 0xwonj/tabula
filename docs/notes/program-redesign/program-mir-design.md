@@ -8,7 +8,7 @@
 > [program-hir-contract-and-data-model.md](program-hir-contract-and-data-model.md),
 > [program-canonical-ir-contract-and-data-model.md](program-canonical-ir-contract-and-data-model.md),
 > [program-typing-and-effect-system.md](program-typing-and-effect-system.md),
-> [../canonical-vocabulary.md](../canonical-vocabulary.md)
+> [verification vocabulary](../../design/architecture.md#verification-vocabulary)
 
 ---
 

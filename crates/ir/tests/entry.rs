@@ -105,6 +105,6 @@ fn validated_program_rejects_invalid_raw_program() {
             }],
         },
     });
-    program.state.tables[0].key_tys.clear();
+    program.state.tables[0].keys.clear();
     assert!(ValidatedProgram::try_from(program).is_err());
 }

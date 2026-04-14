@@ -11,12 +11,14 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_gadgets::bool_fe;
 use tabula_stark::air::columns::borrow_cols_mut;
+use tabula_types::NativeKeyPayload;
 
 use super::columns::{EXECUTION_STANDARD_VALUE_WIDTH, ExecutionCols, MAX_SLOTS, execution_width};
 use super::populate::{
     populate_arith_carry, populate_cmp_witness, populate_divmod, populate_mul_carry,
     set_opcode_selectors,
 };
+use super::trace_utils::native_key_payload_prefix3;
 
 /// Comparison sub-operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +74,16 @@ pub enum Opcode {
     PropertyRead,
     /// Static canonical relation assertion / evaluation.
     RelationProof,
+    /// Canonical transaction header for the proved batch input.
+    TxBegin,
+    /// Canonical transaction parameter load.
+    LoadParam,
+    /// Canonical public-context load.
+    LoadContext,
+    /// Canonical emitted-event header.
+    EmitEventHeader,
+    /// Canonical emitted-event argument.
+    EmitEventArg,
 }
 
 /// Per-instruction witness record for trace generation.
@@ -104,8 +116,8 @@ pub struct InstructionRecord {
     pub access_t: Option<u32>,
     /// For access instructions: column id.
     pub access_c: Option<u16>,
-    /// For access instructions: row key.
-    pub access_r: Option<u64>,
+    /// For access instructions: committed-key proof payload.
+    pub access_r: Option<NativeKeyPayload>,
     /// For access instructions: value (W field elements).
     pub access_val: Option<Vec<KoalaBear>>,
     /// For access instructions: null flag.
@@ -167,6 +179,14 @@ pub struct InstructionRecord {
     pub relation_input_sel: [[bool; MAX_SLOTS]; MAX_SLOTS],
     /// For RelationProof: one-hot output selectors per tuple position.
     pub relation_output_sel: [[bool; MAX_SLOTS]; MAX_SLOTS],
+    /// Generic proof metadata field 0 used by source-commitment opcodes.
+    pub proof_meta0: Option<u32>,
+    /// Generic proof metadata field 1 used by source-commitment opcodes.
+    pub proof_meta1: Option<u32>,
+    /// Generic proof metadata field 2 used by source-commitment opcodes.
+    pub proof_meta2: Option<u32>,
+    /// Generic proof metadata field 3 used by source-commitment opcodes.
+    pub proof_meta3: Option<u32>,
 }
 
 impl Default for InstructionRecord {
@@ -213,6 +233,10 @@ impl Default for InstructionRecord {
             relation_output_vals: [[KoalaBear::ZERO; EXECUTION_STANDARD_VALUE_WIDTH]; MAX_SLOTS],
             relation_input_sel: [[false; MAX_SLOTS]; MAX_SLOTS],
             relation_output_sel: [[false; MAX_SLOTS]; MAX_SLOTS],
+            proof_meta0: None,
+            proof_meta1: None,
+            proof_meta2: None,
+            proof_meta3: None,
         }
     }
 }
@@ -271,7 +295,8 @@ pub fn generate_execution_trace<const W: usize>(
                 cols.access_c = KoalaBear::new(c as u32);
             }
             if let Some(r) = rec.access_r {
-                cols.access_r.populate(r);
+                cols.access_r
+                    .populate_payload(&native_key_payload_prefix3(&r));
             }
             if let Some(ref val) = rec.access_val {
                 for (j, v) in val.iter().enumerate().take(W) {
@@ -353,8 +378,13 @@ pub fn generate_execution_trace<const W: usize>(
         {
             cols.capability_transcript_id = KoalaBear::from_u32(id as u32);
         }
-        if (rec.opcode == Opcode::CapabilityCall || rec.opcode == Opcode::RelationProof)
-            && let Some(instruction_index) = rec.instruction_index
+        if matches!(
+            rec.opcode,
+            Opcode::CapabilityCall
+                | Opcode::RelationProof
+                | Opcode::EmitEventHeader
+                | Opcode::EmitEventArg
+        ) && let Some(instruction_index) = rec.instruction_index
         {
             cols.instruction_index = KoalaBear::new(instruction_index);
         }
@@ -372,6 +402,18 @@ pub fn generate_execution_trace<const W: usize>(
             && let Some(event_digest) = rec.capability_event_digest
         {
             cols.capability_event_digest = event_digest;
+        }
+        if let Some(value) = rec.proof_meta0 {
+            cols.proof_meta0 = KoalaBear::new(value);
+        }
+        if let Some(value) = rec.proof_meta1 {
+            cols.proof_meta1 = KoalaBear::new(value);
+        }
+        if let Some(value) = rec.proof_meta2 {
+            cols.proof_meta2 = KoalaBear::new(value);
+        }
+        if let Some(value) = rec.proof_meta3 {
+            cols.proof_meta3 = KoalaBear::new(value);
         }
 
         // PropertyRead columns

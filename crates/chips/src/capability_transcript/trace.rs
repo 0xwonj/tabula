@@ -202,8 +202,10 @@ mod tests {
                     EncodingClass::FieldElementArray,
                     FieldFamily::KoalaBear31,
                     3,
+                    Some(8),
                     CanonicalNullEncoding::SeparateNullFlagWithZeroValue,
                     TranscriptSerialization::FieldElementsWithNullFlag,
+                    true,
                     true,
                 )
                 .expect("alt u64 encoding"),
@@ -391,8 +393,10 @@ mod tests {
                     EncodingClass::FieldElementArray,
                     FieldFamily::KoalaBear31,
                     3,
+                    Some(8),
                     CanonicalNullEncoding::SeparateNullFlagWithZeroValue,
                     TranscriptSerialization::FieldElementsWithNullFlag,
+                    true,
                     true,
                 )
                 .expect("mirrored u64 encoding"),

@@ -67,14 +67,15 @@ pub struct ColumnProofEntry {
 pub struct TabulaProof {
     /// Tier 1: Execution proof.
     pub execution: SubProofEnvelope,
-    /// Tier 2: Column proofs (one per `(table_id, col_id)`).
+    /// Tier 2: Column proofs in canonical machine proof-plan order (one per
+    /// `(table_id, col_id)`).
     pub columns: Vec<ColumnProofEntry>,
     /// Tier 3: Root proof.
     pub root: SubProofEnvelope,
     /// The public statement this proof attests to.
-    pub statement: PublicStatement,
-    /// Canonical execution statement digest bound into the transcript.
-    pub statement_digest: [u8; 32],
+    pub public_statement: PublicStatement,
+    /// Canonical artifact-bound public-statement digest bound into the transcript.
+    pub binding_digest: [u8; 32],
 }
 
 impl TabulaProof {

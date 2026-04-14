@@ -1,16 +1,23 @@
 #![allow(dead_code, missing_docs)]
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use borsh::to_vec;
-use tabula_core::PortableValue;
-use tabula_core::RowKey;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::Hasher;
+use tabula_core::{
+    ColId, CommittedCellKey, CommittedKey, CommittedPropertyQuery, KeyComponentSchema,
+    PortableValue, TableId,
+};
 use tabula_executor as exec;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BOOL_ID, TYPE_BYTES32_ID, TYPE_U64_ID};
-use tabula_types::{TypeRuntimeRegistry, TypedValue, bool_typed, u64_typed};
+use tabula_types::{
+    CommittedColumnEntry, NativeKeyPayload, TypeRuntimeRegistry, TypedCommittedPropertyQueryResult,
+    TypedValue, bool_typed, encode_structural_u64, u64_typed,
+};
 
 pub struct XorHasher;
 
@@ -117,7 +124,10 @@ pub fn raw_program() -> ir::Program {
             tables: vec![ir::TableSchema {
                 id: ir::TableId(1),
                 symbol: "accounts".into(),
-                key_tys: vec![TYPE_U64_ID],
+                keys: vec![KeyComponentSchema {
+                    symbol: "id".into(),
+                    ty: TYPE_U64_ID,
+                }],
                 fields: vec![ir::FieldSchema {
                     id: ir::FieldId(0),
                     symbol: "balance".into(),
@@ -403,157 +413,262 @@ pub fn capability_query_program(
 }
 
 #[derive(Default)]
-pub struct TestPropertyReads {
-    columns: BTreeMap<(ir::TableId, ir::FieldId), Vec<tabula_types::TypedColumnEntry>>,
+pub struct TestStateRuntime {
+    table_key_types: BTreeMap<ir::TableId, Vec<tabula_core::TypeId>>,
+    column_types: BTreeMap<(ir::TableId, ir::FieldId), tabula_core::TypeId>,
 }
 
-impl TestPropertyReads {
-    pub fn with_u64_column(
-        mut self,
-        table: ir::TableId,
-        field: ir::FieldId,
-        rows: &[(u64, u64, bool)],
-    ) -> Self {
-        self.columns.insert(
-            (table, field),
-            rows.iter()
-                .map(|(row_key, value, is_null)| tabula_types::TypedColumnEntry {
-                    row_key: RowKey(*row_key),
-                    value: u64_typed(*value),
-                    is_null: *is_null,
-                })
-                .collect(),
-        );
+impl TestStateRuntime {
+    pub fn with_u64_column(mut self, table: ir::TableId, field: ir::FieldId) -> Self {
+        self.table_key_types.insert(table, vec![TYPE_U64_ID]);
+        self.column_types.insert((table, field), TYPE_U64_ID);
         self
     }
 }
 
-impl exec::PropertyReadExecutor for TestPropertyReads {
-    fn execute(
+impl exec::StateRuntimeView for TestStateRuntime {
+    fn encode_cell_key(
         &self,
-        request: &exec::PropertyReadRequest,
-        type_runtimes: &TypeRuntimeRegistry,
-    ) -> Result<Vec<TypedValue>, TabulaError> {
-        if request.output_arity != 3 {
-            return Err(TabulaError::InvalidIr(
-                "row-oriented property reads require exactly 3 outputs".into(),
-            ));
-        }
-        if request.key_arity != 1 || request.key_type != TYPE_U64_ID {
+        table: ir::TableId,
+        field: ir::FieldId,
+        key: &[TypedValue],
+    ) -> Result<CommittedCellKey, TabulaError> {
+        Ok(CommittedCellKey {
+            table: TableId(table.0),
+            col: ColId(field.0),
+            key: self.encode_committed_key(table, key)?,
+        })
+    }
+
+    fn encode_committed_key(
+        &self,
+        table: ir::TableId,
+        key: &[TypedValue],
+    ) -> Result<CommittedKey, TabulaError> {
+        let key_types = self.key_component_types(table)?;
+        if key_types != vec![TYPE_U64_ID] {
             return Err(TabulaError::InvalidIr(format!(
-                "V1 canonical executor only supports [u64] key schema, table {} declared arity {} with key type {}",
-                request.table.0, request.key_arity, request.key_type.0
+                "test state runtime only supports [u64] key schema, table {} declared {:?}",
+                table.0, key_types
             )));
         }
-        match &request.query {
-            exec::PropertyReadQuery::Aggregate { .. } => {
-                return Err(TabulaError::InvalidIr(
-                    "ReadStateProperty Aggregate is not yet supported in V1 adapter".into(),
-                ));
-            }
-            exec::PropertyReadQuery::NonExistenceRange { .. } => {
-                return Err(TabulaError::InvalidIr(
-                    "ReadStateProperty NonExistenceRange is not yet supported in V1 adapter".into(),
-                ));
-            }
-            _ => {}
+        let [value] = key else {
+            return Err(TabulaError::InvalidIr(
+                "test state runtime only supports single-component state keys".into(),
+            ));
+        };
+        if value.type_id() != TYPE_U64_ID {
+            return Err(TabulaError::InvalidIr(format!(
+                "test state runtime expects state keys to be u64, got {}",
+                value.type_id().0
+            )));
         }
-        let entries = self
-            .columns
-            .get(&(request.table, request.field))
-            .map(Vec::as_slice)
+        Ok(CommittedKey(value.payload().to_vec()))
+    }
+
+    fn decode_committed_key(
+        &self,
+        table: ir::TableId,
+        key: &CommittedKey,
+    ) -> Result<Vec<TypedValue>, TabulaError> {
+        let key_types = self.key_component_types(table)?;
+        if key_types != vec![TYPE_U64_ID] {
+            return Err(TabulaError::InvalidIr(format!(
+                "test state runtime only supports [u64] key schema, table {} declared {:?}",
+                table.0, key_types
+            )));
+        }
+        if key.0.len() != std::mem::size_of::<u64>() {
+            return Err(TabulaError::InvalidIr(format!(
+                "expected 8 committed key bytes for table {}, got {}",
+                table.0,
+                key.0.len()
+            )));
+        }
+        let raw = u64::from_le_bytes(key.0.clone().try_into().expect("u64 bytes"));
+        Ok(vec![u64_typed(raw)])
+    }
+
+    fn encode_key_payload(
+        &self,
+        table: ir::TableId,
+        key: &CommittedKey,
+    ) -> Result<NativeKeyPayload, TabulaError> {
+        let [value] = self
+            .decode_committed_key(table, key)?
+            .try_into()
+            .map_err(|_| {
+                TabulaError::InvalidIr(
+                    "test state runtime expected exactly one key component".into(),
+                )
+            })?;
+        let raw = u64::from_le_bytes(value.payload().try_into().expect("u64 payload"));
+        encode_structural_u64::<{ tabula_types::NATIVE_KEY_PAYLOAD_WIDTH }>(raw)?
+            .try_into()
+            .map_err(|_| TabulaError::ProofError {
+                phase: "test_state_runtime_key_payload",
+                detail: "failed to build fixed-width key payload".into(),
+            })
+    }
+
+    fn compare_keys(
+        &self,
+        table: ir::TableId,
+        lhs: &CommittedKey,
+        rhs: &CommittedKey,
+    ) -> Result<Ordering, TabulaError> {
+        let lhs = self.decode_committed_key(table, lhs)?;
+        let rhs = self.decode_committed_key(table, rhs)?;
+        let [lhs]: [TypedValue; 1] = lhs
+            .try_into()
+            .map_err(|_| TabulaError::InvalidIr("expected one lhs key component".into()))?;
+        let [rhs]: [TypedValue; 1] = rhs
+            .try_into()
+            .map_err(|_| TabulaError::InvalidIr("expected one rhs key component".into()))?;
+        let lhs = u64::from_le_bytes(lhs.payload().try_into().expect("u64 payload"));
+        let rhs = u64::from_le_bytes(rhs.payload().try_into().expect("u64 payload"));
+        Ok(lhs.cmp(&rhs))
+    }
+
+    fn key_component_types(
+        &self,
+        table: ir::TableId,
+    ) -> Result<Vec<tabula_core::TypeId>, TabulaError> {
+        self.table_key_types.get(&table).cloned().ok_or_else(|| {
+            TabulaError::InvalidIr(format!("missing key schema for state table {}", table.0))
+        })
+    }
+
+    fn column_type(
+        &self,
+        table: ir::TableId,
+        field: ir::FieldId,
+    ) -> Result<tabula_core::TypeId, TabulaError> {
+        self.column_types
+            .get(&(table, field))
+            .copied()
             .ok_or_else(|| {
                 TabulaError::InvalidIr(format!(
-                    "missing committed column {}.{}",
-                    request.table.0, request.field.0
+                    "missing state column contract {}.{}",
+                    table.0, field.0
                 ))
-            })?;
-        for entry in entries {
-            if entry.value.type_id() != request.field_type {
+            })
+    }
+
+    fn resolve_property(
+        &self,
+        table: ir::TableId,
+        field: ir::FieldId,
+        query: &CommittedPropertyQuery,
+        state: &[CommittedColumnEntry],
+    ) -> Result<TypedCommittedPropertyQueryResult, TabulaError> {
+        let field_type = self.column_type(table, field)?;
+        for entry in state {
+            if entry.value.type_id() != field_type {
                 return Err(TabulaError::InvalidIr(format!(
                     "committed column {}.{} yielded value type {} but field type is {}",
-                    request.table.0,
-                    request.field.0,
+                    table.0,
+                    field.0,
                     entry.value.type_id().0,
-                    request.field_type.0
+                    field_type.0
                 )));
             }
         }
 
-        let pick = match &request.query {
-            exec::PropertyReadQuery::Minimum => entries
-                .iter()
-                .filter(|entry| !entry.is_null)
-                .min_by_key(|entry| entry.row_key.0),
-            exec::PropertyReadQuery::Maximum => entries
-                .iter()
-                .filter(|entry| !entry.is_null)
-                .max_by_key(|entry| entry.row_key.0),
-            exec::PropertyReadQuery::Successor { key } => {
-                let pivot = decode_single_row_key(key, type_runtimes)?;
-                entries
+        let pick =
+            match query {
+                CommittedPropertyQuery::Minimum => state
                     .iter()
                     .filter(|entry| !entry.is_null)
-                    .filter(|entry| entry.row_key.0 > pivot.0)
-                    .min_by_key(|entry| entry.row_key.0)
-            }
-            exec::PropertyReadQuery::Predecessor { key } => {
-                let pivot = decode_single_row_key(key, type_runtimes)?;
-                entries
+                    .min_by(|lhs, rhs| {
+                        self.compare_keys(table, &lhs.key, &rhs.key)
+                            .expect("compare state keys")
+                    }),
+                CommittedPropertyQuery::Maximum => state
                     .iter()
                     .filter(|entry| !entry.is_null)
-                    .filter(|entry| entry.row_key.0 < pivot.0)
-                    .max_by_key(|entry| entry.row_key.0)
-            }
-            exec::PropertyReadQuery::Aggregate { .. }
-            | exec::PropertyReadQuery::NonExistenceRange { .. } => {
-                unreachable!("unsupported variants return early")
-            }
-        };
+                    .max_by(|lhs, rhs| {
+                        self.compare_keys(table, &lhs.key, &rhs.key)
+                            .expect("compare state keys")
+                    }),
+                CommittedPropertyQuery::Successor { key } => state
+                    .iter()
+                    .filter(|entry| !entry.is_null)
+                    .filter(|entry| {
+                        self.compare_keys(table, &entry.key, key)
+                            .expect("compare state keys")
+                            == Ordering::Greater
+                    })
+                    .min_by(|lhs, rhs| {
+                        self.compare_keys(table, &lhs.key, &rhs.key)
+                            .expect("compare state keys")
+                    }),
+                CommittedPropertyQuery::Predecessor { key } => state
+                    .iter()
+                    .filter(|entry| !entry.is_null)
+                    .filter(|entry| {
+                        self.compare_keys(table, &entry.key, key)
+                            .expect("compare state keys")
+                            == Ordering::Less
+                    })
+                    .max_by(|lhs, rhs| {
+                        self.compare_keys(table, &lhs.key, &rhs.key)
+                            .expect("compare state keys")
+                    }),
+                CommittedPropertyQuery::Aggregate { .. } => {
+                    return Err(TabulaError::InvalidIr(
+                        "Aggregate is not yet supported in test state runtime".into(),
+                    ));
+                }
+                CommittedPropertyQuery::NonExistenceRange { .. } => {
+                    return Err(TabulaError::InvalidIr(
+                        "NonExistenceRange is not yet supported in test state runtime".into(),
+                    ));
+                }
+            };
 
         if let Some(entry) = pick {
-            Ok(vec![
-                entry.value.clone(),
-                row_key_typed(entry.row_key, type_runtimes)?,
-                bool_typed(false),
-            ])
+            Ok(TypedCommittedPropertyQueryResult {
+                value: entry.value.clone(),
+                key: Some(entry.key.clone()),
+                is_null: false,
+            })
         } else {
-            Ok(vec![
-                type_runtimes.zero_of(request.field_type)?,
-                type_runtimes.zero_of(request.key_type)?,
-                bool_typed(true),
-            ])
+            Ok(TypedCommittedPropertyQueryResult {
+                value: u64_typed(0),
+                key: None,
+                is_null: true,
+            })
         }
     }
 }
 
-fn row_key_typed(
-    row: RowKey,
-    type_runtimes: &TypeRuntimeRegistry,
-) -> Result<TypedValue, TabulaError> {
-    type_runtimes.decode_portable(&PortableValue::new(TYPE_U64_ID, to_vec(&row.0).unwrap()))
+pub fn committed_u64_state(
+    table: ir::TableId,
+    field: ir::FieldId,
+    rows: &[(u64, u64, bool)],
+) -> tabula_core::InMemoryState {
+    let mut state = tabula_core::InMemoryState::new();
+    for (row_key, value, is_null) in rows {
+        if *is_null {
+            continue;
+        }
+        state.set(
+            CommittedCellKey {
+                table: TableId(table.0),
+                col: ColId(field.0),
+                key: CommittedKey(row_key.to_le_bytes().to_vec()),
+            },
+            portable_u64(*value),
+        );
+    }
+    state
 }
 
-fn decode_single_row_key(
-    values: &[TypedValue],
-    type_runtimes: &TypeRuntimeRegistry,
-) -> Result<RowKey, TabulaError> {
-    if values.len() != 1 {
-        return Err(TabulaError::InvalidIr(
-            "V1 canonical executor only supports single-component state keys".into(),
-        ));
-    }
-    let value = &values[0];
-    if value.type_id() != TYPE_U64_ID {
-        return Err(TabulaError::InvalidIr(format!(
-            "V1 canonical executor expects state keys to be u64, got {}",
-            value.type_id().0
-        )));
-    }
-    let portable = type_runtimes.encode_typed(value)?;
-    let raw = borsh::from_slice::<u64>(portable.payload())
-        .map_err(|error| TabulaError::BorshEncodingError(error.to_string()))?;
-    Ok(RowKey(raw))
+pub fn test_state_runtime() -> &'static TestStateRuntime {
+    static RUNTIME: OnceLock<TestStateRuntime> = OnceLock::new();
+    RUNTIME
+        .get_or_init(|| TestStateRuntime::default().with_u64_column(ir::TableId(1), ir::FieldId(0)))
 }
 
 pub fn property_program(
@@ -567,7 +682,10 @@ pub fn property_program(
                 tables: vec![ir::TableSchema {
                     id: ir::TableId(1),
                     symbol: "accounts".into(),
-                    key_tys: vec![key_ty],
+                    keys: vec![KeyComponentSchema {
+                        symbol: "id".into(),
+                        ty: key_ty,
+                    }],
                     fields: vec![ir::FieldSchema {
                         id: ir::FieldId(0),
                         symbol: "balance".into(),
@@ -605,7 +723,9 @@ pub fn property_program(
                     ops: vec![
                         ir::Op::ReadStateProperty {
                             guard: None,
-                            dsts: vec![ir::LocalId(0), ir::LocalId(1), ir::LocalId(2)],
+                            dst_value: ir::LocalId(0),
+                            dst_key_components: vec![ir::LocalId(1)],
+                            dst_is_null: ir::LocalId(2),
                             table: ir::TableId(1),
                             field: ir::FieldId(0),
                             query,
@@ -631,6 +751,6 @@ pub fn query_exec_context<'a>(runtimes: &'a TypeRuntimeRegistry) -> exec::ExecCo
         hasher: &XorHasher,
         type_runtimes: runtimes,
         capability_executor: None,
-        property_reads: None,
+        state_runtime: test_state_runtime(),
     }
 }

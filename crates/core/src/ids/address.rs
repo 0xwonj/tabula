@@ -54,6 +54,22 @@ pub struct ColId(pub u16);
 )]
 pub struct RowKey(pub u64);
 
+/// Canonical committed key for one user-state table row.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub struct CommittedKey(pub Vec<u8>);
+
 /// A fully-qualified cell address.
 ///
 /// **Canonical ordering: `(table, col, row)`** — this is protocol-critical.
@@ -78,6 +94,32 @@ pub struct CellKey {
     pub col: ColId,
     /// The row within the table.
     pub row: RowKey,
+}
+
+/// A fully-qualified committed user-state cell address.
+///
+/// This is the canonical protocol-visible address form for user-state
+/// execution, snapshots, and proof preparation.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
+pub struct CommittedCellKey {
+    /// The table containing this cell.
+    pub table: TableId,
+    /// The column within the table.
+    pub col: ColId,
+    /// The committed key within the table.
+    pub key: CommittedKey,
 }
 
 impl PartialOrd for CellKey {
@@ -114,9 +156,21 @@ impl std::fmt::Display for RowKey {
     }
 }
 
+impl std::fmt::Display for CommittedKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "key:{}b", self.0.len())
+    }
+}
+
 impl std::fmt::Display for CellKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "({}:{}:{})", self.table.0, self.col.0, self.row.0)
+    }
+}
+
+impl std::fmt::Display for CommittedCellKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}:{}:{})", self.table.0, self.col.0, self.key)
     }
 }
 
@@ -153,5 +207,17 @@ impl From<u64> for RowKey {
 impl From<RowKey> for u64 {
     fn from(key: RowKey) -> Self {
         key.0
+    }
+}
+
+impl From<Vec<u8>> for CommittedKey {
+    fn from(value: Vec<u8>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<CommittedKey> for Vec<u8> {
+    fn from(value: CommittedKey) -> Self {
+        value.0
     }
 }

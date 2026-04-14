@@ -3,7 +3,8 @@
 mod common;
 
 use common::{
-    AddOneCapability, XorHasher, resolved_program, resolved_program_with_capability, type_runtimes,
+    AddOneCapability, XorHasher, resolved_program, resolved_program_with_capability,
+    test_state_runtime, type_runtimes,
 };
 use tabula_executor as exec;
 use tabula_ir as ir;
@@ -18,7 +19,7 @@ fn batch_tx_writes_state_records_relation_capability_and_event_effects() {
         hasher: &XorHasher,
         type_runtimes: &runtimes,
         capability_executor: Some(&capabilities),
-        property_reads: None,
+        state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
     let mut context = exec::ContextValues::new();
@@ -52,7 +53,7 @@ fn batch_keeps_failed_txs_separate_from_success_effects() {
         hasher: &XorHasher,
         type_runtimes: &runtimes,
         capability_executor: Some(&capabilities),
-        property_reads: None,
+        state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
     let mut context = exec::ContextValues::new();
@@ -97,7 +98,7 @@ fn opaque_capability_effects_stay_in_execution_journal() {
         hasher: &XorHasher,
         type_runtimes: &runtimes,
         capability_executor: Some(&capabilities),
-        property_reads: None,
+        state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
     let mut context = exec::ContextValues::new();

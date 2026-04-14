@@ -15,6 +15,7 @@
 /// - `field: expr` — a single `AB::Expr`
 /// - `field: var_arr<N>` — a `&[AB::Var; N]` array
 /// - `field: var_slice` — a `&[AB::Var]` slice
+/// - `field: expr_slice` — a `&[AB::Expr]` slice
 /// - `field: u64limbs` — a `&U64Limbs<AB::Var>` (3 limbs)
 /// - `field: access_tuple` — an `AccessTupleExpr<AB::Expr>`
 #[macro_export]
@@ -128,6 +129,7 @@ macro_rules! define_bus {
     (@param_type expr) => { Self::Expr };
     (@param_type var_arr $n:literal) => { &[Self::Var; $n] };
     (@param_type var_slice) => { &[Self::Var] };
+    (@param_type expr_slice) => { &[Self::Expr] };
     (@param_type u64limbs) => { &$crate::air::primitives::U64Limbs<Self::Var> };
     (@param_type access_tuple) => { $crate::air::bus::AccessTupleExpr<Self::Expr> };
 
@@ -139,6 +141,9 @@ macro_rules! define_bus {
     };
     (@to_vec $f:ident, var_slice) => {
         $f.iter().map(|_v| _v.clone().into()).collect::<Vec<_>>()
+    };
+    (@to_vec $f:ident, expr_slice) => {
+        $f.to_vec()
     };
     (@to_vec $f:ident, u64limbs) => {
         vec![$f.limb0.clone().into(), $f.limb1.clone().into(), $f.limb2.clone().into()]

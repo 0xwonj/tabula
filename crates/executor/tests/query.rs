@@ -4,9 +4,9 @@ mod common;
 
 use common::{
     FailOnInputCapability, XorHasher, capability_query_program, portable_u64, query_exec_context,
-    resolved_program, type_runtimes,
+    resolved_program, test_state_runtime, type_runtimes,
 };
-use tabula_core::{CellKey, RowKey};
+use tabula_core::{ColId, CommittedCellKey, CommittedKey, TableId};
 use tabula_executor as exec;
 use tabula_ir as ir;
 use tabula_profile::TYPE_BYTES32_ID;
@@ -18,10 +18,10 @@ fn query_reads_state_and_hashes_result() {
     let exec = query_exec_context(&runtimes);
     let mut state = tabula_core::InMemoryState::new();
     state.set(
-        CellKey {
-            table: tabula_core::TableId(1),
-            col: tabula_core::ColId(0),
-            row: RowKey(9),
+        CommittedCellKey {
+            table: TableId(1),
+            col: ColId(0),
+            key: CommittedKey(9u64.to_le_bytes().to_vec()),
         },
         portable_u64(42),
     );
@@ -55,7 +55,7 @@ fn query_checked_capability_failure_surfaces_execute_error() {
         hasher: &XorHasher,
         type_runtimes: &runtimes,
         capability_executor: Some(&capabilities),
-        property_reads: None,
+        state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
     let context = exec::ContextValues::new();
@@ -89,7 +89,7 @@ fn query_total_capability_failure_still_surfaces_execute_error() {
         hasher: &XorHasher,
         type_runtimes: &runtimes,
         capability_executor: Some(&capabilities),
-        property_reads: None,
+        state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
     let context = exec::ContextValues::new();

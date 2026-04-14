@@ -1,11 +1,14 @@
 //! Execution-tier witness-store assembly for the current STARK backend.
 
+use tabula_chips::event_transcript::EVENT_TRANSCRIPT_WITNESS_LABEL;
 use tabula_core::error::TabulaError;
 
 use tabula_chips::ir_hash::IR_HASH_WITNESS_LABEL;
+use tabula_chips::public_context_transcript::PUBLIC_CONTEXT_TRANSCRIPT_WITNESS_LABEL;
 use tabula_chips::relation_table::RELATION_TABLE_WITNESS_LABEL;
 use tabula_chips::relation_table::RelationTableWitnessRow;
 use tabula_chips::relation_transcript::RELATION_TRANSCRIPT_WITNESS_LABEL;
+use tabula_chips::tx_batch_transcript::TX_BATCH_TRANSCRIPT_WITNESS_LABEL;
 use tabula_stark::trace::{WitnessStore, witness_labels};
 
 use crate::PreparedRelationProof;
@@ -27,6 +30,18 @@ pub fn prepare_execution_store(
         lowering.static_table_rows.clone(),
     );
     store.put(IR_HASH_WITNESS_LABEL, lowering.ir_hash_calls.clone());
+    store.put(
+        PUBLIC_CONTEXT_TRANSCRIPT_WITNESS_LABEL,
+        lowering.public_context_transcript_items.clone(),
+    );
+    store.put(
+        TX_BATCH_TRANSCRIPT_WITNESS_LABEL,
+        lowering.tx_batch_transcript_items.clone(),
+    );
+    store.put(
+        EVENT_TRANSCRIPT_WITNESS_LABEL,
+        lowering.event_transcript_items.clone(),
+    );
     store.put(
         RELATION_TRANSCRIPT_WITNESS_LABEL,
         lowering.relation_transcript_calls.clone(),

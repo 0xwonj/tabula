@@ -21,8 +21,9 @@ pub struct Artifact {
 
 impl Artifact {
     pub(crate) fn from_registered(registered: RegisteredProgram) -> Result<Self, SdkError> {
+        registered.validate_sealed_artifact()?;
         let digest = registered.canonical_digest()?;
-        let schema = Schema::from_program(registered.program());
+        let schema = Schema::from_registered(&registered)?;
         Ok(Self {
             inner: Arc::new(ArtifactInner {
                 registered,

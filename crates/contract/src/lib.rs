@@ -1,40 +1,40 @@
 //! Proof contract metadata, versioning, binding policy, and proof-visible
 //! format schema.
 //!
-//! This module is the M11 "Contract Spine V1" source of truth.
+//! This module is the canonical contract source of truth.
 
 mod binding;
 mod compatibility;
-mod envelope;
+mod error;
 pub mod format;
-mod proof;
+mod metadata_envelope;
+mod proof_envelope;
+mod verification;
 mod versions;
 
 // Envelope
-pub use envelope::ContractMetadataEnvelope;
-pub use proof::{
-    ProofContractError, ProofEncodingId, ProofEnvelopeV2, ProofStatement, ProofSystemId,
-    PublicContextBinding, PublicStatement, decode_proof_envelope, encode_proof_envelope,
+pub use error::ProofContractError;
+pub use metadata_envelope::ContractMetadataEnvelope;
+pub use proof_envelope::{
+    ProofEncodingId, ProofEnvelope, ProofSystemId, decode_proof_envelope, encode_proof_envelope,
 };
+pub use verification::{ArtifactContext, BoundStatement};
 
 // Compatibility
 pub use compatibility::{
-    CONTRACT_RULES_V1, ContractCompatibilityPolicy, ContractRule, ContractRuleCode,
+    CONTRACT_RULES, ContractCompatibilityPolicy, ContractRule, ContractRuleCode,
     ContractValidationError,
 };
 
 // Binding
-pub use binding::{
-    BindingRegistry, BindingStatus, DeferredBinding, DeferredReasonCode, PUBLIC_INPUT_FIELDS,
-    ProgramBinding, PublicInputField, PublicInputs, access_bus_field_names, binding_registry,
-};
+pub use binding::{ProgramBinding, access_bus_field_names};
 pub use format::static_tables::{StaticTableArtifact, StaticTableArtifactRow};
 pub use format::typed_tuple::{TupleEncodingDefaults, TupleEncodingSelection};
+pub use tabula_stark::air::statement::PublicStatement;
 
 // Versions
 pub use versions::{
-    BINDING_REGISTRY_VERSION, CONTRACT_SCHEMA_VERSION, PROOF_ENVELOPE_VERSION,
-    STATEMENT_SCHEMA_VERSION, VERIFIER_PROFILE_VERSION, validate_binding_registry_version,
-    validate_contract_schema_version, validate_proof_envelope_version,
+    CONTRACT_SCHEMA_VERSION, PROOF_ENVELOPE_VERSION, STATEMENT_SCHEMA_VERSION,
+    VERIFIER_PROFILE_VERSION, validate_contract_schema_version, validate_proof_envelope_version,
     validate_statement_schema_version, validate_verifier_profile_version,
 };

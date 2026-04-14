@@ -4,6 +4,8 @@ mod authoring;
 mod workflow;
 
 use clap::{Parser, Subcommand};
+#[cfg(feature = "verify")]
+pub(crate) use workflow::InspectProofArgs;
 #[cfg(feature = "prove")]
 pub(crate) use workflow::ProveArgs;
 #[cfg(feature = "verify")]
@@ -50,6 +52,9 @@ pub enum Command {
     /// Verify one proof against a selected program.
     #[cfg(feature = "verify")]
     Verify(VerifyArgs),
+    /// Inspect the proved public statement and envelope metadata in one proof.
+    #[cfg(feature = "verify")]
+    InspectProof(InspectProofArgs),
     /// Create and edit state files.
     State {
         #[command(subcommand)]

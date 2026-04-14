@@ -42,8 +42,19 @@ use tabula_stark::air::columns::borrow_cols;
 use tabula_stark::chips::ChipId;
 
 use crate::ChipSpec;
+use tabula_types::NATIVE_KEY_PAYLOAD_WIDTH;
 
 use super::columns::{MemoryShardCols, memory_shard_width};
+
+fn key_payload_exprs<AB: InteractionAirBuilder, const W: usize>(
+    local: &MemoryShardCols<AB::Var, W>,
+) -> Vec<AB::Expr> {
+    let mut payload = vec![AB::Expr::ZERO; NATIVE_KEY_PAYLOAD_WIDTH];
+    payload[0] = local.key.limbs.limb0.into();
+    payload[1] = local.key.limbs.limb1.into();
+    payload[2] = local.key.limbs.limb2.into();
+    payload
+}
 
 /// Per-column memory shard AIR chip.
 ///
@@ -400,9 +411,7 @@ fn send_receive_bus_interactions<AB: InteractionAirBuilder, const W: usize>(
         AccessTupleExpr {
             table_id: local.table_id.into(),
             col_id: local.col_id.into(),
-            key_limb0: local.key.limbs.limb0.into(),
-            key_limb1: local.key.limbs.limb1.into(),
-            key_limb2: local.key.limbs.limb2.into(),
+            key_payload: key_payload_exprs::<AB, W>(local),
             tx_index: local.tx_index.into(),
             value: local
                 .input_val
@@ -420,9 +429,7 @@ fn send_receive_bus_interactions<AB: InteractionAirBuilder, const W: usize>(
         AccessTupleExpr {
             table_id: local.table_id.into(),
             col_id: local.col_id.into(),
-            key_limb0: local.key.limbs.limb0.into(),
-            key_limb1: local.key.limbs.limb1.into(),
-            key_limb2: local.key.limbs.limb2.into(),
+            key_payload: key_payload_exprs::<AB, W>(local),
             tx_index: local.tx_index.into(),
             value: local
                 .output_val
@@ -439,7 +446,7 @@ fn send_receive_bus_interactions<AB: InteractionAirBuilder, const W: usize>(
     builder.send_base_state_entry(
         local.table_id.into(),
         local.col_id.into(),
-        &local.key.limbs,
+        &key_payload_exprs::<AB, W>(local),
         &local.input_val,
         local.input_is_null.into(),
         is_real.clone() * local.is_init.into(),
@@ -449,7 +456,7 @@ fn send_receive_bus_interactions<AB: InteractionAirBuilder, const W: usize>(
     builder.send_coalesced_write(
         local.table_id.into(),
         local.col_id.into(),
-        &local.key.limbs,
+        &key_payload_exprs::<AB, W>(local),
         &local.output_val,
         local.output_is_null.into(),
         is_real * local.is_last_for_key.into() * local.has_ever_written.into(),

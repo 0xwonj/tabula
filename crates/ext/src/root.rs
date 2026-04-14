@@ -4,7 +4,11 @@
 use std::sync::Arc;
 
 #[cfg(feature = "prove")]
-use tabula_commitment::{ColumnRootBinding, PoseidonHasher, compute_state_roots_from_bindings};
+use tabula_commitment::{
+    ColumnRootBinding, NativeDigest, PoseidonHasher, compute_state_roots_from_bindings,
+};
+#[cfg(feature = "prove")]
+use tabula_core::RootProfileId;
 #[cfg(feature = "prove")]
 use tabula_machine::PublicStatement;
 #[cfg(feature = "verify")]
@@ -17,7 +21,7 @@ use tabula_witness::stark::{SmtRootStoreContext, prepare_smt_root_store};
 #[cfg(feature = "prove")]
 use crate::{ExtError, ExtResult};
 
-/// Canonical runtime-facing root witness preparation context.
+/// Canonical batch root input prepared by the runtime for one root witness path.
 #[cfg(feature = "prove")]
 #[non_exhaustive]
 #[derive(Clone, Copy)]
@@ -43,23 +47,23 @@ impl<'a> RootWitnessContext<'a> {
 /// Prepared root-tier witness bundle returned by one root witness preparer.
 #[cfg(feature = "prove")]
 pub struct PreparedRootWitness {
-    air_statement: PublicStatement,
+    public_statement: PublicStatement,
     store: WitnessStore,
 }
 
 #[cfg(feature = "prove")]
 impl PreparedRootWitness {
     /// Build a prepared root witness bundle from one AIR statement and root-tier store.
-    pub fn new(air_statement: PublicStatement, store: WitnessStore) -> Self {
+    pub fn new(public_statement: PublicStatement, store: WitnessStore) -> Self {
         Self {
-            air_statement,
+            public_statement,
             store,
         }
     }
 
-    /// Borrow the AIR-visible root statement for this prepared witness.
-    pub fn air_statement(&self) -> &PublicStatement {
-        &self.air_statement
+    /// Borrow the proved public statement for this prepared witness.
+    pub fn public_statement(&self) -> &PublicStatement {
+        &self.public_statement
     }
 
     /// Borrow the root-tier witness store for this prepared witness.
@@ -69,7 +73,7 @@ impl PreparedRootWitness {
 
     /// Consume the prepared witness and return its constituent parts.
     pub fn into_parts(self) -> (PublicStatement, WitnessStore) {
-        (self.air_statement, self.store)
+        (self.public_statement, self.store)
     }
 }
 
@@ -130,6 +134,13 @@ impl RootBackendBundle {
         self.backend.proof_backend()
     }
 
+    /// Root binding families accepted by the bundled proof-side root backend.
+    pub fn supported_root_binding_families(&self) -> &'static [RootProfileId] {
+        self.backend
+            .proof_backend()
+            .supported_root_binding_families()
+    }
+
     /// Clone the bundled root witness preparer.
     pub fn witness_preparer(&self) -> Arc<dyn RootWitnessPreparer> {
         self.backend.witness_preparer()
@@ -164,6 +175,9 @@ impl RootBackend for SmtRootBackend {
 }
 
 /// Built-in SMT root witness preparer paired with [`SmtRootProofBackend`].
+///
+/// This remains intentionally SMT-shaped today: the generic runtime-facing root
+/// input is lowered into the SMT-specific root-tier witness store here.
 #[cfg(feature = "prove")]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SmtRootWitnessPreparer;
@@ -182,20 +196,23 @@ impl RootWitnessPreparer for SmtRootWitnessPreparer {
         let (old_state_root, new_state_root) =
             compute_state_roots_from_bindings(&hasher, context.column_root_bindings())
                 .map_err(ExtError::proof_preparation)?;
-        let air_statement = PublicStatement {
+        let public_statement = PublicStatement {
             old_root: old_state_root,
             new_root: new_state_root,
+            public_context_digest: NativeDigest::ZERO,
+            applied_tx_digest: NativeDigest::ZERO,
+            event_digest: NativeDigest::ZERO,
         };
         let store = prepare_smt_root_store(
             SmtRootStoreContext::new(
                 context.column_root_bindings(),
-                &air_statement.old_root,
-                &air_statement.new_root,
+                &public_statement.old_root,
+                &public_statement.new_root,
             ),
             hasher,
         )
         .map_err(ExtError::proof_preparation)?;
 
-        Ok(PreparedRootWitness::new(air_statement, store))
+        Ok(PreparedRootWitness::new(public_statement, store))
     }
 }

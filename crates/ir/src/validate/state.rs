@@ -2,9 +2,16 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_core::error::TabulaError;
 
+use tabula_core::KeyComponentSchema;
+
 use super::{FieldId, StateSchema, TableId, TypeRef};
 
 pub(super) struct TableValidationInfo {
+    #[expect(
+        dead_code,
+        reason = "key component names are preserved for later stages"
+    )]
+    pub(super) keys: Vec<KeyComponentSchema>,
     pub(super) key_tys: Vec<TypeRef>,
     pub(super) fields: BTreeMap<FieldId, TypeRef>,
 }
@@ -21,7 +28,7 @@ pub(super) fn validate_state(
                 table.id.0
             )));
         }
-        if table.key_tys.is_empty() {
+        if table.keys.is_empty() {
             return Err(TabulaError::InvalidIr(format!(
                 "table {} must declare at least one key type",
                 table.id.0
@@ -41,7 +48,8 @@ pub(super) fn validate_state(
         tables.insert(
             table.id,
             TableValidationInfo {
-                key_tys: table.key_tys.clone(),
+                keys: table.keys.clone(),
+                key_tys: table.keys.iter().map(|key| key.ty).collect(),
                 fields,
             },
         );

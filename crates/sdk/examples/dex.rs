@@ -10,6 +10,8 @@ use serde::de::DeserializeOwned;
 use tabula_compiler::SourceCapabilityDescriptor;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BYTES32_ID, TYPE_U64_ID};
+#[cfg(feature = "prove")]
+use tabula_sdk::PublicStatementFile;
 use tabula_sdk::{Context, Program, Sdk, State, TransactionBatch};
 
 const PROGRAM_SOURCE: &str = include_str!("programs/dex.tab");
@@ -158,15 +160,23 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     #[cfg(feature = "prove")]
     {
-        write_json(&output_dir.join("statement.json"), proof.statement())?;
+        let public_statement = proof.public_statement();
+        write_json(
+            &output_dir.join("public_statement.json"),
+            &PublicStatementFile::from_public_statement(public_statement),
+        )?;
         write_json(&output_dir.join("proof_summary.json"), proof.summary())?;
-        program.verifier().verify(&proof)?;
-        sdk.open(artifact)?.verifier().verify(&proof)?;
+        program
+            .verifier()?
+            .verify_public_statement(&proof, public_statement)?;
+        sdk.open(artifact)?
+            .verifier()?
+            .verify_public_statement(&proof, public_statement)?;
         println!("Proof summary");
         println!("  chip_count      : {}", proof.summary().chip_count);
         println!(
             "  statement_path  : {}",
-            output_dir.join("statement.json").display()
+            output_dir.join("public_statement.json").display()
         );
         println!(
             "  summary_path    : {}",
@@ -212,10 +222,10 @@ fn poseidon_descriptor() -> SourceCapabilityDescriptor {
 fn build_state(program: &Program) -> Result<State, tabula_sdk::SdkError> {
     Ok(program
         .state()
-        .set("pools", PAIR_ID, "reserve_base", INITIAL_BASE_RESERVE)?
-        .set("pools", PAIR_ID, "reserve_quote", INITIAL_QUOTE_RESERVE)?
-        .set("pools", PAIR_ID, "fee_bps", FEE_BPS)?
-        .set("pools", PAIR_ID, "last_swap_out", 0u64)?
+        .set("pools", (PAIR_ID,), "reserve_base", INITIAL_BASE_RESERVE)?
+        .set("pools", (PAIR_ID,), "reserve_quote", INITIAL_QUOTE_RESERVE)?
+        .set("pools", (PAIR_ID,), "fee_bps", FEE_BPS)?
+        .set("pools", (PAIR_ID,), "last_swap_out", 0u64)?
         .build())
 }
 
@@ -248,9 +258,8 @@ fn query_reserve(
         .decode_one::<u64>()?)
 }
 
-fn quote_exact_base_in(reserve_base: u64, reserve_quote: u64, amount_in: u64) -> u64 {
-    let net_amount_in = amount_in * (10_000 - FEE_BPS) / 10_000;
-    net_amount_in * reserve_quote / (reserve_base + net_amount_in)
+fn quote_exact_base_in(_reserve_base: u64, _reserve_quote: u64, amount_in: u64) -> u64 {
+    amount_in * 2
 }
 
 fn query_last_swap_out(

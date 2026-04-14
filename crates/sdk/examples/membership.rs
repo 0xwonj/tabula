@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+#[cfg(feature = "prove")]
+use tabula_sdk::PublicStatementFile;
 use tabula_sdk::{Context, Program, Sdk, State, TransactionBatch};
 
 const PROGRAM_SOURCE: &str = include_str!("programs/membership.tab");
@@ -119,15 +121,23 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     #[cfg(feature = "prove")]
     {
-        write_json(&output_dir.join("statement.json"), proof.statement())?;
+        let public_statement = proof.public_statement();
+        write_json(
+            &output_dir.join("public_statement.json"),
+            &PublicStatementFile::from_public_statement(public_statement),
+        )?;
         write_json(&output_dir.join("proof_summary.json"), proof.summary())?;
-        program.verifier().verify(&proof)?;
-        sdk.open(artifact)?.verifier().verify(&proof)?;
+        program
+            .verifier()?
+            .verify_public_statement(&proof, public_statement)?;
+        sdk.open(artifact)?
+            .verifier()?
+            .verify_public_statement(&proof, public_statement)?;
         println!("Proof summary");
         println!("  chip_count      : {}", proof.summary().chip_count);
         println!(
             "  statement_path  : {}",
-            output_dir.join("statement.json").display()
+            output_dir.join("public_statement.json").display()
         );
         println!(
             "  summary_path    : {}",
@@ -154,7 +164,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn build_state(program: &Program) -> Result<State, tabula_sdk::SdkError> {
     Ok(program
         .state()
-        .set("members", MEMBER_ID, "tier", INITIAL_TIER)?
+        .set("members", (MEMBER_ID,), "tier", INITIAL_TIER)?
         .build())
 }
 

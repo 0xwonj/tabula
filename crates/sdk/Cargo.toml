@@ -27,6 +27,7 @@ blake3 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tabula-commitment = { workspace = true }
 tabula-contract = { workspace = true }
 tabula-compiler = { workspace = true }
 tabula-core = { workspace = true }

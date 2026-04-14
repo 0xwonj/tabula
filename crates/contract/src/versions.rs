@@ -4,27 +4,17 @@ use crate::compatibility::ContractValidationError;
 
 /// Current contract schema version.
 pub const CONTRACT_SCHEMA_VERSION: u32 = 1;
-/// Current binding registry version.
-pub const BINDING_REGISTRY_VERSION: u32 = 2;
 /// Current execution statement schema version.
-pub const STATEMENT_SCHEMA_VERSION: u32 = 3;
+pub const STATEMENT_SCHEMA_VERSION: u32 = 1;
 /// Current verifier profile version.
 pub const VERIFIER_PROFILE_VERSION: u32 = 1;
 /// Current proof envelope schema version.
-pub const PROOF_ENVELOPE_VERSION: u32 = 2;
+pub const PROOF_ENVELOPE_VERSION: u32 = 1;
 
 /// Validate contract schema version with fail-closed policy.
 pub fn validate_contract_schema_version(version: u32) -> Result<(), ContractValidationError> {
     if version != CONTRACT_SCHEMA_VERSION {
         return Err(ContractValidationError::UnknownContractSchemaVersion { got: version });
-    }
-    Ok(())
-}
-
-/// Validate binding registry version with fail-closed policy.
-pub fn validate_binding_registry_version(version: u32) -> Result<(), ContractValidationError> {
-    if version != BINDING_REGISTRY_VERSION {
-        return Err(ContractValidationError::UnknownBindingRegistryVersion { got: version });
     }
     Ok(())
 }

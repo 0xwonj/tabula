@@ -7,6 +7,8 @@ pub mod context;
 pub mod env;
 pub mod example;
 pub mod execute;
+#[cfg(feature = "verify")]
+pub mod inspect_proof;
 #[cfg(feature = "prove")]
 pub mod prove;
 pub mod query;

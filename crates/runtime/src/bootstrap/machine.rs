@@ -1,15 +1,8 @@
 use std::sync::Arc;
 
-use tabula_core::RootProfileId;
 use tabula_ext::backend::ExecutionBackend;
 use tabula_machine::backend::extension::ExecutionTierExtension;
 use tabula_machine::{MachineBuilder, RootProofBackend, TabulaStarkConfig};
-
-pub(crate) fn supported_root_binding_families(
-    root_proof_backend: &Arc<dyn RootProofBackend>,
-) -> &[RootProfileId] {
-    root_proof_backend.supported_root_binding_families()
-}
 
 pub(crate) fn build_machine_builder(
     config: &TabulaStarkConfig,

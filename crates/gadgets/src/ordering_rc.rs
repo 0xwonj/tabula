@@ -6,6 +6,7 @@
 //! Used by SSMC (key_ordering), Merge (key_ordering), SortedMem (ordering).
 
 use p3_air::AirBuilder;
+use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 
 use tabula_stark::air::builder::InteractionAirBuilder;
@@ -48,6 +49,17 @@ impl OrderingRangeChecked<KoalaBear> {
         self.diff0_halves.populate(d0);
         self.diff1_halves.populate(d1);
         self.diff2_bits.populate(d2);
+    }
+
+    /// Populate all columns proving `lhs < rhs` for native committed-key payloads.
+    pub fn populate_payload(&mut self, lhs: &[KoalaBear; 3], rhs: &[KoalaBear; 3]) {
+        let lhs_u64 = u64::from(lhs[0].as_canonical_u32())
+            | (u64::from(lhs[1].as_canonical_u32()) << 30)
+            | (u64::from(lhs[2].as_canonical_u32()) << 60);
+        let rhs_u64 = u64::from(rhs[0].as_canonical_u32())
+            | (u64::from(rhs[1].as_canonical_u32()) << 30)
+            | (u64::from(rhs[2].as_canonical_u32()) << 60);
+        self.populate(lhs_u64, rhs_u64);
     }
 }
 

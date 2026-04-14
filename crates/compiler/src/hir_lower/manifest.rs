@@ -1,3 +1,4 @@
+use tabula_core::KeyComponentSchema;
 use tabula_ir as ir;
 use tabula_lang::hir;
 use tabula_profile::{TYPE_I64_ID, TYPE_U64_ID};
@@ -77,7 +78,14 @@ impl<'a> LowerCx<'a> {
                     .map(|table| ir::TableSchema {
                         id: lower_table_id(table.id),
                         symbol: table.symbol.clone(),
-                        key_tys: table.keys.iter().map(|key| key.ty).collect(),
+                        keys: table
+                            .keys
+                            .iter()
+                            .map(|key| KeyComponentSchema {
+                                symbol: key.symbol.clone(),
+                                ty: key.ty,
+                            })
+                            .collect(),
                         fields: table
                             .fields
                             .iter()

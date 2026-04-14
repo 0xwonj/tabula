@@ -11,7 +11,7 @@
 > [program-typing-and-effect-system.md](program-typing-and-effect-system.md),
 > [program-final-seam-decisions.md](program-final-seam-decisions.md),
 > [program-canonical-ir-contract-and-data-model.md](program-canonical-ir-contract-and-data-model.md),
-> [../canonical-vocabulary.md](../canonical-vocabulary.md),
+> [verification vocabulary](../../design/architecture.md#verification-vocabulary),
 > [../proof-front-end-journal-architecture.md](../proof-front-end-journal-architecture.md),
 > [../executor-proof-codesign-architecture.md](../executor-proof-codesign-architecture.md),
 > [../../research/conditional-branching.md](../../research/conditional-branching.md)
@@ -68,7 +68,8 @@ The naming model should therefore be:
 - `MIR` = mid-level compiler IR
 - `IR` = canonical execution/proof IR
 
-This is already consistent with [../canonical-vocabulary.md](../canonical-vocabulary.md).
+This is already consistent with the current
+[verification vocabulary](../../design/architecture.md#verification-vocabulary).
 
 ### 2.3 Scope of redesign
 

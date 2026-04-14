@@ -6,6 +6,7 @@
 //! Used for SSMC/Merge keys, SortedMem r/tau, Execution access_r/tau_rc.
 
 use p3_air::AirBuilder;
+use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 
 use tabula_stark::air::builder::InteractionAirBuilder;
@@ -44,6 +45,19 @@ impl KeyRangeChecked<KoalaBear> {
         self.l0_halves.populate(l0);
         self.l1_halves.populate(l1);
         self.limb2_bits.populate(l2);
+    }
+
+    /// Populate all columns from a native committed-key payload.
+    pub fn populate_payload(&mut self, payload: &[KoalaBear; 3]) {
+        let limb0 = payload[0].as_canonical_u32() as u64;
+        let limb1 = payload[1].as_canonical_u32() as u64;
+        let limb2 = payload[2].as_canonical_u32() as u64;
+        self.limbs.limb0 = payload[0];
+        self.limbs.limb1 = payload[1];
+        self.limbs.limb2 = payload[2];
+        self.l0_halves.populate(limb0 as u32);
+        self.l1_halves.populate(limb1 as u32);
+        self.limb2_bits.populate(limb2 as u32);
     }
 }
 

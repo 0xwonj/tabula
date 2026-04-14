@@ -102,6 +102,27 @@ pub enum VerificationError {
         /// Stable slot key from the proof.
         proof_key: ColumnSlotKey,
     },
+    /// The proof omitted or added column proofs relative to the configured
+    /// proof plan.
+    #[error("column proof count mismatch: expected {expected}, got {got}")]
+    ColumnProofCountMismatch {
+        /// Number of column proofs expected by the configured machine setup.
+        expected: usize,
+        /// Number of column proofs provided by the proof manifest.
+        got: usize,
+    },
+    /// The proof manifest is not in canonical proof-plan order.
+    #[error(
+        "column proof at index {index} is out of canonical order: expected {expected_key}, got {proof_key}"
+    )]
+    ColumnOrderMismatch {
+        /// Column proof index.
+        index: usize,
+        /// Stable slot key expected at this proof-plan position.
+        expected_key: ColumnSlotKey,
+        /// Stable slot key provided by the proof.
+        proof_key: ColumnSlotKey,
+    },
     /// Cross-proof bus cumsums do not balance.
     #[error("cross-proof bus imbalance: {bus_id}, total = {total:?}")]
     CrossProofBusImbalance {

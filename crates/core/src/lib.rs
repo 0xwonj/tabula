@@ -10,18 +10,23 @@ pub mod traits;
 
 // ── Identifier vocabulary ──
 pub use ids::{
-    CellKey, ColId, ColumnCommitmentId, ColumnLayoutKind, ColumnProfileId, Digest,
-    EncodingProfileId, RootProfileId, RootProofFamilyId, RowKey, SchemeId, SchemeProfileId,
+    ColId, ColumnCommitmentId, ColumnLayoutKind, ColumnProfileId, CommittedCellKey, CommittedKey,
+    Digest, EncodingProfileId, RootProfileId, RootProofFamilyId, RowKey, SchemeId, SchemeProfileId,
     StateRoot, TableCommitmentId, TableId, TxTypeId, TypeId,
 };
 
 // ── State model ──
 pub use state::portable::PortableValue;
-pub use state::schema::{ColumnDef, TableSchema};
+pub use state::schema::{
+    CommittedKeyLayout, KeyComponentSchema, KeyOrderingFamily, ProgramExecutionContract,
+    StateColumnContract, StateContract, StateTableContract, TableKeyContract,
+};
 
 // ── Execution boundary ──
-pub use execution::property::PropertyQueryKind;
-pub use execution::tx::{Batch, ProgramBudgets, Transaction};
+pub use execution::property::{CommittedPropertyQuery, PropertyAggregateKind, PropertyQueryKind};
+pub use execution::tx::{
+    Batch, MachineCapabilities, ProgramBudgets, ProgramMachineShape, Transaction,
+};
 pub use execution::{
     CapabilityTranscriptId, CapabilityTranscriptSignature, CapabilityTranscriptValueProfile,
 };

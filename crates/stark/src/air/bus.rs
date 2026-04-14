@@ -9,20 +9,22 @@
 
 use crate::air::interaction::core_buses;
 
+use tabula_core::execution::NATIVE_MAX_KEY_FES;
+
 // ── Access tuple types (shared by ReadAccess and WriteAccess buses) ──────
 
 /// Runtime/witness-level access tuple value.
 ///
 /// Canonical tuple order:
-/// `(t, c, key[3], tx_index, val[W], is_null)`.
+/// `(t, c, key[K], tx_index, val[W], is_null)`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccessTupleValue<V> {
     /// Table identifier.
     pub table_id: u32,
     /// Column identifier.
     pub col_id: u16,
-    /// Key limbs (`u64` decomposition).
-    pub key_limbs: [u32; 3],
+    /// Padded native key payload elements.
+    pub key_payload: [u32; NATIVE_MAX_KEY_FES as usize],
     /// Transaction index in batch.
     pub tx_index: u32,
     /// Encoded value limbs.
@@ -41,12 +43,8 @@ pub struct AccessTupleExpr<E> {
     pub table_id: E,
     /// Column identifier.
     pub col_id: E,
-    /// Key limb 0.
-    pub key_limb0: E,
-    /// Key limb 1.
-    pub key_limb1: E,
-    /// Key limb 2.
-    pub key_limb2: E,
+    /// Padded native key payload elements.
+    pub key_payload: Vec<E>,
     /// Transaction index in batch.
     pub tx_index: E,
     /// Encoded value limbs.
@@ -58,12 +56,10 @@ pub struct AccessTupleExpr<E> {
 impl<E> AccessTupleExpr<E> {
     /// Convert to canonical tuple vector.
     pub fn into_values(self) -> Vec<E> {
-        let mut values = Vec::with_capacity(self.value.len() + 7);
+        let mut values = Vec::with_capacity(self.value.len() + self.key_payload.len() + 4);
         values.push(self.table_id);
         values.push(self.col_id);
-        values.push(self.key_limb0);
-        values.push(self.key_limb1);
-        values.push(self.key_limb2);
+        values.extend(self.key_payload);
         values.push(self.tx_index);
         values.extend(self.value);
         values.push(self.is_null);
@@ -115,7 +111,7 @@ define_bus! {
 
     /// Extension trait for send/receive on the ReadAccess bus (C10).
     ///
-    /// Tuple (7+W elements): `(t, c, key[3], tx_index, val[W], is_null)`.
+    /// Tuple `(4+K+W elements)`: `(t, c, key[K], tx_index, val[W], is_null)`.
     pub ReadAccessAirBuilder(
         core_buses::READ_ACCESS,
         send_read_access,
@@ -126,7 +122,7 @@ define_bus! {
 
     /// Extension trait for send/receive on the WriteAccess bus (C11).
     ///
-    /// Tuple (7+W elements): `(t, c, key[3], tx_index, val[W], is_null)`.
+    /// Tuple `(4+K+W elements)`: `(t, c, key[K], tx_index, val[W], is_null)`.
     pub WriteAccessAirBuilder(
         core_buses::WRITE_ACCESS,
         send_write_access,
@@ -149,7 +145,7 @@ define_bus! {
 
     /// Extension trait for send/receive on the BaseStateEntry bus (C13).
     ///
-    /// Tuple (6+W elements): `(t, c, key[3], val[W], is_null)`.
+    /// Tuple `(3+K+W elements)`: `(t, c, key[K], val[W], is_null)`.
     pub BaseStateEntryAirBuilder(
         core_buses::BASE_STATE_ENTRY,
         send_base_state_entry,
@@ -157,14 +153,14 @@ define_bus! {
     ) {
         t: expr,
         c: expr,
-        key: u64limbs,
+        key: expr_slice,
         val: var_slice,
         is_null: expr,
     }
 
     /// Extension trait for send/receive on the CoalescedWrite bus (C14).
     ///
-    /// Tuple (6+W elements): `(t, c, key[3], val[W], is_null)`.
+    /// Tuple `(3+K+W elements)`: `(t, c, key[K], val[W], is_null)`.
     pub CoalescedWriteAirBuilder(
         core_buses::COALESCED_WRITE,
         send_coalesced_write,
@@ -172,7 +168,7 @@ define_bus! {
     ) {
         t: expr,
         c: expr,
-        key: u64limbs,
+        key: expr_slice,
         val: var_slice,
         is_null: expr,
     }
@@ -252,7 +248,7 @@ define_bus! {
 
     /// Extension trait for send/receive on the SSMC old-entry anchor bus (C20).
     ///
-    /// Tuple `(t, c, key[3], val[W], has_prev, prev_key[3], is_last_old, next_key[3])`.
+    /// Tuple `(t, c, key[K], val[W], has_prev, prev_key[K], is_last_old, next_key[K])`.
     #[allow(clippy::too_many_arguments)]
     pub SsmcOldEntryAirBuilder(
         core_buses::SSMC_OLD_ENTRY,
@@ -261,11 +257,11 @@ define_bus! {
     ) {
         t: expr,
         c: expr,
-        key: u64limbs,
+        key: expr_slice,
         val: var_slice,
         has_prev: expr,
-        prev_key: u64limbs,
+        prev_key: expr_slice,
         is_last_old: expr,
-        next_key: u64limbs,
+        next_key: expr_slice,
     }
 }

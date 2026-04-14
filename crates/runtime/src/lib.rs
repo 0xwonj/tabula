@@ -17,6 +17,12 @@
 //! `HostEnvironment` currently installs runtime registries and scheme
 //! backends on the `verify` / `prove` surface; end-to-end capability handler
 //! installation remains a follow-up architecture step.
+//! Verification is statement-first: [`PublicStatement`] is the proved object,
+//! `BoundStatement` is the verifier-side binding over one sealed
+//! artifact, and the prepared verifier state lives in the runtime verifier
+//! surface rather than the contract layer. Shared registered-program setup is
+//! derived in `bootstrap`, then consumed by `engine` for proving and
+//! `verifier` for verification.
 //!
 //! ```text
 //! compiler (compile/load/register) -> runtime (execute/prove) -> machine (STARK)
@@ -40,18 +46,22 @@ mod host;
 #[cfg(feature = "prove")]
 mod proof_summary;
 pub mod semantics;
+#[cfg(feature = "verify")]
+mod state_runtime;
+#[cfg(feature = "verify")]
+mod verifier;
 
 pub use error::{RuntimeError, RuntimeResult};
 
 #[cfg(feature = "verify")]
-pub use engine::{ExecutionReceipt, RuntimeBuilder, StateSnapshot, TabulaRuntime};
+pub use engine::{CommittedStateSnapshot, ExecutionReceipt, RuntimeBuilder, TabulaRuntime};
 #[cfg(feature = "prove")]
 pub use engine::{ProveInput, ProveResult, VerifiedResult};
-#[cfg(feature = "verify")]
-pub use engine::{Verifier, VerifierBuilder};
 #[cfg(feature = "verify")]
 pub use host::{HostEnvironment, InstalledSchemes, RuntimeRegistries, SmtScheme, SsmcScheme};
 #[cfg(feature = "prove")]
 pub use proof_summary::ProofSummary;
 #[cfg(feature = "verify")]
-pub use tabula_contract::ProofStatement;
+pub use tabula_contract::{BoundStatement, PublicStatement};
+#[cfg(feature = "verify")]
+pub use verifier::{Verifier, VerifierBuilder};

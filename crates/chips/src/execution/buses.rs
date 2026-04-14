@@ -7,11 +7,25 @@ use tabula_stark::air::bus::{
     AccessTupleExpr, PropertyReadAirBuilder, ReadAccessAirBuilder, WriteAccessAirBuilder,
 };
 use tabula_stark::air::interaction::{AirInteraction, core_buses};
+use tabula_types::NATIVE_KEY_PAYLOAD_WIDTH;
 
 use super::columns::ExecutionCols;
+use crate::event_transcript::EVENT_TRANSCRIPT_BUS;
 use crate::ir_hash::IR_HASH_BUS;
+use crate::public_context_transcript::PUBLIC_CONTEXT_TRANSCRIPT_BUS;
 use crate::relation_table::RELATION_TABLE_BUS;
 use crate::relation_transcript::{RELATION_DIGEST_BUS, RELATION_TUPLE_BUS};
+use crate::tx_batch_transcript::TX_BATCH_TRANSCRIPT_BUS;
+
+fn access_key_payload_exprs<AB: InteractionAirBuilder, const W: usize>(
+    local: &ExecutionCols<AB::Var, W>,
+) -> Vec<AB::Expr> {
+    let mut payload = vec![AB::Expr::ZERO; NATIVE_KEY_PAYLOAD_WIDTH];
+    payload[0] = local.access_r.limbs.limb0.into();
+    payload[1] = local.access_r.limbs.limb1.into();
+    payload[2] = local.access_r.limbs.limb2.into();
+    payload
+}
 
 /// C10 ReadAccess bus send: non-empty reads.
 ///
@@ -34,9 +48,7 @@ pub(super) fn send_read_access<AB: InteractionAirBuilder, const W: usize>(
         AccessTupleExpr {
             table_id: local.access_t.into(),
             col_id: local.access_c.into(),
-            key_limb0: local.access_r.limbs.limb0.into(),
-            key_limb1: local.access_r.limbs.limb1.into(),
-            key_limb2: local.access_r.limbs.limb2.into(),
+            key_payload: access_key_payload_exprs::<AB, W>(local),
             tx_index: local.tx_index.into(),
             value,
             is_null: local.access_is_null.into(),
@@ -65,9 +77,7 @@ pub(super) fn send_write_access<AB: InteractionAirBuilder, const W: usize>(
         AccessTupleExpr {
             table_id: local.access_t.into(),
             col_id: local.access_c.into(),
-            key_limb0: local.access_r.limbs.limb0.into(),
-            key_limb1: local.access_r.limbs.limb1.into(),
-            key_limb2: local.access_r.limbs.limb2.into(),
+            key_payload: access_key_payload_exprs::<AB, W>(local),
             tx_index: local.tx_index.into(),
             value,
             is_null: local.access_is_null.into(),
@@ -358,5 +368,113 @@ pub(super) fn send_relation_table<AB: InteractionAirBuilder, const W: usize>(
         values,
         multiplicity,
         bus: RELATION_TABLE_BUS,
+    });
+}
+
+/// Public-context transcript bus send: canonical context field commitments.
+pub(super) fn send_public_context_transcript_item<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let multiplicity: AB::Expr = local.is_real.into() * local.op_load_context.into();
+    let values = vec![
+        local.proof_meta0.into(),
+        local.proof_meta1.into(),
+        local.proof_meta2.into(),
+        local.src1_val[0].into(),
+        local.src1_val[1].into(),
+        local.src1_val[2].into(),
+        AB::Expr::ZERO,
+        AB::Expr::ZERO,
+        AB::Expr::ZERO,
+    ];
+    builder.send(AirInteraction {
+        values,
+        multiplicity,
+        bus: PUBLIC_CONTEXT_TRANSCRIPT_BUS,
+    });
+}
+
+/// Tx-batch transcript bus send: canonical tx headers and params.
+pub(super) fn send_tx_batch_transcript_item<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let tx_begin_mult: AB::Expr = local.is_real.into() * local.op_tx_begin.into();
+    let tx_begin_values = vec![
+        local.proof_meta0.into(),
+        AB::Expr::ONE,
+        local.tx_index.into(),
+        local.proof_meta1.into(),
+        local.proof_meta2.into(),
+        AB::Expr::ZERO,
+        AB::Expr::ZERO,
+        AB::Expr::ZERO,
+        AB::Expr::ZERO,
+    ];
+    builder.send(AirInteraction {
+        values: tx_begin_values,
+        multiplicity: tx_begin_mult,
+        bus: TX_BATCH_TRANSCRIPT_BUS,
+    });
+
+    let load_param_mult: AB::Expr = local.is_real.into() * local.op_load_param.into();
+    let load_param_values = vec![
+        local.proof_meta0.into(),
+        AB::Expr::ONE + AB::Expr::ONE,
+        local.tx_index.into(),
+        local.proof_meta1.into(),
+        local.proof_meta2.into(),
+        local.src1_val[0].into(),
+        local.src1_val[1].into(),
+        local.src1_val[2].into(),
+        AB::Expr::ZERO,
+    ];
+    builder.send(AirInteraction {
+        values: load_param_values,
+        multiplicity: load_param_mult,
+        bus: TX_BATCH_TRANSCRIPT_BUS,
+    });
+}
+
+/// Event transcript bus send: canonical event headers and args.
+pub(super) fn send_event_transcript_item<AB: InteractionAirBuilder, const W: usize>(
+    builder: &mut AB,
+    local: &ExecutionCols<AB::Var, W>,
+) {
+    let event_header_mult: AB::Expr = local.is_real.into() * local.op_emit_event_header.into();
+    let event_header_values = vec![
+        local.proof_meta0.into(),
+        AB::Expr::ONE,
+        local.tx_index.into(),
+        local.instruction_index.into(),
+        local.proof_meta1.into(),
+        local.proof_meta2.into(),
+        local.proof_meta3.into(),
+        AB::Expr::ZERO,
+        AB::Expr::ZERO,
+    ];
+    builder.send(AirInteraction {
+        values: event_header_values,
+        multiplicity: event_header_mult,
+        bus: EVENT_TRANSCRIPT_BUS,
+    });
+
+    let event_arg_mult: AB::Expr = local.is_real.into() * local.op_emit_event_arg.into();
+    let event_arg_values = vec![
+        local.proof_meta0.into(),
+        AB::Expr::ONE + AB::Expr::ONE,
+        local.tx_index.into(),
+        local.proof_meta1.into(),
+        local.proof_meta2.into(),
+        local.proof_meta3.into(),
+        local.src1_val[0].into(),
+        local.src1_val[1].into(),
+        local.src1_val[2].into(),
+    ];
+    builder.send(AirInteraction {
+        values: event_arg_values,
+        multiplicity: event_arg_mult,
+        bus: EVENT_TRANSCRIPT_BUS,
     });
 }

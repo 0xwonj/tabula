@@ -23,6 +23,7 @@
 pub mod boolean;
 pub mod hash_chain;
 pub mod integer;
+pub mod key_payload;
 pub mod key_rc;
 pub mod mem;
 pub mod ordering_rc;
@@ -39,6 +40,11 @@ pub use mem::{constrain_mem_read, constrain_mem_write, constrain_null_canon};
 // ── Composite operation re-exports ──
 
 pub use hash_chain::{HashChainInput, constrain_hash_chain_input, constrain_hash_chain_transition};
+pub use key_payload::{
+    FieldLt30Checked, KeyLexOrderWitness, KeyPayloadWitness, constrain_field_lt30,
+    constrain_key_equal, constrain_key_equality_flags, constrain_key_lex_lt, constrain_key_payload,
+    constrain_key_zero, send_field_lt30_range_checks, send_key_payload_range_checks,
+};
 pub use key_rc::{
     KeyRangeChecked, constrain_key_halves, eval_key_range_checked, send_key_range_checks,
 };

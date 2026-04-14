@@ -8,10 +8,7 @@ mod program;
 mod state;
 mod surface;
 
-pub use host::{
-    CapabilityExecutor, CapabilityHandler, CapabilityRegistry, PropertyReadExecutor,
-    PropertyReadQuery, PropertyReadRequest,
-};
+pub use host::{CapabilityExecutor, CapabilityHandler, CapabilityRegistry, StateRuntimeView};
 pub use machine::{execute_batch, execute_query};
 pub use program::{ResolvedExecutionProgram, ResolvedTable};
 pub use state::{Overlay, OverlayResult};

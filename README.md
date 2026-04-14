@@ -1,135 +1,93 @@
 # Tabula
 
-Tabula is a zero-knowledge kernel for typed, tabular state transitions.
+Tabula is a zero-knowledge system for typed, tabular state transitions.
 
-Instead of treating application logic as a general-purpose machine trace and
-then proving that trace, Tabula treats typed state transitions themselves as
-the thing to execute, validate, and prove. The project is built around the idea
-that many applications do not naturally think in terms of flat VM memory. They
-think in terms of structured state, explicit reads and writes, and schema-level
-meaning. Accounts, balances, orders, permissions, and ledgers are usually
-closer to tables than to machine memory.
+Most proving systems start from a low-level execution trace and then try to recover the meaning of a program from machine steps. Tabula starts from the other direction. It treats structured state, explicit reads and writes, and registered program semantics as first-class inputs to execution and proof.
 
-## Why This Approach
+The project is aimed at applications that already think in terms of tables and state updates: balances, ledgers, permissions, orders, and similar structured data models.
 
-General-purpose proving systems are powerful, but they flatten structured
-application logic into machine steps. Once that happens, the system sees less
-of what actually matters: state shape, read/write structure, and program meaning.
+## Why Tabular State
 
-Tabula keeps that structure visible. By working with typed state transitions,
-it can push more validation, analysis, and proof planning to compile time
-instead of rediscovering the same facts inside every proof. That is one of the
-central ways it aims to reduce proving cost.
+Many applications do not naturally think in terms of flat VM memory. They
+think in terms of:
 
-## Core Idea
+- typed tables
+- explicit keys and columns
+- well-defined state transitions
+- schema-level meaning that should stay visible across the stack
 
-Tabula is organized around a few durable ideas:
+Tabula tries to preserve that structure through compilation, execution, and proof preparation instead of flattening it away too early.
 
-- state lives in typed tables addressed by `(table, column, row)`
-- programs are registered as explicit semantics, not just raw source text
-- compile-time analysis is part of the optimization story: work resolved
-  statically is work the prover does not need to pay for repeatedly
-- execution, commitment semantics, and proving are separate layers
-- `tabula-sdk` is the default product-facing integration boundary
-- `tabula-runtime` remains the lower-level native orchestration layer
-- the proof backend should be replaceable without redefining program meaning
+That makes the system easier to reason about at the semantic level, and it lets more validation and proof planning happen before proving starts.
 
-## Architecture At A Glance
+## Quick Start
 
-```text
-authoring input
-  -> language front-end
-  -> IR
-  -> semantic registration
-  -> runtime execution and policy
-  -> proof preparation
-  -> proof backend
-```
-
-At the workspace level, the architecture is split into a few clear layers:
-
-- shared meaning: `tabula-core`, `tabula-contract`
-- authoring and registration: `tabula-lang`, `tabula-ir`, `tabula-compiler`
-- execution and runtime policy: `tabula-executor`, `tabula-runtime`
-- proof backend: `tabula-commitment`, `tabula-witness`, `tabula-gadgets`, `tabula-chips`, `tabula-stark`, `tabula-machine`
-- package surfaces: `tabula-ext`, `tabula-sdk`, `tabula-cli`
-
-For the canonical current architecture, read
-[`docs/design/architecture.md`](docs/design/architecture.md).
-
-## Where To Read Next
-
-- [`docs/design/architecture.md`](docs/design/architecture.md)
-  Cross-crate architecture and dependency direction.
-- [`docs/README.md`](docs/README.md)
-  How to interpret `design/`, `notes/`, `research/`, and `archive/`.
-- crate `README.md` files under [`crates/`](crates/)
-  Crate-local contracts, design intent, and ownership boundaries.
-
-## Getting Started
-
-Build and test the workspace:
+Build the CLI with proving support and generate an example project:
 
 ```sh
-cargo build
-cargo test
-```
-
-Generate example inputs and run a local batch:
-
-```sh
+cargo build -p tabula-cli --features prove
 cargo run -p tabula-cli -- example basic --dir /tmp/tabula-example
-cargo run -p tabula-cli -- execute \
-  --program /tmp/tabula-example/program.tab \
-  --state /tmp/tabula-example/state.json \
-  --batch /tmp/tabula-example/batch.json \
-  --context /tmp/tabula-example/context.json
 ```
 
-Produce and verify a proof from that execution:
+Run the example batch:
 
 ```sh
-cargo run -p tabula-cli -- execute \
+target/debug/tabula-cli execute \
   --program /tmp/tabula-example/program.tab \
   --state /tmp/tabula-example/state.json \
   --batch /tmp/tabula-example/batch.json \
   --context /tmp/tabula-example/context.json \
   --receipt-out /tmp/tabula-example/receipt.bin
+```
 
-cargo run -p tabula-cli -- prove \
+Produce and verify a proof:
+
+```sh
+target/debug/tabula-cli prove \
   --program /tmp/tabula-example/program.tab \
   --receipt /tmp/tabula-example/receipt.bin \
   --proof-out /tmp/tabula-example/proof.bin \
-  --statement-out /tmp/tabula-example/statement.json \
+  --public-statement-out /tmp/tabula-example/public_statement.json \
   --summary-out /tmp/tabula-example/proof_summary.json
 
-cargo run -p tabula-cli -- verify \
+target/debug/tabula-cli verify \
   --program /tmp/tabula-example/program.tab \
-  --proof /tmp/tabula-example/proof.bin
+  --proof /tmp/tabula-example/proof.bin \
+  --statement /tmp/tabula-example/public_statement.json
 ```
 
-Check, inspect, or compile a `.tab` program:
+For command-line details, see [crates/cli/README.md](crates/cli/README.md).
 
-```sh
-cargo run -p tabula-cli -- check path/to/program.tab
-cargo run -p tabula-cli -- schema path/to/program.tab
-cargo run -p tabula-cli -- compile path/to/program.tab
-```
+## Proof Surface
 
-## Project Status
+The current verification path is statement-first.
 
-Tabula is still early-stage and the architecture is evolving quickly.
+The verifier checks a sealed program artifact, an expected public statement, and a proof. The public statement commits to the state transition and the public outputs of the executed batch.
 
-The canonical documentation set therefore tries to optimize for durable
-boundaries rather than implementation detail:
+The canonical current verifier vocabulary and cross-crate structure live in [docs/design/architecture.md](docs/design/architecture.md).
 
-- the root `README.md` explains the project and its thesis
-- [`docs/design/architecture.md`](docs/design/architecture.md) explains the
-  current cross-crate architecture
-- crate `README.md` files explain local contracts and design intent
+## Repository Guide
 
-Exploratory material and historical documents still exist, but they should not
-be treated as the primary source of truth for the current workspace.
+The main entry points are:
+
+- `tabula-sdk` for product-facing embedding
+- `tabula-runtime` for native execution, proving, and verification orchestration
+- `tabula-contract` for proof-visible and verifier-facing contract types
+- `tabula-cli` for repository-owned workflows and examples
+
+For the current architecture and documentation map, start with:
+
+- [docs/design/architecture.md](docs/design/architecture.md)
+- [docs/README.md](docs/README.md)
+- crate `README.md` files under [crates/](crates)
+
+## Artifact Evaluation
+
+If you are reviewing this repository as a research artifact, use [ARTIFACT.md](ARTIFACT.md).
+
+## Status
+
+Tabula is research code. The implementation is still evolving, and the repository is not suitable to be used in production.
 
 ## License
 

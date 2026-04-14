@@ -1,8 +1,8 @@
 //! Execution journal: per-batch and per-transaction outcomes with typed effects.
 
-use tabula_core::{CellKey, TypeId};
+use tabula_core::{CommittedCellKey, CommittedPropertyQuery, TypeId};
 use tabula_ir as ir;
-use tabula_types::TypedValue;
+use tabula_types::{TypedCommittedPropertyQueryResult, TypedValue};
 
 /// The result of executing a single query entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,7 +120,7 @@ pub struct ExecutionStateSummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypedStateSnapshot {
     /// The cell key (table, column, row).
-    pub key: CellKey,
+    pub key: CommittedCellKey,
     /// Type of the cell's value.
     pub type_id: TypeId,
     /// The value at the start of the batch (`None` if absent).
@@ -131,7 +131,7 @@ pub struct TypedStateSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypedStateWrite {
     /// The cell key (table, column, row).
-    pub key: CellKey,
+    pub key: CommittedCellKey,
     /// Type of the cell's value.
     pub type_id: TypeId,
     /// The final value after all writes (`None` if deleted).
@@ -153,7 +153,7 @@ pub enum StateEffectKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypedStateEffect {
     /// The cell key (table, column, row).
-    pub key: CellKey,
+    pub key: CommittedCellKey,
     /// Type of the cell's value.
     pub type_id: TypeId,
     /// Whether this was a read, write, or delete.
@@ -175,10 +175,10 @@ pub struct StatePropertyEffect {
     pub table: ir::TableId,
     /// Target column field.
     pub field: ir::FieldId,
-    /// The structural query that was evaluated.
-    pub query: ir::StatePropertyQuery,
-    /// The output values returned by the query.
-    pub outputs: Vec<TypedValue>,
+    /// The committed structural query that was evaluated.
+    pub query: CommittedPropertyQuery,
+    /// The committed-key-native result returned by the query.
+    pub result: TypedCommittedPropertyQueryResult,
     /// Index of the IR operation that produced this effect.
     pub op_index: usize,
     /// Ordinal of this effect among all effects within the enclosing entry execution.

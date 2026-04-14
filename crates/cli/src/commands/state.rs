@@ -26,18 +26,46 @@ fn init(ctx: &AppContext, args: &StateInitArgs) -> anyhow::Result<()> {
 fn set(ctx: &AppContext, args: &StateSetArgs) -> anyhow::Result<()> {
     let loaded = load_program(ctx.sdk()?, &args.program)?;
     let state = load_state(&args.state)?;
-    let field = loaded.program.table(&args.table)?.field(&args.field)?;
+    let table = loaded.program.table(&args.table)?;
+    let field = table.field(&args.field)?;
+    let key = encode_key_literal(&args.key, table.key_components())?;
     let value = encode_json_literal(&args.value, field.ty())?;
     let updated = loaded
         .program
         .state_from(&state)
-        .set(&args.table, args.row, &args.field, value)?
+        .set(&args.table, key, &args.field, value)?
         .build();
     let output_path = args.out.as_ref().unwrap_or(&args.state);
     ensure_parent_dir(output_path)?;
     write_json(output_path, &updated)?;
     println!("Updated {}", output_path.display());
     Ok(())
+}
+
+fn encode_key_literal(
+    raw: &str,
+    expected: &[tabula_sdk::KeyComponentHandle],
+) -> anyhow::Result<Vec<tabula_sdk::interop::PortableValue>> {
+    let parsed: serde_json::Value = serde_json::from_str(raw)?;
+    let values = parsed
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("--key must be a JSON array"))?;
+    if values.len() != expected.len() {
+        return Err(anyhow::anyhow!(
+            "table key expects {} components but {} were provided",
+            expected.len(),
+            values.len()
+        ));
+    }
+    values
+        .iter()
+        .zip(expected.iter())
+        .map(
+            |(value, component): (&serde_json::Value, &tabula_sdk::KeyComponentHandle)| {
+                encode_json_literal(&value.to_string(), component.ty())
+            },
+        )
+        .collect()
 }
 
 fn inspect(ctx: &AppContext, args: &StateInspectArgs) -> anyhow::Result<()> {

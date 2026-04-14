@@ -1,8 +1,11 @@
 use tabula_chips::capability_transcript::CapabilityTranscriptChip;
+use tabula_chips::event_transcript::EventTranscriptChip;
 use tabula_chips::ir_hash::IrHashChip;
 use tabula_chips::poseidon::PoseidonChip;
+use tabula_chips::public_context_transcript::PublicContextTranscriptChip;
 use tabula_chips::relation_table::RelationTableChip;
 use tabula_chips::relation_transcript::RelationTranscriptChip;
+use tabula_chips::tx_batch_transcript::TxBatchTranscriptChip;
 use tabula_stark::trace::{BusConsumer, DynChip};
 
 use crate::backend::AnyRap;
@@ -85,5 +88,37 @@ impl ExecutionBackend for RelationExecutionBackend {
             Box::new(RelationTranscriptChip),
             Box::new(RelationTableChip),
         ]
+    }
+}
+
+/// Built-in execution backend for proved public-statement transcript families.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PublicStatementTranscriptExecutionBackend;
+
+impl ExecutionBackend for PublicStatementTranscriptExecutionBackend {
+    fn name(&self) -> &str {
+        "public_statement_transcript"
+    }
+
+    fn airs(&self) -> Vec<Box<dyn AnyRap>> {
+        vec![
+            Box::new(PublicContextTranscriptChip),
+            Box::new(TxBatchTranscriptChip),
+            Box::new(EventTranscriptChip),
+            Box::new(PoseidonChip),
+        ]
+    }
+
+    fn dyn_chips(&self) -> Vec<Box<dyn DynChip>> {
+        vec![
+            Box::new(PublicContextTranscriptChip),
+            Box::new(TxBatchTranscriptChip),
+            Box::new(EventTranscriptChip),
+            Box::new(PoseidonChip),
+        ]
+    }
+
+    fn bus_consumers(&self) -> Vec<Box<dyn BusConsumer>> {
+        vec![Box::new(PoseidonChip)]
     }
 }

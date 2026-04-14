@@ -13,6 +13,43 @@ If this document and exploratory material disagree, prefer this document for
 cross-crate structure and the crate-level `README.md` files for crate-local
 contracts.
 
+## Current Supported Proving Surface
+
+The architecture is broader than the currently supported proof-capable subset.
+
+Today, the repository intentionally supports:
+
+- stateful transaction-batch proving
+- query execution without query proving
+- unary native user-state keys only (`1 component / 3 FE`)
+
+Composite-key proving, symbolic AIR compilation, and broader proof-topology
+changes remain future work. Current design documents may describe those target
+architectures, but the active implementation should be read through the
+supported subset above.
+
+## Verification Vocabulary
+
+The current proof surface is statement-first:
+
+- `PublicStatement` is the proved public object.
+- `BoundStatement` is the verifier-side binding object that ties a
+  proved public statement to one sealed artifact.
+- `public_statement.json` is the stable external verification file carrying a
+  versioned encoding of `PublicStatement`.
+- older claim-first names in notes or archived material are historical, not the
+  current theorem or API vocabulary.
+
+The verifier model is layered:
+
+- `PublicStatement` is the proved public object.
+- `ArtifactContext` is the artifact-derived binding context recomputed
+  from the sealed artifact.
+- `VerifierState` is the runtime-internal prepared verifier state:
+  artifact binding context plus relation policy plus machine verifier state.
+- `Verifier` is the runtime algorithm over `(prepared verifier state,
+  expected public statement, proof)`.
+
 ## Architecture In One View
 
 ```text

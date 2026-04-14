@@ -1,17 +1,19 @@
 use tabula_contract::{
-    BINDING_REGISTRY_VERSION, CONTRACT_SCHEMA_VERSION, ContractMetadataEnvelope,
-    STATEMENT_SCHEMA_VERSION, TupleEncodingDefaults, TupleEncodingSelection,
-    VERIFIER_PROFILE_VERSION,
+    CONTRACT_SCHEMA_VERSION, ContractMetadataEnvelope, STATEMENT_SCHEMA_VERSION,
+    TupleEncodingDefaults, TupleEncodingSelection, VERIFIER_PROFILE_VERSION,
 };
 
 use crate::CompilerCatalogs;
 use crate::error::{CompilerError, CompilerResult};
-use crate::pipeline::{CompiledProgram, RegisteredProgram, compile_program_source_with_catalogs};
+use crate::pipeline::{
+    CompiledProgram, REGISTERED_PROGRAM_SCHEMA_VERSION, RegisteredProgram,
+    compile_program_source_with_catalogs,
+};
 use crate::registration::RegistrationContext;
 use crate::registration::binding::{
-    compute_profile_hash, compute_program_binding, compute_semantic_hash_stub,
+    compute_profile_hash, compute_program_binding, compute_semantic_hash,
 };
-use crate::registration::profiles::seal_state_profiles;
+use crate::registration::keys::seal_execution_contract;
 use crate::registration::static_tables::build_static_table_artifact;
 
 /// Register a compiled rewritten program into a native sealed artifact.
@@ -30,9 +32,13 @@ fn register_compiled_program_with_context(
     context: &RegistrationContext,
 ) -> CompilerResult<RegisteredProgram> {
     let (validated, field_schemes) = compiled.into_parts();
-    let (table_schemas, profile_catalog) =
-        seal_state_profiles(validated.as_program(), &field_schemes, catalogs.semantics())
-            .map_err(|detail| CompilerError::InvalidProgram(anyhow::anyhow!(detail)))?;
+    let (execution_contract, profile_catalog) = seal_execution_contract(
+        validated.as_program(),
+        &field_schemes,
+        catalogs.semantics(),
+        catalogs.machine_capabilities(),
+    )
+    .map_err(|detail| CompilerError::InvalidProgram(anyhow::anyhow!(detail)))?;
     let tuple_encoding_defaults = TupleEncodingDefaults::new(
         catalogs
             .semantics()
@@ -49,28 +55,32 @@ fn register_compiled_program_with_context(
     let static_table_artifact =
         build_static_table_artifact(validated.as_program(), context, &tuple_encoding_defaults)
             .map_err(|source| CompilerError::InvalidProgram(anyhow::anyhow!(source.to_string())))?;
-    let profile_hash = compute_profile_hash(&table_schemas, &profile_catalog)
+    let profile_hash = compute_profile_hash(&execution_contract, &profile_catalog)
         .map_err(CompilerError::InvalidProgram)?;
-    let semantic_hash_stub = Some(
-        compute_semantic_hash_stub(validated.as_program(), &field_schemes, &profile_catalog)
-            .map_err(CompilerError::InvalidProgram)?,
-    );
+    let semantic_hash = compute_semantic_hash(
+        validated.as_program(),
+        &execution_contract,
+        &profile_catalog,
+    )
+    .map_err(CompilerError::InvalidProgram)?;
     let metadata_envelope = ContractMetadataEnvelope {
         profile_hash,
         contract_schema_version: CONTRACT_SCHEMA_VERSION,
-        binding_registry_version: BINDING_REGISTRY_VERSION,
         statement_schema_version: STATEMENT_SCHEMA_VERSION,
         verifier_profile_version: VERIFIER_PROFILE_VERSION,
-        semantic_hash_stub,
+        semantic_hash,
     };
-    let binding =
-        compute_program_binding(validated.as_program(), &field_schemes, &metadata_envelope)
-            .map_err(CompilerError::InvalidProgram)?;
+    let binding = compute_program_binding(
+        validated.as_program(),
+        &execution_contract,
+        &metadata_envelope,
+    )
+    .map_err(CompilerError::InvalidProgram)?;
 
     Ok(RegisteredProgram {
+        artifact_schema_version: REGISTERED_PROGRAM_SCHEMA_VERSION,
         validated,
-        field_schemes,
-        table_schemas,
+        execution_contract,
         profile_catalog,
         tuple_encoding_defaults,
         capability_manifest,

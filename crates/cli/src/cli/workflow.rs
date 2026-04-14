@@ -120,9 +120,9 @@ pub struct ProveArgs {
     #[arg(long)]
     pub proof_out: PathBuf,
 
-    /// Output path for `statement.json`.
+    /// Output path for `public_statement.json`.
     #[arg(long)]
-    pub statement_out: PathBuf,
+    pub public_statement_out: PathBuf,
 
     /// Output path for `proof_summary.json`.
     #[arg(long)]
@@ -141,6 +141,23 @@ pub struct VerifyArgs {
     #[arg(short = 'p', long)]
     pub program: PathBuf,
 
+    /// Canonical `proof.bin` path.
+    #[arg(long)]
+    pub proof: PathBuf,
+
+    /// Expected public statement JSON.
+    #[arg(long)]
+    pub statement: PathBuf,
+
+    /// Emit the versioned JSON contract.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// `tabula inspect-proof`
+#[cfg(feature = "verify")]
+#[derive(Debug, Clone, clap::Args)]
+pub struct InspectProofArgs {
     /// Canonical `proof.bin` path.
     #[arg(long)]
     pub proof: PathBuf,
@@ -167,6 +184,8 @@ pub struct ExampleArgs {
 pub enum ExampleName {
     /// Minimal example with one state table and one transaction.
     Basic,
+    /// Bank transfer example with context, relations, helper functions, and events.
+    Bank,
     /// Membership approval example with queries and relations.
     Membership,
     /// DEX example with declarative capability bundle config.

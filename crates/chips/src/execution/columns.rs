@@ -8,6 +8,7 @@
 //! - Operand-to-slot selectors (one-hot, constrained in M9-A1)
 //! - SSA slots (Layout A: full carry)
 
+use tabula_core::execution::NATIVE_MAX_SLOTS;
 use tabula_gadgets::KeyRangeChecked;
 use tabula_stark::air::columns::num_cols;
 
@@ -18,8 +19,8 @@ use super::ops::mul::MulCarry;
 /// Maximum number of SSA slots per program.
 ///
 /// Must be ≥ `ProgramBudgets.max_slots` for any registered program.
-/// 16 covers the expected upper bound for M8; future phases may make this dynamic.
-pub const MAX_SLOTS: usize = 16;
+/// Currently aliases the core-defined native machine ceiling.
+pub const MAX_SLOTS: usize = NATIVE_MAX_SLOTS as usize;
 
 /// Fixed logical value width used by the generic execution lane.
 pub const EXECUTION_STANDARD_VALUE_WIDTH: usize = 3;
@@ -40,9 +41,7 @@ pub struct ExecutionCols<T, const W: usize> {
     /// Effect ordinal within the transaction (E-Trace identity anchor).
     pub effect_ordinal_in_tx: T,
 
-    // ── Opcode one-hot selectors (14) ──
-    // Note: Emit is intentionally omitted — it is out-of-protocol (semantics-spec §2.8)
-    // and produces no AIR constraints.
+    // ── Opcode one-hot selectors ──
     /// Read from state.
     pub op_read: T,
     /// Write to state.
@@ -73,6 +72,16 @@ pub struct ExecutionCols<T, const W: usize> {
     pub op_property_read: T,
     /// Relation lookup / static functional relation evaluation.
     pub op_relation_table: T,
+    /// Canonical transaction-batch header relay.
+    pub op_tx_begin: T,
+    /// Canonical transaction-parameter relay and immediate slot load.
+    pub op_load_param: T,
+    /// Canonical public-context relay and immediate slot load.
+    pub op_load_context: T,
+    /// Canonical emitted-event header relay.
+    pub op_emit_event_header: T,
+    /// Canonical emitted-event argument relay.
+    pub op_emit_event_arg: T,
 
     /// Capability transcript ID witness (populated when op_capability_call=1).
     pub capability_transcript_id: T,
@@ -84,6 +93,14 @@ pub struct ExecutionCols<T, const W: usize> {
     pub capability_output_count: T,
     /// Canonical transcript digest for the capability call.
     pub capability_event_digest: [T; 8],
+    /// Generic proof metadata field 0 used by source-commitment opcodes.
+    pub proof_meta0: T,
+    /// Generic proof metadata field 1 used by source-commitment opcodes.
+    pub proof_meta1: T,
+    /// Generic proof metadata field 2 used by source-commitment opcodes.
+    pub proof_meta2: T,
+    /// Generic proof metadata field 3 used by source-commitment opcodes.
+    pub proof_meta3: T,
 
     // ── Arith sub-selectors (gated by op_arith) ──
     /// 1 if Sub, 0 otherwise.

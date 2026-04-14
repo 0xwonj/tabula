@@ -2,15 +2,14 @@
 
 use std::collections::BTreeMap;
 
+use serde_json::json;
 #[cfg(not(feature = "compile"))]
 use tabula_compiler::compile_program_source_with_catalogs;
 use tabula_core::PortableValue;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BYTES32_ID, TYPE_U64_ID};
-#[cfg(feature = "prove")]
-use tabula_sdk::interop::ArtifactExt;
 use tabula_sdk::interop::register_compiled;
-use tabula_sdk::{Context, Program, Sdk, State};
+use tabula_sdk::{Context, DecodeValue, Program, Sdk, State};
 use tabula_types::u64_portable;
 
 const SDK_SURFACE_SOURCE: &str = r#"
@@ -127,7 +126,13 @@ tx register(flag: bool, id: u64) {
 fn state_values(state: &State) -> BTreeMap<(u32, u64, u16), PortableValue> {
     state
         .cells()
-        .map(|(key, value)| ((key.table.0, key.row.0, key.col.0), value.clone()))
+        .map(|cell| {
+            let [key_component] = cell.key.as_slice() else {
+                panic!("expected unary logical key in sdk surface test");
+            };
+            let key_id = u64::decode_from(key_component).expect("decode logical key component");
+            ((cell.table.0, key_id, cell.field.0), cell.value.clone())
+        })
         .collect()
 }
 
@@ -180,16 +185,20 @@ fn open_program(sdk: &Sdk, source: &str) -> Program {
     sdk.open(artifact).expect("open artifact")
 }
 
+fn artifact_json_value(sdk: &Sdk, source: &str) -> serde_json::Value {
+    serde_json::to_value(compile_artifact(sdk, source)).expect("serialize artifact")
+}
+
 fn seeded_state(program: &Program) -> State {
     program
         .state()
-        .set("users", 0, "tier", 0u64)
+        .set("users", (0u64,), "tier", 0u64)
         .expect("seed tier 0")
-        .set("users", 0, "seen", 0u64)
+        .set("users", (0u64,), "seen", 0u64)
         .expect("seed seen 0")
-        .set("users", 1, "tier", 0u64)
+        .set("users", (1u64,), "tier", 0u64)
         .expect("seed tier 1")
-        .set("users", 1, "seen", 0u64)
+        .set("users", (1u64,), "seen", 0u64)
         .expect("seed seen 1")
         .build()
 }
@@ -217,6 +226,84 @@ fn compile_and_open_registered_program() {
 
     assert_eq!(artifact.digest(), reopened.artifact().digest());
     assert_eq!(artifact.schema().tx_count(), reopened.schema().tx_count());
+}
+
+#[test]
+fn load_artifact_accepts_fresh_registered_payload() {
+    let sdk = sdk();
+    let artifact = compile_artifact(&sdk, SDK_SURFACE_SOURCE);
+    let bytes = serde_json::to_vec(&artifact).expect("serialize artifact");
+
+    let loaded = sdk.load_artifact(&bytes).expect("load artifact");
+
+    assert_eq!(artifact.digest(), loaded.digest());
+    assert_eq!(artifact.schema().tx_count(), loaded.schema().tx_count());
+}
+
+#[test]
+fn load_artifact_rejects_mutated_binding_program_hash() {
+    let sdk = sdk();
+    let mut value = artifact_json_value(&sdk, SDK_SURFACE_SOURCE);
+    value["binding"]["program_hash"] =
+        json!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+
+    let err = sdk
+        .load_artifact(&serde_json::to_vec(&value).expect("serialize mutated artifact payload"))
+        .expect_err("mutated binding program hash must fail closed");
+    assert!(
+        err.to_string().contains("program binding"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn load_artifact_rejects_mutated_binding_metadata_hash() {
+    let sdk = sdk();
+    let mut value = artifact_json_value(&sdk, SDK_SURFACE_SOURCE);
+    value["binding"]["metadata_hash"] =
+        json!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+
+    let err = sdk
+        .load_artifact(&serde_json::to_vec(&value).expect("serialize mutated artifact payload"))
+        .expect_err("mutated binding metadata hash must fail closed");
+    assert!(
+        err.to_string().contains("program binding"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn load_artifact_rejects_mutated_static_table_root() {
+    let sdk = sdk();
+    let mut value = artifact_json_value(&sdk, SDK_SURFACE_SOURCE);
+    value["static_table_artifact"]["root"][0] = json!(19);
+
+    let err = sdk
+        .load_artifact(&serde_json::to_vec(&value).expect("serialize mutated artifact payload"))
+        .expect_err("mutated static table root must fail closed");
+    assert!(
+        err.to_string().contains("static table artifact"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn load_artifact_rejects_mutated_static_table_rows() {
+    let sdk = sdk();
+    let mut value = artifact_json_value(&sdk, SDK_SURFACE_SOURCE);
+    value["static_table_artifact"]["rows"] = json!([{
+        "relation_id": 99,
+        "input_digest": [0, 0, 0, 0, 0, 0, 0, 0],
+        "output_digest": [0, 0, 0, 0, 0, 0, 0, 0]
+    }]);
+
+    let err = sdk
+        .load_artifact(&serde_json::to_vec(&value).expect("serialize mutated artifact payload"))
+        .expect_err("mutated static table rows must fail closed");
+    assert!(
+        err.to_string().contains("static table artifact"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
@@ -289,23 +376,24 @@ fn prove_and_verify_native_execution() {
         .expect("execute");
     let proof = program.runner().prove(&execution).expect("prove");
 
-    assert_eq!(
-        &proof.statement().binding,
-        artifact.registered_program().binding()
+    assert_ne!(
+        proof.public_statement().public_context_digest.to_bytes(),
+        [0u8; 32]
     );
-    assert_eq!(proof.statement().public.public_context.len(), 2);
-    assert_ne!(proof.statement().public.event_digest, [0u8; 32]);
+    assert_ne!(proof.public_statement().event_digest.to_bytes(), [0u8; 32]);
     assert!(proof.summary().chip_count > 0);
 
     program
         .verifier()
-        .verify(&proof)
+        .expect("prepare verifier")
+        .verify_public_statement(&proof, proof.public_statement())
         .expect("program verifier accepts proof");
 
     let reopened = sdk.open(artifact).expect("reopen artifact");
     reopened
         .verifier()
-        .verify(&proof)
+        .expect("prepare verifier")
+        .verify_public_statement(&proof, proof.public_statement())
         .expect("reopened verifier accepts proof");
 }
 
@@ -331,31 +419,74 @@ fn proof_binary_round_trip_reuses_contract_envelope() {
     let encoded = proof.encode_binary().expect("encode proof binary");
     let decoded = tabula_sdk::Proof::decode_binary(&encoded).expect("decode proof binary");
 
-    assert_eq!(proof.statement().binding, decoded.statement().binding);
-    assert_eq!(
-        proof
-            .statement()
-            .statement_hash_bytes()
-            .expect("original statement hash"),
-        decoded
-            .statement()
-            .statement_hash_bytes()
-            .expect("decoded statement hash"),
-    );
+    assert_eq!(proof.public_statement(), decoded.public_statement());
+    assert_eq!(proof.binding_digest(), decoded.binding_digest());
 
     program
         .verifier()
-        .verify(&decoded)
+        .expect("prepare verifier")
+        .verify_public_statement(&decoded, decoded.public_statement())
         .expect("verify decoded proof");
 }
 
 #[cfg(feature = "prove")]
 #[test]
-fn warm_and_reuse_runtime_and_verifier() {
+fn public_statement_file_round_trip_reuses_shared_contract() {
+    let sdk = sdk();
+    let artifact = sdk.compile(SDK_SURFACE_SOURCE).expect("compile source");
+    let program = sdk.open(artifact).expect("open artifact");
+    let snapshot = seeded_state(&program);
+    let batch = program
+        .batch()
+        .call("register", (true, 0u64))
+        .expect("register batch item")
+        .build();
+    let context = context(&program, 7, 99);
+    let execution = program
+        .runner()
+        .execute(&snapshot, &batch, &context)
+        .expect("execute");
+    let proof = program.runner().prove(&execution).expect("prove");
+
+    let file = tabula_sdk::PublicStatementFile::from_public_statement(proof.public_statement());
+    let encoded = serde_json::to_vec_pretty(&file).expect("encode statement file");
+    let decoded =
+        tabula_sdk::PublicStatementFile::from_json_bytes(&encoded).expect("decode statement file");
+
+    assert_eq!(decoded.version, tabula_sdk::PublicStatementFile::VERSION);
+    assert_eq!(
+        decoded
+            .to_public_statement()
+            .expect("reconstruct statement"),
+        *proof.public_statement()
+    );
+}
+
+#[cfg(feature = "verify")]
+#[test]
+fn from_envelope_rejects_unknown_proof_system_ids() {
+    let envelope: tabula_sdk::interop::ProofEnvelope = serde_json::from_value(json!({
+        "proof_system": 999,
+        "proof_encoding": 4,
+        "proof_bytes": [],
+    }))
+    .expect("deserialize envelope");
+
+    let err =
+        tabula_sdk::Proof::from_envelope(&envelope).expect_err("unknown proof system must fail");
+    assert!(
+        err.to_string().contains("unsupported proof system id"),
+        "unexpected error: {err}"
+    );
+}
+
+#[cfg(feature = "prove")]
+#[test]
+fn prepare_and_reuse_runtime_and_verifier() {
     let sdk = sdk();
     let program = open_program(&sdk, SDK_SURFACE_SOURCE);
     let runner = program.runner();
-    let verifier = program.verifier();
+    let verifier = program.verifier().expect("prepare verifier");
     let snapshot = seeded_state(&program);
     let batch = program
         .batch()
@@ -365,28 +496,21 @@ fn warm_and_reuse_runtime_and_verifier() {
     let context = context(&program, 7, 99);
 
     runner.warm().expect("warm runtime");
-    verifier.warm().expect("warm verifier");
-
     let (_, first) = runner
         .execute_and_prove(&snapshot, &batch, &context)
         .expect("first proof");
-    verifier.verify(&first).expect("verify first proof");
+    verifier
+        .verify_public_statement(&first, first.public_statement())
+        .expect("verify first proof");
 
     let (_, second) = runner
         .execute_and_prove(&snapshot, &batch, &context)
         .expect("second proof");
-    verifier.verify(&second).expect("verify second proof");
+    verifier
+        .verify_public_statement(&second, second.public_statement())
+        .expect("verify second proof");
 
-    assert_eq!(
-        first
-            .statement()
-            .statement_hash_bytes()
-            .expect("first statement hash"),
-        second
-            .statement()
-            .statement_hash_bytes()
-            .expect("second statement hash"),
-    );
+    assert_eq!(first.binding_digest(), second.binding_digest());
 }
 
 #[cfg(feature = "prove")]

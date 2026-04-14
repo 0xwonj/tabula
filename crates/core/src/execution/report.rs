@@ -4,7 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
 use crate::execution::property::PropertyReadResult;
-use crate::{CellKey, PortableValue};
+use crate::{CommittedCellKey, PortableValue};
 
 /// Monotonically increasing logical timestamp within a batch execution.
 pub type LogicalTime = u64;
@@ -48,7 +48,7 @@ pub enum OpKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct AccessEvent {
     /// The cell being accessed.
-    pub key: CellKey,
+    pub key: CommittedCellKey,
     /// Whether this is a read or write.
     pub op: OpKind,
     /// The value read or written (canonical zero when absent).
@@ -169,10 +169,10 @@ pub enum ExecutionConsistencyStatus {
 pub struct BatchReport {
     /// Cells read from committed state (not from overlay). Deduplicated.
     /// `None` = cell was absent.
-    pub read_set_old: Vec<(CellKey, Option<PortableValue>)>,
+    pub read_set_old: Vec<(CommittedCellKey, Option<PortableValue>)>,
     /// Final writes to apply to committed state. Coalesced (last-write-wins).
     /// `None` = delete (write null).
-    pub write_set_final: Vec<(CellKey, Option<PortableValue>)>,
+    pub write_set_final: Vec<(CommittedCellKey, Option<PortableValue>)>,
     /// Per-transaction results, in batch order.
     pub txs: Vec<TxResult>,
 }

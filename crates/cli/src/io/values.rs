@@ -110,15 +110,15 @@ mod tests {
     fn parses_builtin_literals() {
         assert_eq!(
             value_output(&encode_json_literal("7", TYPE_U64_ID).unwrap()),
-            crate::output::ValueOutputV1::U64 { value: 7 }
+            crate::output::ValueOutput::U64 { value: 7 }
         );
         assert_eq!(
             value_output(&encode_json_literal("-2", TYPE_I64_ID).unwrap()),
-            crate::output::ValueOutputV1::I64 { value: -2 }
+            crate::output::ValueOutput::I64 { value: -2 }
         );
         assert_eq!(
             value_output(&encode_json_literal("true", TYPE_BOOL_ID).unwrap()),
-            crate::output::ValueOutputV1::Bool { value: true }
+            crate::output::ValueOutput::Bool { value: true }
         );
         assert_eq!(
             value_output(
@@ -128,7 +128,7 @@ mod tests {
                 )
                 .unwrap()
             ),
-            crate::output::ValueOutputV1::Bytes32 {
+            crate::output::ValueOutput::Bytes32 {
                 hex: "0x0000000000000000000000000000000000000000000000000000000000000001"
                     .to_string()
             }

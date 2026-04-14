@@ -33,6 +33,8 @@ pub fn run_cli(cli: Cli) -> anyhow::Result<()> {
         cli::Command::Prove(args) => commands::prove::run(&ctx, &args),
         #[cfg(feature = "verify")]
         cli::Command::Verify(args) => commands::verify::run(&ctx, &args),
+        #[cfg(feature = "verify")]
+        cli::Command::InspectProof(args) => commands::inspect_proof::run(&ctx, &args),
         cli::Command::State { command } => commands::state::run(&ctx, &command),
         cli::Command::Context { command } => commands::context::run(&ctx, &command),
         cli::Command::Batch { command } => commands::batch::run(&ctx, &command),

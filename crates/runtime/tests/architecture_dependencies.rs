@@ -1,4 +1,4 @@
-//! Final architecture guardrails for the native runtime cutover.
+//! Final architecture guardrails for the native runtime surface.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -120,15 +120,19 @@ fn runtime_root_exposes_only_the_final_native_surface() {
         "runtime host surface must stay gated to the verify surface"
     );
     assert!(
+        runtime_lib.contains("#[cfg(feature = \"verify\")]\nmod verifier;"),
+        "runtime verifier surface must live in its dedicated module"
+    );
+    assert!(
         runtime_lib.contains("pub mod semantics;"),
         "runtime root must expose semantic helpers"
     );
     assert!(
         runtime_lib.contains(
-            "pub use engine::{ExecutionReceipt, RuntimeBuilder, StateSnapshot, TabulaRuntime};"
-        ) && runtime_lib.contains("pub use tabula_contract::ProofStatement;")
+            "pub use engine::{CommittedStateSnapshot, ExecutionReceipt, RuntimeBuilder, TabulaRuntime};"
+        ) && runtime_lib.contains("pub use tabula_contract::{BoundStatement, PublicStatement};")
             && runtime_lib.contains("pub use engine::{ProveInput, ProveResult, VerifiedResult};")
-            && runtime_lib.contains("pub use engine::{Verifier, VerifierBuilder};"),
+            && runtime_lib.contains("pub use verifier::{Verifier, VerifierBuilder};"),
         "runtime root must re-export the canonical native runtime and verifier types"
     );
     for forbidden in [
@@ -152,9 +156,12 @@ fn live_runtime_sources_are_legacy_free() {
         "crates/runtime/src/error.rs",
         "crates/runtime/src/semantics.rs",
         "crates/runtime/src/engine.rs",
+        "crates/runtime/src/verifier.rs",
+        "crates/runtime/src/state_runtime.rs",
         "crates/runtime/src/proof_summary.rs",
         "crates/runtime/src/bootstrap/mod.rs",
         "crates/runtime/src/bootstrap/machine.rs",
+        "crates/runtime/src/bootstrap/program.rs",
     ];
 
     for rel in compiled_paths {
@@ -187,6 +194,14 @@ fn live_runtime_sources_are_legacy_free() {
 }
 
 #[test]
+fn runtime_state_bootstrap_uses_sealed_column_contracts_directly() {
+    assert_source_omits(
+        "crates/runtime/src/state_runtime.rs",
+        &["resolve_field_profile("],
+    );
+}
+
+#[test]
 fn native_proof_path_stays_bridge_free() {
     assert_source_omits(
         "crates/runtime/src/engine.rs",
@@ -198,12 +213,39 @@ fn native_proof_path_stays_bridge_free() {
         ],
     );
     assert_source_omits(
+        "crates/runtime/src/engine.rs",
+        &[
+            "struct VerifierCore",
+            "pub struct VerifierBuilder",
+            "pub struct Verifier {",
+            "fn validate_core_first_program(",
+            "fn materialize_registered_state_runtime(",
+            "fn program_uses_hash(",
+            "fn program_uses_relations(",
+        ],
+    );
+    assert_source_omits(
         "crates/witness/src/stark/lowering/driver.rs",
         &[
             leaked(&["tabula_", "artifact", "::"]),
             "tabula_ir::TxTypeDef",
             leaked(&["legacy", "::"]),
         ],
+    );
+}
+
+#[test]
+fn verifier_path_is_single_sourced_in_verifier_module() {
+    let verifier_source = read_workspace_file("crates/runtime/src/verifier.rs");
+    assert!(
+        verifier_source.contains("struct VerifierCore")
+            && verifier_source.contains("pub struct VerifierBuilder")
+            && verifier_source.contains("pub struct Verifier"),
+        "runtime verifier module must own the canonical verification path"
+    );
+    assert!(
+        !verifier_source.contains("crate::engine::"),
+        "runtime verifier module must not depend on proving orchestration in engine.rs"
     );
 }
 
@@ -227,13 +269,13 @@ fn machine_input_uses_explicit_air_and_semantic_statement_names() {
     let machine_input = read_workspace_file("crates/machine/src/input/mod.rs");
 
     assert!(
-        machine_input.contains("pub air_statement: PublicStatement")
-            && machine_input.contains("pub semantic_statement_digest: [u8; 32]"),
-        "machine input must expose explicit AIR/public and semantic/transcript bindings"
+        machine_input.contains("pub public_statement: PublicStatement")
+            && machine_input.contains("pub binding_digest: [u8; 32]"),
+        "machine input must expose explicit public-statement and binding-digest fields"
     );
     for forbidden in [
-        "pub statement: PublicStatement",
-        "pub statement_digest: [u8; 32]",
+        "pub air_statement: PublicStatement",
+        "pub semantic_statement_digest: [u8; 32]",
     ] {
         assert!(
             !machine_input.contains(forbidden),
@@ -254,12 +296,11 @@ fn removed_runtime_compatibility_tree_stays_deleted() {
         "crates/runtime/src/program",
         "crates/runtime/src/proving",
         "crates/runtime/src/runtime.rs",
-        "crates/runtime/src/verifier.rs",
         "crates/runtime/src/testing",
     ] {
         assert!(
             !workspace_root().join(rel).exists(),
-            "{rel} must remain deleted after the native runtime cutover"
+            "{rel} must remain deleted in the final native runtime surface"
         );
     }
 }

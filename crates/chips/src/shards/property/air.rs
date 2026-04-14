@@ -22,8 +22,19 @@ use tabula_stark::air::columns::borrow_cols;
 use tabula_stark::chips::ChipId;
 
 use crate::ChipSpec;
+use tabula_types::NATIVE_KEY_PAYLOAD_WIDTH;
 
 use super::columns::{LessOrEqChecked, SsmcPropertyCols, ssmc_property_width};
+
+fn key_payload_exprs<AB: InteractionAirBuilder>(
+    key: &tabula_gadgets::KeyRangeChecked<AB::Var>,
+) -> Vec<AB::Expr> {
+    let mut payload = vec![AB::Expr::ZERO; NATIVE_KEY_PAYLOAD_WIDTH];
+    payload[0] = key.limbs.limb0.into();
+    payload[1] = key.limbs.limb1.into();
+    payload[2] = key.limbs.limb2.into();
+    payload
+}
 
 /// Per-column SSMC property verifier.
 #[derive(Debug, Clone)]
@@ -218,12 +229,12 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for SsmcPropertyChip<W> 
         builder.receive_ssmc_old_entry(
             local.table_id.into(),
             local.col_id.into(),
-            &local.anchor_key.limbs,
+            &key_payload_exprs::<AB>(&local.anchor_key),
             &local.anchor_val,
             local.has_prev_old.into(),
-            &local.prev_old_key.limbs,
+            &key_payload_exprs::<AB>(&local.prev_old_key),
             local.is_last_old.into(),
-            &local.next_old_key.limbs,
+            &key_payload_exprs::<AB>(&local.next_old_key),
             is_real * local.uses_anchor.into(),
         );
     }

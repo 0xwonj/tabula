@@ -5,10 +5,10 @@ use p3_koala_bear::KoalaBear;
 
 use tabula_chips::execution::trace::{InstructionRecord, Opcode};
 use tabula_chips::execution::{EXECUTION_STANDARD_VALUE_WIDTH, MAX_SLOTS};
+use tabula_core::CommittedKey;
 use tabula_core::error::TabulaError;
 use tabula_ir as ir;
-use tabula_profile::is_u64_type;
-use tabula_types::{TypedValue, bool_typed, typed_bool, typed_row_key, u64_typed};
+use tabula_types::{NativeKeyPayload, TypedValue, bool_typed, typed_bool, u64_typed};
 
 use super::context::LoweringCx;
 
@@ -93,10 +93,31 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
                 }
                 Ok(slot)
             }
-            ir::ValueRef::Param(_)
-            | ir::ValueRef::Context(_)
-            | ir::ValueRef::Const(_)
-            | ir::ValueRef::Literal(_) => {
+            ir::ValueRef::Param(id) => {
+                self.param_slot_by_id
+                    .get(id)
+                    .copied()
+                    .ok_or_else(|| TabulaError::ProofError {
+                        phase: "next_trace_lowering",
+                        detail: format!(
+                            "tx={} param {} is missing the reserved proof-claim slot",
+                            self.tx_index, id.0
+                        ),
+                    })
+            }
+            ir::ValueRef::Context(id) => {
+                self.context_slot_by_id
+                    .get(id)
+                    .copied()
+                    .ok_or_else(|| TabulaError::ProofError {
+                        phase: "next_trace_lowering",
+                        detail: format!(
+                            "tx={} context field {} is missing the reserved proof-claim slot",
+                            self.tx_index, id.0
+                        ),
+                    })
+            }
+            ir::ValueRef::Const(_) | ir::ValueRef::Literal(_) => {
                 let encoded = self.encode_padded(value)?;
                 if let Some(slot) = self.find_materialized_slot(&encoded, is_null, exclude_slots) {
                     return Ok(slot);
@@ -247,12 +268,12 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
     }
 
     pub(crate) fn alloc_slot(&mut self) -> Result<usize, TabulaError> {
-        if self.next_aux_slot >= MAX_SLOTS {
+        if self.next_aux_slot >= self.aux_slot_limit {
             return Err(TabulaError::ProofError {
                 phase: "next_trace_lowering",
                 detail: format!(
-                    "slot allocation exceeded MAX_SLOTS ({MAX_SLOTS}) in tx={}",
-                    self.tx_index
+                    "slot allocation exceeded aux-slot limit {} in tx={} (MAX_SLOTS={MAX_SLOTS})",
+                    self.aux_slot_limit, self.tx_index
                 ),
             });
         }
@@ -360,6 +381,10 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
             relation_output_vals: [[KoalaBear::ZERO; EXECUTION_STANDARD_VALUE_WIDTH]; MAX_SLOTS],
             relation_input_sel: [[false; MAX_SLOTS]; MAX_SLOTS],
             relation_output_sel: [[false; MAX_SLOTS]; MAX_SLOTS],
+            proof_meta0: None,
+            proof_meta1: None,
+            proof_meta2: None,
+            proof_meta3: None,
         }
     }
 
@@ -381,31 +406,16 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
         table: ir::TableId,
         field: ir::FieldId,
         key: &ir::ValueTupleRef,
-    ) -> Result<tabula_core::CellKey, TabulaError> {
-        let schema = self
-            .program
-            .state
-            .tables
-            .iter()
-            .find(|schema| schema.id == table)
-            .ok_or_else(|| TabulaError::InvalidIr(format!("unknown table {}", table.0)))?;
-        if schema.key_tys.len() != 1 || !is_u64_type(schema.key_tys[0]) {
-            return Err(TabulaError::InvalidIr(format!(
-                "V1 native witness lowering only supports [u64] state keys, table {} declared {:?}",
-                table.0,
-                schema.key_tys.iter().map(|ty| ty.0).collect::<Vec<_>>()
-            )));
-        }
-        if key.0.len() != 1 {
-            return Err(TabulaError::InvalidIr(
-                "V1 native witness lowering only supports single-component state keys".into(),
-            ));
-        }
-        let row = typed_row_key(&self.eval_value(&key.0[0])?, self.type_runtimes)?;
-        Ok(tabula_core::CellKey {
-            table: table.into(),
-            col: field.into(),
-            row,
-        })
+    ) -> Result<tabula_core::CommittedCellKey, TabulaError> {
+        self.state_runtime
+            .encode_cell_key(table, field, &self.eval_tuple(key)?)
+    }
+
+    pub(crate) fn proof_key_payload(
+        &self,
+        table: ir::TableId,
+        key: &CommittedKey,
+    ) -> Result<NativeKeyPayload, TabulaError> {
+        self.state_runtime.encode_key_payload(table, key)
     }
 }

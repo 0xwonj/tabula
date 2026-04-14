@@ -149,12 +149,19 @@ impl<'a, 'b> InlineCx<'a, 'b> {
                 field: *field,
             }),
             Op::ReadStateProperty {
-                dsts,
+                dst_value,
+                dst_key_components,
+                dst_is_null,
                 table,
                 field,
                 query,
             } => out.push(Op::ReadStateProperty {
-                dsts: dsts.iter().map(|dst| env.define_local(*dst)).collect(),
+                dst_value: env.define_local(*dst_value),
+                dst_key_components: dst_key_components
+                    .iter()
+                    .map(|dst| env.define_local(*dst))
+                    .collect(),
+                dst_is_null: env.define_local(*dst_is_null),
                 table: *table,
                 field: *field,
                 query: Self::normalize_property_query(query, env)?,

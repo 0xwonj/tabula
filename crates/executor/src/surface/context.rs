@@ -6,7 +6,7 @@ use tabula_core::traits::Hasher;
 use tabula_ir as ir;
 use tabula_types::{TypeRuntimeRegistry, TypedValue};
 
-use crate::host::{CapabilityExecutor, PropertyReadExecutor};
+use crate::host::{CapabilityExecutor, StateRuntimeView};
 
 /// Host services and type registries threaded through a single batch execution.
 pub struct ExecContext<'a> {
@@ -16,8 +16,8 @@ pub struct ExecContext<'a> {
     pub type_runtimes: &'a TypeRuntimeRegistry,
     /// Capability executor, present when native capabilities are available.
     pub capability_executor: Option<&'a dyn CapabilityExecutor>,
-    /// Property read executor, present when structural state queries are available.
-    pub property_reads: Option<&'a dyn PropertyReadExecutor>,
+    /// Runtime-owned user-state services for committed-key access and property reads.
+    pub state_runtime: &'a dyn StateRuntimeView,
 }
 
 /// The decoded public context values supplied by the caller for one batch.

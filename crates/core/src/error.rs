@@ -1,6 +1,6 @@
 //! Error types for the Tabula kernel.
 
-use crate::{CellKey, ColId, RowKey, TableId};
+use crate::{ColId, CommittedCellKey, RowKey, TableId};
 
 /// Unified error type for all Tabula crate boundaries.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -15,7 +15,7 @@ pub enum TabulaError {
 
     /// Referenced cell does not exist.
     #[error("cell not found: {0:?}")]
-    CellNotFound(CellKey),
+    CellNotFound(CommittedCellKey),
 
     /// Type mismatch during arithmetic or comparison.
     #[error("type mismatch: expected {expected}, got {actual}")]

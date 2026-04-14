@@ -1,0 +1,73 @@
+program Bank
+
+context {
+  caller: u64;
+}
+
+const DAILY_LIMIT: u64 = 1000;
+
+state {
+  table accounts(key id: u64) {
+    owner: u64 @ssmc;
+    balance: u64 @ssmc;
+    frozen: bool @ssmc;
+    spent_today: u64 @ssmc;
+  }
+}
+
+relation TransferAmount(amount: u64) = range(1, 500);
+relation AdminCaller(actor: u64) = set { 900 };
+
+event TransferRecorded(from: u64, to: u64, amount: u64, actor: u64);
+event AccountFrozen(account: u64, actor: u64);
+
+fn spendable_balance(id: u64) -> u64 {
+  let frozen = accounts[id].frozen;
+  let balance = accounts[id].balance;
+  return select(frozen, 0, balance);
+}
+
+fn remaining_daily_limit(id: u64) -> u64 {
+  let spent_today = accounts[id].spent_today;
+  assert spent_today <= DAILY_LIMIT;
+  return DAILY_LIMIT - spent_today;
+}
+
+query balance_of(id: u64) -> u64 {
+  return spendable_balance(id);
+}
+
+query daily_limit_left(id: u64) -> u64 {
+  return remaining_daily_limit(id);
+}
+
+query can_transfer(from: u64, amount: u64) -> bool {
+  let enough_balance = spendable_balance(from) >= amount;
+  let enough_limit = remaining_daily_limit(from) >= amount;
+  return select(enough_balance, enough_limit, false);
+}
+
+tx transfer(from: u64, to: u64, amount: u64) {
+  assert relation TransferAmount(amount);
+  assert caller == accounts[from].owner;
+
+  let available = spendable_balance(from);
+  let remaining = remaining_daily_limit(from);
+
+  assert available >= amount;
+  assert remaining >= amount;
+
+  accounts[from].balance = accounts[from].balance - amount;
+  accounts[to].balance = accounts[to].balance + amount;
+  accounts[from].spent_today = accounts[from].spent_today + amount;
+
+  emit TransferRecorded(from, to, amount, caller);
+  return;
+}
+
+tx freeze_account(account: u64) {
+  assert relation AdminCaller(caller);
+  accounts[account].frozen = true;
+  emit AccountFrozen(account, caller);
+  return;
+}

@@ -6,7 +6,7 @@ use tabula_sdk::interop::TypeRef;
 
 use crate::io::encode_hex;
 
-use super::ValueOutputV1;
+use super::ValueOutput;
 
 /// Return a human-friendly type name for one schema type reference.
 pub(crate) fn type_name(ty: TypeRef) -> String {
@@ -20,22 +20,22 @@ pub(crate) fn type_name(ty: TypeRef) -> String {
 }
 
 /// Convert one portable value into the versioned JSON contract representation.
-pub(crate) fn value_output(value: &tabula_sdk::interop::PortableValue) -> ValueOutputV1 {
+pub(crate) fn value_output(value: &tabula_sdk::interop::PortableValue) -> ValueOutput {
     match value.type_id() {
-        TYPE_BOOL_ID => ValueOutputV1::Bool {
+        TYPE_BOOL_ID => ValueOutput::Bool {
             value: bool::try_from_slice(value.payload()).unwrap_or(false),
         },
-        TYPE_U64_ID => ValueOutputV1::U64 {
+        TYPE_U64_ID => ValueOutput::U64 {
             value: u64::try_from_slice(value.payload()).unwrap_or_default(),
         },
-        TYPE_I64_ID => ValueOutputV1::I64 {
+        TYPE_I64_ID => ValueOutput::I64 {
             value: i64::try_from_slice(value.payload()).unwrap_or_default(),
         },
         TYPE_BYTES32_ID => {
             let hex = format!("0x{}", encode_hex(value.payload()));
-            ValueOutputV1::Bytes32 { hex }
+            ValueOutput::Bytes32 { hex }
         }
-        type_id => ValueOutputV1::Portable {
+        type_id => ValueOutput::Portable {
             type_id: type_id.0,
             payload_hex: format!("0x{}", encode_hex(value.payload())),
         },
@@ -54,7 +54,7 @@ mod tests {
         );
         assert_eq!(
             value_output(&value),
-            crate::output::ValueOutputV1::U64 { value: 7 }
+            crate::output::ValueOutput::U64 { value: 7 }
         );
     }
 }

@@ -138,7 +138,9 @@ pub enum Op {
         field: FieldId,
     },
     ReadStateProperty {
-        dsts: Vec<LocalId>,
+        dst_value: LocalId,
+        dst_key_components: Vec<LocalId>,
+        dst_is_null: LocalId,
         table: TableId,
         field: FieldId,
         query: StatePropertyQuery,
@@ -193,8 +195,19 @@ impl Op {
                 dst_present,
                 ..
             } => vec![*dst_value, *dst_present],
-            Self::ReadStateProperty { dsts, .. }
-            | Self::EvalRelation { dsts, .. }
+            Self::ReadStateProperty {
+                dst_value,
+                dst_key_components,
+                dst_is_null,
+                ..
+            } => {
+                let mut dsts = Vec::with_capacity(dst_key_components.len() + 2);
+                dsts.push(*dst_value);
+                dsts.extend(dst_key_components.iter().copied());
+                dsts.push(*dst_is_null);
+                dsts
+            }
+            Self::EvalRelation { dsts, .. }
             | Self::CallCapability { dsts, .. }
             | Self::CallFunction { dsts, .. }
             | Self::If { dsts, .. }

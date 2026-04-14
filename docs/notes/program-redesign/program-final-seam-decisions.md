@@ -12,7 +12,7 @@
 > [program-mir-design.md](program-mir-design.md),
 > [program-canonical-ir-design.md](program-canonical-ir-design.md),
 > [program-rewrite-roadmap.md](program-rewrite-roadmap.md),
-> [../canonical-vocabulary.md](../canonical-vocabulary.md)
+> [verification vocabulary](../../design/architecture.md#verification-vocabulary)
 
 ---
 

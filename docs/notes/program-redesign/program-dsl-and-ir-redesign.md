@@ -12,7 +12,7 @@
 > [program-typing-and-effect-system.md](program-typing-and-effect-system.md),
 > [program-final-seam-decisions.md](program-final-seam-decisions.md),
 > [program-rewrite-roadmap.md](program-rewrite-roadmap.md),
-> [../canonical-vocabulary.md](../canonical-vocabulary.md),
+> [verification vocabulary](../../design/architecture.md#verification-vocabulary),
 > [../executor-proof-codesign-architecture.md](../executor-proof-codesign-architecture.md),
 > [../proof-front-end-journal-architecture.md](../proof-front-end-journal-architecture.md),
 > [../../research/conditional-branching.md](../../research/conditional-branching.md)

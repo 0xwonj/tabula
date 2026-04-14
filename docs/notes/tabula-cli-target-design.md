@@ -46,7 +46,7 @@ tabula-cli
     -> tabula-runtime / tabula-compiler
 ```
 
-`tabula-cli` must stay an adapter above the canonical SDK surface. It should
+`tabula-cli` must stay a thin layer above the canonical SDK surface. It should
 compose the SDK, not bypass it.
 
 ## 2. Hard Requirements
@@ -246,20 +246,23 @@ for users and automation, not the canonical prove input.
 
 This is another new contract the CLI needs.
 
-The ideal proof envelope should contain:
+The current proof-facing CLI surface separates the binary proof envelope from
+the stable external verification statement:
 
-- program digest
-- statement
-- proof payload
+- `proof.bin`
+  - meaning: canonical proof envelope carrying proof-system metadata plus proof
+    payload
+- `public_statement.json`
+  - meaning: stable external verification object supplied to the secure verify
+    path
 
-The exact envelope type can evolve, but the CLI contract must be versioned and
-explicit from the start.
+Both contracts must stay versioned and explicit from the start.
 
-### 7.10 Statement
+### 7.10 Public Statement
 
 - extension: `.json`
-- meaning: transcript-bound public claim
-- source type: `tabula_runtime::ProofStatement`
+- meaning: stable external verification object
+- source type: `tabula_sdk::PublicStatement`
 
 ### 7.11 Proof Summary
 
@@ -286,7 +289,7 @@ Responsibilities:
 ### 8.2 Authoring Commands
 
 - `tabula state init --program <PROGRAM> --out <STATE>`
-- `tabula state set --program <PROGRAM> --state <STATE> <TABLE> <ROW> <FIELD> <VALUE>`
+- `tabula state set --program <PROGRAM> --state <STATE> <TABLE> --key <JSON_ARRAY> <FIELD> <VALUE>`
 - `tabula state inspect --state <STATE> [--program <PROGRAM>] [--json]`
 - `tabula context init --program <PROGRAM> --out <CONTEXT>`
 - `tabula context set --program <PROGRAM> --context <CONTEXT> <FIELD> <VALUE>`
@@ -483,7 +486,7 @@ tabula schema program.artifact.json
 
 ```sh
 tabula state init --program program.artifact.json --out state.json
-tabula state set --program program.artifact.json --state state.json balances 1 amount 100
+tabula state set --program program.artifact.json --state state.json balances --key '[1]' amount 100
 tabula context init --program program.artifact.json --out context.json
 tabula batch init --out batch.json
 tabula batch call --program program.artifact.json --batch batch.json transfer --args '[1,2,50]'

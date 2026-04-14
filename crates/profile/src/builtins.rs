@@ -115,6 +115,9 @@ pub fn builtin_semantic_registry() -> Result<SemanticRegistry, ProfileError> {
     registry.register_default_encoding(TYPE_I64_ID, ENCODING_I64_ID)?;
     registry.register_default_encoding(TYPE_BOOL_ID, ENCODING_BOOL_ID)?;
     registry.register_default_encoding(TYPE_BYTES32_ID, ENCODING_BYTES32_ID)?;
+    registry.register_default_key_encoding(TYPE_U64_ID, ENCODING_U64_ID)?;
+    registry.register_default_key_encoding(TYPE_I64_ID, ENCODING_I64_ID)?;
+    registry.register_default_key_encoding(TYPE_BOOL_ID, ENCODING_BOOL_ID)?;
 
     registry.register_default_scheme_profile(
         SchemeId::SSMC,
@@ -232,8 +235,10 @@ fn builtin_u64_encoding(compatible_type: &TypeDescriptor) -> Result<EncodingProf
         EncodingClass::FieldElementArray,
         FieldFamily::KoalaBear31,
         3,
+        Some(8),
         CanonicalNullEncoding::SeparateNullFlagWithZeroValue,
         TranscriptSerialization::FieldElementsWithNullFlag,
+        true,
         true,
     )
 }
@@ -247,8 +252,10 @@ fn builtin_i64_encoding(compatible_type: &TypeDescriptor) -> Result<EncodingProf
         EncodingClass::FieldElementArray,
         FieldFamily::KoalaBear31,
         3,
+        Some(8),
         CanonicalNullEncoding::SeparateNullFlagWithZeroValue,
         TranscriptSerialization::FieldElementsWithNullFlag,
+        true,
         true,
     )
 }
@@ -264,8 +271,10 @@ fn builtin_bool_encoding(
         EncodingClass::FieldElementArray,
         FieldFamily::KoalaBear31,
         1,
+        Some(1),
         CanonicalNullEncoding::SeparateNullFlagWithZeroValue,
         TranscriptSerialization::FieldElementsWithNullFlag,
+        true,
         true,
     )
 }
@@ -281,8 +290,10 @@ fn builtin_bytes32_encoding(
         EncodingClass::FieldElementArray,
         FieldFamily::KoalaBear31,
         8,
+        Some(32),
         CanonicalNullEncoding::SeparateNullFlagWithZeroValue,
         TranscriptSerialization::FieldElementsWithNullFlag,
+        false,
         false,
     )
 }

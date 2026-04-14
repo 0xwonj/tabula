@@ -1,6 +1,6 @@
-use tabula_core::{CellKey, TypeId};
+use tabula_core::{CommittedCellKey, CommittedPropertyQuery, TypeId};
 use tabula_ir as ir;
-use tabula_types::TypedValue;
+use tabula_types::{TypedCommittedPropertyQueryResult, TypedValue};
 
 use crate::surface::{
     CapabilityEffect, RelationEffect, RelationEffectKind, StateEffectKind, StatePropertyEffect,
@@ -42,7 +42,7 @@ impl EffectRecorder {
     pub(crate) fn record_state(
         &mut self,
         op_index: usize,
-        key: CellKey,
+        key: CommittedCellKey,
         type_id: TypeId,
         kind: StateEffectKind,
         value: Option<TypedValue>,
@@ -84,15 +84,15 @@ impl EffectRecorder {
         op_index: usize,
         table: ir::TableId,
         field: ir::FieldId,
-        query: ir::StatePropertyQuery,
-        outputs: Vec<TypedValue>,
+        query: CommittedPropertyQuery,
+        result: TypedCommittedPropertyQueryResult,
     ) {
         let effect_ordinal_in_entry = self.next_effect_ordinal();
         self.property_effects.push(StatePropertyEffect {
             table,
             field,
             query,
-            outputs,
+            result,
             op_index,
             effect_ordinal_in_entry,
         });
@@ -150,7 +150,7 @@ impl EffectRecorder {
 
 #[cfg(test)]
 mod tests {
-    use tabula_core::{CellKey, TypeId};
+    use tabula_core::{CommittedCellKey, CommittedKey, TypeId};
     use tabula_ir as ir;
     use tabula_profile::TYPE_U64_ID;
     use tabula_types::u64_typed;
@@ -170,10 +170,10 @@ mod tests {
         );
         recorder.record_state(
             1,
-            CellKey {
+            CommittedCellKey {
                 table: tabula_core::TableId(1),
                 col: tabula_core::ColId(0),
-                row: tabula_core::RowKey(9),
+                key: CommittedKey(vec![9]),
             },
             TypeId(TYPE_U64_ID.0),
             StateEffectKind::Write,

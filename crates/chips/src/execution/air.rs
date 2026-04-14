@@ -67,6 +67,7 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         super::ops::cmp::constrain_cmp(builder, local, is_real.clone());
         super::ops::control::constrain_assert(builder, local, is_real.clone());
         super::ops::control::constrain_select(builder, local, is_real.clone());
+        super::ops::control::constrain_load_immediate(builder, local, is_real.clone());
         super::ops::logic::constrain_not(builder, local, is_real.clone());
         super::ops::logic::constrain_and(builder, local, is_real.clone());
         super::ops::logic::constrain_or(builder, local, is_real.clone());
@@ -91,6 +92,9 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for ExecutionChip<W> {
         super::buses::send_range_checks(builder, local);
         super::buses::send_hash_relay(builder, local);
         super::buses::send_capability_call(builder, local);
+        super::buses::send_public_context_transcript_item(builder, local);
+        super::buses::send_tx_batch_transcript_item(builder, local);
+        super::buses::send_event_transcript_item(builder, local);
         super::buses::send_property_read(builder, local);
         super::buses::send_static_table_lookup(builder, local);
         super::buses::send_relation_tuples(builder, local);
@@ -122,6 +126,11 @@ fn constrain_booleans<AB: AirBuilder, const W: usize>(
     builder.assert_bool(local.op_capability_call);
     builder.assert_bool(local.op_property_read);
     builder.assert_bool(local.op_relation_table);
+    builder.assert_bool(local.op_tx_begin);
+    builder.assert_bool(local.op_load_param);
+    builder.assert_bool(local.op_load_context);
+    builder.assert_bool(local.op_emit_event_header);
+    builder.assert_bool(local.op_emit_event_arg);
 
     // Arith sub-selectors
     builder.assert_bool(local.arith_is_sub);
@@ -180,7 +189,12 @@ fn constrain_opcode_one_hot<AB: AirBuilder, const W: usize>(
         + local.op_lookup.into()
         + local.op_capability_call.into()
         + local.op_property_read.into()
-        + local.op_relation_table.into();
+        + local.op_relation_table.into()
+        + local.op_tx_begin.into()
+        + local.op_load_param.into()
+        + local.op_load_context.into()
+        + local.op_emit_event_header.into()
+        + local.op_emit_event_arg.into();
 
     builder.assert_zero(is_real * (opcode_sum - AB::Expr::ONE));
 }
@@ -312,6 +326,9 @@ fn constrain_slot_written_count<AB: AirBuilder, const W: usize>(
         - local.op_write.into()
         - local.op_assert.into()
         - local.op_capability_call.into()
+        - local.op_tx_begin.into()
+        - local.op_emit_event_header.into()
+        - local.op_emit_event_arg.into()
         + local.op_divmod.into()
         + local.op_property_read.into() * (AB::Expr::ONE + AB::Expr::ONE);
     let expected = default_expected

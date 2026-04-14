@@ -13,7 +13,7 @@
 > [program-final-seam-decisions.md](program-final-seam-decisions.md),
 > [../program-static-semantics-research-directions.md](../program-static-semantics-research-directions.md),
 > [program-rewrite-roadmap.md](program-rewrite-roadmap.md),
-> [../canonical-vocabulary.md](../canonical-vocabulary.md)
+> [verification vocabulary](../../design/architecture.md#verification-vocabulary)
 
 ---
 

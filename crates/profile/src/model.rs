@@ -249,12 +249,16 @@ pub struct EncodingProfile {
     pub field_family: FieldFamily,
     /// Fixed field-element width.
     pub width: u16,
+    /// Fixed committed-byte width, when this encoding can be used in a canonical key.
+    pub fixed_byte_width: Option<u16>,
     /// Canonical null encoding rule.
     pub canonical_null_encoding: CanonicalNullEncoding,
     /// Transcript serialization rule.
     pub transcript_serialization: TranscriptSerialization,
     /// Whether this encoding preserves ordering semantics.
     pub ordering_preserving: bool,
+    /// Whether this encoding may participate in committed-key encoding.
+    pub key_eligible: bool,
 }
 
 impl EncodingProfile {
@@ -268,9 +272,11 @@ impl EncodingProfile {
         encoding_class: EncodingClass,
         field_family: FieldFamily,
         width: u16,
+        fixed_byte_width: Option<u16>,
         canonical_null_encoding: CanonicalNullEncoding,
         transcript_serialization: TranscriptSerialization,
         ordering_preserving: bool,
+        key_eligible: bool,
     ) -> Result<Self, ProfileError> {
         let mut profile = Self {
             encoding_profile_id,
@@ -281,9 +287,11 @@ impl EncodingProfile {
             encoding_class,
             field_family,
             width,
+            fixed_byte_width,
             canonical_null_encoding,
             transcript_serialization,
             ordering_preserving,
+            key_eligible,
         };
         profile.semantic_hash = profile.compute_semantic_hash(compatible_type)?;
         Ok(profile)
@@ -301,9 +309,11 @@ impl EncodingProfile {
                 encoding_class: &self.encoding_class,
                 field_family: &self.field_family,
                 width: self.width,
+                fixed_byte_width: self.fixed_byte_width,
                 canonical_null_encoding: &self.canonical_null_encoding,
                 transcript_serialization: &self.transcript_serialization,
                 ordering_preserving: self.ordering_preserving,
+                key_eligible: self.key_eligible,
             },
         )
     }
@@ -315,9 +325,11 @@ struct EncodingProfileSemanticView<'a> {
     encoding_class: &'a EncodingClass,
     field_family: &'a FieldFamily,
     width: u16,
+    fixed_byte_width: Option<u16>,
     canonical_null_encoding: &'a CanonicalNullEncoding,
     transcript_serialization: &'a TranscriptSerialization,
     ordering_preserving: bool,
+    key_eligible: bool,
 }
 
 /// Width acceptance rule for a scheme profile.

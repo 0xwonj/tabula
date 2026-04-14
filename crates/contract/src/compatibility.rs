@@ -1,10 +1,9 @@
 //! Compatibility policy and fail-closed validation.
 
-use crate::binding::PublicInputField;
-use crate::envelope::ContractMetadataEnvelope;
+use crate::metadata_envelope::ContractMetadataEnvelope;
 use crate::versions::{
-    validate_binding_registry_version, validate_contract_schema_version,
-    validate_statement_schema_version, validate_verifier_profile_version,
+    validate_contract_schema_version, validate_statement_schema_version,
+    validate_verifier_profile_version,
 };
 
 /// Compatibility policy applied at proof entry.
@@ -14,14 +13,12 @@ pub struct ContractCompatibilityPolicy {
     pub expected_profile_hash: [u8; 32],
     /// Expected contract schema version.
     pub expected_contract_schema_version: u32,
-    /// Expected binding registry version.
-    pub expected_binding_registry_version: u32,
     /// Expected execution statement schema version.
     pub expected_statement_schema_version: u32,
     /// Expected verifier profile version.
     pub expected_verifier_profile_version: u32,
-    /// Expected semantic hash stub.
-    pub expected_semantic_hash_stub: Option<[u8; 32]>,
+    /// Expected semantic hash fingerprint.
+    pub expected_semantic_hash: [u8; 32],
 }
 
 impl ContractCompatibilityPolicy {
@@ -31,10 +28,8 @@ impl ContractCompatibilityPolicy {
         envelope: &ContractMetadataEnvelope,
     ) -> Result<(), ContractValidationError> {
         validate_contract_schema_version(envelope.contract_schema_version)?;
-        validate_binding_registry_version(envelope.binding_registry_version)?;
         validate_statement_schema_version(envelope.statement_schema_version)?;
         validate_verifier_profile_version(envelope.verifier_profile_version)?;
-        validate_binding_registry_version(self.expected_binding_registry_version)?;
         validate_statement_schema_version(self.expected_statement_schema_version)?;
         validate_verifier_profile_version(self.expected_verifier_profile_version)?;
 
@@ -42,12 +37,6 @@ impl ContractCompatibilityPolicy {
             return Err(ContractValidationError::ContractSchemaVersionMismatch {
                 expected: self.expected_contract_schema_version,
                 got: envelope.contract_schema_version,
-            });
-        }
-        if envelope.binding_registry_version != self.expected_binding_registry_version {
-            return Err(ContractValidationError::BindingRegistryVersionMismatch {
-                expected: self.expected_binding_registry_version,
-                got: envelope.binding_registry_version,
             });
         }
         if envelope.statement_schema_version != self.expected_statement_schema_version {
@@ -65,7 +54,7 @@ impl ContractCompatibilityPolicy {
         if envelope.profile_hash != self.expected_profile_hash {
             return Err(ContractValidationError::ProfileMismatch);
         }
-        if envelope.semantic_hash_stub != self.expected_semantic_hash_stub {
+        if envelope.semantic_hash != self.expected_semantic_hash {
             return Err(ContractValidationError::SemanticHashMismatch);
         }
         Ok(())
@@ -78,11 +67,6 @@ pub enum ContractValidationError {
     /// Envelope references an unsupported contract schema version.
     UnknownContractSchemaVersion {
         /// Version provided by envelope.
-        got: u32,
-    },
-    /// Envelope or policy references an unsupported binding registry version.
-    UnknownBindingRegistryVersion {
-        /// Version provided by envelope or policy.
         got: u32,
     },
     /// Envelope or policy references an unsupported statement schema version.
@@ -107,13 +91,6 @@ pub enum ContractValidationError {
         /// Version provided by envelope.
         got: u32,
     },
-    /// Binding registry version mismatch.
-    BindingRegistryVersionMismatch {
-        /// Version expected by policy.
-        expected: u32,
-        /// Version provided by envelope.
-        got: u32,
-    },
     /// Statement schema version mismatch.
     StatementSchemaVersionMismatch {
         /// Version expected by policy.
@@ -130,13 +107,8 @@ pub enum ContractValidationError {
     },
     /// Profile hash mismatch.
     ProfileMismatch,
-    /// Semantic hash stub mismatch.
+    /// Semantic hash mismatch.
     SemanticHashMismatch,
-    /// Binding registry is incomplete.
-    IncompleteBinding {
-        /// Missing fields that were not classified as `BoundInAir` or `Deferred`.
-        missing_fields: Vec<PublicInputField>,
-    },
 }
 
 impl ContractValidationError {
@@ -144,17 +116,14 @@ impl ContractValidationError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::UnknownContractSchemaVersion { .. } => "unknown_contract_schema_version",
-            Self::UnknownBindingRegistryVersion { .. } => "unknown_binding_registry_version",
             Self::UnknownStatementSchemaVersion { .. } => "unknown_statement_schema_version",
             Self::UnknownVerifierProfileVersion { .. } => "unknown_verifier_profile_version",
             Self::UnknownProofEnvelopeVersion { .. } => "unknown_proof_envelope_version",
             Self::ContractSchemaVersionMismatch { .. } => "contract_schema_version_mismatch",
-            Self::BindingRegistryVersionMismatch { .. } => "binding_registry_version_mismatch",
             Self::StatementSchemaVersionMismatch { .. } => "statement_schema_version_mismatch",
             Self::VerifierProfileVersionMismatch { .. } => "verifier_profile_version_mismatch",
             Self::ProfileMismatch => "profile_mismatch",
             Self::SemanticHashMismatch => "semantic_hash_mismatch",
-            Self::IncompleteBinding { .. } => "binding_incomplete",
         }
     }
 }
@@ -166,14 +135,6 @@ impl std::fmt::Display for ContractValidationError {
                 write!(
                     f,
                     "[{}] unsupported contract schema version {}",
-                    self.code(),
-                    got
-                )
-            }
-            Self::UnknownBindingRegistryVersion { got } => {
-                write!(
-                    f,
-                    "[{}] unsupported binding registry version {}",
                     self.code(),
                     got
                 )
@@ -209,13 +170,6 @@ impl std::fmt::Display for ContractValidationError {
                 expected,
                 got
             ),
-            Self::BindingRegistryVersionMismatch { expected, got } => write!(
-                f,
-                "[{}] binding registry version mismatch: expected {}, got {}",
-                self.code(),
-                expected,
-                got
-            ),
             Self::StatementSchemaVersionMismatch { expected, got } => write!(
                 f,
                 "[{}] statement schema version mismatch: expected {}, got {}",
@@ -236,14 +190,8 @@ impl std::fmt::Display for ContractValidationError {
                 self.code()
             ),
             Self::SemanticHashMismatch => {
-                write!(f, "[{}] semantic hash stub mismatch", self.code())
+                write!(f, "[{}] semantic hash mismatch", self.code())
             }
-            Self::IncompleteBinding { missing_fields } => write!(
-                f,
-                "[{}] binding registry missing fields: {:?}",
-                self.code(),
-                missing_fields
-            ),
         }
     }
 }
@@ -266,8 +214,8 @@ pub struct ContractRule {
     pub description: &'static str,
 }
 
-/// Rules required in schema v1.
-pub const CONTRACT_RULES_V1: [ContractRule; 1] = [ContractRule {
+/// Rules required by the current contract schema.
+pub const CONTRACT_RULES: [ContractRule; 1] = [ContractRule {
     code: ContractRuleCode::ComNewRequiresNonEmptyNewSet,
     description: "C6 Com_new multiplicity is gated by is_touched * (1 - is_empty_new) in the canonical meta shard",
 }];

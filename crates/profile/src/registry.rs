@@ -12,6 +12,7 @@ pub struct SemanticRegistry {
     type_names: BTreeMap<String, TypeId>,
     scheme_names: BTreeMap<String, SchemeId>,
     default_encoding_by_type: BTreeMap<TypeId, EncodingProfileId>,
+    default_key_encoding_by_type: BTreeMap<TypeId, EncodingProfileId>,
     default_scheme_profile_by_key: BTreeMap<(SchemeId, EncodingProfileId), SchemeProfileId>,
 }
 
@@ -60,6 +61,20 @@ impl SemanticRegistry {
             type_id,
             encoding_profile_id,
             "default encoding",
+        )
+    }
+
+    /// Register the default key encoding to use for one type.
+    pub fn register_default_key_encoding(
+        &mut self,
+        type_id: TypeId,
+        encoding_profile_id: EncodingProfileId,
+    ) -> Result<(), ProfileError> {
+        insert_unique_default(
+            &mut self.default_key_encoding_by_type,
+            type_id,
+            encoding_profile_id,
+            "default key encoding",
         )
     }
 
@@ -136,11 +151,32 @@ impl SemanticRegistry {
             .ok_or(ProfileError::MissingDefaultEncoding(type_id))
     }
 
+    /// Resolve the default key encoding for one type.
+    pub fn resolve_default_key_encoding(
+        &self,
+        type_id: TypeId,
+    ) -> Result<EncodingProfileId, ProfileError> {
+        self.default_key_encoding_by_type
+            .get(&type_id)
+            .copied()
+            .ok_or(ProfileError::MissingDefaultKeyEncoding(type_id))
+    }
+
     /// Snapshot the canonical default-encoding selection map in deterministic
     /// type-id order.
     #[must_use]
     pub fn default_encoding_entries(&self) -> Vec<(TypeId, EncodingProfileId)> {
         self.default_encoding_by_type
+            .iter()
+            .map(|(type_id, encoding_profile_id)| (*type_id, *encoding_profile_id))
+            .collect()
+    }
+
+    /// Snapshot the canonical default-key-encoding selection map in
+    /// deterministic type-id order.
+    #[must_use]
+    pub fn default_key_encoding_entries(&self) -> Vec<(TypeId, EncodingProfileId)> {
+        self.default_key_encoding_by_type
             .iter()
             .map(|(type_id, encoding_profile_id)| (*type_id, *encoding_profile_id))
             .collect()
@@ -191,7 +227,33 @@ impl SemanticRegistry {
                 });
             }
         }
+        for type_id in self.default_key_encoding_by_type.keys() {
+            if !self
+                .catalog
+                .types
+                .iter()
+                .any(|descriptor| descriptor.type_id == *type_id)
+            {
+                return Err(ProfileError::MissingReference {
+                    kind: "type",
+                    raw: type_id.0,
+                });
+            }
+        }
         for encoding_profile_id in self.default_encoding_by_type.values() {
+            if !self
+                .catalog
+                .encodings
+                .iter()
+                .any(|profile| profile.encoding_profile_id == *encoding_profile_id)
+            {
+                return Err(ProfileError::MissingReference {
+                    kind: "encoding",
+                    raw: encoding_profile_id.0,
+                });
+            }
+        }
+        for encoding_profile_id in self.default_key_encoding_by_type.values() {
             if !self
                 .catalog
                 .encodings

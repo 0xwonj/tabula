@@ -34,8 +34,8 @@ struct ProofDto {
     execution: SubProofEnvelopeDto,
     columns: Vec<ColumnProofEntryDto>,
     root: SubProofEnvelopeDto,
-    statement: AirStatementDto,
-    statement_digest: [u8; 32],
+    public_statement: AirStatementDto,
+    binding_digest: [u8; 32],
 }
 
 #[derive(Clone, BorshSerialize, BorshDeserialize)]
@@ -91,6 +91,9 @@ struct ChipOpeningDto {
 struct AirStatementDto {
     old_root: [u8; 32],
     new_root: [u8; 32],
+    public_context_digest: [u8; 32],
+    applied_tx_digest: [u8; 32],
+    event_digest: [u8; 32],
 }
 
 #[derive(Clone, BorshSerialize, BorshDeserialize)]
@@ -152,8 +155,8 @@ impl ProofDto {
                 .map(ColumnProofEntryDto::from_entry)
                 .collect(),
             root: SubProofEnvelopeDto::from_subproof(&proof.root),
-            statement: AirStatementDto::from_statement(&proof.statement),
-            statement_digest: proof.statement_digest,
+            public_statement: AirStatementDto::from_statement(&proof.public_statement),
+            binding_digest: proof.binding_digest,
         }
     }
 
@@ -166,8 +169,8 @@ impl ProofDto {
                 .map(ColumnProofEntryDto::into_entry)
                 .collect::<Result<Vec<_>, _>>()?,
             root: self.root.into_subproof()?,
-            statement: self.statement.into_statement()?,
-            statement_digest: self.statement_digest,
+            public_statement: self.public_statement.into_statement()?,
+            binding_digest: self.binding_digest,
         })
     }
 }
@@ -356,6 +359,9 @@ impl AirStatementDto {
         Self {
             old_root: statement.old_root.to_bytes(),
             new_root: statement.new_root.to_bytes(),
+            public_context_digest: statement.public_context_digest.to_bytes(),
+            applied_tx_digest: statement.applied_tx_digest.to_bytes(),
+            event_digest: statement.event_digest.to_bytes(),
         }
     }
 
@@ -368,7 +374,30 @@ impl AirStatementDto {
             NativeDigest::from_bytes(&self.new_root).map_err(|error| ProofCodecError::Decode {
                 detail: format!("invalid new_root digest: {error}"),
             })?;
-        Ok(PublicStatement { old_root, new_root })
+        let public_context_digest =
+            NativeDigest::from_bytes(&self.public_context_digest).map_err(|error| {
+                ProofCodecError::Decode {
+                    detail: format!("invalid public_context_digest: {error}"),
+                }
+            })?;
+        let applied_tx_digest =
+            NativeDigest::from_bytes(&self.applied_tx_digest).map_err(|error| {
+                ProofCodecError::Decode {
+                    detail: format!("invalid applied_tx_digest: {error}"),
+                }
+            })?;
+        let event_digest = NativeDigest::from_bytes(&self.event_digest).map_err(|error| {
+            ProofCodecError::Decode {
+                detail: format!("invalid event_digest: {error}"),
+            }
+        })?;
+        Ok(PublicStatement {
+            old_root,
+            new_root,
+            public_context_digest,
+            applied_tx_digest,
+            event_digest,
+        })
     }
 }
 
@@ -657,11 +686,14 @@ mod tests {
             execution: empty_subproof(ProofTier::Execution),
             columns: vec![],
             root: empty_subproof(ProofTier::Root),
-            statement: PublicStatement {
+            public_statement: PublicStatement {
                 old_root: tabula_commitment::NativeDigest([KoalaBear::ZERO; 8]),
                 new_root: tabula_commitment::NativeDigest([KoalaBear::ZERO; 8]),
+                public_context_digest: tabula_commitment::NativeDigest([KoalaBear::ZERO; 8]),
+                applied_tx_digest: tabula_commitment::NativeDigest([KoalaBear::ZERO; 8]),
+                event_digest: tabula_commitment::NativeDigest([KoalaBear::ZERO; 8]),
             },
-            statement_digest: [7u8; 32],
+            binding_digest: [7u8; 32],
         };
 
         let encoded = encode_proof_bytes(&proof).expect("encode proof");

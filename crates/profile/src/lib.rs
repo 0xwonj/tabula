@@ -79,8 +79,10 @@ mod tests {
             EncodingClass::FieldElementArray,
             FieldFamily::KoalaBear31,
             3,
+            Some(8),
             CanonicalNullEncoding::SeparateNullFlagWithZeroValue,
             TranscriptSerialization::FieldElementsWithNullFlag,
+            true,
             true,
         )
         .unwrap();
@@ -92,8 +94,10 @@ mod tests {
             EncodingClass::FieldElementArray,
             FieldFamily::KoalaBear31,
             4,
+            Some(8),
             CanonicalNullEncoding::SeparateNullFlagWithZeroValue,
             TranscriptSerialization::FieldElementsWithNullFlag,
+            true,
             true,
         )
         .unwrap();
@@ -309,10 +313,36 @@ mod tests {
             ENCODING_U64_ID
         );
         assert_eq!(
+            registry.resolve_default_key_encoding(TYPE_U64_ID).unwrap(),
+            ENCODING_U64_ID
+        );
+        assert_eq!(
             registry
                 .resolve_default_scheme_profile(tabula_core::SchemeId::SMT, ENCODING_BOOL_ID)
                 .unwrap(),
             SCHEME_PROFILE_SMT_ID
         );
+        assert_eq!(
+            registry.default_key_encoding_entries(),
+            vec![
+                (TYPE_U64_ID, ENCODING_U64_ID),
+                (TYPE_I64_ID, ENCODING_I64_ID),
+                (TYPE_BOOL_ID, ENCODING_BOOL_ID),
+            ]
+        );
+    }
+
+    #[test]
+    fn builtin_registry_omits_bytes32_default_key_encoding() {
+        let registry = builtin_semantic_registry().unwrap();
+
+        assert_eq!(
+            registry.resolve_default_encoding(TYPE_BYTES32_ID).unwrap(),
+            ENCODING_BYTES32_ID
+        );
+        assert!(matches!(
+            registry.resolve_default_key_encoding(TYPE_BYTES32_ID),
+            Err(ProfileError::MissingDefaultKeyEncoding(type_id)) if type_id == TYPE_BYTES32_ID
+        ));
     }
 }

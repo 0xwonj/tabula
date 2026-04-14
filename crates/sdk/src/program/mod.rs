@@ -15,17 +15,17 @@ pub use artifact::Artifact;
 #[cfg(feature = "execute")]
 pub use runner::{ExecutionReceipt, QueryResult, Runner, TxOutcomeSummary};
 pub use schema::{
-    ContextFieldHandle, FieldHandle, ParameterHandle, QueryHandle, Schema, TableHandle, TxHandle,
+    ContextFieldHandle, FieldHandle, KeyComponentHandle, ParameterHandle, QueryHandle, Schema,
+    TableHandle, TxHandle,
 };
 #[cfg(feature = "verify")]
 pub use verifier::Verifier;
 
-use tabula_core::RowKey;
 use tabula_ir as ir;
 
 use crate::Sdk;
 use crate::error::SdkError;
-use crate::types::{Context, State, TransactionBatch};
+use crate::types::{Context, LogicalStateCell, State, TransactionBatch};
 use crate::value::{EncodeArgs, EncodeValue};
 
 /// User-facing opened program handle.
@@ -110,10 +110,10 @@ impl Program {
         Runner::new(self.clone())
     }
 
-    /// Create a proof verifier for this program.
+    /// Prepare a proof verifier for this program.
     #[cfg(feature = "verify")]
-    pub fn verifier(&self) -> Verifier {
-        Verifier::new(self.clone())
+    pub fn verifier(&self) -> Result<Verifier, SdkError> {
+        Verifier::new(self)
     }
 }
 
@@ -126,9 +126,7 @@ pub struct StateBuilder {
 
 impl StateBuilder {
     fn new(program: Program) -> Self {
-        let state = State::from_raw(tabula_runtime::StateSnapshot::empty(
-            program.artifact.registered().program(),
-        ));
+        let state = State::default();
         Self { program, state }
     }
 
@@ -137,26 +135,32 @@ impl StateBuilder {
     }
 
     /// Write a field value into the state snapshot by table/field symbols.
-    pub fn set<V: EncodeValue>(
+    pub fn set<K, V>(
         mut self,
         table_symbol: &str,
-        row: u64,
+        key_args: K,
         field_symbol: &str,
         value: V,
-    ) -> Result<Self, SdkError> {
+    ) -> Result<Self, SdkError>
+    where
+        K: EncodeArgs,
+        V: EncodeValue,
+    {
         let table = self.program.table(table_symbol)?;
         let field = table.field(field_symbol)?;
+        let expected_key = table
+            .key_components()
+            .iter()
+            .map(schema::KeyComponentHandle::as_parameter_handle)
+            .collect::<Vec<_>>();
+        let key = key_args.encode_args(&expected_key)?;
         let portable = value.encode_for(field.ty())?;
-        self.state
-            .0
-            .insert(
-                self.program.artifact.registered().program(),
-                table.id(),
-                RowKey(row),
-                field.id(),
-                portable,
-            )
-            .map_err(SdkError::from)?;
+        self.state.upsert(LogicalStateCell {
+            table: table.id(),
+            key,
+            field: field.id(),
+            value: portable,
+        });
         Ok(self)
     }
 

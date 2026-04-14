@@ -7,7 +7,7 @@
 > rationale for the main syntax choices.
 > **Related**: [program-dsl-and-ir-redesign.md](program-dsl-and-ir-redesign.md),
 > [program-typing-and-effect-system.md](program-typing-and-effect-system.md),
-> [../canonical-vocabulary.md](../canonical-vocabulary.md),
+> [verification vocabulary](../../design/architecture.md#verification-vocabulary),
 > [../executor-proof-codesign-architecture.md](../executor-proof-codesign-architecture.md),
 > [../proof-front-end-journal-architecture.md](../proof-front-end-journal-architecture.md)
 

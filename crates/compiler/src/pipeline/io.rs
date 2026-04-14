@@ -8,10 +8,13 @@ pub fn parse_registered_program(
     content: &str,
     logical_path: &str,
 ) -> CompilerResult<RegisteredProgram> {
-    serde_json::from_str(content).map_err(|source| CompilerError::ParseJson {
-        path: logical_path.to_string(),
-        source,
-    })
+    let registered: RegisteredProgram =
+        serde_json::from_str(content).map_err(|source| CompilerError::ParseJson {
+            path: logical_path.to_string(),
+            source,
+        })?;
+    registered.validate_sealed_artifact()?;
+    Ok(registered)
 }
 
 /// Load one native registered program from disk.

@@ -12,9 +12,11 @@ use p3_matrix::dense::RowMajorMatrix;
 use tabula_gadgets::bool_fe;
 use tabula_stark::air::columns::borrow_cols_mut;
 use tabula_stark::trace::generator::TraceGenerator;
+use tabula_types::{NativeKeyPayload, zero_key_payload};
 
 use super::air::StateShardChip;
 use super::columns::{StateShardCols, state_shard_width};
+use crate::execution::{native_key_payload_prefix3, native_key_payload_to_u64};
 
 /// Source type for a state column entry row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,8 +63,8 @@ impl EntrySource {
 /// Pre-sorted by `key` within the column.
 #[derive(Debug, Clone)]
 pub struct StateShardRow {
-    /// Row key (u64).
-    pub key: u64,
+    /// Native committed-key payload.
+    pub key: NativeKeyPayload,
     /// True if this is a gap row (non-membership proof).
     pub is_gap: bool,
     /// Source type (meaningful only for entry rows).
@@ -81,10 +83,10 @@ pub struct StateShardRow {
     pub read_mult: bool,
     /// Multiplicity for CoalescedWrite bus receive.
     pub write_mult: bool,
-    /// Previous old-state entry key, or zero when absent.
-    pub prev_old_key: u64,
-    /// Next old-state entry key, or zero when absent.
-    pub next_old_key: u64,
+    /// Previous old-state entry key, or zero payload when absent.
+    pub prev_old_key: NativeKeyPayload,
+    /// Next old-state entry key, or zero payload when absent.
+    pub next_old_key: NativeKeyPayload,
 }
 
 /// Generate a StateShard trace from pre-sorted rows for a single column.
@@ -107,7 +109,7 @@ pub fn generate_state_shard_trace_with_anchor_mults<const W: usize>(
     table_id: u32,
     col_id: u16,
     rows: &[StateShardRow],
-    anchor_mults: &BTreeMap<u64, u32>,
+    anchor_mults: &BTreeMap<NativeKeyPayload, u32>,
 ) -> RowMajorMatrix<KoalaBear> {
     debug_assert!(
         rows.windows(2).all(|w| w[0].key < w[1].key),
@@ -143,10 +145,12 @@ pub fn generate_state_shard_trace_with_anchor_mults<const W: usize>(
     RowMajorMatrix::new(values, width)
 }
 
-fn derive_old_neighbor_keys(rows: &[StateShardRow]) -> (Vec<u64>, Vec<u64>) {
-    let mut prev_old_keys = vec![0; rows.len()];
-    let mut next_old_keys = vec![0; rows.len()];
-    let mut last_old_key = 0;
+fn derive_old_neighbor_keys(
+    rows: &[StateShardRow],
+) -> (Vec<NativeKeyPayload>, Vec<NativeKeyPayload>) {
+    let mut prev_old_keys = vec![zero_key_payload(); rows.len()];
+    let mut next_old_keys = vec![zero_key_payload(); rows.len()];
+    let mut last_old_key = zero_key_payload();
     for (idx, row) in rows.iter().enumerate() {
         prev_old_keys[idx] = last_old_key;
         if !row.is_gap && row.source.in_old() {
@@ -154,7 +158,7 @@ fn derive_old_neighbor_keys(rows: &[StateShardRow]) -> (Vec<u64>, Vec<u64>) {
         }
     }
 
-    let mut upcoming_old_key = 0;
+    let mut upcoming_old_key = zero_key_payload();
     for (idx, row) in rows.iter().enumerate().rev() {
         next_old_keys[idx] = upcoming_old_key;
         if !row.is_gap && row.source.in_old() {
@@ -163,6 +167,10 @@ fn derive_old_neighbor_keys(rows: &[StateShardRow]) -> (Vec<u64>, Vec<u64>) {
     }
 
     (prev_old_keys, next_old_keys)
+}
+
+fn payload_to_u64(payload: &NativeKeyPayload) -> u64 {
+    native_key_payload_to_u64(payload)
 }
 
 #[derive(Clone, Copy)]
@@ -176,9 +184,9 @@ struct StateShardTraceLayout {
 fn populate_base_and_chains<const W: usize>(
     layout: StateShardTraceLayout,
     rows: &[StateShardRow],
-    prev_old_keys: &[u64],
-    next_old_keys: &[u64],
-    anchor_mults: &BTreeMap<u64, u32>,
+    prev_old_keys: &[NativeKeyPayload],
+    next_old_keys: &[NativeKeyPayload],
+    anchor_mults: &BTreeMap<NativeKeyPayload, u32>,
     values: &mut [KoalaBear],
 ) {
     let mut seen_old = false;
@@ -198,7 +206,8 @@ fn populate_base_and_chains<const W: usize>(
         cols.is_real = KoalaBear::ONE;
         cols.table_id = KoalaBear::new(layout.table_id);
         cols.col_id = KoalaBear::new(layout.col_id as u32);
-        cols.key.populate(row.key);
+        cols.key
+            .populate_payload(&native_key_payload_prefix3(&row.key));
 
         cols.is_gap = bool_fe(row.is_gap);
         if !row.is_gap {
@@ -223,8 +232,10 @@ fn populate_base_and_chains<const W: usize>(
         } else {
             0
         });
-        cols.prev_old_key.populate(prev_old_keys[i]);
-        cols.next_old_key.populate(next_old_keys[i]);
+        cols.prev_old_key
+            .populate_payload(&native_key_payload_prefix3(&prev_old_keys[i]));
+        cols.next_old_key
+            .populate_payload(&native_key_payload_prefix3(&next_old_keys[i]));
 
         let in_old = !row.is_gap && row.source.in_old();
         let in_new = !row.is_gap && row.source.in_new();
@@ -239,7 +250,7 @@ fn populate_base_and_chains<const W: usize>(
                 cols.old_hash_chain.populate_first(
                     layout.table_id,
                     layout.col_id as u32,
-                    row.key,
+                    payload_to_u64(&row.key),
                     &row.old_val,
                 );
             } else {
@@ -247,7 +258,7 @@ fn populate_base_and_chains<const W: usize>(
                     prev_old_hash_acc
                         .as_ref()
                         .expect("continuation must have prev"),
-                    row.key,
+                    payload_to_u64(&row.key),
                     &row.old_val,
                 );
             }
@@ -262,7 +273,7 @@ fn populate_base_and_chains<const W: usize>(
                 cols.new_hash_chain.populate_first(
                     layout.table_id,
                     layout.col_id as u32,
-                    row.key,
+                    payload_to_u64(&row.key),
                     &row.new_val,
                 );
             } else {
@@ -270,7 +281,7 @@ fn populate_base_and_chains<const W: usize>(
                     prev_new_hash_acc
                         .as_ref()
                         .expect("continuation must have prev"),
-                    row.key,
+                    payload_to_u64(&row.key),
                     &row.new_val,
                 );
             }
@@ -347,7 +358,10 @@ fn populate_ordering_witnesses<const W: usize>(
             let offset = i * width;
             let cols: &mut StateShardCols<KoalaBear, W> =
                 borrow_cols_mut(&mut values[offset..offset + width]);
-            cols.key_ordering.populate(cur_key, next_key);
+            cols.key_ordering.populate_payload(
+                &native_key_payload_prefix3(&cur_key),
+                &native_key_payload_prefix3(&next_key),
+            );
         }
     }
 }

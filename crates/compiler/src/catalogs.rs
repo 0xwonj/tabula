@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use tabula_core::MachineCapabilities;
 use tabula_ir as ir;
 use tabula_profile::{
     ProfileCatalog, SemanticRegistry, builtin_semantic_registry, is_bytes32_type,
@@ -35,6 +36,7 @@ pub type SourceCapabilityCatalog = BTreeMap<String, SourceCapabilityDescriptor>;
 #[derive(Debug, Clone)]
 pub struct CompilerCatalogs {
     semantics: SemanticRegistry,
+    machine_capabilities: MachineCapabilities,
     capability_descriptors: SourceCapabilityCatalog,
 }
 
@@ -44,6 +46,7 @@ impl CompilerCatalogs {
         Ok(Self {
             semantics: builtin_semantic_registry()
                 .map_err(CompilerCatalogError::InvalidSemanticRegistry)?,
+            machine_capabilities: MachineCapabilities::standard(),
             capability_descriptors: SourceCapabilityCatalog::new(),
         })
     }
@@ -52,6 +55,7 @@ impl CompilerCatalogs {
     pub fn empty() -> Self {
         Self {
             semantics: SemanticRegistry::new(),
+            machine_capabilities: MachineCapabilities::standard(),
             capability_descriptors: SourceCapabilityCatalog::new(),
         }
     }
@@ -66,6 +70,11 @@ impl CompilerCatalogs {
         &self.capability_descriptors
     }
 
+    /// Borrow the native machine capability ceiling used during registration.
+    pub fn machine_capabilities(&self) -> MachineCapabilities {
+        self.machine_capabilities
+    }
+
     /// Replace the semantic registry used during sealing.
     pub fn with_semantic_registry(
         mut self,
@@ -78,6 +87,12 @@ impl CompilerCatalogs {
             .map_err(|detail| CompilerCatalogError::InvalidCapabilityDescriptor { detail })?;
         self.semantics = semantics;
         Ok(self)
+    }
+
+    /// Replace the machine capability ceiling used during registration.
+    pub fn with_machine_capabilities(mut self, machine_capabilities: MachineCapabilities) -> Self {
+        self.machine_capabilities = machine_capabilities;
+        self
     }
 
     /// Register one source capability descriptor available during source compilation.

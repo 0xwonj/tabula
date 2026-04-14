@@ -76,11 +76,14 @@ fn direct_machine_prove_is_not_gated_by_runtime_root_authority() {
         root: PreparedTierInput {
             store: WitnessStore::new(),
         },
-        air_statement: PublicStatement {
+        public_statement: PublicStatement {
             old_root: NativeDigest([KoalaBear::ZERO; 8]),
             new_root: NativeDigest([KoalaBear::ZERO; 8]),
+            public_context_digest: NativeDigest([KoalaBear::ZERO; 8]),
+            applied_tx_digest: NativeDigest([KoalaBear::ZERO; 8]),
+            event_digest: NativeDigest([KoalaBear::ZERO; 8]),
         },
-        semantic_statement_digest: [0u8; 32],
+        binding_digest: [0u8; 32],
     };
 
     match machine.prove(input) {

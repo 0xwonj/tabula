@@ -1,10 +1,10 @@
 //! In-memory implementations of state traits.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::error::TabulaError;
 use crate::traits::{StateView, StaticTableProvider};
-use crate::{CellKey, ColId, PortableValue, RowKey, TableId};
+use crate::{ColId, CommittedCellKey, CommittedKey, PortableValue, RowKey, TableId};
 
 // ---------------------------------------------------------------------------
 // InMemoryState
@@ -13,8 +13,7 @@ use crate::{CellKey, ColId, PortableValue, RowKey, TableId};
 /// BTreeMap-backed [`StateView`].
 #[derive(Debug, Clone)]
 pub struct InMemoryState {
-    data: BTreeMap<CellKey, PortableValue>,
-    tables: BTreeSet<TableId>,
+    data: BTreeMap<CommittedCellKey, PortableValue>,
 }
 
 impl InMemoryState {
@@ -22,13 +21,11 @@ impl InMemoryState {
     pub fn new() -> Self {
         Self {
             data: BTreeMap::new(),
-            tables: BTreeSet::new(),
         }
     }
 
     /// Set a cell value.
-    pub fn set(&mut self, key: CellKey, value: PortableValue) {
-        self.tables.insert(key.table);
+    pub fn set(&mut self, key: CommittedCellKey, value: PortableValue) {
         self.data.insert(key, value);
     }
 }
@@ -40,12 +37,21 @@ impl Default for InMemoryState {
 }
 
 impl StateView for InMemoryState {
-    fn read(&self, key: &CellKey) -> Result<Option<PortableValue>, TabulaError> {
+    fn read(&self, key: &CommittedCellKey) -> Result<Option<PortableValue>, TabulaError> {
         Ok(self.data.get(key).cloned())
     }
 
-    fn table_exists(&self, table: TableId) -> bool {
-        self.tables.contains(&table)
+    fn column_entries(
+        &self,
+        table: TableId,
+        col: ColId,
+    ) -> Result<Vec<(CommittedKey, PortableValue)>, TabulaError> {
+        Ok(self
+            .data
+            .iter()
+            .filter(|(key, _)| key.table == table && key.col == col)
+            .map(|(key, value)| (key.key.clone(), value.clone()))
+            .collect())
     }
 }
 
@@ -89,11 +95,7 @@ impl StaticTableProvider for InMemoryStaticTables {
         self.data
             .get(&(table, key, col))
             .cloned()
-            .ok_or(TabulaError::CellNotFound(CellKey {
-                table,
-                col,
-                row: key,
-            }))
+            .ok_or(TabulaError::RowNotFound(table, key))
     }
 
     fn contains(&self, table: TableId, key: RowKey) -> Result<bool, TabulaError> {
@@ -134,25 +136,33 @@ mod tests {
     #[test]
     fn in_memory_state_read_write() {
         let mut state = InMemoryState::new();
-        let k = CellKey {
+        let k = CommittedCellKey {
             table: TableId(1),
             col: ColId(0),
-            row: RowKey(0),
+            key: vec![0].into(),
         };
-        state.set(k, portable_u64(100));
+        state.set(k.clone(), portable_u64(100));
 
         assert_eq!(state.read(&k).unwrap(), Some(portable_u64(100)));
-        assert!(state.table_exists(TableId(1)));
-        assert!(!state.table_exists(TableId(99)));
+        assert_eq!(
+            state.column_entries(TableId(1), ColId(0)).unwrap(),
+            vec![(vec![0].into(), portable_u64(100))]
+        );
+        assert!(
+            state
+                .column_entries(TableId(99), ColId(0))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
     fn in_memory_state_none_for_missing() {
         let state = InMemoryState::new();
-        let k = CellKey {
+        let k = CommittedCellKey {
             table: TableId(1),
             col: ColId(0),
-            row: RowKey(0),
+            key: vec![0].into(),
         };
         assert_eq!(state.read(&k).unwrap(), None);
     }

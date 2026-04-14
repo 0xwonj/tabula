@@ -8,9 +8,20 @@ use tabula_stark::air::bus::{
     BaseStateEntryAirBuilder, CoalescedWriteAirBuilder, CommitmentAirBuilder, PoseidonAirBuilder,
     SsmcOldEntryAirBuilder,
 };
+use tabula_types::NATIVE_KEY_PAYLOAD_WIDTH;
 
 use super::columns::StateShardCols;
 use super::derived::{derive_in_write, derive_is_write_only};
+
+fn key_payload_exprs<AB: InteractionAirBuilder, const W: usize>(
+    key: &tabula_gadgets::KeyRangeChecked<AB::Var>,
+) -> Vec<AB::Expr> {
+    let mut payload = vec![AB::Expr::ZERO; NATIVE_KEY_PAYLOAD_WIDTH];
+    payload[0] = key.limbs.limb0.into();
+    payload[1] = key.limbs.limb1.into();
+    payload[2] = key.limbs.limb2.into();
+    payload
+}
 
 /// Emit all LogUp bus sends/receives for the StateShard chip.
 pub(super) fn send_receive_buses<AB: InteractionAirBuilder, const W: usize>(
@@ -27,7 +38,7 @@ pub(super) fn send_receive_buses<AB: InteractionAirBuilder, const W: usize>(
         builder.receive_base_state_entry(
             local.table_id.into(),
             local.col_id.into(),
-            &local.key.limbs,
+            &key_payload_exprs::<AB, W>(&local.key),
             &local.old_val,
             AB::Expr::ZERO,
             is_real.clone() * (*in_old).clone() * local.read_mult_witness.into(),
@@ -36,7 +47,7 @@ pub(super) fn send_receive_buses<AB: InteractionAirBuilder, const W: usize>(
         builder.receive_base_state_entry(
             local.table_id.into(),
             local.col_id.into(),
-            &local.key.limbs,
+            &key_payload_exprs::<AB, W>(&local.key),
             &local.new_val, // zeros for gap rows (constrained)
             AB::Expr::ONE,
             is_real.clone() * local.is_gap.into() * local.read_mult_witness.into(),
@@ -45,7 +56,7 @@ pub(super) fn send_receive_buses<AB: InteractionAirBuilder, const W: usize>(
         builder.receive_base_state_entry(
             local.table_id.into(),
             local.col_id.into(),
-            &local.key.limbs,
+            &key_payload_exprs::<AB, W>(&local.key),
             &local.old_val, // zeros for write_only (constrained by merge logic)
             AB::Expr::ONE,
             is_real.clone() * is_write_only * local.read_mult_witness.into(),
@@ -59,7 +70,7 @@ pub(super) fn send_receive_buses<AB: InteractionAirBuilder, const W: usize>(
         builder.receive_coalesced_write(
             local.table_id.into(),
             local.col_id.into(),
-            &local.key.limbs,
+            &key_payload_exprs::<AB, W>(&local.key),
             &local.new_val,
             is_delete,
             is_real.clone() * in_write * local.write_mult_witness.into(),
@@ -109,12 +120,12 @@ pub(super) fn send_receive_buses<AB: InteractionAirBuilder, const W: usize>(
     builder.send_ssmc_old_entry(
         local.table_id.into(),
         local.col_id.into(),
-        &local.key.limbs,
+        &key_payload_exprs::<AB, W>(&local.key),
         &local.old_val,
         local.has_prev_old_entry.into(),
-        &local.prev_old_key.limbs,
+        &key_payload_exprs::<AB, W>(&local.prev_old_key),
         local.is_last_old_entry.into(),
-        &local.next_old_key.limbs,
+        &key_payload_exprs::<AB, W>(&local.next_old_key),
         is_real * local.property_anchor_mult.into(),
     );
 }

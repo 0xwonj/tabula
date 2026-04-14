@@ -13,9 +13,10 @@ use tabula_stark::air::columns::borrow_cols_mut;
 use tabula_stark::trace::contributor::{TraceContributor, TracePhase, WitnessStore};
 use tabula_stark::trace::generator::TraceGenerator;
 use tabula_stark::trace::trace_map::TraceMap;
+use tabula_types::{NativeKeyPayload, zero_key_payload};
 
 use crate::ChipSpec;
-use crate::execution::limbs_to_u64;
+use crate::execution::{native_key_payload_prefix3, native_key_payload_to_u64};
 use crate::shards::ssmc::{SSMC_WITNESS_LABEL, SsmcColumnWitness, SsmcWitness};
 
 use super::air::SsmcPropertyChip;
@@ -46,28 +47,28 @@ pub struct PropertyReadRecord {
 #[doc(hidden)]
 pub struct SsmcPropertyRecord {
     query_type: u8,
-    query_arg0: u64,
-    query_arg1: u64,
+    query_arg0: NativeKeyPayload,
+    query_arg1: NativeKeyPayload,
     result_val: Vec<KoalaBear>,
-    result_key: u64,
+    result_key: NativeKeyPayload,
     result_is_null: bool,
     uses_empty_old: bool,
-    anchor_key: u64,
+    anchor_key: NativeKeyPayload,
     anchor_val: Vec<KoalaBear>,
     has_prev_old: bool,
-    prev_old_key: u64,
+    prev_old_key: NativeKeyPayload,
     is_last_old: bool,
-    next_old_key: u64,
+    next_old_key: NativeKeyPayload,
 }
 
 #[derive(Clone)]
 struct OldEntryAnchor {
-    key: u64,
+    key: NativeKeyPayload,
     value: Vec<KoalaBear>,
     has_prev_old: bool,
-    prev_old_key: u64,
+    prev_old_key: NativeKeyPayload,
     is_last_old: bool,
-    next_old_key: u64,
+    next_old_key: NativeKeyPayload,
 }
 
 fn zero_ordering() -> tabula_gadgets::OrderingRangeChecked<KoalaBear> {
@@ -108,13 +109,20 @@ fn populate_leq(leq: &mut LessOrEqChecked<KoalaBear>, lhs: u64, rhs: u64) {
     }
 }
 
-fn claim_arg_u64(limbs: &[KoalaBear]) -> u64 {
-    let arr = [
-        *limbs.first().unwrap_or(&KoalaBear::ZERO),
-        *limbs.get(1).unwrap_or(&KoalaBear::ZERO),
-        *limbs.get(2).unwrap_or(&KoalaBear::ZERO),
-    ];
-    limbs_to_u64(&arr)
+fn zero_payload() -> NativeKeyPayload {
+    zero_key_payload()
+}
+
+fn payload_to_u64(payload: &NativeKeyPayload) -> u64 {
+    native_key_payload_to_u64(payload)
+}
+
+fn claim_arg_payload(limbs: &[KoalaBear]) -> NativeKeyPayload {
+    let mut payload = zero_key_payload();
+    for (index, limb) in limbs.iter().copied().enumerate().take(payload.len()) {
+        payload[index] = limb;
+    }
+    payload
 }
 
 fn zero_fes<const W: usize>() -> Vec<KoalaBear> {
@@ -134,7 +142,7 @@ fn build_old_entry_anchors(col_data: &SsmcColumnWitness) -> Vec<OldEntryAnchor> 
         .map(|(idx, row)| OldEntryAnchor {
             key: row.key,
             value: row.old_val.clone(),
-            has_prev_old: row.prev_old_key != 0 || idx > 0,
+            has_prev_old: row.prev_old_key != zero_payload() || idx > 0,
             prev_old_key: row.prev_old_key,
             is_last_old: row.is_last_old_entry_hint(),
             next_old_key: row.next_old_key,
@@ -148,7 +156,7 @@ trait StateRowExt {
 
 impl StateRowExt for crate::shards::state::trace::StateShardRow {
     fn is_last_old_entry_hint(&self) -> bool {
-        self.source.in_old() && self.next_old_key == 0
+        self.source.in_old() && self.next_old_key == zero_payload()
     }
 }
 
@@ -164,14 +172,17 @@ fn build_ssmc_property_records<const W: usize>(
     claims
         .iter()
         .map(|claim| {
-            let query_arg0 = claim_arg_u64(&claim.query_arg0);
-            let query_arg1 = claim_arg_u64(&claim.query_arg1);
-            let result_key = claim_arg_u64(&claim.result_key);
+            let query_arg0 = claim_arg_payload(&claim.query_arg0);
+            let query_arg1 = claim_arg_payload(&claim.query_arg1);
+            let result_key = claim_arg_payload(&claim.result_key);
             let zero_val = zero_fes::<W>();
 
             let selected_anchor = match claim.query_type {
                 2 => {
-                    if let Some(entry) = old_entries.iter().find(|entry| entry.key > query_arg0) {
+                    if let Some(entry) = old_entries
+                        .iter()
+                        .find(|entry| entry.key > query_arg0)
+                    {
                         Some(entry.clone())
                     } else if is_empty_old {
                         None
@@ -203,7 +214,8 @@ fn build_ssmc_property_records<const W: usize>(
             };
 
             if claim.is_null
-                && (!is_zero_fes(&claim.result_val) || result_key != 0) {
+                && (!is_zero_fes(&claim.result_val) || result_key != zero_payload())
+            {
                     return Err(TabulaError::ProofError {
                         phase: "ssmc_property_witness",
                         detail: "null PropertyRead claims must carry canonical zero value/key"
@@ -242,15 +254,15 @@ fn build_ssmc_property_records<const W: usize>(
                     query_arg0,
                     query_arg1,
                     result_val: zero_val,
-                    result_key: 0,
+                    result_key: zero_payload(),
                     result_is_null: true,
                     uses_empty_old: true,
-                    anchor_key: 0,
+                    anchor_key: zero_payload(),
                     anchor_val: zero_fes::<W>(),
                     has_prev_old: false,
-                    prev_old_key: 0,
+                    prev_old_key: zero_payload(),
                     is_last_old: false,
-                    next_old_key: 0,
+                    next_old_key: zero_payload(),
                 })
             }
         })
@@ -265,7 +277,7 @@ fn build_ssmc_property_records<const W: usize>(
 pub fn ssmc_property_anchor_multiplicities<const W: usize>(
     claims: &[PropertyReadRecord],
     col_data: &SsmcColumnWitness,
-) -> Result<BTreeMap<u64, u32>, TabulaError> {
+) -> Result<BTreeMap<NativeKeyPayload, u32>, TabulaError> {
     let mut mults = BTreeMap::new();
     for record in build_ssmc_property_records::<W>(claims, col_data)? {
         if record.uses_empty_old {
@@ -297,22 +309,28 @@ fn generate_ssmc_property_trace<const W: usize>(
         cols.query_type = KoalaBear::new(record.query_type as u32);
         cols.query_is_successor = bool_fe(record.query_type == 2);
         cols.query_is_predecessor = bool_fe(record.query_type == 3);
-        cols.query_arg0.populate(record.query_arg0);
-        cols.query_arg1.populate(record.query_arg1);
+        cols.query_arg0
+            .populate_payload(&native_key_payload_prefix3(&record.query_arg0));
+        cols.query_arg1
+            .populate_payload(&native_key_payload_prefix3(&record.query_arg1));
 
         for i in 0..W {
             cols.result_val[i] = *record.result_val.get(i).unwrap_or(&KoalaBear::ZERO);
             cols.anchor_val[i] = *record.anchor_val.get(i).unwrap_or(&KoalaBear::ZERO);
         }
-        cols.result_key.populate(record.result_key);
+        cols.result_key
+            .populate_payload(&native_key_payload_prefix3(&record.result_key));
         cols.result_is_null = bool_fe(record.result_is_null);
         cols.uses_empty_old = bool_fe(record.uses_empty_old);
         cols.uses_anchor = bool_fe(!record.uses_empty_old);
-        cols.anchor_key.populate(record.anchor_key);
+        cols.anchor_key
+            .populate_payload(&native_key_payload_prefix3(&record.anchor_key));
         cols.has_prev_old = bool_fe(record.has_prev_old);
-        cols.prev_old_key.populate(record.prev_old_key);
+        cols.prev_old_key
+            .populate_payload(&native_key_payload_prefix3(&record.prev_old_key));
         cols.is_last_old = bool_fe(record.is_last_old);
-        cols.next_old_key.populate(record.next_old_key);
+        cols.next_old_key
+            .populate_payload(&native_key_payload_prefix3(&record.next_old_key));
 
         cols.query_lt_anchor = zero_ordering();
         cols.anchor_lt_query = zero_ordering();
@@ -328,39 +346,43 @@ fn generate_ssmc_property_trace<const W: usize>(
         match record.query_type {
             2 => {
                 if !record.result_is_null {
-                    cols.query_lt_anchor
-                        .populate(record.query_arg0, record.anchor_key);
+                    cols.query_lt_anchor.populate_payload(
+                        &native_key_payload_prefix3(&record.query_arg0),
+                        &native_key_payload_prefix3(&record.anchor_key),
+                    );
                     if record.has_prev_old {
                         populate_leq(
                             &mut cols.prev_le_query,
-                            record.prev_old_key,
-                            record.query_arg0,
+                            payload_to_u64(&record.prev_old_key),
+                            payload_to_u64(&record.query_arg0),
                         );
                     }
                 } else if !record.uses_empty_old {
                     populate_leq(
                         &mut cols.anchor_le_query,
-                        record.anchor_key,
-                        record.query_arg0,
+                        payload_to_u64(&record.anchor_key),
+                        payload_to_u64(&record.query_arg0),
                     );
                 }
             }
             3 => {
                 if !record.result_is_null {
-                    cols.anchor_lt_query
-                        .populate(record.anchor_key, record.query_arg0);
+                    cols.anchor_lt_query.populate_payload(
+                        &native_key_payload_prefix3(&record.anchor_key),
+                        &native_key_payload_prefix3(&record.query_arg0),
+                    );
                     if !record.is_last_old {
                         populate_leq(
                             &mut cols.query_le_next,
-                            record.query_arg0,
-                            record.next_old_key,
+                            payload_to_u64(&record.query_arg0),
+                            payload_to_u64(&record.next_old_key),
                         );
                     }
                 } else if !record.uses_empty_old {
                     populate_leq(
                         &mut cols.query_le_anchor,
-                        record.query_arg0,
-                        record.anchor_key,
+                        payload_to_u64(&record.query_arg0),
+                        payload_to_u64(&record.anchor_key),
                     );
                 }
             }

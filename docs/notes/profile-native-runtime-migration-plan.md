@@ -4,7 +4,7 @@
 > **Date**: 2026-03-23
 > **Scope**: Final end-to-end architecture after the legacy carrier, compat,
 > and capability-contract migrations.
-> **Related**: [canonical-vocabulary.md](canonical-vocabulary.md),
+> **Related**: [verification vocabulary](../design/architecture.md#verification-vocabulary),
 > [column-profile-architecture-workstreams.md](column-profile-architecture-workstreams.md),
 > [proof-hierarchy-and-grouping.md](proof-hierarchy-and-grouping.md),
 > [proof-front-end-journal-architecture.md](proof-front-end-journal-architecture.md),

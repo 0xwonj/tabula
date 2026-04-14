@@ -1,4 +1,4 @@
-use tabula_core::PortableValue;
+use tabula_core::{KeyComponentSchema, PortableValue};
 use tabula_ir::*;
 use tabula_profile::TYPE_U64_ID;
 
@@ -9,7 +9,10 @@ pub fn base_program(entry: Entry) -> Program {
             tables: vec![TableSchema {
                 id: TableId(1),
                 symbol: "accounts".into(),
-                key_tys: vec![TYPE_U64_ID],
+                keys: vec![KeyComponentSchema {
+                    symbol: "id".into(),
+                    ty: TYPE_U64_ID,
+                }],
                 fields: vec![FieldSchema {
                     id: FieldId(0),
                     symbol: "balance".into(),

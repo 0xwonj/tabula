@@ -11,7 +11,7 @@
 > [program-typing-and-effect-system.md](program-typing-and-effect-system.md),
 > [program-mir-design.md](program-mir-design.md),
 > [program-rewrite-roadmap.md](program-rewrite-roadmap.md),
-> [../canonical-vocabulary.md](../canonical-vocabulary.md)
+> [verification vocabulary](../../design/architecture.md#verification-vocabulary)
 
 ---
 

@@ -1,9 +1,9 @@
-//! Versioned binary execution receipt handoff.
+//! Internal versioned execution receipt bridge.
 
 use anyhow::Context as _;
 use tabula_sdk::interop::{
     CapabilityEffect, ContextExt, ExecutionJournal, ExecutionReceiptExt, FailedTxExecution,
-    RelationEffect, RelationEffectKind, StateEffectKind, StateExt, StatePropertyEffect,
+    RelationEffect, RelationEffectKind, StateEffectKind, StatePropertyEffect,
     SuccessfulTxExecution, TransactionBatchExt, TxExecutionOutcome, TypedEventEffect,
     TypedStateEffect, TypedStateSnapshot, TypedStateWrite,
 };
@@ -13,70 +13,94 @@ const RECEIPT_VERSION: u32 = 1;
 
 /// Versioned binary receipt bridge written by `execute --receipt-out`.
 #[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct ExecutionReceiptBridgeV1 {
+pub(crate) struct ReceiptBridge {
     /// Canonical artifact digest.
     pub(crate) program_digest: String,
-    /// Exact committed pre-state snapshot.
-    pub(crate) snapshot: tabula_sdk::interop::StateSnapshot,
+    /// Exact logical pre-state authored through the SDK surface.
+    pub(crate) state_before: tabula_sdk::State,
+    /// Exact committed pre-state snapshot encoded for handoff.
+    pub(crate) snapshot: CommittedStateSnapshotBridge,
     /// Exact portable transaction batch.
     pub(crate) batch: tabula_sdk::interop::EntryBatch,
     /// Exact portable public context input.
     pub(crate) context: tabula_sdk::interop::ContextInput,
-    /// Exact committed post-state snapshot.
-    pub(crate) state_after: tabula_sdk::interop::StateSnapshot,
-    /// Portable execution journal required to reconstruct prove input later.
-    pub(crate) journal: PortableExecutionJournalV1,
+    /// Exact logical post-state projected through the SDK surface.
+    pub(crate) state_after: tabula_sdk::State,
+    /// Exact committed post-state snapshot encoded for handoff.
+    pub(crate) state_after_snapshot: CommittedStateSnapshotBridge,
+    /// Bridge execution journal required to reconstruct prove input later.
+    pub(crate) journal: ExecutionJournalBridge,
 }
 
-/// Portable journal equivalent for future proof reconstruction.
-#[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct PortableExecutionJournalV1 {
-    /// Aggregate state summary across the whole batch.
-    pub(crate) state_summary: PortableExecutionStateSummaryV1,
-    /// Per-transaction outcomes in batch order.
-    pub(crate) txs: Vec<PortableTxExecutionOutcomeV1>,
-}
-
-/// Portable aggregate state read/write summary.
+/// Bridge committed snapshot payload validated through the runtime on load.
 #[derive(Debug, Clone, PartialEq, Eq, Default, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct PortableExecutionStateSummaryV1 {
+pub(crate) struct CommittedStateSnapshotBridge {
+    /// Canonical committed cells in `(table, field, committed_key)` order.
+    pub(crate) cells: Vec<CommittedStateCellBridge>,
+}
+
+/// Bridge committed snapshot cell.
+#[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
+pub(crate) struct CommittedStateCellBridge {
+    /// Target state table id.
+    pub(crate) table: tabula_sdk::interop::TableId,
+    /// Canonical committed key bytes.
+    pub(crate) key: Vec<u8>,
+    /// Target state field id.
+    pub(crate) field: tabula_sdk::interop::FieldId,
+    /// Portable field value.
+    pub(crate) value: tabula_sdk::interop::PortableValue,
+}
+
+/// Bridge journal equivalent for future proof reconstruction.
+#[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
+pub(crate) struct ExecutionJournalBridge {
+    /// Aggregate state summary across the whole batch.
+    pub(crate) state_summary: ExecutionStateSummaryBridge,
+    /// Per-transaction outcomes in batch order.
+    pub(crate) txs: Vec<TxExecutionOutcomeBridge>,
+}
+
+/// Bridge aggregate state read/write summary.
+#[derive(Debug, Clone, PartialEq, Eq, Default, borsh::BorshSerialize, borsh::BorshDeserialize)]
+pub(crate) struct ExecutionStateSummaryBridge {
     /// Snapshot of old values for distinct reads.
-    pub(crate) read_set_old: Vec<PortableStateSnapshotV1>,
+    pub(crate) read_set_old: Vec<StateSnapshotBridge>,
     /// Snapshot of final values for distinct writes.
-    pub(crate) write_set_final: Vec<PortableStateWriteV1>,
+    pub(crate) write_set_final: Vec<StateWriteBridge>,
 }
 
-/// Portable outcome of one transaction execution.
+/// Bridge outcome of one transaction execution.
 #[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) enum PortableTxExecutionOutcomeV1 {
+pub(crate) enum TxExecutionOutcomeBridge {
     /// Success case carrying exact effects.
-    Success(PortableSuccessfulTxExecutionV1),
+    Success(SuccessfulTxExecutionBridge),
     /// Failure case carrying diagnostic metadata.
-    Failed(PortableFailedTxExecutionV1),
+    Failed(FailedTxExecutionBridge),
 }
 
-/// Portable successful transaction journal.
+/// Bridge successful transaction journal.
 #[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct PortableSuccessfulTxExecutionV1 {
+pub(crate) struct SuccessfulTxExecutionBridge {
     /// Zero-based transaction index within the batch.
     pub(crate) tx_index: u32,
     /// Executed entry id.
     pub(crate) entry_id: tabula_sdk::interop::EntryId,
     /// State read/write/delete effects in order.
-    pub(crate) state_effects: Vec<PortableStateEffectV1>,
+    pub(crate) state_effects: Vec<StateEffectBridge>,
     /// Property read effects.
-    pub(crate) property_effects: Vec<PortableStatePropertyEffectV1>,
+    pub(crate) property_effects: Vec<StatePropertyEffectBridge>,
     /// Relation lookup effects.
-    pub(crate) relation_effects: Vec<PortableRelationEffectV1>,
+    pub(crate) relation_effects: Vec<RelationEffectBridge>,
     /// Native capability invocation effects.
-    pub(crate) capability_effects: Vec<PortableCapabilityEffectV1>,
+    pub(crate) capability_effects: Vec<CapabilityEffectBridge>,
     /// Event emission effects.
-    pub(crate) event_effects: Vec<PortableEventEffectV1>,
+    pub(crate) event_effects: Vec<EventEffectBridge>,
 }
 
-/// Portable failed transaction journal.
+/// Bridge failed transaction journal.
 #[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct PortableFailedTxExecutionV1 {
+pub(crate) struct FailedTxExecutionBridge {
     /// Zero-based transaction index within the batch.
     pub(crate) tx_index: u32,
     /// Executed entry id.
@@ -87,31 +111,31 @@ pub(crate) struct PortableFailedTxExecutionV1 {
     pub(crate) failed_op_index: Option<usize>,
 }
 
-/// Portable snapshot of one state cell value.
+/// Bridge snapshot of one state cell value.
 #[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct PortableStateSnapshotV1 {
+pub(crate) struct StateSnapshotBridge {
     /// Cell identity.
-    pub(crate) key: tabula_sdk::interop::CellKey,
+    pub(crate) key: tabula_sdk::interop::CommittedCellKey,
     /// Value type identifier.
     pub(crate) type_id: tabula_sdk::interop::TypeRef,
-    /// Portable old value, or `None` if the cell was absent.
+    /// Bridge old value, or `None` if the cell was absent.
     pub(crate) value: Option<tabula_sdk::interop::PortableValue>,
 }
 
-/// Portable final write for one state cell.
+/// Bridge final write for one state cell.
 #[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct PortableStateWriteV1 {
+pub(crate) struct StateWriteBridge {
     /// Cell identity.
-    pub(crate) key: tabula_sdk::interop::CellKey,
+    pub(crate) key: tabula_sdk::interop::CommittedCellKey,
     /// Value type identifier.
     pub(crate) type_id: tabula_sdk::interop::TypeRef,
     /// Final written value, or `None` if the cell was deleted.
     pub(crate) value: Option<tabula_sdk::interop::PortableValue>,
 }
 
-/// Portable classification of one state effect.
+/// Bridge classification of one state effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) enum PortableStateEffectKindV1 {
+pub(crate) enum StateEffectKindBridge {
     /// A state read.
     Read,
     /// A state write.
@@ -120,16 +144,16 @@ pub(crate) enum PortableStateEffectKindV1 {
     Delete,
 }
 
-/// Portable state access effect.
+/// Bridge state access effect.
 #[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct PortableStateEffectV1 {
+pub(crate) struct StateEffectBridge {
     /// Cell identity.
-    pub(crate) key: tabula_sdk::interop::CellKey,
+    pub(crate) key: tabula_sdk::interop::CommittedCellKey,
     /// Value type identifier.
     pub(crate) type_id: tabula_sdk::interop::TypeRef,
     /// Effect kind.
-    pub(crate) kind: PortableStateEffectKindV1,
-    /// Portable value, or `None` for deletes.
+    pub(crate) kind: StateEffectKindBridge,
+    /// Bridge value, or `None` for deletes.
     pub(crate) value: Option<tabula_sdk::interop::PortableValue>,
     /// Logical execution timestamp.
     pub(crate) logical_time: u64,
@@ -139,33 +163,44 @@ pub(crate) struct PortableStateEffectV1 {
     pub(crate) effect_ordinal_in_entry: u32,
 }
 
-/// Portable state property read effect.
+/// Bridge committed-key-native property-query result.
 #[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct PortableStatePropertyEffectV1 {
+pub(crate) struct PropertyQueryResultBridge {
+    /// Bridge typed value produced by the query.
+    pub(crate) value: tabula_sdk::interop::PortableValue,
+    /// Committed key returned by the query when one matched.
+    pub(crate) key: Option<tabula_sdk::interop::CommittedKey>,
+    /// Whether the query resolved to null.
+    pub(crate) is_null: bool,
+}
+
+/// Bridge state property read effect.
+#[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
+pub(crate) struct StatePropertyEffectBridge {
     /// Target table id.
     pub(crate) table: tabula_sdk::interop::TableId,
     /// Target field id.
     pub(crate) field: tabula_sdk::interop::FieldId,
-    /// Resolved structural query.
-    pub(crate) query: tabula_sdk::interop::StatePropertyQuery,
-    /// Portable outputs.
-    pub(crate) outputs: Vec<tabula_sdk::interop::PortableValue>,
+    /// Resolved committed-key structural query.
+    pub(crate) query: tabula_sdk::interop::CommittedPropertyQuery,
+    /// Bridge committed-key-native query result.
+    pub(crate) result: PropertyQueryResultBridge,
     /// Producing IR operation index.
     pub(crate) op_index: usize,
     /// Effect ordinal within the entry.
     pub(crate) effect_ordinal_in_entry: u32,
 }
 
-/// Portable static relation effect.
+/// Bridge static relation effect.
 #[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct PortableRelationEffectV1 {
+pub(crate) struct RelationEffectBridge {
     /// Target relation id.
     pub(crate) relation: tabula_sdk::interop::RelationId,
     /// Whether this was an assertion or evaluation.
-    pub(crate) kind: PortableRelationEffectKindV1,
-    /// Portable relation inputs.
+    pub(crate) kind: RelationEffectKindBridge,
+    /// Bridge relation inputs.
     pub(crate) inputs: Vec<tabula_sdk::interop::PortableValue>,
-    /// Portable relation outputs.
+    /// Bridge relation outputs.
     pub(crate) outputs: Vec<tabula_sdk::interop::PortableValue>,
     /// Producing IR operation index.
     pub(crate) op_index: usize,
@@ -173,23 +208,23 @@ pub(crate) struct PortableRelationEffectV1 {
     pub(crate) effect_ordinal_in_entry: u32,
 }
 
-/// Portable relation effect kind.
+/// Bridge relation effect kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) enum PortableRelationEffectKindV1 {
+pub(crate) enum RelationEffectKindBridge {
     /// Membership assertion.
     Assert,
     /// Output-producing evaluation.
     Eval,
 }
 
-/// Portable native capability effect.
+/// Bridge native capability effect.
 #[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct PortableCapabilityEffectV1 {
+pub(crate) struct CapabilityEffectBridge {
     /// Target capability id.
     pub(crate) capability: tabula_sdk::interop::CapabilityId,
-    /// Portable inputs.
+    /// Bridge inputs.
     pub(crate) inputs: Vec<tabula_sdk::interop::PortableValue>,
-    /// Portable outputs.
+    /// Bridge outputs.
     pub(crate) outputs: Vec<tabula_sdk::interop::PortableValue>,
     /// Producing IR operation index.
     pub(crate) op_index: usize,
@@ -197,12 +232,12 @@ pub(crate) struct PortableCapabilityEffectV1 {
     pub(crate) effect_ordinal_in_entry: u32,
 }
 
-/// Portable application event effect.
+/// Bridge application event effect.
 #[derive(Debug, Clone, PartialEq, Eq, borsh::BorshSerialize, borsh::BorshDeserialize)]
-pub(crate) struct PortableEventEffectV1 {
+pub(crate) struct EventEffectBridge {
     /// Event id.
     pub(crate) event: tabula_sdk::interop::EventId,
-    /// Portable event payload.
+    /// Bridge event payload.
     pub(crate) args: Vec<tabula_sdk::interop::PortableValue>,
     /// Producing IR operation index.
     pub(crate) op_index: usize,
@@ -214,19 +249,23 @@ pub(crate) struct PortableEventEffectV1 {
 pub(crate) fn bridge_from_receipt(
     program_digest: &str,
     receipt: &tabula_sdk::ExecutionReceipt,
-) -> ExecutionReceiptBridgeV1 {
-    ExecutionReceiptBridgeV1 {
+) -> ReceiptBridge {
+    ReceiptBridge {
         program_digest: program_digest.to_string(),
-        snapshot: StateExt::snapshot(&receipt.state_before()).clone(),
+        state_before: receipt.state_before(),
+        snapshot: portable_committed_snapshot(ExecutionReceiptExt::snapshot(receipt)),
         batch: TransactionBatchExt::batch(&receipt.batch()).clone(),
         context: ContextExt::input(&receipt.context()).clone(),
-        state_after: StateExt::snapshot(&receipt.state_after()).clone(),
+        state_after: receipt.state_after(),
+        state_after_snapshot: portable_committed_snapshot(
+            ExecutionReceiptExt::state_after_snapshot(receipt),
+        ),
         journal: portable_journal(ExecutionReceiptExt::journal(receipt)),
     }
 }
 
 /// Serialize one receipt bridge into the canonical binary file format.
-pub(crate) fn encode_receipt_bridge(bridge: &ExecutionReceiptBridgeV1) -> anyhow::Result<Vec<u8>> {
+pub(crate) fn encode_receipt_bridge(bridge: &ReceiptBridge) -> anyhow::Result<Vec<u8>> {
     let mut bytes = RECEIPT_MAGIC.to_vec();
     bytes.extend_from_slice(&RECEIPT_VERSION.to_le_bytes());
     bytes.extend(borsh::to_vec(bridge).context("failed to encode execution receipt bridge")?);
@@ -234,7 +273,7 @@ pub(crate) fn encode_receipt_bridge(bridge: &ExecutionReceiptBridgeV1) -> anyhow
 }
 
 #[cfg(any(test, feature = "prove"))]
-pub(crate) fn decode_receipt_bridge(bytes: &[u8]) -> anyhow::Result<ExecutionReceiptBridgeV1> {
+pub(crate) fn decode_receipt_bridge(bytes: &[u8]) -> anyhow::Result<ReceiptBridge> {
     use anyhow::bail;
     use borsh::BorshDeserialize as _;
 
@@ -250,34 +289,74 @@ pub(crate) fn decode_receipt_bridge(bytes: &[u8]) -> anyhow::Result<ExecutionRec
     if version != RECEIPT_VERSION {
         bail!("unsupported receipt version {version}");
     }
-    ExecutionReceiptBridgeV1::try_from_slice(payload)
+    ReceiptBridge::try_from_slice(payload)
         .context("failed to decode execution receipt bridge payload")
 }
 
 #[cfg(feature = "prove")]
 pub(crate) fn sdk_receipt_from_bridge(
-    bridge: ExecutionReceiptBridgeV1,
+    runtime: &tabula_sdk::interop::TabulaRuntime,
+    bridge: ReceiptBridge,
 ) -> anyhow::Result<tabula_sdk::ExecutionReceipt> {
     Ok(tabula_sdk::interop::execution_receipt_from_raw_parts(
-        #[cfg(feature = "prove")]
-        bridge.program_digest,
-        bridge.snapshot,
-        bridge.batch,
-        bridge.context,
-        bridge.state_after,
-        execution_journal_from_portable(&bridge.journal),
+        tabula_sdk::interop::RawExecutionReceiptParts {
+            #[cfg(feature = "prove")]
+            program_digest: bridge.program_digest,
+            state_before: bridge.state_before,
+            snapshot: committed_snapshot_from_portable(runtime, &bridge.snapshot)?,
+            batch: bridge.batch,
+            context: bridge.context,
+            state_after: bridge.state_after,
+            state_after_snapshot: committed_snapshot_from_portable(
+                runtime,
+                &bridge.state_after_snapshot,
+            )?,
+            journal: execution_journal_from_portable(&bridge.journal),
+        },
     ))
 }
 
-fn portable_journal(journal: &ExecutionJournal) -> PortableExecutionJournalV1 {
-    PortableExecutionJournalV1 {
+fn portable_committed_snapshot(
+    snapshot: &tabula_sdk::interop::CommittedStateSnapshot,
+) -> CommittedStateSnapshotBridge {
+    CommittedStateSnapshotBridge {
+        cells: snapshot
+            .cells()
+            .map(|(key, value)| CommittedStateCellBridge {
+                table: tabula_sdk::interop::TableId(key.table.0),
+                key: key.key.0.clone(),
+                field: tabula_sdk::interop::FieldId(key.col.0),
+                value: value.clone(),
+            })
+            .collect(),
+    }
+}
+
+#[cfg(feature = "prove")]
+fn committed_snapshot_from_portable(
+    runtime: &tabula_sdk::interop::TabulaRuntime,
+    snapshot: &CommittedStateSnapshotBridge,
+) -> anyhow::Result<tabula_sdk::interop::CommittedStateSnapshot> {
+    runtime
+        .decode_committed_snapshot(
+            snapshot
+                .cells
+                .iter()
+                .cloned()
+                .map(|cell| (cell.table, cell.key, cell.field, cell.value)),
+        )
+        .context("failed to validate committed snapshot against the sealed runtime contract")
+}
+
+fn portable_journal(journal: &ExecutionJournal) -> ExecutionJournalBridge {
+    ExecutionJournalBridge {
         state_summary: portable_state_summary(&journal.state_summary),
         txs: journal.txs.iter().map(portable_tx_outcome).collect(),
     }
 }
 
 #[cfg(feature = "prove")]
-fn execution_journal_from_portable(journal: &PortableExecutionJournalV1) -> ExecutionJournal {
+fn execution_journal_from_portable(journal: &ExecutionJournalBridge) -> ExecutionJournal {
     ExecutionJournal {
         state_summary: execution_state_summary_from_portable(&journal.state_summary),
         txs: journal.txs.iter().map(tx_outcome_from_portable).collect(),
@@ -286,7 +365,7 @@ fn execution_journal_from_portable(journal: &PortableExecutionJournalV1) -> Exec
 
 #[cfg(feature = "prove")]
 fn execution_state_summary_from_portable(
-    summary: &PortableExecutionStateSummaryV1,
+    summary: &ExecutionStateSummaryBridge,
 ) -> tabula_sdk::interop::ExecutionStateSummary {
     tabula_sdk::interop::ExecutionStateSummary {
         read_set_old: summary
@@ -303,19 +382,19 @@ fn execution_state_summary_from_portable(
 }
 
 #[cfg(feature = "prove")]
-fn tx_outcome_from_portable(outcome: &PortableTxExecutionOutcomeV1) -> TxExecutionOutcome {
+fn tx_outcome_from_portable(outcome: &TxExecutionOutcomeBridge) -> TxExecutionOutcome {
     match outcome {
-        PortableTxExecutionOutcomeV1::Success(success) => {
+        TxExecutionOutcomeBridge::Success(success) => {
             TxExecutionOutcome::Success(success_from_portable(success))
         }
-        PortableTxExecutionOutcomeV1::Failed(failure) => {
+        TxExecutionOutcomeBridge::Failed(failure) => {
             TxExecutionOutcome::Failed(failure_from_portable(failure))
         }
     }
 }
 
 #[cfg(feature = "prove")]
-fn success_from_portable(success: &PortableSuccessfulTxExecutionV1) -> SuccessfulTxExecution {
+fn success_from_portable(success: &SuccessfulTxExecutionBridge) -> SuccessfulTxExecution {
     SuccessfulTxExecution {
         tx_index: success.tx_index,
         entry_id: success.entry_id,
@@ -348,7 +427,7 @@ fn success_from_portable(success: &PortableSuccessfulTxExecutionV1) -> Successfu
 }
 
 #[cfg(feature = "prove")]
-fn failure_from_portable(failure: &PortableFailedTxExecutionV1) -> FailedTxExecution {
+fn failure_from_portable(failure: &FailedTxExecutionBridge) -> FailedTxExecution {
     FailedTxExecution {
         tx_index: failure.tx_index,
         entry_id: failure.entry_id,
@@ -359,10 +438,10 @@ fn failure_from_portable(failure: &PortableFailedTxExecutionV1) -> FailedTxExecu
 
 #[cfg(feature = "prove")]
 fn state_snapshot_from_portable(
-    snapshot: &PortableStateSnapshotV1,
+    snapshot: &StateSnapshotBridge,
 ) -> tabula_sdk::interop::TypedStateSnapshot {
     tabula_sdk::interop::TypedStateSnapshot {
-        key: snapshot.key,
+        key: snapshot.key.clone(),
         type_id: snapshot.type_id,
         value: snapshot
             .value
@@ -372,23 +451,23 @@ fn state_snapshot_from_portable(
 }
 
 #[cfg(feature = "prove")]
-fn state_write_from_portable(write: &PortableStateWriteV1) -> TypedStateWrite {
+fn state_write_from_portable(write: &StateWriteBridge) -> TypedStateWrite {
     TypedStateWrite {
-        key: write.key,
+        key: write.key.clone(),
         type_id: write.type_id,
         value: write.value.clone().map(|value| portable_to_typed(&value)),
     }
 }
 
 #[cfg(feature = "prove")]
-fn state_effect_from_portable(effect: &PortableStateEffectV1) -> TypedStateEffect {
+fn state_effect_from_portable(effect: &StateEffectBridge) -> TypedStateEffect {
     TypedStateEffect {
-        key: effect.key,
+        key: effect.key.clone(),
         type_id: effect.type_id,
         kind: match effect.kind {
-            PortableStateEffectKindV1::Read => StateEffectKind::Read,
-            PortableStateEffectKindV1::Write => StateEffectKind::Write,
-            PortableStateEffectKindV1::Delete => StateEffectKind::Delete,
+            StateEffectKindBridge::Read => StateEffectKind::Read,
+            StateEffectKindBridge::Write => StateEffectKind::Write,
+            StateEffectKindBridge::Delete => StateEffectKind::Delete,
         },
         value: effect.value.clone().map(|value| portable_to_typed(&value)),
         logical_time: effect.logical_time,
@@ -398,24 +477,24 @@ fn state_effect_from_portable(effect: &PortableStateEffectV1) -> TypedStateEffec
 }
 
 #[cfg(feature = "prove")]
-fn property_effect_from_portable(effect: &PortableStatePropertyEffectV1) -> StatePropertyEffect {
+fn property_effect_from_portable(effect: &StatePropertyEffectBridge) -> StatePropertyEffect {
     StatePropertyEffect {
         table: effect.table,
         field: effect.field,
         query: effect.query.clone(),
-        outputs: effect.outputs.iter().map(portable_to_typed).collect(),
+        result: property_query_result_from_portable(&effect.result),
         op_index: effect.op_index,
         effect_ordinal_in_entry: effect.effect_ordinal_in_entry,
     }
 }
 
 #[cfg(feature = "prove")]
-fn relation_effect_from_portable(effect: &PortableRelationEffectV1) -> RelationEffect {
+fn relation_effect_from_portable(effect: &RelationEffectBridge) -> RelationEffect {
     RelationEffect {
         relation: effect.relation,
         kind: match effect.kind {
-            PortableRelationEffectKindV1::Assert => RelationEffectKind::Assert,
-            PortableRelationEffectKindV1::Eval => RelationEffectKind::Eval,
+            RelationEffectKindBridge::Assert => RelationEffectKind::Assert,
+            RelationEffectKindBridge::Eval => RelationEffectKind::Eval,
         },
         inputs: effect.inputs.iter().map(portable_to_typed).collect(),
         outputs: effect.outputs.iter().map(portable_to_typed).collect(),
@@ -425,7 +504,7 @@ fn relation_effect_from_portable(effect: &PortableRelationEffectV1) -> RelationE
 }
 
 #[cfg(feature = "prove")]
-fn capability_effect_from_portable(effect: &PortableCapabilityEffectV1) -> CapabilityEffect {
+fn capability_effect_from_portable(effect: &CapabilityEffectBridge) -> CapabilityEffect {
     CapabilityEffect {
         capability: effect.capability,
         inputs: effect.inputs.iter().map(portable_to_typed).collect(),
@@ -436,7 +515,7 @@ fn capability_effect_from_portable(effect: &PortableCapabilityEffectV1) -> Capab
 }
 
 #[cfg(feature = "prove")]
-fn event_effect_from_portable(effect: &PortableEventEffectV1) -> TypedEventEffect {
+fn event_effect_from_portable(effect: &EventEffectBridge) -> TypedEventEffect {
     TypedEventEffect {
         event: effect.event,
         args: effect.args.iter().map(portable_to_typed).collect(),
@@ -454,8 +533,8 @@ fn portable_to_typed(
 
 fn portable_state_summary(
     summary: &tabula_sdk::interop::ExecutionStateSummary,
-) -> PortableExecutionStateSummaryV1 {
-    PortableExecutionStateSummaryV1 {
+) -> ExecutionStateSummaryBridge {
+    ExecutionStateSummaryBridge {
         read_set_old: summary
             .read_set_old
             .iter()
@@ -469,9 +548,9 @@ fn portable_state_summary(
     }
 }
 
-fn portable_state_snapshot(snapshot: &TypedStateSnapshot) -> PortableStateSnapshotV1 {
-    PortableStateSnapshotV1 {
-        key: snapshot.key,
+fn portable_state_snapshot(snapshot: &TypedStateSnapshot) -> StateSnapshotBridge {
+    StateSnapshotBridge {
+        key: snapshot.key.clone(),
         type_id: snapshot.type_id,
         value: snapshot
             .value
@@ -480,9 +559,9 @@ fn portable_state_snapshot(snapshot: &TypedStateSnapshot) -> PortableStateSnapsh
     }
 }
 
-fn portable_state_write(write: &TypedStateWrite) -> PortableStateWriteV1 {
-    PortableStateWriteV1 {
-        key: write.key,
+fn portable_state_write(write: &TypedStateWrite) -> StateWriteBridge {
+    StateWriteBridge {
+        key: write.key.clone(),
         type_id: write.type_id,
         value: write
             .value
@@ -491,19 +570,19 @@ fn portable_state_write(write: &TypedStateWrite) -> PortableStateWriteV1 {
     }
 }
 
-fn portable_tx_outcome(outcome: &TxExecutionOutcome) -> PortableTxExecutionOutcomeV1 {
+fn portable_tx_outcome(outcome: &TxExecutionOutcome) -> TxExecutionOutcomeBridge {
     match outcome {
         TxExecutionOutcome::Success(success) => {
-            PortableTxExecutionOutcomeV1::Success(portable_success(success))
+            TxExecutionOutcomeBridge::Success(portable_success(success))
         }
         TxExecutionOutcome::Failed(failure) => {
-            PortableTxExecutionOutcomeV1::Failed(portable_failure(failure))
+            TxExecutionOutcomeBridge::Failed(portable_failure(failure))
         }
     }
 }
 
-fn portable_success(success: &SuccessfulTxExecution) -> PortableSuccessfulTxExecutionV1 {
-    PortableSuccessfulTxExecutionV1 {
+fn portable_success(success: &SuccessfulTxExecution) -> SuccessfulTxExecutionBridge {
+    SuccessfulTxExecutionBridge {
         tx_index: success.tx_index,
         entry_id: success.entry_id,
         state_effects: success
@@ -534,8 +613,8 @@ fn portable_success(success: &SuccessfulTxExecution) -> PortableSuccessfulTxExec
     }
 }
 
-fn portable_failure(failure: &FailedTxExecution) -> PortableFailedTxExecutionV1 {
-    PortableFailedTxExecutionV1 {
+fn portable_failure(failure: &FailedTxExecution) -> FailedTxExecutionBridge {
+    FailedTxExecutionBridge {
         tx_index: failure.tx_index,
         entry_id: failure.entry_id,
         reason: failure.reason.clone(),
@@ -543,14 +622,14 @@ fn portable_failure(failure: &FailedTxExecution) -> PortableFailedTxExecutionV1 
     }
 }
 
-fn portable_state_effect(effect: &TypedStateEffect) -> PortableStateEffectV1 {
-    PortableStateEffectV1 {
-        key: effect.key,
+fn portable_state_effect(effect: &TypedStateEffect) -> StateEffectBridge {
+    StateEffectBridge {
+        key: effect.key.clone(),
         type_id: effect.type_id,
         kind: match effect.kind {
-            StateEffectKind::Read => PortableStateEffectKindV1::Read,
-            StateEffectKind::Write => PortableStateEffectKindV1::Write,
-            StateEffectKind::Delete => PortableStateEffectKindV1::Delete,
+            StateEffectKind::Read => StateEffectKindBridge::Read,
+            StateEffectKind::Write => StateEffectKindBridge::Write,
+            StateEffectKind::Delete => StateEffectKindBridge::Delete,
         },
         value: effect
             .value
@@ -562,28 +641,44 @@ fn portable_state_effect(effect: &TypedStateEffect) -> PortableStateEffectV1 {
     }
 }
 
-fn portable_property_effect(effect: &StatePropertyEffect) -> PortableStatePropertyEffectV1 {
-    PortableStatePropertyEffectV1 {
+fn portable_property_effect(effect: &StatePropertyEffect) -> StatePropertyEffectBridge {
+    StatePropertyEffectBridge {
         table: effect.table,
         field: effect.field,
         query: effect.query.clone(),
-        outputs: effect
-            .outputs
-            .iter()
-            .cloned()
-            .map(tabula_sdk::interop::TypedValue::into_portable)
-            .collect(),
+        result: portable_property_query_result(&effect.result),
         op_index: effect.op_index,
         effect_ordinal_in_entry: effect.effect_ordinal_in_entry,
     }
 }
 
-fn portable_relation_effect(effect: &RelationEffect) -> PortableRelationEffectV1 {
-    PortableRelationEffectV1 {
+#[cfg(feature = "prove")]
+fn property_query_result_from_portable(
+    result: &PropertyQueryResultBridge,
+) -> tabula_sdk::interop::TypedCommittedPropertyQueryResult {
+    tabula_sdk::interop::TypedCommittedPropertyQueryResult {
+        value: portable_to_typed(&result.value),
+        key: result.key.clone(),
+        is_null: result.is_null,
+    }
+}
+
+fn portable_property_query_result(
+    result: &tabula_sdk::interop::TypedCommittedPropertyQueryResult,
+) -> PropertyQueryResultBridge {
+    PropertyQueryResultBridge {
+        value: result.value.clone().into_portable(),
+        key: result.key.clone(),
+        is_null: result.is_null,
+    }
+}
+
+fn portable_relation_effect(effect: &RelationEffect) -> RelationEffectBridge {
+    RelationEffectBridge {
         relation: effect.relation,
         kind: match effect.kind {
-            RelationEffectKind::Assert => PortableRelationEffectKindV1::Assert,
-            RelationEffectKind::Eval => PortableRelationEffectKindV1::Eval,
+            RelationEffectKind::Assert => RelationEffectKindBridge::Assert,
+            RelationEffectKind::Eval => RelationEffectKindBridge::Eval,
         },
         inputs: effect
             .inputs
@@ -602,8 +697,8 @@ fn portable_relation_effect(effect: &RelationEffect) -> PortableRelationEffectV1
     }
 }
 
-fn portable_capability_effect(effect: &CapabilityEffect) -> PortableCapabilityEffectV1 {
-    PortableCapabilityEffectV1 {
+fn portable_capability_effect(effect: &CapabilityEffect) -> CapabilityEffectBridge {
+    CapabilityEffectBridge {
         capability: effect.capability,
         inputs: effect
             .inputs
@@ -622,8 +717,8 @@ fn portable_capability_effect(effect: &CapabilityEffect) -> PortableCapabilityEf
     }
 }
 
-fn portable_event_effect(effect: &TypedEventEffect) -> PortableEventEffectV1 {
-    PortableEventEffectV1 {
+fn portable_event_effect(effect: &TypedEventEffect) -> EventEffectBridge {
+    EventEffectBridge {
         event: effect.event,
         args: effect
             .args
@@ -638,19 +733,23 @@ fn portable_event_effect(effect: &TypedEventEffect) -> PortableEventEffectV1 {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExecutionReceiptBridgeV1, decode_receipt_bridge, encode_receipt_bridge};
-    use super::{PortableExecutionJournalV1, PortableExecutionStateSummaryV1};
+    use super::{
+        CommittedStateSnapshotBridge, ExecutionJournalBridge, ExecutionStateSummaryBridge,
+    };
+    use super::{ReceiptBridge, decode_receipt_bridge, encode_receipt_bridge};
 
     #[test]
     fn receipt_roundtrip_preserves_payload() {
-        let envelope = ExecutionReceiptBridgeV1 {
+        let envelope = ReceiptBridge {
             program_digest: "digest".to_string(),
-            snapshot: tabula_sdk::interop::StateSnapshot::default(),
+            state_before: tabula_sdk::State::default(),
+            snapshot: CommittedStateSnapshotBridge::default(),
             batch: tabula_sdk::interop::EntryBatch::default(),
             context: tabula_sdk::interop::ContextInput::default(),
-            state_after: tabula_sdk::interop::StateSnapshot::default(),
-            journal: PortableExecutionJournalV1 {
-                state_summary: PortableExecutionStateSummaryV1::default(),
+            state_after: tabula_sdk::State::default(),
+            state_after_snapshot: CommittedStateSnapshotBridge::default(),
+            journal: ExecutionJournalBridge {
+                state_summary: ExecutionStateSummaryBridge::default(),
                 txs: Vec::new(),
             },
         };

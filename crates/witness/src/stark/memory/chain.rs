@@ -1,7 +1,9 @@
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
+use tabula_types::NativeKeyPayload;
 
 use super::state::StateColumnRow;
+use tabula_chips::execution::native_key_payload_prefix3;
 use tabula_chips::poseidon::constants::poseidon2_permutation;
 
 pub(super) fn populate_state_chain_accumulators<const W: usize>(rows: &mut [StateColumnRow]) {
@@ -47,11 +49,11 @@ pub(super) fn populate_state_chain_accumulators<const W: usize>(rows: &mut [Stat
 fn hash_chain_step_first<const W: usize>(
     table_id: u32,
     col_id: u16,
-    key: u64,
+    key: NativeKeyPayload,
     value: &[KoalaBear],
 ) -> [KoalaBear; 8] {
-    let key_limbs = decompose_u64(key);
     let mut input = [KoalaBear::ZERO; 16];
+    let key_limbs = native_key_payload_prefix3(&key);
     input[1] = KoalaBear::new(table_id);
     input[2] = KoalaBear::new(col_id as u32);
     input[3] = key_limbs[0];
@@ -66,11 +68,11 @@ fn hash_chain_step_first<const W: usize>(
 
 fn hash_chain_step_cont<const W: usize>(
     prev: [KoalaBear; 8],
-    key: u64,
+    key: NativeKeyPayload,
     value: &[KoalaBear],
 ) -> [KoalaBear; 8] {
-    let key_limbs = decompose_u64(key);
     let mut input = [KoalaBear::ZERO; 16];
+    let key_limbs = native_key_payload_prefix3(&key);
     input[..8].copy_from_slice(&prev);
     input[8] = key_limbs[0];
     input[9] = key_limbs[1];
@@ -80,13 +82,4 @@ fn hash_chain_step_cont<const W: usize>(
     }
     let (_, out) = poseidon2_permutation(input);
     core::array::from_fn(|i| out[i])
-}
-
-fn decompose_u64(v: u64) -> [KoalaBear; 3] {
-    const MASK_30: u64 = (1u64 << 30) - 1;
-    [
-        KoalaBear::new((v & MASK_30) as u32),
-        KoalaBear::new(((v >> 30) & MASK_30) as u32),
-        KoalaBear::new((v >> 60) as u32),
-    ]
 }

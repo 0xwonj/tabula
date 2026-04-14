@@ -7,9 +7,12 @@ use tabula_core::error::TabulaError;
 
 use tabula_stark::trace::{WitnessStore, witness_labels};
 
-use super::paths::{build_smt_paths, smt_table_public_statement, validate_smt_path_shapes};
+use super::paths::{build_smt_paths, smt_table_public_values, validate_smt_path_shapes};
 
-/// Minimal SMT root witness context required by root-tier traces.
+/// SMT-specific lowering context required to build the current root-tier traces.
+///
+/// The runtime-facing root witness surface is generic, but the built-in root
+/// witness lowering still materializes SMT path witnesses here.
 #[derive(Clone, Copy)]
 pub struct SmtRootStoreContext<'a> {
     column_root_bindings: &'a [ColumnRootBinding],
@@ -63,8 +66,7 @@ where
     )?;
     validate_smt_path_shapes(&smt_col_paths, &smt_table_paths)?;
 
-    let statement = smt_table_public_statement(context.old_state_root(), context.new_state_root());
-    let smt_table_pvs = statement.to_field_elements();
+    let smt_table_pvs = smt_table_public_values(context.old_state_root(), context.new_state_root());
 
     let mut store = WitnessStore::new();
     store.put(witness_labels::SMT_COL_PATHS, smt_col_paths);

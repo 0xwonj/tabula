@@ -1,10 +1,17 @@
 #![cfg(feature = "prove")]
 #![allow(missing_docs)]
 
+use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
+use tabula_chips::event_transcript::EVENT_TRANSCRIPT_CHIP_ID;
+use tabula_chips::public_context_transcript::PUBLIC_CONTEXT_TRANSCRIPT_CHIP_ID;
 use tabula_ir as ir;
-use tabula_testing::exec::{context_input, register_program_from_source, state_snapshot, tx_batch};
+use tabula_machine::VerificationError;
+use tabula_testing::exec::{
+    context_input, logical_state_snapshot, register_program_from_source, tx_batch,
+};
 use tabula_testing::runtime::build_runtime;
-use tabula_types::{bool_portable, u64_portable, u64_typed};
+use tabula_types::{bool_portable, i64_portable, u64_portable, u64_typed};
 
 fn proving_source() -> &'static str {
     r#"
@@ -120,6 +127,59 @@ tx register(flag: bool, id: u64) {
 "#
 }
 
+fn bool_key_proving_source() -> &'static str {
+    r#"
+program BoolKeyProof
+
+context {
+  caller: u64;
+  epoch: u64;
+}
+
+state {
+  table flags(key active: bool) {
+    tier: u64 @ssmc;
+    seen: u64 @ssmc;
+  }
+}
+
+tx update(active: bool) {
+  if active {
+    flags[active].tier = caller;
+    flags[active].seen = epoch;
+  } else {
+    flags[active].tier = epoch;
+    flags[active].seen = caller;
+  }
+  return;
+}
+"#
+}
+
+fn i64_key_proving_source() -> &'static str {
+    r#"
+program I64KeyProof
+
+context {
+  caller: u64;
+  epoch: u64;
+}
+
+state {
+  table deltas(key offset: i64) {
+    tier: u64 @ssmc;
+    seen: u64 @ssmc;
+  }
+}
+
+tx update(offset: i64) {
+  deltas[offset].tier = caller;
+  deltas[offset].seen = epoch;
+  return;
+}
+"#
+}
+
 fn context(caller: u64, epoch: u64) -> ir::ContextInput {
     context_input([
         (ir::ContextFieldId(0), u64_portable(caller)),
@@ -129,31 +189,99 @@ fn context(caller: u64, epoch: u64) -> ir::ContextInput {
 
 fn seeded_snapshot(
     registered: &tabula_compiler::RegisteredProgram,
-) -> tabula_runtime::StateSnapshot {
-    state_snapshot(
+) -> tabula_runtime::CommittedStateSnapshot {
+    logical_state_snapshot(
         registered,
         &[
             (
                 tabula_ir::TableId(0),
-                tabula_core::RowKey(0),
+                vec![u64_portable(0)],
                 tabula_ir::FieldId(0),
                 u64_portable(0),
             ),
             (
                 tabula_ir::TableId(0),
-                tabula_core::RowKey(0),
+                vec![u64_portable(0)],
                 tabula_ir::FieldId(1),
                 u64_portable(0),
             ),
             (
                 tabula_ir::TableId(0),
-                tabula_core::RowKey(1),
+                vec![u64_portable(1)],
                 tabula_ir::FieldId(0),
                 u64_portable(0),
             ),
             (
                 tabula_ir::TableId(0),
-                tabula_core::RowKey(1),
+                vec![u64_portable(1)],
+                tabula_ir::FieldId(1),
+                u64_portable(0),
+            ),
+        ],
+    )
+}
+
+fn bool_key_seeded_snapshot(
+    registered: &tabula_compiler::RegisteredProgram,
+) -> tabula_runtime::CommittedStateSnapshot {
+    logical_state_snapshot(
+        registered,
+        &[
+            (
+                tabula_ir::TableId(0),
+                vec![bool_portable(false)],
+                tabula_ir::FieldId(0),
+                u64_portable(0),
+            ),
+            (
+                tabula_ir::TableId(0),
+                vec![bool_portable(false)],
+                tabula_ir::FieldId(1),
+                u64_portable(0),
+            ),
+            (
+                tabula_ir::TableId(0),
+                vec![bool_portable(true)],
+                tabula_ir::FieldId(0),
+                u64_portable(0),
+            ),
+            (
+                tabula_ir::TableId(0),
+                vec![bool_portable(true)],
+                tabula_ir::FieldId(1),
+                u64_portable(0),
+            ),
+        ],
+    )
+}
+
+fn i64_key_seeded_snapshot(
+    registered: &tabula_compiler::RegisteredProgram,
+) -> tabula_runtime::CommittedStateSnapshot {
+    logical_state_snapshot(
+        registered,
+        &[
+            (
+                tabula_ir::TableId(0),
+                vec![i64_portable(-1)],
+                tabula_ir::FieldId(0),
+                u64_portable(0),
+            ),
+            (
+                tabula_ir::TableId(0),
+                vec![i64_portable(-1)],
+                tabula_ir::FieldId(1),
+                u64_portable(0),
+            ),
+            (
+                tabula_ir::TableId(0),
+                vec![i64_portable(1)],
+                tabula_ir::FieldId(0),
+                u64_portable(0),
+            ),
+            (
+                tabula_ir::TableId(0),
+                vec![i64_portable(1)],
                 tabula_ir::FieldId(1),
                 u64_portable(0),
             ),
@@ -181,6 +309,42 @@ fn choose_entry_id(runtime: &tabula_runtime::TabulaRuntime) -> tabula_ir::EntryI
         .find(|entry| entry.symbol == "choose")
         .map(|entry| entry.id)
         .expect("choose entry")
+}
+
+fn update_entry_id(runtime: &tabula_runtime::TabulaRuntime) -> tabula_ir::EntryId {
+    runtime
+        .execution_program()
+        .program()
+        .entries
+        .iter()
+        .find(|entry| entry.symbol == "update")
+        .map(|entry| entry.id)
+        .expect("update entry")
+}
+
+fn prove_native_batch() -> (
+    tabula_runtime::TabulaRuntime,
+    tabula_runtime::VerifiedResult,
+) {
+    let registered = register_program_from_source(proving_source());
+    let snapshot = seeded_snapshot(&registered);
+    let runtime = build_runtime(registered);
+    let register = register_entry_id(&runtime);
+    let batch = tx_batch(vec![
+        ir::EntryCall {
+            entry_id: register,
+            params: vec![bool_portable(false), u64_portable(1)],
+        },
+        ir::EntryCall {
+            entry_id: register,
+            params: vec![bool_portable(true), u64_portable(0)],
+        },
+    ]);
+    let context = context(7, 99);
+    let proved = runtime
+        .execute_and_prove(&snapshot, &batch, &context)
+        .expect("prove native batch");
+    (runtime, proved)
 }
 
 #[test]
@@ -211,6 +375,160 @@ fn query_executes_but_remains_execution_only() {
     assert_eq!(false_result.returns, vec![u64_typed(5)]);
     assert!(true_result.state_effects.is_empty());
     assert!(false_result.event_effects.is_empty());
+}
+
+#[test]
+fn unary_bool_key_batch_executes_projects_and_proves() {
+    let registered = register_program_from_source(bool_key_proving_source());
+    let snapshot = bool_key_seeded_snapshot(&registered);
+    let runtime = build_runtime(registered);
+    let update = update_entry_id(&runtime);
+    let batch = tx_batch(vec![
+        ir::EntryCall {
+            entry_id: update,
+            params: vec![bool_portable(false)],
+        },
+        ir::EntryCall {
+            entry_id: update,
+            params: vec![bool_portable(true)],
+        },
+    ]);
+    let ctx = context(7, 99);
+
+    let receipt = runtime
+        .execute_batch_receipt(&snapshot, &batch, &ctx)
+        .expect("execute bool-key batch");
+    let projected = runtime
+        .project_logical_state(&receipt.state_after)
+        .expect("project logical bool-key state");
+
+    for expected in [
+        (
+            tabula_ir::TableId(0),
+            vec![bool_portable(false)],
+            tabula_ir::FieldId(0),
+            u64_portable(99),
+        ),
+        (
+            tabula_ir::TableId(0),
+            vec![bool_portable(false)],
+            tabula_ir::FieldId(1),
+            u64_portable(7),
+        ),
+        (
+            tabula_ir::TableId(0),
+            vec![bool_portable(true)],
+            tabula_ir::FieldId(0),
+            u64_portable(7),
+        ),
+        (
+            tabula_ir::TableId(0),
+            vec![bool_portable(true)],
+            tabula_ir::FieldId(1),
+            u64_portable(99),
+        ),
+    ] {
+        assert!(
+            projected.contains(&expected),
+            "missing projected logical state cell: {expected:?}; projected={projected:?}"
+        );
+    }
+
+    let verified = runtime
+        .prove_and_verify(&tabula_runtime::ProveInput {
+            snapshot: &snapshot,
+            batch: &batch,
+            context: &ctx,
+            executed: &receipt.journal,
+        })
+        .expect("prove and verify bool-key batch");
+
+    assert!(verified.verified);
+    assert_ne!(
+        verified.proof.public_statement.old_root.to_bytes(),
+        [0u8; 32]
+    );
+    assert_ne!(
+        verified.proof.public_statement.new_root.to_bytes(),
+        [0u8; 32]
+    );
+}
+
+#[test]
+fn unary_i64_key_batch_executes_projects_and_proves() {
+    let registered = register_program_from_source(i64_key_proving_source());
+    let snapshot = i64_key_seeded_snapshot(&registered);
+    let runtime = build_runtime(registered);
+    let update = update_entry_id(&runtime);
+    let batch = tx_batch(vec![
+        ir::EntryCall {
+            entry_id: update,
+            params: vec![i64_portable(-1)],
+        },
+        ir::EntryCall {
+            entry_id: update,
+            params: vec![i64_portable(1)],
+        },
+    ]);
+    let ctx = context(7, 99);
+
+    let receipt = runtime
+        .execute_batch_receipt(&snapshot, &batch, &ctx)
+        .expect("execute i64-key batch");
+    let projected = runtime
+        .project_logical_state(&receipt.state_after)
+        .expect("project logical i64-key state");
+
+    for expected in [
+        (
+            tabula_ir::TableId(0),
+            vec![i64_portable(-1)],
+            tabula_ir::FieldId(0),
+            u64_portable(7),
+        ),
+        (
+            tabula_ir::TableId(0),
+            vec![i64_portable(-1)],
+            tabula_ir::FieldId(1),
+            u64_portable(99),
+        ),
+        (
+            tabula_ir::TableId(0),
+            vec![i64_portable(1)],
+            tabula_ir::FieldId(0),
+            u64_portable(7),
+        ),
+        (
+            tabula_ir::TableId(0),
+            vec![i64_portable(1)],
+            tabula_ir::FieldId(1),
+            u64_portable(99),
+        ),
+    ] {
+        assert!(
+            projected.contains(&expected),
+            "missing projected logical state cell: {expected:?}; projected={projected:?}"
+        );
+    }
+
+    let verified = runtime
+        .prove_and_verify(&tabula_runtime::ProveInput {
+            snapshot: &snapshot,
+            batch: &batch,
+            context: &ctx,
+            executed: &receipt.journal,
+        })
+        .expect("prove and verify i64-key batch");
+
+    assert!(verified.verified);
+    assert_ne!(
+        verified.proof.public_statement.old_root.to_bytes(),
+        [0u8; 32]
+    );
+    assert_ne!(
+        verified.proof.public_statement.new_root.to_bytes(),
+        [0u8; 32]
+    );
 }
 
 #[test]
@@ -251,27 +569,23 @@ fn tx_batch_proves_and_verifies_mixed_surface() {
         .expect("prove and verify");
 
     assert!(verified.verified);
-    assert_eq!(verified.statement.public.public_context.len(), 2);
-    assert_ne!(verified.statement.public.event_digest, [0u8; 32]);
-    assert_eq!(
-        verified.statement.old_state_root,
-        verified.proof.statement.old_root.to_bytes()
-    );
-    assert_eq!(
-        verified.statement.new_state_root,
-        verified.proof.statement.new_root.to_bytes()
-    );
-    assert_eq!(
-        verified.proof.statement_digest,
+    assert_ne!(
         verified
-            .statement
-            .statement_hash_bytes()
-            .expect("statement hash"),
+            .proof
+            .public_statement
+            .public_context_digest
+            .to_bytes(),
+        [0u8; 32]
     );
+    assert_ne!(
+        verified.proof.public_statement.event_digest.to_bytes(),
+        [0u8; 32]
+    );
+    assert_ne!(verified.proof.binding_digest, [0u8; 32]);
 }
 
 #[test]
-fn statement_hash_changes_with_batch_context_and_binding() {
+fn binding_digest_changes_with_batch_context_and_binding() {
     let registered = register_program_from_source(proving_source());
     let snapshot = seeded_snapshot(&registered);
     let runtime = build_runtime(registered);
@@ -297,37 +611,18 @@ fn statement_hash_changes_with_batch_context_and_binding() {
         .execute_and_prove(&snapshot, &txs_a, &context_b)
         .expect("prove c");
 
+    assert_ne!(prove_a.proof.binding_digest, prove_b.proof.binding_digest);
     assert_ne!(
-        prove_a
-            .statement
-            .statement_hash_bytes()
-            .expect("statement hash a"),
-        prove_b
-            .statement
-            .statement_hash_bytes()
-            .expect("statement hash b"),
+        prove_a.proof.public_statement.event_digest,
+        prove_b.proof.public_statement.event_digest
     );
+    assert_ne!(prove_a.proof.binding_digest, prove_c.proof.binding_digest);
     assert_ne!(
-        prove_a.statement.public.event_digest,
-        prove_b.statement.public.event_digest
-    );
-    assert_ne!(
-        prove_a
-            .statement
-            .statement_hash_bytes()
-            .expect("statement hash a"),
-        prove_c
-            .statement
-            .statement_hash_bytes()
-            .expect("statement hash c"),
-    );
-    assert_ne!(
-        prove_a.statement.public.public_context,
-        prove_c.statement.public.public_context,
+        prove_a.proof.public_statement.public_context_digest,
+        prove_c.proof.public_statement.public_context_digest
     );
 
     let alt_registered = register_program_from_source(proving_source_alt_scheme());
-    let alt_binding = alt_registered.binding().clone();
     let alt_snapshot = seeded_snapshot(&alt_registered);
     let alt_runtime = build_runtime(alt_registered);
     let alt_register = register_entry_id(&alt_runtime);
@@ -339,15 +634,152 @@ fn statement_hash_changes_with_batch_context_and_binding() {
         .execute_and_prove(&alt_snapshot, &alt_txs, &context_a)
         .expect("prove alt");
 
-    assert_ne!(prove_a.statement.binding, alt_binding);
     assert_ne!(
-        prove_a
-            .statement
-            .statement_hash_bytes()
-            .expect("statement hash a"),
-        alt_proved
-            .statement
-            .statement_hash_bytes()
-            .expect("statement hash alt"),
+        prove_a.proof.binding_digest,
+        alt_proved.proof.binding_digest
+    );
+}
+
+#[test]
+fn verifier_rejects_missing_column_proof_manifest_entry() {
+    let (runtime, mut proved) = prove_native_batch();
+    proved.proof.columns.pop();
+
+    let err = runtime
+        .verify_public_statement(&proved.proof, &proved.proof.public_statement)
+        .expect_err("missing column proof must fail verification");
+    assert!(matches!(
+        err,
+        tabula_runtime::RuntimeError::Verification(VerificationError::ColumnProofCountMismatch {
+            expected: 2,
+            got: 1
+        })
+    ));
+}
+
+#[test]
+fn verifier_rejects_permuted_column_proof_manifest_order() {
+    let (runtime, mut proved) = prove_native_batch();
+    proved.proof.columns.swap(0, 1);
+
+    let err = runtime
+        .verify_public_statement(&proved.proof, &proved.proof.public_statement)
+        .expect_err("permuted column proof order must fail verification");
+    assert!(matches!(
+        err,
+        tabula_runtime::RuntimeError::Verification(VerificationError::ColumnOrderMismatch {
+            index: 0,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn verifier_rejects_duplicate_column_proof_manifest_entry() {
+    let (runtime, mut proved) = prove_native_batch();
+    proved.proof.columns[1].key = proved.proof.columns[0].key;
+
+    let err = runtime
+        .verify_public_statement(&proved.proof, &proved.proof.public_statement)
+        .expect_err("duplicate column proof manifest entry must fail verification");
+    assert!(matches!(
+        err,
+        tabula_runtime::RuntimeError::Verification(VerificationError::ColumnOrderMismatch {
+            index: 1,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn verifier_rejects_wrong_public_context_digest() {
+    let (runtime, proved) = prove_native_batch();
+    let mut wrong_statement = proved.proof.public_statement.clone();
+    wrong_statement.public_context_digest.0[0] += KoalaBear::ONE;
+
+    let err = runtime
+        .verify_public_statement(&proved.proof, &wrong_statement)
+        .expect_err("wrong public-context digest must fail verification");
+    assert!(
+        err.to_string()
+            .contains("proof binding digest does not match the artifact-bound public statement"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn verifier_rejects_wrong_applied_tx_digest() {
+    let (runtime, proved) = prove_native_batch();
+    let mut wrong_statement = proved.proof.public_statement.clone();
+    wrong_statement.applied_tx_digest.0[0] += KoalaBear::ONE;
+
+    let err = runtime
+        .verify_public_statement(&proved.proof, &wrong_statement)
+        .expect_err("wrong applied tx digest must fail verification");
+    assert!(
+        err.to_string()
+            .contains("proof binding digest does not match the artifact-bound public statement"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn verifier_rejects_wrong_event_digest() {
+    let (runtime, proved) = prove_native_batch();
+    let mut wrong_statement = proved.proof.public_statement.clone();
+    wrong_statement.event_digest.0[0] += KoalaBear::ONE;
+
+    let err = runtime
+        .verify_public_statement(&proved.proof, &wrong_statement)
+        .expect_err("wrong event digest must fail verification");
+    assert!(
+        err.to_string()
+            .contains("proof binding digest does not match the artifact-bound public statement"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn verifier_rejects_mutated_public_context_chip_digest() {
+    let (runtime, mut proved) = prove_native_batch();
+    let opening = proved
+        .proof
+        .execution
+        .chip_openings
+        .iter_mut()
+        .find(|opening| opening.chip_id == PUBLIC_CONTEXT_TRANSCRIPT_CHIP_ID)
+        .expect("public-context transcript chip opening");
+    opening.public_values[0] += KoalaBear::ONE;
+
+    let err = runtime
+        .verify_public_statement(&proved.proof, &proved.proof.public_statement)
+        .expect_err("mutated public-context chip digest must fail verification");
+    assert!(
+        err.to_string().contains(
+            "public-context transcript chip digest does not match the proved public statement"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn verifier_rejects_mutated_event_chip_digest() {
+    let (runtime, mut proved) = prove_native_batch();
+    let opening = proved
+        .proof
+        .execution
+        .chip_openings
+        .iter_mut()
+        .find(|opening| opening.chip_id == EVENT_TRANSCRIPT_CHIP_ID)
+        .expect("event transcript chip opening");
+    opening.public_values[0] += KoalaBear::ONE;
+
+    let err = runtime
+        .verify_public_statement(&proved.proof, &proved.proof.public_statement)
+        .expect_err("mutated event chip digest must fail verification");
+    assert!(
+        err.to_string()
+            .contains("event transcript chip digest does not match the proved public statement"),
+        "unexpected error: {err}"
     );
 }

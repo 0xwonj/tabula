@@ -16,11 +16,22 @@ use tabula_stark::air::columns::borrow_cols;
 use tabula_stark::chips::ChipId;
 
 use crate::ChipSpec;
+use tabula_types::NATIVE_KEY_PAYLOAD_WIDTH;
 
 use super::columns::{
     DIGEST_WIDTH, HI_REGION_ROOT_POWER, LOW_REGION_SWITCH_POWER, SmtStateShardCols,
     smt_state_shard_width,
 };
+
+fn key_payload_exprs<AB: InteractionAirBuilder, const W: usize>(
+    local: &SmtStateShardCols<AB::Var, W>,
+) -> Vec<AB::Expr> {
+    let mut payload = vec![AB::Expr::ZERO; NATIVE_KEY_PAYLOAD_WIDTH];
+    payload[0] = local.key.limbs.limb0.into();
+    payload[1] = local.key.limbs.limb1.into();
+    payload[2] = local.key.limbs.limb2.into();
+    payload
+}
 
 /// Per-column state shard AIR chip for SMT-backed columns.
 #[derive(Debug, Clone)]
@@ -106,7 +117,7 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for SmtStateShardChip<W>
         builder.receive_base_state_entry(
             local.table_id.into(),
             local.col_id.into(),
-            &local.key.limbs,
+            &key_payload_exprs::<AB, W>(local),
             &local.old_val,
             local.old_is_null.into(),
             is_real.clone() * local.is_leaf.into() * local.read_mult_witness.into(),
@@ -114,7 +125,7 @@ impl<AB: InteractionAirBuilder, const W: usize> Air<AB> for SmtStateShardChip<W>
         builder.receive_coalesced_write(
             local.table_id.into(),
             local.col_id.into(),
-            &local.key.limbs,
+            &key_payload_exprs::<AB, W>(local),
             &local.new_val,
             local.new_is_null.into(),
             is_real.clone() * local.is_leaf.into() * local.write_mult_witness.into(),

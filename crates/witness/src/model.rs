@@ -1,15 +1,16 @@
 //! Logical shared input types for witness-owned proof preparation.
 
-use tabula_core::{CellKey, EncodingProfileId, LogicalTime, RowKey, TypeId};
+use tabula_core::{
+    CommittedCellKey, CommittedKey, CommittedPropertyQuery, EncodingProfileId, LogicalTime, TypeId,
+};
 use tabula_ir as ir;
-use tabula_ir::StatePropertyQuery;
-use tabula_types::{TypedPropertyQueryResult, TypedValue};
+use tabula_types::{TypedCommittedPropertyQueryResult, TypedValue};
 
-/// Logical committed-state entry for one row of a committed column.
+/// Logical committed-state entry for one committed key of a column.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommittedEntry {
-    /// Row key.
-    pub row: RowKey,
+    /// Committed key.
+    pub key: CommittedKey,
     /// Logical cell value.
     pub value: TypedValue,
     /// Whether the entry is absent in committed state.
@@ -20,7 +21,7 @@ pub struct CommittedEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InitCell {
     /// The cell address.
-    pub key: CellKey,
+    pub key: CommittedCellKey,
     /// The logical cell value.
     pub value: TypedValue,
     /// Whether the cell is absent in committed state.
@@ -31,7 +32,7 @@ pub struct InitCell {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccessEvent {
     /// The cell address.
-    pub key: CellKey,
+    pub key: CommittedCellKey,
     /// Logical time of this access.
     pub time: LogicalTime,
     /// Whether this event is a write.
@@ -46,11 +47,11 @@ pub struct AccessEvent {
     pub effect_ordinal_in_tx: u32,
 }
 
-/// Final coalesced write for one row of a committed column.
+/// Final coalesced write for one committed key of a column.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ColumnWrite {
-    /// Target row key.
-    pub row: RowKey,
+    /// Target committed key.
+    pub key: CommittedKey,
     /// Final logical value. `None` means delete / write null.
     pub value: Option<TypedValue>,
 }
@@ -58,10 +59,10 @@ pub struct ColumnWrite {
 /// Logical property-read claim extracted from execution for proof preparation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PropertyReadClaim {
-    /// Original structural query.
-    pub query: StatePropertyQuery,
+    /// Canonical committed query.
+    pub query: CommittedPropertyQuery,
     /// Execution result claimed for this query.
-    pub result: TypedPropertyQueryResult,
+    pub result: TypedCommittedPropertyQueryResult,
 }
 
 /// Relation proof claim kind extracted from execution.

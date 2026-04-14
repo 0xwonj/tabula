@@ -2,7 +2,8 @@
 
 use p3_koala_bear::KoalaBear;
 
-use tabula_core::{ColId, RowKey, TableId};
+use tabula_core::{ColId, TableId};
+use tabula_types::NativeKeyPayload;
 
 use crate::primitives::FieldHasher;
 use crate::schemes::ssmc::{SsmcCommitment, SsmcEntry, SsmcList};
@@ -14,7 +15,7 @@ use crate::schemes::ssmc::{SsmcCommitment, SsmcEntry, SsmcList};
 /// `writes` is a sorted list of (key, Option<value>). `None` value = delete.
 pub(crate) fn merge<H: FieldHasher<F = KoalaBear>>(
     old: &SsmcList,
-    writes: &[(RowKey, Option<Vec<KoalaBear>>)],
+    writes: &[(NativeKeyPayload, Option<Vec<KoalaBear>>)],
     table: TableId,
     col: ColId,
     hasher: &H,
@@ -89,14 +90,23 @@ mod tests {
     use super::*;
     use crate::primitives::MockFieldHasher;
     use p3_koala_bear::KoalaBear;
+    use tabula_types::zero_key_payload;
 
     fn val(n: u32) -> Vec<KoalaBear> {
         vec![KoalaBear::new(n)]
     }
 
-    fn entry(key: u64, n: u32) -> SsmcEntry {
+    fn key(n: u64) -> NativeKeyPayload {
+        let mut payload = zero_key_payload();
+        payload[0] = KoalaBear::new((n >> 60) as u32);
+        payload[1] = KoalaBear::new(((n >> 30) & 0x3fff_ffff) as u32);
+        payload[2] = KoalaBear::new((n & 0x3fff_ffff) as u32);
+        payload
+    }
+
+    fn entry(key_num: u64, n: u32) -> SsmcEntry {
         SsmcEntry {
-            key: RowKey(key),
+            key: key(key_num),
             value: val(n),
         }
     }
@@ -106,7 +116,7 @@ mod tests {
         let h = MockFieldHasher;
         let old =
             SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 10), entry(1, 20)]).unwrap();
-        let writes: Vec<(RowKey, Option<Vec<KoalaBear>>)> = vec![];
+        let writes: Vec<(NativeKeyPayload, Option<Vec<KoalaBear>>)> = vec![];
         let (new_list, _) = merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 2);
         assert_eq!(new_list.entries()[0].value, val(10));
@@ -117,18 +127,18 @@ mod tests {
     fn merge_write_only() {
         let h = MockFieldHasher;
         let old = SsmcList::new(TableId(1), ColId(0));
-        let writes = vec![(RowKey(0), Some(val(10))), (RowKey(1), Some(val(20)))];
+        let writes = vec![(key(0), Some(val(10))), (key(1), Some(val(20)))];
         let (new_list, _) = merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 2);
-        assert_eq!(new_list.entries()[0].key, RowKey(0));
-        assert_eq!(new_list.entries()[1].key, RowKey(1));
+        assert_eq!(new_list.entries()[0].key, key(0));
+        assert_eq!(new_list.entries()[1].key, key(1));
     }
 
     #[test]
     fn merge_both_overwrites() {
         let h = MockFieldHasher;
         let old = SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 10)]).unwrap();
-        let writes = vec![(RowKey(0), Some(val(99)))];
+        let writes = vec![(key(0), Some(val(99)))];
         let (new_list, _) = merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 1);
         assert_eq!(new_list.entries()[0].value, val(99));
@@ -138,7 +148,7 @@ mod tests {
     fn merge_delete() {
         let h = MockFieldHasher;
         let old = SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 10)]).unwrap();
-        let writes: Vec<(RowKey, Option<Vec<KoalaBear>>)> = vec![(RowKey(0), None)];
+        let writes: Vec<(NativeKeyPayload, Option<Vec<KoalaBear>>)> = vec![(key(0), None)];
         let (new_list, _) = merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 0);
     }
@@ -153,17 +163,17 @@ mod tests {
         )
         .unwrap();
         let writes = vec![
-            (RowKey(2), Some(val(20))), // write_only: new key
-            (RowKey(3), Some(val(33))), // both: overwrite
-            (RowKey(5), None),          // both: delete
-            (RowKey(7), Some(val(70))), // write_only: new key
+            (key(2), Some(val(20))), // write_only: new key
+            (key(3), Some(val(33))), // both: overwrite
+            (key(5), None),          // both: delete
+            (key(7), Some(val(70))), // write_only: new key
         ];
         let (new_list, _) = merge(&old, &writes, TableId(1), ColId(0), &h);
 
         // New list: [1->10, 2->20, 3->33, 7->70] (key 5 deleted)
         assert_eq!(new_list.len(), 4);
-        let keys: Vec<u64> = new_list.entries().iter().map(|e| e.key.0).collect();
-        assert_eq!(keys, vec![1, 2, 3, 7]);
+        let keys: Vec<NativeKeyPayload> = new_list.entries().iter().map(|e| e.key).collect();
+        assert_eq!(keys, vec![key(1), key(2), key(3), key(7)]);
     }
 
     #[test]
@@ -171,17 +181,17 @@ mod tests {
         let h = MockFieldHasher;
         let old =
             SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(10, 1), entry(30, 3)]).unwrap();
-        let writes = vec![(RowKey(5), Some(val(5))), (RowKey(20), Some(val(2)))];
+        let writes = vec![(key(5), Some(val(5))), (key(20), Some(val(2)))];
         let (new_list, _) = merge(&old, &writes, TableId(1), ColId(0), &h);
-        let keys: Vec<u64> = new_list.entries().iter().map(|e| e.key.0).collect();
-        assert_eq!(keys, vec![5, 10, 20, 30]);
+        let keys: Vec<NativeKeyPayload> = new_list.entries().iter().map(|e| e.key).collect();
+        assert_eq!(keys, vec![key(5), key(10), key(20), key(30)]);
     }
 
     #[test]
     fn merge_empty_old_plus_writes() {
         let h = MockFieldHasher;
         let old = SsmcList::new(TableId(1), ColId(0));
-        let writes = vec![(RowKey(0), Some(val(1))), (RowKey(1), Some(val(2)))];
+        let writes = vec![(key(0), Some(val(1))), (key(1), Some(val(2)))];
         let (new_list, _) = merge(&old, &writes, TableId(1), ColId(0), &h);
         assert_eq!(new_list.len(), 2);
     }
@@ -191,7 +201,7 @@ mod tests {
         let h = MockFieldHasher;
         let old =
             SsmcList::from_sorted(TableId(1), ColId(0), vec![entry(0, 1), entry(1, 2)]).unwrap();
-        let writes: Vec<(RowKey, Option<Vec<KoalaBear>>)> = vec![];
+        let writes: Vec<(NativeKeyPayload, Option<Vec<KoalaBear>>)> = vec![];
         let (new_list, c_new) = merge(&old, &writes, TableId(1), ColId(0), &h);
         // New list should equal old list.
         assert_eq!(new_list.len(), old.len());
