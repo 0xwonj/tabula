@@ -9,8 +9,8 @@ use super::ProveOutput;
 #[cfg(feature = "verify")]
 use super::VerifyOutput;
 use super::{
-    CheckOutput, EnvDoctorOutput, ExecutionReport, QueryRunOutput, SchemaOutput,
-    StateInspectOutput, TxOutcomeStatus, ValueOutput,
+    CheckOutput, ExecutionReport, QueryRunOutput, SchemaOutput, StateInspectOutput,
+    TxOutcomeStatus, ValueOutput,
 };
 
 /// Render `check` output for humans.
@@ -199,48 +199,6 @@ pub(crate) fn render_state(output: &StateInspectOutput) -> String {
     let mut text = String::new();
     let _ = writeln!(&mut text, "State: {} cell(s)", output.cell_count);
     append_state_cells(&mut text, output, false);
-    text.trim_end().to_string()
-}
-
-/// Render `env doctor` output for humans.
-pub(crate) fn render_env_doctor(output: &EnvDoctorOutput) -> String {
-    let mut text = String::new();
-    let _ = writeln!(
-        &mut text,
-        "Config: {}",
-        output.config_path.as_deref().unwrap_or("(none)")
-    );
-    let _ = writeln!(&mut text, "SDK ready: {}", output.sdk_ready);
-    if let Some(error) = &output.build_error {
-        let _ = writeln!(&mut text, "Build error: {error}");
-    }
-    let _ = writeln!(
-        &mut text,
-        "Features: verify={}, prove={}",
-        output.verify_feature_enabled, output.prove_feature_enabled
-    );
-    if output.extensions.is_empty() {
-        let _ = writeln!(&mut text, "Extensions: (none)");
-    } else {
-        let _ = writeln!(&mut text, "Extensions");
-        for extension in &output.extensions {
-            let _ = writeln!(&mut text, "  {} ({})", extension.name, extension.path);
-            if !extension.capability_paths.is_empty() {
-                let _ = writeln!(
-                    &mut text,
-                    "    capabilities: {}",
-                    extension.capability_paths.join(", ")
-                );
-            }
-            if !extension.unsupported_entries.is_empty() {
-                let _ = writeln!(
-                    &mut text,
-                    "    unsupported: {}",
-                    extension.unsupported_entries.join(", ")
-                );
-            }
-        }
-    }
     text.trim_end().to_string()
 }
 

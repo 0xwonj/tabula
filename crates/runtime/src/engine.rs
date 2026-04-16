@@ -170,14 +170,20 @@ impl CommittedStateSnapshot {
                 ),
             });
         }
-        self.cells.insert(
-            CommittedCellKey {
-                table: table.into(),
-                col: field.into(),
-                key: committed_key,
-            },
-            value,
-        );
+        let cell_key = CommittedCellKey {
+            table: table.into(),
+            col: field.into(),
+            key: committed_key,
+        };
+        if self.cells.contains_key(&cell_key) {
+            return Err(RuntimeError::ValidationFailed {
+                detail: format!(
+                    "duplicate logical state cell {}.{} key {} in external state payload",
+                    cell_key.table.0, cell_key.col.0, cell_key.key
+                ),
+            });
+        }
+        self.cells.insert(cell_key, value);
         Ok(())
     }
 
@@ -2095,6 +2101,34 @@ tx scan(id: u64) {
             error
                 .to_string()
                 .contains("duplicate committed cell 0.0 key"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn logical_state_materialization_rejects_duplicate_cells() {
+        let (_registered, runtime) = runtime_for_source(relation_source());
+        let error = runtime
+            .materialize_logical_state([
+                (
+                    ir::TableId(0),
+                    vec![u64_portable(0)],
+                    ir::FieldId(0),
+                    u64_portable(1),
+                ),
+                (
+                    ir::TableId(0),
+                    vec![u64_portable(0)],
+                    ir::FieldId(0),
+                    u64_portable(2),
+                ),
+            ])
+            .expect_err("duplicate logical cells must fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate logical state cell 0.0 key"),
             "unexpected error: {error}"
         );
     }

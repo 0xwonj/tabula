@@ -7,7 +7,7 @@ use crate::output::{query_run_output, render_query};
 
 /// Execute one read-only query against the supplied state snapshot.
 pub(crate) fn run(ctx: &AppContext, args: &QueryArgs) -> anyhow::Result<()> {
-    let loaded = load_program(ctx.sdk()?, &args.program)?;
+    let loaded = load_program(ctx.sdk(), &args.program)?;
     let state = load_state(&args.state)?;
     let context = load_context(args.context.as_deref())?;
     let query = loaded.program.query(&args.query)?;

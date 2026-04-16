@@ -47,9 +47,5 @@ tabula-testing = { workspace = true }
 workspace = true
 
 [[example]]
-name = "dex"
-required-features = ["compile", "execute"]
-
-[[example]]
 name = "membership"
 required-features = ["compile", "execute"]

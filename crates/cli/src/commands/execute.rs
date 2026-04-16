@@ -10,7 +10,7 @@ use crate::output::{execution_report, render_execution};
 
 /// Execute one transaction batch against the supplied state snapshot.
 pub(crate) fn run(ctx: &AppContext, args: &ExecuteArgs) -> anyhow::Result<()> {
-    let loaded = load_program(ctx.sdk()?, &args.program)?;
+    let loaded = load_program(ctx.sdk(), &args.program)?;
     let state = load_state(&args.state)?;
     let batch = load_batch(&args.batch)?;
     let context = load_context(args.context.as_deref())?;

@@ -1,22 +1,25 @@
-# Documentation
+# Internal Documentation
 
-This directory is for documentation that helps maintainers, contributors, and
-AI agents understand the project without guessing which writing is current,
-which writing is exploratory, and which writing is only historical.
+This directory is maintainer-facing navigation for the repository's internal
+docs tree.
 
-The goal is not to keep a perfect index of every document. The goal is to keep
-document authority clear.
+Artifact reviewers should start with [`../README.md`](../README.md),
+[`../ARTIFACT.md`](../ARTIFACT.md), and
+[`../crates/cli/README.md`](../crates/cli/README.md). Most material under
+`docs/` is supporting or exploratory and is not part of the narrow public
+artifact path.
 
-## Read In This Order
+## Maintainer Read Order
 
-If you are trying to understand the current project, use this order:
+If you are maintaining or extending the codebase, use this order:
 
-1. [`../README.md`](../README.md)
-   Repository overview, workspace shape, and day-to-day entry points.
-2. [`design/architecture.md`](design/architecture.md)
-   Canonical cross-crate architecture for the current codebase.
-3. crate `README.md` files under [`../crates/`](../crates/)
-   Crate-local contracts, design intent, and ownership boundaries.
+1. [`design/architecture.md`](design/architecture.md) for the current
+   cross-crate architecture.
+2. crate `README.md` files under [`../crates/`](../crates/) for crate-local
+   boundaries and ownership. The SDK and extension crates also now carry
+   lightweight top-level README files describing their role.
+3. `docs/notes/`, `docs/research/`, and `docs/archive/` only as supporting
+   material.
 
 Everything else in `docs/` is supporting material.
 
@@ -31,13 +34,13 @@ Use the directories by intent, not by age or filename:
 | `docs/research/` | exploration, tradeoff analysis, external references | informative, but not authoritative |
 | `docs/archive/` | superseded historical docs kept for context | historical only |
 
-## What Should Be Canonical
+## Canonical Maintainer Docs
 
-The canonical current-state documentation set should stay small:
+The canonical current-state maintainer docs should stay small:
 
-- the root [`../README.md`](../README.md)
 - [`design/architecture.md`](design/architecture.md)
 - crate-level `README.md` files
+- narrowly scoped design docs that represent real current-state contracts
 
 If those documents disagree with notes, research, or archive material, prefer
 the canonical set.
@@ -78,9 +81,5 @@ Use `docs/archive/` for:
   real current-state contract.
 - If a change is crate-local, prefer updating the relevant crate `README.md`
   instead of adding a new cross-crate design document.
-- This file should explain how to navigate the docs tree. It should not become
-  a constantly changing index of every note and memo.
-
-## Related
-
-- [`archive/README.md`](archive/README.md) explains how to treat archived docs
+- This file should stay a maintainer navigation note, not a reviewer entry
+  point or a constantly changing index of every memo.

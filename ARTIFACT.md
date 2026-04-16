@@ -1,22 +1,26 @@
 # Artifact Guide
 
-This document is the reproduction guide for the Tabula repository.
+This document is the self-contained reproduction guide for the current
+proof-capable Tabula artifact.
 
-The root [README.md](README.md) explains the project. This file explains how to run the current proof-capable path and what to expect from it.
+The artifact demonstrates semantic-first proving of typed tabular transaction
+batches with statement-first verification: the verifier checks a sealed program,
+an explicit expected `public_statement.json`, and the proof together.
 
-## Scope
+## Supported Scope
 
-The current artifact covers the active proof-capable implementation:
+The supported subset is:
 
-- stateful transaction-batch execution
-- proof generation from `receipt.bin`
+- stateful transaction-batch execution and proving
 - verification against a sealed program and explicit `public_statement.json`
+- unary native user-state keys only
+- public examples: `basic` and `membership`
 
-Out of scope for the current artifact:
+The following are intentionally out of scope:
 
 - query proving
 - non-unary native user-state proving
-- broader future architectures described in exploratory notes
+- broader architecture or future-system material elsewhere in the repository
 
 ## Requirements
 
@@ -35,50 +39,61 @@ Build the proof-capable CLI:
 cargo build -p tabula-cli --features prove
 ```
 
-## Quick Check
+## Fastest End-To-End Run: `basic`
 
 Generate a small example project:
 
 ```sh
-cargo run -p tabula-cli -- example basic --dir /tmp/tabula-example
+target/debug/tabula-cli example basic --dir /tmp/tabula-basic
 ```
 
 Execute the example batch:
 
 ```sh
 target/debug/tabula-cli execute \
-  --program /tmp/tabula-example/program.tab \
-  --state /tmp/tabula-example/state.json \
-  --batch /tmp/tabula-example/batch.json \
-  --context /tmp/tabula-example/context.json \
-  --receipt-out /tmp/tabula-example/receipt.bin
+  --program /tmp/tabula-basic/program.tab \
+  --state /tmp/tabula-basic/state.json \
+  --batch /tmp/tabula-basic/batch.json \
+  --context /tmp/tabula-basic/context.json \
+  --receipt-out /tmp/tabula-basic/receipt.bin
 ```
 
 Produce a proof and public statement:
 
 ```sh
 target/debug/tabula-cli prove \
-  --program /tmp/tabula-example/program.tab \
-  --receipt /tmp/tabula-example/receipt.bin \
-  --proof-out /tmp/tabula-example/proof.bin \
-  --public-statement-out /tmp/tabula-example/public_statement.json \
-  --summary-out /tmp/tabula-example/proof_summary.json
+  --program /tmp/tabula-basic/program.tab \
+  --receipt /tmp/tabula-basic/receipt.bin \
+  --proof-out /tmp/tabula-basic/proof.bin \
+  --public-statement-out /tmp/tabula-basic/public_statement.json \
+  --summary-out /tmp/tabula-basic/proof_summary.json
 ```
 
 Verify the proof:
 
 ```sh
 target/debug/tabula-cli verify \
-  --program /tmp/tabula-example/program.tab \
-  --proof /tmp/tabula-example/proof.bin \
-  --statement /tmp/tabula-example/public_statement.json
+  --program /tmp/tabula-basic/program.tab \
+  --proof /tmp/tabula-basic/proof.bin \
+  --statement /tmp/tabula-basic/public_statement.json
 ```
 
 Inspect the proof payload:
 
 ```sh
-target/debug/tabula-cli inspect-proof --proof /tmp/tabula-example/proof.bin
+target/debug/tabula-cli inspect-proof --proof /tmp/tabula-basic/proof.bin
 ```
+
+## Other Public Example
+
+You can run the same execute/prove/verify flow on the other public example:
+
+```sh
+target/debug/tabula-cli example membership --dir /tmp/tabula-membership
+```
+
+Each generated directory contains the same file layout used above:
+`program.tab`, `state.json`, `batch.json`, and `context.json`.
 
 ## Expected Outputs
 
@@ -96,18 +111,9 @@ After `prove`, the example directory should contain:
 `inspect-proof` should print proof-envelope metadata and the carried public
 statement.
 
-## Notes
+## Output Meaning
 
 - `receipt.bin` is a CLI/runtime handoff file used to reconstruct the proving
   input. It is not the stable external verification object.
 - `proof.bin` is the proof envelope.
 - `public_statement.json` is the caller-supplied stable verification file.
-
-For the proof vocabulary and architecture behind this flow, see
-[docs/design/architecture.md](docs/design/architecture.md).
-
-## More Reading
-
-- [README.md](README.md)
-- [crates/cli/README.md](crates/cli/README.md)
-- [docs/README.md](docs/README.md)

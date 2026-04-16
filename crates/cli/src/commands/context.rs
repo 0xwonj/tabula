@@ -13,7 +13,7 @@ pub(crate) fn run(ctx: &AppContext, command: &ContextCommand) -> anyhow::Result<
 }
 
 fn init(ctx: &AppContext, args: &ContextInitArgs) -> anyhow::Result<()> {
-    let loaded = load_program(ctx.sdk()?, &args.program)?;
+    let loaded = load_program(ctx.sdk(), &args.program)?;
     let context = loaded.program.context().build();
     ensure_parent_dir(&args.out)?;
     write_json(&args.out, &context)?;
@@ -22,7 +22,7 @@ fn init(ctx: &AppContext, args: &ContextInitArgs) -> anyhow::Result<()> {
 }
 
 fn set(ctx: &AppContext, args: &ContextSetArgs) -> anyhow::Result<()> {
-    let loaded = load_program(ctx.sdk()?, &args.program)?;
+    let loaded = load_program(ctx.sdk(), &args.program)?;
     let context = load_context(Some(&args.context))?;
     let field = loaded.program.context_field(&args.field)?;
     let value = encode_json_literal(&args.value, field.ty())?;

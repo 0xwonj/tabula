@@ -79,25 +79,6 @@ pub struct StateInspectOutput {
     pub cells: Vec<StateCellOutput>,
 }
 
-/// Stable JSON contract for `tabula env doctor --json`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EnvDoctorOutput {
-    /// Contract version tag.
-    pub version: String,
-    /// Resolved config file path, when one was loaded.
-    pub config_path: Option<String>,
-    /// Whether the SDK environment could be constructed successfully.
-    pub sdk_ready: bool,
-    /// Build failure detail when the environment is not usable.
-    pub build_error: Option<String>,
-    /// Parsed extension bundle reports.
-    pub extensions: Vec<ExtensionBundleOutput>,
-    /// Whether this build enables verifier support.
-    pub verify_feature_enabled: bool,
-    /// Whether this build enables prover support.
-    pub prove_feature_enabled: bool,
-}
-
 /// Stable JSON contract for `tabula prove --json`.
 #[cfg(feature = "prove")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -279,17 +260,4 @@ pub enum TxOutcomeStatus {
         /// Failing operation index when the runtime reported one.
         failed_op_index: Option<usize>,
     },
-}
-
-/// One parsed extension bundle.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExtensionBundleOutput {
-    /// Absolute bundle path.
-    pub path: String,
-    /// Human-readable bundle name.
-    pub name: String,
-    /// Capability paths contributed by this bundle.
-    pub capability_paths: Vec<String>,
-    /// Unsupported declarative sections discovered in the bundle.
-    pub unsupported_entries: Vec<String>,
 }

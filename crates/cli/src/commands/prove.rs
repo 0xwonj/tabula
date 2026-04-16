@@ -12,11 +12,11 @@ use crate::output::{prove_output, render_prove};
 
 /// Generate one proof from an execution receipt bridge.
 pub(crate) fn run(ctx: &AppContext, args: &ProveArgs) -> anyhow::Result<()> {
-    let loaded = load_program(ctx.sdk()?, &args.program)?;
+    let loaded = load_program(ctx.sdk(), &args.program)?;
     let receipt_bytes = std::fs::read(&args.receipt)
         .with_context(|| format!("failed to read {}", args.receipt.display()))?;
     let bridge = decode_receipt_bridge(&receipt_bytes)?;
-    let runtime = prepare_runtime(ctx.sdk()?, &loaded.artifact)?;
+    let runtime = prepare_runtime(ctx.sdk(), &loaded.artifact)?;
     let receipt = sdk_receipt_from_bridge(runtime.as_ref(), bridge)?;
     let proof = loaded.program.runner().prove(&receipt)?;
 

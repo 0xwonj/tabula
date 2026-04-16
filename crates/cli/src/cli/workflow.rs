@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Subcommand, ValueEnum};
+use clap::ValueEnum;
 
 /// `tabula compile`
 #[derive(Debug, Clone, clap::Args)]
@@ -184,25 +184,6 @@ pub struct ExampleArgs {
 pub enum ExampleName {
     /// Minimal example with one state table and one transaction.
     Basic,
-    /// Bank transfer example with context, relations, helper functions, and events.
-    Bank,
     /// Membership approval example with queries and relations.
     Membership,
-    /// DEX example with declarative capability bundle config.
-    Dex,
-}
-
-/// `tabula env ...`
-#[derive(Debug, Clone, Subcommand)]
-pub enum EnvCommand {
-    /// Show resolved config, extension bundles, and build feature availability.
-    Doctor(EnvDoctorArgs),
-}
-
-/// `tabula env doctor`
-#[derive(Debug, Clone, clap::Args)]
-pub struct EnvDoctorArgs {
-    /// Emit the versioned JSON contract.
-    #[arg(long)]
-    pub json: bool,
 }

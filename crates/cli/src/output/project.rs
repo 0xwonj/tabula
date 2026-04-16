@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 
 use tabula_sdk::{Artifact, Program, QueryResult, State};
 
-use crate::environment::EnvironmentStatus;
 use crate::io::ProgramInputKind;
 
 #[cfg(feature = "verify")]
@@ -14,10 +13,9 @@ use super::ProveOutput;
 #[cfg(feature = "verify")]
 use super::VerifyOutput;
 use super::{
-    CheckOutput, EntryOutput, EnvDoctorOutput, ExecutionReport, ExtensionBundleOutput,
-    NamedTypeOutput, QueryOutput, QueryRunOutput, SchemaOutput, StateCellOutput,
-    StateInspectOutput, TableFieldOutput, TableOutput, TxOutcomeOutput, TxOutcomeStatus,
-    TypeOutput,
+    CheckOutput, EntryOutput, ExecutionReport, NamedTypeOutput, QueryOutput, QueryRunOutput,
+    SchemaOutput, StateCellOutput, StateInspectOutput, TableFieldOutput, TableOutput,
+    TxOutcomeOutput, TxOutcomeStatus, TypeOutput,
 };
 use crate::output::{type_name, value_output};
 #[cfg(feature = "verify")]
@@ -241,27 +239,6 @@ pub(crate) fn type_output(ty: tabula_sdk::interop::TypeRef) -> TypeOutput {
     }
 }
 
-pub(crate) fn environment_status_output(status: &EnvironmentStatus) -> EnvDoctorOutput {
-    EnvDoctorOutput {
-        version: "tabula.cli.env.v1".to_string(),
-        config_path: status.config_path.clone(),
-        sdk_ready: status.sdk_ready,
-        build_error: status.build_error.clone(),
-        extensions: status
-            .extensions
-            .iter()
-            .map(|extension| ExtensionBundleOutput {
-                path: extension.path.clone(),
-                name: extension.name.clone(),
-                capability_paths: extension.capability_paths.clone(),
-                unsupported_entries: extension.unsupported_entries.clone(),
-            })
-            .collect(),
-        verify_feature_enabled: status.verify_feature_enabled,
-        prove_feature_enabled: status.prove_feature_enabled,
-    }
-}
-
 #[cfg(feature = "prove")]
 pub(crate) fn prove_output(
     artifact: &Artifact,
@@ -336,25 +313,4 @@ fn hex_encode(bytes: &[u8]) -> String {
         let _ = write!(out, "{byte:02x}");
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::environment::EnvironmentStatus;
-
-    use super::environment_status_output;
-
-    #[test]
-    fn projects_environment_status_into_output_contract() {
-        let output = environment_status_output(&EnvironmentStatus {
-            config_path: Some("/tmp/tabula.toml".to_string()),
-            sdk_ready: true,
-            build_error: None,
-            extensions: vec![],
-            verify_feature_enabled: true,
-            prove_feature_enabled: false,
-        });
-        assert_eq!(output.version, "tabula.cli.env.v1");
-        assert!(output.extensions.is_empty());
-    }
 }

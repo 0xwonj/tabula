@@ -15,7 +15,7 @@ pub(crate) fn run(ctx: &AppContext, command: &StateCommand) -> anyhow::Result<()
 }
 
 fn init(ctx: &AppContext, args: &StateInitArgs) -> anyhow::Result<()> {
-    let loaded = load_program(ctx.sdk()?, &args.program)?;
+    let loaded = load_program(ctx.sdk(), &args.program)?;
     let state = loaded.program.state().build();
     ensure_parent_dir(&args.out)?;
     write_json(&args.out, &state)?;
@@ -24,7 +24,7 @@ fn init(ctx: &AppContext, args: &StateInitArgs) -> anyhow::Result<()> {
 }
 
 fn set(ctx: &AppContext, args: &StateSetArgs) -> anyhow::Result<()> {
-    let loaded = load_program(ctx.sdk()?, &args.program)?;
+    let loaded = load_program(ctx.sdk(), &args.program)?;
     let state = load_state(&args.state)?;
     let table = loaded.program.table(&args.table)?;
     let field = table.field(&args.field)?;
@@ -71,7 +71,7 @@ fn encode_key_literal(
 fn inspect(ctx: &AppContext, args: &StateInspectArgs) -> anyhow::Result<()> {
     let state = load_state(&args.state)?;
     let program = match args.program.as_deref() {
-        Some(path) => Some(load_program(ctx.sdk()?, path)?.program),
+        Some(path) => Some(load_program(ctx.sdk(), path)?.program),
         None => None,
     };
     let output = state_output(program.as_ref(), &state, args.table.as_deref(), args.raw);

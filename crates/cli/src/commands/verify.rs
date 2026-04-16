@@ -10,7 +10,7 @@ use crate::output::{render_verify, verify_output};
 
 /// Verify one canonical `proof.bin` against a selected program artifact.
 pub(crate) fn run(ctx: &AppContext, args: &VerifyArgs) -> anyhow::Result<()> {
-    let loaded = load_program(ctx.sdk()?, &args.program)?;
+    let loaded = load_program(ctx.sdk(), &args.program)?;
     let bytes = std::fs::read(&args.proof)
         .with_context(|| format!("failed to read {}", args.proof.display()))?;
     let proof = tabula_sdk::Proof::decode_binary(&bytes)?;

@@ -20,7 +20,7 @@ fn init(_ctx: &AppContext, args: &BatchInitArgs) -> anyhow::Result<()> {
 }
 
 fn call(ctx: &AppContext, args: &BatchCallArgs) -> anyhow::Result<()> {
-    let loaded = load_program(ctx.sdk()?, &args.program)?;
+    let loaded = load_program(ctx.sdk(), &args.program)?;
     let batch = load_batch(&args.batch)?;
     let tx = loaded.program.tx(&args.tx)?;
     let params = encode_json_args(

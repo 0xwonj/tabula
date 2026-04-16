@@ -1,63 +1,83 @@
 # tabula-cli
 
-Command-line interface for product-facing and developer-facing Tabula
-workflows.
+`tabula-cli` is the file-based command surface for the current Tabula artifact.
+It compiles sealed programs, executes read-only queries and stateful batches,
+turns `receipt.bin` handoff files into `proof.bin`, and verifies proofs in a
+statement-first flow against an explicit expected `public_statement.json`.
 
-## Role
+## Current Artifact Scope
 
-- compile `.tab` source to sealed artifact JSON
-- validate programs (`check`) and inspect full schema (`schema`)
-- execute read-only queries (`query`) and stateful batches (`execute`)
-- turn `receipt.bin` handoff files into canonical `proof.bin` artifacts
-  (`prove`)
-- verify canonical `proof.bin` artifacts against sealed programs and explicit
-  expected public statements (`verify`)
-- inspect proved public statements and proof-envelope metadata (`inspect-proof`)
-- author state, context, and batch files with symbol-based commands
-- inspect state files with symbolic rendering
-- inspect resolved config and extension bundles (`env doctor`)
-- generate standard and extension-backed example directories
+- stateful transaction-batch proving
+- query execution only, not query proving
+- unary native user-state keys only
+- public examples: `basic` and `membership`
 
-`tabula-cli` stays above `tabula-sdk` and uses explicit files plus
-project-local `tabula.toml` configuration. It does not keep hidden mutable
-state across invocations.
+`prove`, `verify`, and `inspect-proof` are only available when the CLI is built
+with proof support.
 
-## Usage
+## Primary Commands
 
-```sh
-cargo run -p tabula-cli -- check path/to/program.tab
-cargo run -p tabula-cli -- compile path/to/program.tab
-cargo run -p tabula-cli -- schema path/to/program.tab
-cargo run -p tabula-cli -- query current_tier --program program.tab --state state.json --args "[1]"
-cargo run -p tabula-cli -- state set --program program.tab --state state.json accounts --key '[1]' balance 100
-cargo run -p tabula-cli -- execute --program program.tab --state state.json --batch batch.json --context context.json
-cargo run -p tabula-cli -- state inspect --state state.json --program program.tab
-cargo run -p tabula-cli -- env doctor
-cargo run -p tabula-cli -- example bank --dir /tmp/tabula-example
-```
+- `check`, `compile`, `schema`
+- `query`, `execute`
+- `prove`, `verify`, `inspect-proof`
 
-`prove` and `verify` are only available when the CLI is built with proof
-support:
+This repository builds the CLI as `target/debug/tabula-cli`.
+
+## Common Flow
+
+Build the proof-capable CLI:
 
 ```sh
 cargo build -p tabula-cli --features prove
-target/debug/tabula-cli prove --program program.tab --receipt receipt.bin --proof-out proof.bin --public-statement-out public_statement.json --summary-out proof_summary.json
-target/debug/tabula-cli verify --program program.tab --proof proof.bin --statement public_statement.json
-target/debug/tabula-cli inspect-proof --proof proof.bin
 ```
 
-`receipt.bin` is a CLI/runtime handoff file, not a cross-layer contract
-artifact. `proof.bin` is the contract-owned proof envelope, while
-`public_statement.json` is the caller-supplied stable verification object used
-by the secure verification path.
+Generate one of the public example directories:
 
-Logical user-state keys are always authored as JSON arrays through `--key`,
-even for unary keys.
+```sh
+target/debug/tabula-cli example basic --dir /tmp/tabula-basic
+target/debug/tabula-cli example membership --dir /tmp/tabula-membership
+```
 
-Current proof-capable CLI scope:
+Each generated directory has the same file layout, so the core execution and
+proof flow is:
 
-- stateful transaction batches only
-- query execution only, not query proving
-- unary native user-state keys only (`1 component / 3 FE`)
+```sh
+target/debug/tabula-cli execute \
+  --program DIR/program.tab \
+  --state DIR/state.json \
+  --batch DIR/batch.json \
+  --context DIR/context.json \
+  --receipt-out DIR/receipt.bin
 
-If installed as a binary, the command name is `tabula`.
+target/debug/tabula-cli prove \
+  --program DIR/program.tab \
+  --receipt DIR/receipt.bin \
+  --proof-out DIR/proof.bin \
+  --public-statement-out DIR/public_statement.json \
+  --summary-out DIR/proof_summary.json
+
+target/debug/tabula-cli verify \
+  --program DIR/program.tab \
+  --proof DIR/proof.bin \
+  --statement DIR/public_statement.json
+
+target/debug/tabula-cli inspect-proof --proof DIR/proof.bin
+```
+
+There is no query-proof flow in the current artifact.
+
+## Artifact Files
+
+- `receipt.bin` is a CLI/runtime handoff file used to reconstruct proving
+  inputs. It is not the stable external verification object.
+- `proof.bin` is the proof envelope.
+- `public_statement.json` is the caller-supplied stable verification object
+  used by the statement-first verification path.
+
+## Secondary Commands
+
+- `state set` and `state inspect` help author and inspect local state files.
+- `context init` / `context set` and `batch init` / `batch call` help build the
+  typed JSON inputs consumed by `execute`.
+- When using `state set`, logical keys are authored as JSON arrays through
+  `--key`; the current proof-capable subset supports unary keys only.

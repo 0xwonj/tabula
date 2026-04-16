@@ -4,7 +4,6 @@ pub mod batch;
 pub mod check;
 pub mod compile;
 pub mod context;
-pub mod env;
 pub mod example;
 pub mod execute;
 #[cfg(feature = "verify")]

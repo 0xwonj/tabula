@@ -11,8 +11,7 @@ pub(crate) use workflow::ProveArgs;
 #[cfg(feature = "verify")]
 pub(crate) use workflow::VerifyArgs;
 pub(crate) use workflow::{
-    CheckArgs, CompileArgs, EnvDoctorArgs, ExampleArgs, ExampleName, ExecuteArgs, QueryArgs,
-    SchemaArgs,
+    CheckArgs, CompileArgs, ExampleArgs, ExampleName, ExecuteArgs, QueryArgs, SchemaArgs,
 };
 
 pub(crate) use authoring::{
@@ -24,10 +23,6 @@ pub(crate) use authoring::{
 #[derive(Debug, Parser)]
 #[command(name = "tabula", about = "Tabula CLI")]
 pub struct Cli {
-    /// Path to an explicit `tabula.toml` config file.
-    #[arg(long, global = true)]
-    pub config: Option<std::path::PathBuf>,
-
     /// Requested top-level command.
     #[command(subcommand)]
     pub command: Command,
@@ -72,11 +67,4 @@ pub enum Command {
     },
     /// Generate example files in the specified directory.
     Example(ExampleArgs),
-    /// Inspect the resolved CLI environment.
-    Env {
-        #[command(subcommand)]
-        command: workflow::EnvCommand,
-    },
 }
-
-pub(crate) use workflow::EnvCommand;

@@ -3,8 +3,6 @@
 mod app;
 mod cli;
 mod commands;
-mod config;
-mod environment;
 mod handoff;
 mod io;
 mod output;
@@ -20,8 +18,7 @@ pub fn run() -> anyhow::Result<()> {
 
 /// Run the CLI from one already-parsed clap value.
 pub fn run_cli(cli: Cli) -> anyhow::Result<()> {
-    let cwd = std::env::current_dir()?;
-    let ctx = app::AppContext::load(&cwd, cli.config.as_deref())?;
+    let ctx = app::AppContext::standard()?;
 
     match cli.command {
         cli::Command::Compile(args) => commands::compile::run(&ctx, &args),
@@ -39,6 +36,5 @@ pub fn run_cli(cli: Cli) -> anyhow::Result<()> {
         cli::Command::Context { command } => commands::context::run(&ctx, &command),
         cli::Command::Batch { command } => commands::batch::run(&ctx, &command),
         cli::Command::Example(args) => commands::example::run(&ctx, &args),
-        cli::Command::Env { command } => commands::env::run(&ctx, &command),
     }
 }

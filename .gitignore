@@ -4,3 +4,6 @@
 tasks/
 docs/archive/
 book/build/
+.omx/
+.codex
+.codex/

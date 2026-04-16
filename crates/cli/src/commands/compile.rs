@@ -8,7 +8,7 @@ use crate::io::{default_artifact_output, ensure_parent_dir, load_artifact, write
 
 /// Compile source into one artifact JSON file.
 pub(crate) fn run(ctx: &AppContext, args: &CompileArgs) -> anyhow::Result<()> {
-    let (artifact, _) = load_artifact(ctx.sdk()?, &args.program)?;
+    let (artifact, _) = load_artifact(ctx.sdk(), &args.program)?;
     let output_path = args
         .output
         .clone()
