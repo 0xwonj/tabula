@@ -399,6 +399,88 @@ fn crate_readmes_under(rel: &str) -> Vec<PathBuf> {
     files
 }
 
+/// SP-3 §2.5 guardrail — **off mode** (S1): scans `crates/witness/src/**/*.rs`
+/// for `use tabula_chips::...` paths and reports anything outside the
+/// allowlist without failing. S4 flips this to assertive.
+///
+/// Allowlist (from SP-3 §2.5):
+/// - protocol-level identifiers: `Opcode`, `CmpOp`, `MAX_SLOTS`,
+///   `EXECUTION_STANDARD_VALUE_WIDTH`,
+/// - witness-store label constants: any `*_WITNESS_LABEL`,
+/// - crypto helpers: `native_key_payload_prefix3`, `poseidon2_permutation`,
+/// - core row types: `InstructionRecord`, `StaticTableRow`,
+/// - shared helpers: `EntrySource`,
+/// - `*Kit` types (post-S2 — witness ops files import the kit, never
+///   the row type).
+#[test]
+fn sp3_witness_chip_import_guardrail_off_mode() {
+    fn last_segment(path: &str) -> &str {
+        path.rsplit("::").next().unwrap_or(path)
+    }
+
+    fn allowed(tail: &str) -> bool {
+        matches!(
+            tail,
+            "Opcode"
+                | "CmpOp"
+                | "MAX_SLOTS"
+                | "EXECUTION_STANDARD_VALUE_WIDTH"
+                | "native_key_payload_prefix3"
+                | "poseidon2_permutation"
+                | "InstructionRecord"
+                | "StaticTableRow"
+                | "EntrySource"
+        ) || tail.ends_with("_WITNESS_LABEL")
+            || tail.ends_with("Kit")
+    }
+
+    let sources = rust_sources_under("crates/witness/src");
+    let mut forbidden: Vec<(PathBuf, String)> = Vec::new();
+
+    for path in sources {
+        let source = fs::read_to_string(&path).expect("read witness source");
+        for line in source.lines() {
+            let trimmed = line.trim_start();
+            let Some(rest) = trimmed.strip_prefix("use tabula_chips::") else {
+                continue;
+            };
+            let body = rest.trim_end_matches(';').trim();
+            if let Some(open) = body.find('{') {
+                let prefix = &body[..open];
+                let close = body.rfind('}').unwrap_or(body.len());
+                let group = &body[open + 1..close];
+                for item in group.split(',') {
+                    let item = item.trim();
+                    if item.is_empty() {
+                        continue;
+                    }
+                    let head = item.split(" as ").next().unwrap_or(item).trim();
+                    let tail = last_segment(head);
+                    if !allowed(tail) {
+                        forbidden.push((path.clone(), format!("tabula_chips::{prefix}{head}")));
+                    }
+                }
+            } else {
+                let head = body.split(" as ").next().unwrap_or(body).trim();
+                let tail = last_segment(head);
+                if !allowed(tail) {
+                    forbidden.push((path.clone(), format!("tabula_chips::{head}")));
+                }
+            }
+        }
+    }
+
+    if !forbidden.is_empty() {
+        eprintln!(
+            "[SP-3 off-mode] {} chip-row import(s) still live in tabula-witness (pending migration to ChipWitnessKit):",
+            forbidden.len()
+        );
+        for (path, import) in &forbidden {
+            eprintln!("  {}: {}", path.display(), import);
+        }
+    }
+}
+
 #[test]
 fn live_sources_do_not_reintroduce_legacy_capability_vocabulary() {
     let mut files = rust_sources_under("crates");

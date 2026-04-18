@@ -16,6 +16,7 @@ pub mod debug;
 pub mod permutation;
 pub mod rap;
 pub mod trace;
+pub mod witness_kit;
 
 /// Quartic extension of KoalaBear for ~124-bit security.
 ///

@@ -28,3 +28,11 @@ pub use error::{ExtError, ExtResult};
 pub use extension::{Extension, ExtensionBuilder};
 #[cfg(feature = "prove")]
 pub use root::RootBackend;
+/// Re-exports of the chip-authoring protocol for witness row contribution.
+///
+/// The trait itself lives in [`tabula_stark::witness_kit`] so that
+/// `tabula-machine` and `tabula-witness` (both below ext in the
+/// dependency graph) can reference it; extension authors still import
+/// it from here alongside the rest of the authoring surface.
+#[cfg(feature = "verify")]
+pub use tabula_stark::witness_kit::{ChipWitnessKit, KitError, KitFinalizeContext, KitScratch};

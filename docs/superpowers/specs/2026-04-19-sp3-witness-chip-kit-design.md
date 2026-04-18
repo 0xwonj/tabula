@@ -82,6 +82,18 @@ crate. The trait is declared in a new module
 `crates/ext/src/witness_kit.rs` re-exported from `crates/ext/src/lib.rs`,
 so the public import path is `tabula_ext::ChipWitnessKit`.
 
+**Amendment (2026-04-19, S1).** The as-shipped trait lives in
+`tabula-stark` (`crates/stark/src/witness_kit.rs`), not `tabula-ext`.
+Reason: `tabula-ext` is a public package surface above
+`tabula-machine` / `tabula-witness` in the dependency graph (see
+`docs/design/architecture.md`), so neither machine nor witness can
+reference a trait declared there. `tabula-stark` already owns the
+sibling `ChipId` / `ChipSpec` / `WitnessStore` identifiers, making it
+the natural home for the chip-authoring protocol seam too. The
+public import path for extension authors remains
+`tabula_ext::ChipWitnessKit` via a re-export, so option 3's authoring
+ergonomics are preserved.
+
 Rationale:
 
 - `tabula-ext`'s stated purpose (per its crate README and lib.rs
@@ -309,9 +321,11 @@ explicit protocol/label/helper list above.
 - `crates/ext/src/backend/execution.rs`:
   - Add `witness_kits(&self) -> Vec<Box<dyn ChipWitnessKit>>` with a
     default-empty impl.
-- `crates/machine/src/setup/registry.rs`:
-  - `ChipRegistry` gains a `witness_kits: BTreeMap<ChipId, Box<dyn
-    ChipWitnessKit>>` field and a `register_kit` helper.
+- Kit registry (location TBD in S2): kits collected from each
+  `ExecutionBackend::witness_kits()` into a registry owned by the
+  witness-lowering driver, not by `ChipRegistry` (which holds AIRs
+  only). S1 leaves this unwired; S2 introduces it once the pilot
+  kit lands.
 - `crates/witness/src/stark/lowering/driver.rs`:
   - `LoweringOutput` splits into `{ core: CoreLoweringOutput, kits:
     KitScratch }`.

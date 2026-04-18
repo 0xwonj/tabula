@@ -8,6 +8,8 @@ use tabula_chips::relation_transcript::RelationTranscriptChip;
 use tabula_chips::tx_batch_transcript::TxBatchTranscriptChip;
 use tabula_stark::trace::{BusConsumer, DynChip};
 
+use tabula_stark::witness_kit::ChipWitnessKit;
+
 use crate::backend::AnyRap;
 
 /// Stable advanced execution-tier backend contract.
@@ -24,6 +26,17 @@ pub trait ExecutionBackend: Send + Sync {
     /// Optional dependent bus consumers.
     fn bus_consumers(&self) -> Vec<Box<dyn BusConsumer>> {
         vec![]
+    }
+
+    /// Witness kits whose rows feed the execution-tier trace.
+    ///
+    /// Must align with [`Self::airs`]: each AIR that reads rows from a
+    /// chip-specific witness-store label should have a matching kit
+    /// here. Default-empty for backends whose chips are AIR-only
+    /// (e.g. `PoseidonChip`, `RangeCheckChip`) and derive their
+    /// witness from the trace itself.
+    fn witness_kits(&self) -> Vec<Box<dyn ChipWitnessKit>> {
+        Vec::new()
     }
 }
 
