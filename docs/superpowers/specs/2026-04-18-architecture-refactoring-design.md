@@ -97,8 +97,11 @@ code. The refactoring closes those gaps.
 - Exposes `BackendProver::prove_envelope(...)` and
   `BackendVerifier::verify_envelope(...)` taking binding digest and
   envelope; no embedded wire types.
-- `TabulaProof` = `(ArtifactId, binding_digest, ProofEnvelope)`
-  only. No `public_statement` field.
+- Wire form is `ProofEnvelope` (owned by `tabula-contract`).
+  In-memory decoded form is `TabulaProof { sub_proof_envelopes,
+  binding_digest }` — no `public_statement` field, no `ArtifactId`
+  (superseded in SP-2: `binding_digest` alone commits to the
+  `(artifact, public_statement)` pair).
 - `PreparedMachineInput` carries no `PublicStatement`.
 - No wire-type re-exports; callers import from `tabula-contract`.
 - Dev-dependencies pruned: no `tabula-lang` or `tabula-executor`
