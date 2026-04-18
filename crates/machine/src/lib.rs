@@ -36,4 +36,4 @@ pub use proof::model::{ChipOpening, ColumnProofEntry, ProofTier, SubProofEnvelop
 pub use setup::builder::MachineBuilder;
 pub use setup::registry::SetupError;
 pub use setup::root::{RootProofBackend, SmtRootProofBackend};
-pub use tabula_stark::air::statement::PublicStatement;
+pub use tabula_contract::PublicStatement;

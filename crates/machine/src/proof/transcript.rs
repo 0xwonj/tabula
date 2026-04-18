@@ -8,7 +8,7 @@ use p3_challenger::{CanObserve, CanSample};
 use p3_koala_bear::KoalaBear;
 use p3_uni_stark::StarkGenericConfig;
 
-use tabula_stark::air::statement::PublicStatement;
+use tabula_contract::PublicStatement;
 
 use crate::config::{Challenger, EF4, TabulaStarkConfig};
 use crate::proof::instance::MainCommitment;

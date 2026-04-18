@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
+use tabula_contract::PublicStatement;
 use tabula_stark::air::interaction::BusId;
-use tabula_stark::air::statement::PublicStatement;
 use tabula_stark::chips::ChipId;
 
 use crate::config::{EF4, PcsCommitment, PcsOpeningProof};

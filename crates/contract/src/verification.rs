@@ -3,11 +3,10 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use tabula_commitment::PoseidonHasher;
-use tabula_core::Digest;
 use tabula_core::traits::Hasher;
-use tabula_ir as ir;
-use tabula_stark::air::statement::PublicStatement;
+use tabula_core::{Digest, ProgramId};
 
+use crate::PublicStatement;
 use crate::binding::ProgramBinding;
 use crate::error::ProofContractError;
 use crate::versions::{STATEMENT_SCHEMA_VERSION, validate_statement_schema_version};
@@ -19,7 +18,7 @@ struct CanonicalBoundStatement {
     schema_version: u32,
     program_hash: Digest,
     metadata_hash: Digest,
-    program_id: ir::ProgramId,
+    program_id: ProgramId,
     static_table_root: Digest,
     old_state_root: Digest,
     new_state_root: Digest,
@@ -37,7 +36,7 @@ pub struct ArtifactContext {
     /// Compiler-sealed program binding.
     pub binding: ProgramBinding,
     /// Program identifier sealed by the artifact.
-    pub program_id: ir::ProgramId,
+    pub program_id: ProgramId,
     /// Transcript-bound root of the sealed static relation table set.
     pub static_table_root: Digest,
 }
@@ -47,7 +46,7 @@ impl ArtifactContext {
     #[must_use]
     pub const fn new(
         binding: ProgramBinding,
-        program_id: ir::ProgramId,
+        program_id: ProgramId,
         static_table_root: Digest,
     ) -> Self {
         Self {

@@ -1,7 +1,7 @@
 //! Stable machine proving input types.
 
+use tabula_contract::PublicStatement;
 use tabula_core::{ColId, TableId};
-use tabula_stark::air::statement::PublicStatement;
 use tabula_stark::trace::WitnessStore;
 
 pub(crate) mod assembly;

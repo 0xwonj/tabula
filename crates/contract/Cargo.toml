@@ -11,8 +11,6 @@ serde = { workspace = true }
 sha2 = { workspace = true }
 tabula-core = { workspace = true }
 tabula-commitment = { workspace = true, features = ["stark"] }
-tabula-ir = { workspace = true }
-tabula-stark = { workspace = true }
 p3-field = { workspace = true }
 p3-koala-bear = { workspace = true }
 thiserror = { workspace = true }

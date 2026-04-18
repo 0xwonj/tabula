@@ -12,9 +12,7 @@ pub mod descriptor;
 pub mod interaction;
 pub mod keygen;
 pub mod primitives;
-pub mod statement;
 
 pub use builder::InteractionAirBuilder;
 pub use columns::{borrow_cols, borrow_cols_mut, num_cols};
 pub use interaction::{AirInteraction, BusId};
-pub use statement::PublicStatement;

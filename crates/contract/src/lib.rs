@@ -9,6 +9,7 @@ mod error;
 pub mod format;
 mod metadata_envelope;
 mod proof_envelope;
+pub mod public_statement;
 mod verification;
 mod versions;
 
@@ -30,7 +31,7 @@ pub use compatibility::{
 pub use binding::{ProgramBinding, access_bus_field_names};
 pub use format::static_tables::{StaticTableArtifact, StaticTableArtifactRow};
 pub use format::typed_tuple::{TupleEncodingDefaults, TupleEncodingSelection};
-pub use tabula_stark::air::statement::PublicStatement;
+pub use public_statement::{PublicStatement, PublicStatementError};
 
 // Versions
 pub use versions::{

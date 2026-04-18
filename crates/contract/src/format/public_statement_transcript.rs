@@ -5,8 +5,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
 use tabula_commitment::NativeDigest;
-use tabula_core::TypeId;
-use tabula_ir as ir;
+use tabula_core::{ContextFieldId, EntryId, EventId, TypeId};
 
 use crate::format::static_tables::compute_block_chain_digest_from_iter;
 
@@ -42,7 +41,7 @@ pub fn public_context_header_block(
 
 /// One public-context item block.
 pub fn public_context_item_block(
-    field_id: ir::ContextFieldId,
+    field_id: ContextFieldId,
     value: &EncodedTranscriptValue,
 ) -> [KoalaBear; PUBLIC_STATEMENT_TRANSCRIPT_RATE] {
     let mut block = [KoalaBear::ZERO; PUBLIC_STATEMENT_TRANSCRIPT_RATE];
@@ -63,7 +62,7 @@ pub fn tx_batch_header_block(tx_count: usize) -> [KoalaBear; PUBLIC_STATEMENT_TR
 /// One per-transaction header block.
 pub fn tx_header_block(
     tx_index: u32,
-    entry_id: ir::EntryId,
+    entry_id: EntryId,
     param_count: usize,
 ) -> [KoalaBear; PUBLIC_STATEMENT_TRANSCRIPT_RATE] {
     let mut block = [KoalaBear::ZERO; PUBLIC_STATEMENT_TRANSCRIPT_RATE];
@@ -104,7 +103,7 @@ pub fn event_header_block(
     tx_index: u32,
     instruction_index: usize,
     effect_ordinal_in_tx: u32,
-    event_id: ir::EventId,
+    event_id: EventId,
     arg_count: usize,
 ) -> [KoalaBear; PUBLIC_STATEMENT_TRANSCRIPT_RATE] {
     let mut block = [KoalaBear::ZERO; PUBLIC_STATEMENT_TRANSCRIPT_RATE];

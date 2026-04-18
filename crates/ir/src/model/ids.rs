@@ -4,42 +4,10 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use tabula_core::TypeId;
 
+pub use tabula_core::{ContextFieldId, EntryId, EventId, ProgramId};
+
 /// A resolved type reference (alias for [`TypeId`]).
 pub type TypeRef = TypeId;
-
-/// Identifies a program registered in the Tabula registry.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-)]
-pub struct ProgramId(pub u32);
-
-/// Identifies a callable entry (function, query, or transaction) within a program.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-)]
-pub struct EntryId(pub u32);
 
 /// Identifies a parameter of a callable entry.
 #[derive(
@@ -74,23 +42,6 @@ pub struct ParamId(pub u32);
     BorshDeserialize,
 )]
 pub struct LocalId(pub u32);
-
-/// Identifies a field in the program's public context.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-)]
-pub struct ContextFieldId(pub u32);
 
 /// Identifies a compile-time constant in the constant pool.
 #[derive(
@@ -176,23 +127,6 @@ pub struct RelationId(pub u32);
     BorshDeserialize,
 )]
 pub struct CapabilityId(pub u32);
-
-/// Identifies an event type.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-)]
-pub struct EventId(pub u32);
 
 /// Discriminates callable entry kinds.
 #[derive(

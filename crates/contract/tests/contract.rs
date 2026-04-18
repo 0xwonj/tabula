@@ -7,13 +7,12 @@ use tabula_contract::{
     ArtifactContext, BoundStatement, CONTRACT_RULES, CONTRACT_SCHEMA_VERSION,
     ContractCompatibilityPolicy, ContractMetadataEnvelope, ContractRuleCode,
     ContractValidationError, PROOF_ENVELOPE_VERSION, ProgramBinding, ProofEncodingId,
-    ProofEnvelope, ProofSystemId, STATEMENT_SCHEMA_VERSION, StaticTableArtifact,
+    ProofEnvelope, ProofSystemId, PublicStatement, STATEMENT_SCHEMA_VERSION, StaticTableArtifact,
     StaticTableArtifactRow, VERIFIER_PROFILE_VERSION, access_bus_field_names,
     decode_proof_envelope, encode_proof_envelope,
 };
+use tabula_core::ProgramId;
 use tabula_core::execution::NATIVE_MAX_KEY_FES;
-use tabula_ir as ir;
-use tabula_stark::air::statement::PublicStatement;
 
 fn to_hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
@@ -219,7 +218,7 @@ fn bound_statement_canonical_hash_is_deterministic() {
     let statement = BoundStatement::new(
         ArtifactContext::new(
             ProgramBinding::new([0xaa; 32], [0xbb; 32]),
-            ir::ProgramId(7),
+            ProgramId(7),
             [0x33; 32],
         ),
         sample_public_statement(),
@@ -281,7 +280,7 @@ fn bound_statement_binding_digest_changes_with_context() {
     let baseline = BoundStatement::new(
         ArtifactContext::new(
             ProgramBinding::new([0xaa; 32], [0xbb; 32]),
-            ir::ProgramId(7),
+            ProgramId(7),
             [0x33; 32],
         ),
         sample_public_statement(),
@@ -291,7 +290,7 @@ fn bound_statement_binding_digest_changes_with_context() {
     let changed = BoundStatement::new(
         ArtifactContext::new(
             ProgramBinding::new([0xab; 32], [0xbb; 32]),
-            ir::ProgramId(7),
+            ProgramId(7),
             [0x33; 32],
         ),
         sample_public_statement(),

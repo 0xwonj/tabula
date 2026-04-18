@@ -11,8 +11,9 @@ pub mod traits;
 // ── Identifier vocabulary ──
 pub use ids::{
     ColId, ColumnCommitmentId, ColumnLayoutKind, ColumnProfileId, CommittedCellKey, CommittedKey,
-    Digest, EncodingProfileId, RootProfileId, RootProofFamilyId, RowKey, SchemeId, SchemeProfileId,
-    StateRoot, TableCommitmentId, TableId, TxTypeId, TypeId,
+    ContextFieldId, Digest, EncodingProfileId, EntryId, EventId, ProgramId, RootProfileId,
+    RootProofFamilyId, RowKey, SchemeId, SchemeProfileId, StateRoot, TableCommitmentId, TableId,
+    TxTypeId, TypeId,
 };
 
 // ── State model ──

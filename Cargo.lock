@@ -1402,8 +1402,6 @@ dependencies = [
  "sha2",
  "tabula-commitment",
  "tabula-core",
- "tabula-ir",
- "tabula-stark",
  "thiserror",
 ]
 
@@ -1507,6 +1505,7 @@ dependencies = [
  "serde",
  "tabula-chips",
  "tabula-commitment",
+ "tabula-contract",
  "tabula-core",
  "tabula-executor",
  "tabula-lang",
@@ -1592,6 +1591,7 @@ dependencies = [
  "p3-uni-stark",
  "rayon",
  "tabula-commitment",
+ "tabula-contract",
  "tabula-core",
  "thiserror",
 ]

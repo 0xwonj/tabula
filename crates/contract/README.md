@@ -61,13 +61,21 @@ fail-closed validation live here.
   the theorem root.
 - Secure verification is statement-first:
   `VerifyPublicStatement(artifact, public_statement, proof)`.
+- A canonical derivation API, `public_statement_from_record(artifact, record)`,
+  is planned so `PublicStatement` has one authoritative constructor in this
+  crate. It is deferred until `ExecutionRecord` lands (likely the SP that
+  consolidates runtime materialization), because lifting the current
+  materializer would pull runtime and `tabula-types` registries into contract
+  and violate the dep-set above.
 
 ## Dependency Rules
 
-- This crate may build shared contract rules on top of `tabula-core`,
-  `tabula-types`, `tabula-ir`, `tabula-stark`, and native commitment
-  primitives when those rules define canonical proof-visible encodings.
-- It should not depend on compiler, runtime, or backend proof crates.
+- This crate depends on `tabula-core` and `tabula-commitment` (shared-foundation
+  primitives: `PoseidonHasher`, `NativeDigest`, `FieldHasher`). It does not
+  depend on `tabula-ir`, `tabula-stark`, `tabula-types`, compiler, runtime, or
+  backend proof crates.
+- As the wire-type authority, every other workspace crate is free to depend on
+  `tabula-contract`; the reverse is forbidden.
 - If a rule is about whether two sides should trust the same sealed contract,
   it belongs here before it belongs in consumers.
 
