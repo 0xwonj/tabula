@@ -38,6 +38,34 @@ separate from both runtime policy and backend proving.
 - Prevent runtime policy and backend proof assembly concerns from collapsing
   into the witness layer.
 
+## Chip Kit Registry and Scratchpad
+
+Execution-tier witness-store assembly routes every chip-specific label
+through the [`ChipWitnessKit`](../stark/src/witness_kit.rs) protocol
+rather than having witness own each chip's row type. The lowering
+driver holds a shared `KitScratch` (keyed by `ChipId`) that chips
+populate in one of two ways:
+
+- *inline-push* — opcode handlers in
+  `crates/witness/src/stark/lowering/ops/` call kit helpers during
+  lowering (e.g. `IrHashKit::push_from_inputs`,
+  `RelationTranscriptKit::push_from_typed_values`). The kit owns the
+  row type; witness only passes raw inputs.
+- *runtime-pre-stuff* — the runtime computes full row buffers and
+  installs them into `lowered.kit_scratch` via `insert_*` helpers
+  (relation table, context/tx-batch/event transcripts) before calling
+  `prepare_execution_store`.
+
+`prepare_execution_store` then drives a `ChipKitRegistry` over the
+scratchpad: each registered kit's `finalize` drains its entry and
+publishes rows under its canonical witness-store label. Witness itself
+only publishes `EXECUTION_RECORDS` and `STATIC_TABLE_ROWS` directly.
+
+Column- and root-tier chips (`crates/witness/src/stark/{memory,roots,schemes}`)
+are intentionally not yet migrated to kits; the
+`sp3_witness_chip_import_guardrail` test skips those subtrees. That
+scope is deferred to a future spike.
+
 ## Core Contract
 
 - The root API should stay about logical preparation, not backend policy.

@@ -504,3 +504,46 @@ Acceptance is gated on:
   `RelationEffect`, `StateEffectKind`, etc., all in `tabula-types`
   post-SP-2). Those types are still produced by executor and consumed
   by witness lowering unchanged.
+
+---
+
+## Landed (2026-04-19)
+
+SP-3 landed on `refactor/witness-chip-kit` in five commits: `dc2690e`
+(S1 trait infra), `7ddf374` (S2 IrHashKit pilot), `8066d3f` / `6360ade`
+/ `218f6af` (S3.1–S3.3 remaining execution-tier chips), `6c216e8`
+(S4 guardrail assertive). Deviations from the original spec shape:
+
+- **Trait home.** `ChipWitnessKit` lives in
+  `tabula-stark::witness_kit` rather than a new `tabula-witness-core`
+  or `tabula-ext` crate. Stark already owns `WitnessStore` and the
+  chip-independent proving contracts, so the kit protocol sits
+  naturally next to them without adding a crate.
+- **Scratchpad model.** Kits share one
+  `KitScratch = BTreeMap<ChipId, Box<dyn Any + Send>>` carried on
+  `LoweringOutput`. Each kit owns its entry; `finalize` drains it
+  into the witness store under the kit's canonical label. Two
+  authoring patterns emerged:
+  - *inline-push* (`IrHashKit`, `RelationTranscriptKit`) — opcode
+    handlers call kit helpers during lowering.
+  - *runtime-pre-stuff* (`RelationTableKit` + context/tx-batch/event
+    transcripts) — the runtime installs a full row buffer into the
+    scratchpad before `prepare_execution_store` runs.
+- **S3 scope narrowing.** Only execution-tier chips were migrated.
+  Column- and root-tier chips
+  (`crates/witness/src/stark/{memory,roots,schemes}`) remain on
+  direct row imports; the `sp3_witness_chip_import_guardrail` test
+  skips those subtrees explicitly. Migrating them is deferred per
+  §9.
+- **`prepare_execution_store` signature.** Dropped the
+  `relation_proof` parameter; runtime now pre-stuffs the relation
+  table scratchpad. The function publishes `EXECUTION_RECORDS` +
+  `STATIC_TABLE_ROWS` and drives the registry — nothing else.
+- **Guardrail scope.** Runtime guardrail
+  `runtime_relation_proof_prep_stays_witness_owned` was relaxed to
+  allow `RelationTableWitnessRow` in `engine.rs`. Chips cannot
+  depend on witness's `PreparedRelationProof`, so the row
+  projection's natural site is the runtime boundary.
+
+Byte-identical proofs on `basic` and `membership` end-to-end flows
+held at every stage (S2, S3.1, S3.2, S3.3).

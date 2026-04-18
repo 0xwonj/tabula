@@ -36,6 +36,35 @@ and proving orchestration lives above.
 - Prefer explicit chip implementations and composition over implicit backend magic.
 - Let higher layers decide how chips are assembled without moving chip logic upward.
 
+## Chip Witness Kits
+
+Each chip that contributes rows to the execution-tier `WitnessStore`
+pairs its AIR module with a `ChipWitnessKit` (see
+`tabula_stark::witness_kit::ChipWitnessKit`). The kit owns:
+
+- the chip's `ChipId` and canonical `*_WITNESS_LABEL`,
+- a `finalize` step that drains the kit's scratchpad entry and
+  publishes rows into the execution `WitnessStore`.
+
+The kit's row-building helper (for example
+`IrHashKit::push_from_inputs` or `RelationTableKit::insert_rows`)
+keeps the chip's row type internal to this crate: callers in
+`tabula-witness` and `tabula-runtime` interact with chips through the
+kit surface alone. Two authoring patterns are in use:
+
+- *inline-push* — opcode handlers construct a row via a kit helper
+  during lowering (e.g. IR hash, relation transcript). The kit owns
+  row construction; the caller only supplies raw inputs and receives
+  any derived data it needs (digest limbs, padded tuple values).
+- *runtime-pre-stuff* — the runtime computes the full row vector at
+  batch level and installs it into the kit scratchpad via an
+  `insert_*` helper (e.g. the relation table and transcript
+  families). The kit's `finalize` then publishes the rows.
+
+Column- and root-tier chips (`crates/witness/src/stark/{memory,roots,schemes}`
+in the current codebase) are intentionally not yet migrated to kits;
+that scope is deferred to a future spike.
+
 ## Core Contract
 
 - This crate is where concrete chip behavior lives.

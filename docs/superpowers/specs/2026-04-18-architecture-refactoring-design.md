@@ -265,6 +265,12 @@ types come from contract.
 
 ### SP-3 — Witness-Chips protocol abstraction
 
+> **Status: shipped (2026-04-19).** Landed on `refactor/witness-chip-kit` as
+> commits `dc2690e` (S1 trait infra), `7ddf374` (S2 IrHashKit pilot),
+> `8066d3f` / `6360ade` / `218f6af` (S3.1–S3.3 remaining execution-tier
+> chips), `6c216e8` (S4 guardrail assertive). See the SP-3 design doc's
+> "Landed" amendment for deviations from the original shape.
+
 **Goal:** Witness is chip-agnostic; the extension authoring seam is
 formal.
 
