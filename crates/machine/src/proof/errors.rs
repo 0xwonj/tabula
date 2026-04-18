@@ -158,6 +158,17 @@ pub enum VerificationError {
         /// Human-readable detail.
         detail: String,
     },
+    /// The caller-supplied expected binding digest does not match the digest
+    /// encoded in the decoded proof (and absorbed into the Fiat-Shamir
+    /// transcript). The backend surfaces this as its own variant so callers
+    /// can distinguish "wrong statement bound" from STARK-level failures.
+    #[error("binding digest mismatch: expected {expected:?}, proof contains {actual:?}")]
+    BindingDigestMismatch {
+        /// The expected 32-byte binding digest supplied by the caller.
+        expected: [u8; 32],
+        /// The binding digest actually encoded in the decoded proof bytes.
+        actual: [u8; 32],
+    },
     /// Decoding the proof bytes from the envelope failed.
     #[error("proof codec failure: {0}")]
     ProofCodec(#[from] ProofCodecError),

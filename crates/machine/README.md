@@ -20,12 +20,20 @@ External callers reach the backend through two borrowed facades around a
 configured [`TabulaMachine`]:
 
 - `BackendProver::new(&machine).prove_envelope(input)` returns the decoded
-  `TabulaProof` together with the contract-owned `ProofEnvelope` that wraps
+  `TabulaProof` **together with** the contract-owned `ProofEnvelope` that wraps
   the canonical encoded proof bytes (proof system `TABULA_STARK`, proof
-  encoding `TABULA_MACHINE_BINARY_V1`).
+  encoding `TABULA_MACHINE_BINARY_V1`). The tuple shape is deliberate: the
+  prover already holds the decoded proof after proving, and the runtime needs
+  both the wire-format envelope (for persistence and transport) and the
+  decoded form (for statement-level chip-opening introspection during
+  verification). Returning the tuple avoids a decode round-trip on the hot
+  path without widening the verifier's API surface.
 - `BackendVerifier::new(&machine).verify_envelope(envelope, binding_digest)`
-  decodes the envelope bytes, verifies the machine proof, and returns the
-  decoded `TabulaProof` on success.
+  decodes the envelope bytes, re-checks that the caller's expected
+  `binding_digest` matches the digest encoded in the decoded proof
+  (defense-in-depth against byte-level tampering that would otherwise only
+  surface as a transcript failure), verifies the machine proof, and returns
+  the decoded `TabulaProof` on success.
 - `BackendVerifier::new(&machine).verify_proof(&proof)` is the short path for
   callers that already hold a decoded `TabulaProof` (for example, the runtime
   after statement-level chip-opening checks).

@@ -16,6 +16,11 @@ The supported subset is:
 - unary native user-state keys only
 - public examples: `basic` and `membership`
 
+Paper-planning notes in `docs/notes/` may describe broader
+submission-time goals such as a StarkEx-class workload, provenance
+verification, or Dockerized reproduction. Those capabilities are **not**
+part of the current public artifact until they are documented here.
+
 The following are intentionally out of scope:
 
 - query proving

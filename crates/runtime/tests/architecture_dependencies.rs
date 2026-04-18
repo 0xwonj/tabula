@@ -264,6 +264,17 @@ fn runtime_relation_proof_prep_stays_witness_owned() {
     );
 }
 
+/// Guardrail: every production call site that drives the STARK machine must go
+/// through [`tabula_machine::BackendProver`] / [`tabula_machine::BackendVerifier`]
+/// rather than the internal `TabulaMachine::prove` / `verify` helpers.
+///
+/// Scope is intentionally limited to `crates/runtime/src/{engine,verifier}.rs`
+/// because the runtime is the only workspace crate that may construct a
+/// `TabulaMachine` and drive it directly. `tabula-sdk` reaches the backend
+/// exclusively through `tabula_runtime::TabulaRuntime::prove` and through
+/// `Verifier` — it does not depend on `tabula-machine` except for re-exported
+/// envelope types. If that changes (e.g. SDK gains a direct `TabulaMachine`
+/// handle), extend `facade_routing_paths` below to cover `crates/sdk/src/**`.
 #[test]
 fn runtime_prove_and_verify_route_through_backend_facade() {
     let engine = read_workspace_file("crates/runtime/src/engine.rs");

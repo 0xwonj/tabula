@@ -118,6 +118,10 @@ struct CommitPhaseProofStepDto {
 }
 
 /// Encode one machine proof into canonical proof bytes.
+///
+/// Internal to the machine: callers produce the envelope through
+/// [`crate::backend::BackendProver::prove_envelope`]. Direct byte-level
+/// encoding outside this crate would bypass the envelope invariants.
 pub(crate) fn encode_proof_bytes(proof: &TabulaProof) -> Result<Vec<u8>, ProofCodecError> {
     let dto = ProofDto::from_proof(proof);
     borsh::to_vec(&dto).map_err(|error| ProofCodecError::Encode {
@@ -126,6 +130,34 @@ pub(crate) fn encode_proof_bytes(proof: &TabulaProof) -> Result<Vec<u8>, ProofCo
 }
 
 /// Decode one machine proof from canonical proof bytes.
+///
+/// Used by [`crate::backend::BackendVerifier::verify_envelope`] internally and
+/// by SDK-side reconstitution paths that load a proof from serialized bytes
+/// without an associated verifier context yet.
+///
+/// # Visibility Asymmetry
+///
+/// `decode_proof_bytes` is `pub` while [`encode_proof_bytes`] is `pub(crate)`.
+/// This is intentional and reflects the envelope contract:
+///
+/// - **Encoding is privileged.** Only `BackendProver::prove_envelope` may
+///   produce the canonical proof-bytes that ride inside a `ProofEnvelope`,
+///   because those bytes are meaningful only alongside a freshly-proved
+///   `TabulaProof` from this machine. Letting external crates encode their
+///   own `TabulaProof`s would risk fabricating envelopes for in-memory
+///   proofs that never went through the prover, bypassing the bundling
+///   invariants (proof system id, encoding id, binding digest threading).
+///   So `encode_proof_bytes` is crate-internal.
+/// - **Decoding is a pure byte-to-struct operation.** Reconstituting a
+///   `TabulaProof` from its canonical bytes does not yet make it valid —
+///   the verifier still has to check every constraint. External callers
+///   (SDK, storage layers, transport code) legitimately need to parse
+///   proof bytes before a verifier is in hand (for introspection, routing,
+///   or persistence). Gating decode behind the backend facade would force
+///   them to construct a machine they do not need.
+///
+/// If that trust model changes, move this under `pub(crate)` and expose a
+/// facade method on `BackendVerifier` instead.
 pub fn decode_proof_bytes(bytes: &[u8]) -> Result<TabulaProof, ProofCodecError> {
     let dto = ProofDto::try_from_slice(bytes).map_err(|error| ProofCodecError::Decode {
         detail: error.to_string(),

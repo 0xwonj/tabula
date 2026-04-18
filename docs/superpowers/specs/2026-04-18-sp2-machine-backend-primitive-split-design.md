@@ -138,6 +138,22 @@ Consequently:
   the returned `TabulaProof`; callers that only need "valid or not"
   drop it.
 
+> **Amendment (2026-04-19):** During SP-2 implementation two small
+> shape adjustments shipped:
+>
+> 1. `prove_envelope` takes only `input: PreparedMachineInput` (no
+>    separate `binding_digest` argument). `PreparedMachineInput`
+>    already carries the binding digest internally — the executor
+>    computed it when preparing the input — so a second parameter would
+>    be redundant and introduce a "which one wins?" footgun.
+> 2. `prove_envelope` returns `(TabulaProof, ProofEnvelope)` rather
+>    than just `ProofEnvelope`. The prover has the decoded proof in
+>    hand after proving, and the runtime needs both the wire envelope
+>    (for persistence and transport) and the decoded form (to
+>    introspect chip openings during statement-level verification).
+>    Returning the tuple avoids a decode round-trip on the hot path
+>    without widening the verifier's API surface.
+
 The existing lower-level `TabulaMachine::prove(input) -> TabulaProof`
 and `TabulaMachine::verify(&TabulaProof)` remain as crate-internal
 (or narrowly pub) helpers that `BackendProver` / `BackendVerifier`
@@ -183,6 +199,20 @@ only if a future consumer needs it.
 `StateRuntimeView` is a trait that defines how the runtime exposes
 state to executor hosts. Its only implementer is inside runtime; it is
 consumed by executor via trait-object. It is not on the witness path.
+
+> **Amendment (2026-04-19):** During SP-2 implementation we moved
+> `StateRuntimeView` into `tabula-types` alongside the other shared
+> execution-output types, rather than leaving it in executor as the
+> original plan implied. Rationale: the trait composes directly with
+> `TypedValue`, `CommittedKey`, and `TypedCommittedPropertyQueryResult`
+> (all already in `tabula-types`) and with `ExecContext`, which needed
+> a home that did not force runtime callers to depend on `tabula-executor`
+> just to name the view. Putting all execution-output value types in one
+> crate simplified the executor-re-export removal (S3) and eliminated the
+> residual `use tabula_executor::StateRuntimeView` imports from
+> `crates/runtime/src/state_runtime.rs` and `crates/compiler/**` tests.
+> Witness still does not depend on `StateRuntimeView`; the move is
+> motivated by the runtime/compiler/executor boundary, not witness.
 
 ---
 

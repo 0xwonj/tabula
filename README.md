@@ -18,6 +18,12 @@ The public artifact currently supports only a narrow subset:
 - unary native user-state keys only
 - public examples: `basic` and `membership`
 
+Paper-planning notes may describe broader submission-time deliverables
+such as a StarkEx-class evaluation workload, provenance verification, or
+Dockerized reproducibility. Those are **not** part of the current public
+artifact unless this README or [ARTIFACT.md](ARTIFACT.md) documents them
+explicitly.
+
 ## Reviewer Path
 
 If you are reviewing the artifact, use this order:

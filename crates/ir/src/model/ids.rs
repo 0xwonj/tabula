@@ -4,6 +4,13 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use tabula_core::TypeId;
 
+// TODO(SP-later): These are transitional re-exports left over from SP-1's
+// migration of the shared IR identifier primitives into `tabula-core`. Once
+// downstream call sites import them directly from `tabula_core`, delete this
+// re-export line. Tracked alongside the remaining cross-crate cleanup under
+// the architecture refactoring umbrella — do not grow new dependencies on
+// `tabula_ir::{ContextFieldId, EntryId, EventId, ProgramId}`; import from
+// `tabula_core` instead.
 pub use tabula_core::{ContextFieldId, EntryId, EventId, ProgramId};
 
 /// A resolved type reference (alias for [`TypeId`]).
