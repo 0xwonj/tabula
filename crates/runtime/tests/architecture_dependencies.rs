@@ -407,7 +407,9 @@ fn crate_readmes_under(rel: &str) -> Vec<PathBuf> {
 
 /// SP-3 §2.5 guardrail — **off mode** (S1): scans `crates/witness/src/**/*.rs`
 /// for `use tabula_chips::...` paths and reports anything outside the
-/// allowlist without failing. S4 flips this to assertive.
+/// allowlist without failing. S4 flipped this to assertive for the
+/// execution-tier surface only; column- and root-tier sources remain
+/// out of SP-3 scope (plan §9) and are skipped via `DEFERRED_TIER_PREFIXES`.
 ///
 /// Allowlist (from SP-3 §2.5):
 /// - protocol-level identifiers: `Opcode`, `CmpOp`, `MAX_SLOTS`,
@@ -419,7 +421,17 @@ fn crate_readmes_under(rel: &str) -> Vec<PathBuf> {
 /// - `*Kit` types (post-S2 — witness ops files import the kit, never
 ///   the row type).
 #[test]
-fn sp3_witness_chip_import_guardrail_off_mode() {
+fn sp3_witness_chip_import_guardrail() {
+    /// Relative path prefixes (under `crates/witness/src/`) skipped by
+    /// the execution-tier guardrail. These tiers intentionally stay
+    /// chip-aware per SP-3 §9 non-goals and will migrate in a future
+    /// spike.
+    const DEFERRED_TIER_PREFIXES: &[&str] = &[
+        "crates/witness/src/stark/memory",
+        "crates/witness/src/stark/roots",
+        "crates/witness/src/stark/schemes",
+    ];
+
     fn last_segment(path: &str) -> &str {
         path.rsplit("::").next().unwrap_or(path)
     }
@@ -444,6 +456,13 @@ fn sp3_witness_chip_import_guardrail_off_mode() {
     let mut forbidden: Vec<(PathBuf, String)> = Vec::new();
 
     for path in sources {
+        let path_str = path.to_string_lossy();
+        if DEFERRED_TIER_PREFIXES
+            .iter()
+            .any(|prefix| path_str.contains(prefix))
+        {
+            continue;
+        }
         let source = fs::read_to_string(&path).expect("read witness source");
         for line in source.lines() {
             let trimmed = line.trim_start();
@@ -476,15 +495,16 @@ fn sp3_witness_chip_import_guardrail_off_mode() {
         }
     }
 
-    if !forbidden.is_empty() {
-        eprintln!(
-            "[SP-3 off-mode] {} chip-row import(s) still live in tabula-witness (pending migration to ChipWitnessKit):",
-            forbidden.len()
-        );
-        for (path, import) in &forbidden {
-            eprintln!("  {}: {}", path.display(), import);
-        }
-    }
+    assert!(
+        forbidden.is_empty(),
+        "SP-3 guardrail: {} forbidden chip-row import(s) under tabula-witness execution-tier surface:\n{}",
+        forbidden.len(),
+        forbidden
+            .iter()
+            .map(|(path, import)| format!("  {}: {}", path.display(), import))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
 }
 
 #[test]
