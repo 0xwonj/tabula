@@ -211,8 +211,13 @@ a minimal dep set.
   `tabula-contract`. Relocate its canonical field-element codec.
 - Flip the dep direction: `tabula-stark` (and chips) import
   `PublicStatement` from contract.
-- Introduce `tabula_contract::public_statement_from_record` as
-  stable public API.
+- ~~Introduce `tabula_contract::public_statement_from_record` as
+  stable public API.~~ **Reassigned out of SP-1** (see SP-1 §1):
+  `ExecutionRecord` does not yet exist, and the current materializer
+  depends on runtime-internal `ProofJournal` /
+  `PublicStatementMaterialization` plus `tabula-types` registries.
+  The API moves to whichever later SP defines `ExecutionRecord` —
+  likely SP-4.
 - Resolve `contract → ir` dep: either remove by moving shared types
   into contract/core, or justify and document.
 - Decide on `contract → commitment`: allow (reclassify commitment
