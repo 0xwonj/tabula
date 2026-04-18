@@ -3,15 +3,15 @@
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
 use tabula_ir as ir;
-use tabula_types::{TypeRuntimeRegistry, TypedValue};
+use tabula_types::{ContextValues, TxCall, TypeRuntimeRegistry, TypedValue};
 
 use crate::machine::entry::EntryMachineCore;
 use crate::program::{ResolvedEntry, ResolvedExecutionProgram};
 use crate::state::{Overlay, OverlayResult};
 use crate::surface::{
-    ContextValues, ExecContext, ExecuteError, ExecutionJournal, ExecutionStateSummary,
-    FailedTxExecution, QueryExecutionResult, SuccessfulTxExecution, TxCall, TxExecutionOutcome,
-    TypedStateSnapshot, TypedStateWrite,
+    ExecContext, ExecuteError, ExecutionJournal, ExecutionStateSummary, FailedTxExecution,
+    QueryExecutionResult, SuccessfulTxExecution, TxExecutionOutcome, TypedStateSnapshot,
+    TypedStateWrite,
 };
 
 /// Execute a single query entry and return its result with all observed effects.

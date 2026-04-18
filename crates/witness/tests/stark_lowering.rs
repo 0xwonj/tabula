@@ -11,7 +11,6 @@ use tabula_commitment::PoseidonHasher;
 use tabula_contract::{StaticTableArtifact, TupleEncodingDefaults, TupleEncodingSelection};
 use tabula_core::error::TabulaError;
 use tabula_core::{CommittedCellKey, CommittedKey, CommittedPropertyQuery, TypeId};
-use tabula_executor::TxCall;
 use tabula_ir as ir;
 use tabula_profile::{
     ENCODING_BOOL_ID, ENCODING_BYTES32_ID, ENCODING_U64_ID, TYPE_BOOL_ID, TYPE_BYTES32_ID,
@@ -19,7 +18,7 @@ use tabula_profile::{
 };
 use tabula_stark::trace::witness_labels;
 use tabula_types::{
-    CommittedColumnEntry, NativeKeyPayload, TypedCommittedPropertyQueryResult, TypedValue,
+    CommittedColumnEntry, NativeKeyPayload, TxCall, TypedCommittedPropertyQueryResult, TypedValue,
 };
 use tabula_witness::prepare_relation_proof;
 use tabula_witness::stark::{
@@ -28,7 +27,7 @@ use tabula_witness::stark::{
 
 struct NoopStateRuntime;
 
-impl tabula_executor::StateRuntimeView for NoopStateRuntime {
+impl tabula_types::StateRuntimeView for NoopStateRuntime {
     fn encode_cell_key(
         &self,
         _table: ir::TableId,
@@ -155,7 +154,7 @@ fn tuple_encoding_defaults() -> TupleEncodingDefaults {
 fn lowers_an_empty_tx_entry_and_builds_execution_store() {
     let entry = empty_tx_entry();
     let program = program_with_entry(entry.clone());
-    let context = tabula_executor::ContextValues::new();
+    let context = tabula_types::ContextValues::new();
     let call = TxCall {
         entry_id: entry.id,
         params: vec![],

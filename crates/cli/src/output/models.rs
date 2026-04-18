@@ -112,6 +112,10 @@ pub struct VerifyOutput {
 }
 
 /// Stable JSON contract for `tabula inspect-proof --json`.
+///
+/// The proof envelope wire format does not carry the `PublicStatement`; callers
+/// who want statement-level fields must load the accompanying
+/// `public_statement.json` separately.
 #[cfg(feature = "verify")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InspectProofOutput {
@@ -123,8 +127,6 @@ pub struct InspectProofOutput {
     pub proof_system: String,
     /// Proof encoding identifier.
     pub proof_encoding: String,
-    /// Verbatim stable `public_statement.json` payload derived from the machine proof.
-    pub public_statement_file: tabula_sdk::PublicStatementFile,
 }
 
 /// One named schema value carrying a type reference.

@@ -14,6 +14,8 @@ use tabula_chips::execution::trace::InstructionRecord;
 use tabula_commitment::PoseidonHasher;
 use tabula_compiler::RegisteredProgram;
 #[cfg(feature = "prove")]
+use tabula_contract::ProofEnvelope;
+#[cfg(feature = "prove")]
 use tabula_contract::TupleEncodingDefaults;
 use tabula_contract::{
     ArtifactContext, BoundStatement, ProgramBinding, PublicStatement, StaticTableArtifact,
@@ -30,11 +32,16 @@ use tabula_ext::root::{RootBackendBundle, RootWitnessContext};
 use tabula_ext::root::{RootProofBackend, SmtRootProofBackend};
 use tabula_ir as ir;
 #[cfg(feature = "prove")]
-use tabula_machine::{ColumnSlotKey, PreparedColumnInput, PreparedMachineInput, PreparedTierInput};
+use tabula_machine::{
+    BackendProver, ColumnSlotKey, PreparedColumnInput, PreparedMachineInput, PreparedTierInput,
+};
 use tabula_machine::{TabulaMachine, TabulaProof, TabulaStarkConfig};
 #[cfg(feature = "prove")]
 use tabula_types::CommittedColumnEntry;
-use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue};
+use tabula_types::{
+    ContextValues, EncodingRuntimeRegistry, StateEffectKind, TxCall, TypeRuntimeRegistry,
+    TypedValue,
+};
 #[cfg(feature = "prove")]
 use tabula_witness::stark::prepare_execution_store;
 #[cfg(feature = "prove")]
@@ -57,7 +64,7 @@ use crate::host::HostEnvironment;
 use crate::proof_summary::ProofSummary;
 use crate::semantics as runtime_ir;
 use crate::state_runtime::ResolvedStateRuntime;
-use crate::verifier::{verify_proof_with_context, verify_public_statement_with_context};
+use crate::verifier::verify_public_statement_with_context;
 
 type LogicalStateCell = (ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue);
 
@@ -367,8 +374,13 @@ pub struct ProveInput<'a> {
 /// Result of native proof generation.
 #[cfg(feature = "prove")]
 pub struct ProveResult {
-    /// Generated STARK proof.
+    /// Generated STARK proof (decoded form).
     pub proof: TabulaProof,
+    /// Wire-format envelope around the encoded proof bytes, produced by the
+    /// machine backend primitive.
+    pub envelope: ProofEnvelope,
+    /// The artifact-bound public statement that accompanies `proof`.
+    pub public_statement: PublicStatement,
     /// Human-readable machine summary.
     pub summary: ProofSummary,
 }
@@ -376,8 +388,13 @@ pub struct ProveResult {
 /// Result of prove + verify.
 #[cfg(feature = "prove")]
 pub struct VerifiedResult {
-    /// Generated STARK proof.
+    /// Generated STARK proof (decoded form).
     pub proof: TabulaProof,
+    /// Wire-format envelope around the encoded proof bytes, produced by the
+    /// machine backend primitive.
+    pub envelope: ProofEnvelope,
+    /// The artifact-bound public statement that accompanies `proof`.
+    pub public_statement: PublicStatement,
     /// Whether verification passed.
     pub verified: bool,
     /// Human-readable machine summary.
@@ -719,8 +736,8 @@ impl TabulaRuntime {
     fn execute_batch_typed(
         &self,
         snapshot: &CommittedStateSnapshot,
-        txs: &[exec::TxCall],
-        context: &exec::ContextValues,
+        txs: &[TxCall],
+        context: &ContextValues,
     ) -> Result<exec::ExecutionJournal, RuntimeError> {
         snapshot.validate(&self.runtime_program.state, self.type_runtimes())?;
         exec::execute_batch(
@@ -760,7 +777,7 @@ impl TabulaRuntime {
         snapshot: &CommittedStateSnapshot,
         entry_id: ir::EntryId,
         params: &[TypedValue],
-        context: &exec::ContextValues,
+        context: &ContextValues,
     ) -> Result<exec::QueryExecutionResult, RuntimeError> {
         snapshot.validate(&self.runtime_program.state, self.type_runtimes())?;
         exec::execute_query(
@@ -786,7 +803,7 @@ impl TabulaRuntime {
     #[cfg(feature = "prove")]
     fn materialize_public_statement_typed(
         &self,
-        context: &exec::ContextValues,
+        context: &ContextValues,
         materialization: runtime_ir::PublicStatementMaterialization,
         execution_journal: &exec::ExecutionJournal,
     ) -> Result<PublicStatement, RuntimeError> {
@@ -807,13 +824,17 @@ impl TabulaRuntime {
     /// Generate a proof for one already-executed tx batch.
     #[cfg(feature = "prove")]
     pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, RuntimeError> {
-        let machine_input = self.prepare_proof_request(input)?;
-        let proof = self
-            .machine
-            .prove(machine_input)
+        let (machine_input, public_statement) = self.prepare_proof_request(input)?;
+        let (proof, envelope) = BackendProver::new(&self.machine)
+            .prove_envelope(machine_input)
             .map_err(RuntimeError::Proving)?;
         let summary = ProofSummary::from_proof(&proof);
-        Ok(ProveResult { proof, summary })
+        Ok(ProveResult {
+            proof,
+            envelope,
+            public_statement,
+            summary,
+        })
     }
 
     /// Verify a native proof against an externally supplied expected public statement.
@@ -831,23 +852,15 @@ impl TabulaRuntime {
         )
     }
 
-    /// Verify a native proof against the public statement carried inside the proof.
-    pub fn verify_proof(&self, proof: &TabulaProof) -> Result<(), RuntimeError> {
-        verify_proof_with_context(
-            &self.artifact_context(),
-            self.runtime_program.relation_policy,
-            &self.machine,
-            proof,
-        )
-    }
-
     /// Generate and verify a proof in one call.
     #[cfg(feature = "prove")]
     pub fn prove_and_verify(&self, input: &ProveInput<'_>) -> Result<VerifiedResult, RuntimeError> {
         let prove_result = self.prove(input)?;
-        self.verify_proof(&prove_result.proof)?;
+        self.verify_public_statement(&prove_result.proof, &prove_result.public_statement)?;
         Ok(VerifiedResult {
             proof: prove_result.proof,
+            envelope: prove_result.envelope,
+            public_statement: prove_result.public_statement,
             verified: true,
             summary: prove_result.summary,
         })
@@ -874,7 +887,7 @@ impl TabulaRuntime {
     fn prepare_proof_request(
         &self,
         input: &ProveInput<'_>,
-    ) -> Result<PreparedMachineInput, RuntimeError> {
+    ) -> Result<(PreparedMachineInput, PublicStatement), RuntimeError> {
         let typed_context = self.decode_context_input(input.context)?;
         let typed_txs = self.decode_entry_batch(input.batch)?;
         let applied_tx_digest = runtime_ir::compute_applied_tx_digest(
@@ -909,9 +922,8 @@ impl TabulaRuntime {
             .map_err(|error| RuntimeError::StatementBuild {
                 detail: error.to_string(),
             })?;
-        Ok(proof_artifacts
-            .with_public_statement(public_statement)
-            .into_prepared_machine_input(binding_digest))
+        let machine_input = proof_artifacts.into_prepared_machine_input(binding_digest);
+        Ok((machine_input, public_statement))
     }
 
     fn bound_statement(&self, public_statement: &PublicStatement) -> BoundStatement {
@@ -922,10 +934,7 @@ impl TabulaRuntime {
         self.runtime_program.artifact_context.clone()
     }
 
-    fn decode_entry_batch(
-        &self,
-        batch: &ir::EntryBatch,
-    ) -> Result<Vec<exec::TxCall>, RuntimeError> {
+    fn decode_entry_batch(&self, batch: &ir::EntryBatch) -> Result<Vec<TxCall>, RuntimeError> {
         batch
             .calls
             .iter()
@@ -933,7 +942,7 @@ impl TabulaRuntime {
             .collect()
     }
 
-    fn decode_entry_call(&self, call: &ir::EntryCall) -> Result<exec::TxCall, RuntimeError> {
+    fn decode_entry_call(&self, call: &ir::EntryCall) -> Result<TxCall, RuntimeError> {
         let entry = self
             .execution_program()
             .entry_definition(call.entry_id)
@@ -946,7 +955,7 @@ impl TabulaRuntime {
             });
         }
         let params = self.decode_params(&entry.params, &call.params)?;
-        Ok(exec::TxCall {
+        Ok(TxCall {
             entry_id: call.entry_id,
             params,
         })
@@ -1011,8 +1020,8 @@ impl TabulaRuntime {
     fn decode_context_input(
         &self,
         context: &ir::ContextInput,
-    ) -> Result<exec::ContextValues, RuntimeError> {
-        let mut typed = exec::ContextValues::new();
+    ) -> Result<ContextValues, RuntimeError> {
+        let mut typed = ContextValues::new();
         for (field_id, value) in &context.fields {
             let field = self
                 .execution_program()
@@ -1093,11 +1102,6 @@ struct PreparedArtifacts {
 
 #[cfg(feature = "prove")]
 impl PreparedArtifacts {
-    fn with_public_statement(mut self, public_statement: PublicStatement) -> Self {
-        self.public_statement = public_statement;
-        self
-    }
-
     fn into_prepared_machine_input(self, binding_digest: [u8; 32]) -> PreparedMachineInput {
         PreparedMachineInput {
             execution: self.execution,
@@ -1107,7 +1111,6 @@ impl PreparedArtifacts {
                 .map(|column| column.input)
                 .collect(),
             root: self.root,
-            public_statement: self.public_statement,
             binding_digest,
         }
     }
@@ -1162,7 +1165,7 @@ fn build_public_statement_slot_layout(
 #[cfg(feature = "prove")]
 fn context_public_statement_bindings(
     runtime_program: &RuntimeProgramState,
-    context: &exec::ContextValues,
+    context: &ContextValues,
 ) -> Result<Vec<runtime_ir::PublicContextBinding>, RuntimeError> {
     runtime_ir::encode_public_context(
         runtime_program.semantic.proof(),
@@ -1252,7 +1255,7 @@ fn build_param_prelude(
     runtime_program: &RuntimeProgramState,
     layout: &PublicStatementSlotLayout,
     entry: &ir::Entry,
-    call: &exec::TxCall,
+    call: &TxCall,
     tx_item_index_base: u32,
     tx_index: u32,
 ) -> Result<(Vec<ParamPreludeSlot>, Vec<InstructionRecord>), RuntimeError> {
@@ -1341,8 +1344,8 @@ fn prepare_proof_artifacts(
     runtime_program: &RuntimeProgramState,
     root_backend_bundle: &RootBackendBundle,
     snapshot: &CommittedStateSnapshot,
-    txs: &[exec::TxCall],
-    context: &exec::ContextValues,
+    txs: &[TxCall],
+    context: &ContextValues,
     executed: &exec::ExecutionJournal,
 ) -> Result<PreparedArtifacts, RuntimeError> {
     let mut column_slots = Vec::with_capacity(runtime_program.column_slots.len());
@@ -1525,7 +1528,7 @@ fn prepare_proof_artifacts(
                 time: effect.logical_time,
                 is_write: matches!(
                     effect.kind,
-                    exec::StateEffectKind::Write | exec::StateEffectKind::Delete
+                    StateEffectKind::Write | StateEffectKind::Delete
                 ),
                 value,
                 is_null: effect.value.is_none(),
@@ -1832,7 +1835,7 @@ mod relation_proof_tests {
     use tabula_ext::root::{
         RootBackend, RootBackendBundle, RootWitnessPreparer, SmtRootWitnessPreparer,
     };
-    use tabula_machine::{RootProofBackend, SmtRootProofBackend};
+    use tabula_machine::{BackendProver, RootProofBackend, SmtRootProofBackend};
     use tabula_profile::{
         CanonicalNullEncoding, EncodingClass, EncodingProfile, FieldFamily, GenericIrFamily,
         HostValueFamily, NullSemantics, TranscriptSerialization, TypeCapabilities, TypeDescriptor,
@@ -2427,7 +2430,7 @@ tx scan(id: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute guarded batch");
 
-        let machine_input = runtime
+        let (machine_input, _public_statement) = runtime
             .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
             .expect("prepare proof request");
 
@@ -2462,7 +2465,7 @@ tx scan(id: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute batch");
 
-        let mut machine_input = runtime
+        let (mut machine_input, _public_statement) = runtime
             .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
             .expect("prepare proof request");
 
@@ -2484,7 +2487,9 @@ tx scan(id: u64) {
             .put(RELATION_TABLE_WITNESS_LABEL, rows);
 
         assert!(
-            runtime.machine.prove(machine_input).is_err(),
+            BackendProver::new(&runtime.machine)
+                .prove_envelope(machine_input)
+                .is_err(),
             "tampered relation lookup rows must fail proving"
         );
     }
@@ -2502,7 +2507,7 @@ tx scan(id: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute batch");
 
-        let mut machine_input = runtime
+        let (mut machine_input, _public_statement) = runtime
             .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
             .expect("prepare proof request");
 
@@ -2524,7 +2529,9 @@ tx scan(id: u64) {
             .put(witness_labels::EXECUTION_RECORDS, records);
 
         assert!(
-            runtime.machine.prove(machine_input).is_err(),
+            BackendProver::new(&runtime.machine)
+                .prove_envelope(machine_input)
+                .is_err(),
             "tampered relation output binding must fail proving"
         );
     }
@@ -2542,7 +2549,7 @@ tx scan(id: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute batch");
 
-        let mut machine_input = runtime
+        let (mut machine_input, _public_statement) = runtime
             .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
             .expect("prepare proof request");
 
@@ -2563,7 +2570,9 @@ tx scan(id: u64) {
             .put(RELATION_TRANSCRIPT_WITNESS_LABEL, calls);
 
         assert!(
-            runtime.machine.prove(machine_input).is_err(),
+            BackendProver::new(&runtime.machine)
+                .prove_envelope(machine_input)
+                .is_err(),
             "tampered relation effect identity must fail proving"
         );
     }
@@ -2648,7 +2657,7 @@ tx scan(id: u64) {
                 &runtime.runtime_program.tuple_encoding_defaults,
             )
             .expect("batch digest"),
-            proved.proof.public_statement.applied_tx_digest.to_bytes()
+            proved.public_statement.applied_tx_digest.to_bytes()
         );
         assert_eq!(
             executed.successful_txs().count(),
@@ -2683,7 +2692,7 @@ tx scan(id: u64) {
         relation_opening.public_values.pop();
 
         let runtime_err = runtime
-            .verify_proof(&proved.proof)
+            .verify_public_statement(&proved.proof, &proved.public_statement)
             .expect_err("truncated relation chip public values must fail runtime verification");
         assert!(
             runtime_err
@@ -2693,7 +2702,7 @@ tx scan(id: u64) {
         );
 
         let verifier_err = verifier
-            .verify_proof(&proved.proof)
+            .verify_public_statement(&proved.proof, &proved.public_statement)
             .expect_err("truncated relation chip public values must fail verifier validation");
         assert!(
             verifier_err
@@ -2729,7 +2738,7 @@ tx scan(id: u64) {
         relation_opening.public_values.push(KoalaBear::ZERO);
 
         let runtime_err = runtime
-            .verify_proof(&proved.proof)
+            .verify_public_statement(&proved.proof, &proved.public_statement)
             .expect_err("extended relation chip public values must fail runtime verification");
         assert!(
             runtime_err
@@ -2739,7 +2748,7 @@ tx scan(id: u64) {
         );
 
         let verifier_err = verifier
-            .verify_proof(&proved.proof)
+            .verify_public_statement(&proved.proof, &proved.public_statement)
             .expect_err("extended relation chip public values must fail verifier validation");
         assert!(
             verifier_err
@@ -2772,7 +2781,7 @@ tx scan(id: u64) {
             .retain(|opening| opening.chip_id != RELATION_TABLE_CHIP_ID);
 
         let runtime_err = runtime
-            .verify_proof(&proved.proof)
+            .verify_public_statement(&proved.proof, &proved.public_statement)
             .expect_err("missing relation chip opening must fail runtime verification");
         assert!(
             runtime_err
@@ -2782,7 +2791,7 @@ tx scan(id: u64) {
         );
 
         let verifier_err = verifier
-            .verify_proof(&proved.proof)
+            .verify_public_statement(&proved.proof, &proved.public_statement)
             .expect_err("missing relation chip opening must fail verifier validation");
         assert!(
             verifier_err
@@ -2970,7 +2979,7 @@ tx scan(id: u64) {
             registered.static_table_artifact().root
         );
         verifier
-            .verify_proof(&proved.proof)
+            .verify_public_statement(&proved.proof, &proved.public_statement)
             .expect("verify proof under custom host environment");
     }
 }

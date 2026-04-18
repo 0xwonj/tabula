@@ -8,13 +8,12 @@ mod program;
 mod state;
 mod surface;
 
-pub use host::{CapabilityExecutor, CapabilityHandler, CapabilityRegistry, StateRuntimeView};
+pub use host::{CapabilityExecutor, CapabilityHandler, CapabilityRegistry};
 pub use machine::{execute_batch, execute_query};
 pub use program::{ResolvedExecutionProgram, ResolvedTable};
 pub use state::{Overlay, OverlayResult};
 pub use surface::{
-    CapabilityEffect, ContextValues, ExecContext, ExecuteError, ExecutionJournal,
-    ExecutionStateSummary, FailedTxExecution, QueryExecutionResult, RelationEffect,
-    RelationEffectKind, StateEffectKind, StatePropertyEffect, SuccessfulTxExecution, TxCall,
-    TxExecutionOutcome, TypedEventEffect, TypedStateEffect, TypedStateSnapshot, TypedStateWrite,
+    CapabilityEffect, ExecContext, ExecuteError, ExecutionJournal, ExecutionStateSummary,
+    FailedTxExecution, QueryExecutionResult, SuccessfulTxExecution, TxExecutionOutcome,
+    TypedStateSnapshot, TypedStateWrite,
 };

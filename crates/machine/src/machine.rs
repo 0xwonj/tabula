@@ -3,17 +3,9 @@
 //! [`TabulaMachine`] orchestrates the C+2 proof architecture:
 //! 1 execution proof + C column proofs + 1 root proof.
 //!
-//! ```ignore
-//! let machine = TabulaMachine::new(columns)?;
-//! let proof = machine.prove(crate::PreparedMachineInput {
-//!     execution,
-//!     columns,
-//!     root,
-//!     public_statement,
-//!     binding_digest: [0u8; 32],
-//! })?;
-//! machine.verify(&proof)?;
-//! ```
+//! Callers normally reach this layer through the backend primitive surface in
+//! [`crate::backend`] (`BackendProver` / `BackendVerifier`), which wraps the
+//! decoded `TabulaProof` in a contract-owned `ProofEnvelope`.
 
 use std::fmt;
 use std::sync::Arc;
@@ -89,12 +81,21 @@ impl TabulaMachine {
     }
 
     /// Build traces and generate a proof from prepared backend input.
-    pub fn prove(&self, input: PreparedMachineInput) -> Result<TabulaProof, ProveError> {
+    ///
+    /// Internal entry point: external callers go through
+    /// [`crate::backend::BackendProver::prove_envelope`], which produces a
+    /// [`tabula_contract::ProofEnvelope`] around the encoded proof bytes.
+    pub(crate) fn prove(&self, input: PreparedMachineInput) -> Result<TabulaProof, ProveError> {
         crate::proof::prover::Prover::new(&self.topology).prove(input)
     }
 
     /// Verify a proof against this machine's configured backend setup.
-    pub fn verify(&self, proof: &TabulaProof) -> Result<(), VerificationError> {
+    ///
+    /// Internal entry point: external callers go through
+    /// [`crate::backend::BackendVerifier::verify_envelope`] (from wire bytes)
+    /// or [`crate::backend::BackendVerifier::verify_proof`] (from a proof
+    /// already decoded by the runtime).
+    pub(crate) fn verify(&self, proof: &TabulaProof) -> Result<(), VerificationError> {
         crate::proof::verifier::Verifier::new(&self.topology).verify(proof)
     }
 

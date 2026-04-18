@@ -1,12 +1,9 @@
 //! Execution context types: per-batch host services and public context values.
 
-use std::collections::BTreeMap;
-
 use tabula_core::traits::Hasher;
-use tabula_ir as ir;
-use tabula_types::{TypeRuntimeRegistry, TypedValue};
+use tabula_types::{StateRuntimeView, TypeRuntimeRegistry};
 
-use crate::host::{CapabilityExecutor, StateRuntimeView};
+use crate::host::CapabilityExecutor;
 
 /// Host services and type registries threaded through a single batch execution.
 pub struct ExecContext<'a> {
@@ -18,23 +15,4 @@ pub struct ExecContext<'a> {
     pub capability_executor: Option<&'a dyn CapabilityExecutor>,
     /// Runtime-owned user-state services for committed-key access and property reads.
     pub state_runtime: &'a dyn StateRuntimeView,
-}
-
-/// The decoded public context values supplied by the caller for one batch.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ContextValues {
-    /// Mapping from context field ID to its decoded value.
-    pub fields: BTreeMap<ir::ContextFieldId, TypedValue>,
-}
-
-impl ContextValues {
-    /// Create an empty context.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Insert a context field value.
-    pub fn insert(&mut self, id: ir::ContextFieldId, value: TypedValue) {
-        self.fields.insert(id, value);
-    }
 }

@@ -1,14 +1,12 @@
 //! Machine-level Fiat-Shamir transcript orchestration.
 //!
 //! This module owns the cross-proof transcript rules shared by the top-level
-//! `Prover` and `Verifier`: public-statement binding, tier commitment ordering, and
-//! shared LogUp challenge derivation.
+//! `Prover` and `Verifier`: binding-digest absorption, tier commitment ordering,
+//! and shared LogUp challenge derivation.
 
 use p3_challenger::{CanObserve, CanSample};
 use p3_koala_bear::KoalaBear;
 use p3_uni_stark::StarkGenericConfig;
-
-use tabula_contract::PublicStatement;
 
 use crate::config::{Challenger, EF4, TabulaStarkConfig};
 use crate::proof::instance::MainCommitment;
@@ -31,15 +29,8 @@ impl MachineTranscript {
         }
     }
 
-    /// Observe the canonical artifact-bound public statement binding.
-    pub(crate) fn observe_public_statement_binding(
-        &mut self,
-        public_statement: &PublicStatement,
-        binding_digest: &[u8; 32],
-    ) {
-        let public_statement_felts = public_statement.to_field_elements();
-        self.challenger.observe_slice(&public_statement_felts);
-
+    /// Observe the canonical artifact-bound public-statement binding digest.
+    pub(crate) fn observe_binding_digest(&mut self, binding_digest: &[u8; 32]) {
         let digest_felts: Vec<_> = binding_digest
             .iter()
             .map(|byte| KoalaBear::new(u32::from(*byte)))

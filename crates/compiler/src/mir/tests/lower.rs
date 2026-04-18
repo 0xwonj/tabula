@@ -357,10 +357,10 @@ fn lower_match_catch_all_respects_outer_guard() {
         state_runtime: &state_runtime,
     };
     let state = InMemoryState::new();
-    let context = exec::ContextValues::new();
+    let context = ContextValues::new();
     let journal = exec::execute_batch(
         runtime_program.execution(),
-        &[exec::TxCall {
+        &[TxCall {
             entry_id: ir::EntryId(1),
             params: vec![bool_typed(true), u64_typed(0)],
         }],
@@ -466,11 +466,11 @@ fn lower_if_keeps_untaken_checked_and_effectful_branch_inactive() {
     };
     let journal = exec::execute_batch(
         runtime_program.execution(),
-        &[exec::TxCall {
+        &[TxCall {
             entry_id: ir::EntryId(1),
             params: vec![bool_typed(false)],
         }],
-        &exec::ContextValues::new(),
+        &ContextValues::new(),
         &InMemoryState::new(),
         &exec_ctx,
     )

@@ -15,7 +15,7 @@ use tabula_core::Digest;
 use tabula_ext::root::RootBackendBundle;
 #[cfg(not(feature = "prove"))]
 use tabula_ext::root::{RootProofBackend, SmtRootProofBackend};
-use tabula_machine::{TabulaMachine, TabulaProof, TabulaStarkConfig};
+use tabula_machine::{BackendVerifier, TabulaMachine, TabulaProof, TabulaStarkConfig};
 
 use crate::bootstrap::program::{
     RelationPolicy, build_registered_program_machine, resolve_program_setup,
@@ -82,11 +82,6 @@ impl Verifier {
         self.prepared
             .verifier_core()
             .verify_public_statement(proof, expected_public_statement)
-    }
-
-    /// Verify one native proof against the public statement carried inside the proof.
-    pub fn verify_proof(&self, proof: &TabulaProof) -> Result<(), RuntimeError> {
-        self.prepared.verifier_core().verify_proof(proof)
     }
 }
 
@@ -329,12 +324,6 @@ impl VerifierCore<'_> {
                     .to_string(),
             });
         }
-        if proof.public_statement != *expected_public_statement {
-            return Err(RuntimeError::ValidationFailed {
-                detail: "proved public statement does not match the expected public statement"
-                    .to_string(),
-            });
-        }
         verify_proved_public_statement_digests(proof, self.machine, expected_public_statement)?;
         match relation_table_root_from_proof(proof, self.machine)? {
             Some(root) if self.relation_policy.requires_artifact_root() => {
@@ -353,13 +342,9 @@ impl VerifierCore<'_> {
             }
             _ => {}
         }
-        self.machine
-            .verify(proof)
+        BackendVerifier::new(self.machine)
+            .verify_proof(proof)
             .map_err(RuntimeError::Verification)
-    }
-
-    fn verify_proof(&self, proof: &TabulaProof) -> Result<(), RuntimeError> {
-        self.verify_public_statement(proof, &proof.public_statement)
     }
 }
 
@@ -376,18 +361,4 @@ pub(crate) fn verify_public_statement_with_context(
         machine,
     }
     .verify_public_statement(proof, expected_public_statement)
-}
-
-pub(crate) fn verify_proof_with_context(
-    context: &ArtifactContext,
-    relation_policy: RelationPolicy,
-    machine: &TabulaMachine,
-    proof: &TabulaProof,
-) -> Result<(), RuntimeError> {
-    VerifierCore {
-        context,
-        relation_policy,
-        machine,
-    }
-    .verify_proof(proof)
 }

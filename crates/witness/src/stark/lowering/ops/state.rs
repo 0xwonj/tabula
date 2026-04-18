@@ -3,8 +3,8 @@
 use tabula_chips::execution::trace::Opcode;
 use tabula_core::error::TabulaError;
 use tabula_core::{CommittedPropertyQuery, PropertyAggregateKind, PropertyQueryKind};
-use tabula_executor as exec;
 use tabula_ir as ir;
+use tabula_types as exec;
 use tabula_types::{NativeKeyPayload, bool_typed, zero_key_payload};
 
 use super::super::context::LoweringCx;

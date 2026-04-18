@@ -1,11 +1,11 @@
 use tabula_core::{CommittedCellKey, CommittedPropertyQuery, TypeId};
 use tabula_ir as ir;
-use tabula_types::{TypedCommittedPropertyQueryResult, TypedValue};
-
-use crate::surface::{
-    CapabilityEffect, RelationEffect, RelationEffectKind, StateEffectKind, StatePropertyEffect,
-    TypedEventEffect, TypedStateEffect,
+use tabula_types::{
+    RelationEffect, RelationEffectKind, StateEffectKind, StatePropertyEffect,
+    TypedCommittedPropertyQueryResult, TypedEventEffect, TypedStateEffect, TypedValue,
 };
+
+use crate::surface::CapabilityEffect;
 
 type EffectRecorderParts = (
     Vec<TypedStateEffect>,
@@ -155,8 +155,9 @@ mod tests {
     use tabula_profile::TYPE_U64_ID;
     use tabula_types::u64_typed;
 
+    use tabula_types::{RelationEffectKind, StateEffectKind};
+
     use super::EffectRecorder;
-    use crate::surface::{RelationEffectKind, StateEffectKind};
 
     #[test]
     fn effect_recorder_shares_ordinals_and_only_state_advances_logical_time() {

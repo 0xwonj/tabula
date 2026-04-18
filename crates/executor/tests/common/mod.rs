@@ -15,8 +15,8 @@ use tabula_executor as exec;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BOOL_ID, TYPE_BYTES32_ID, TYPE_U64_ID};
 use tabula_types::{
-    CommittedColumnEntry, NativeKeyPayload, TypeRuntimeRegistry, TypedCommittedPropertyQueryResult,
-    TypedValue, bool_typed, encode_structural_u64, u64_typed,
+    CommittedColumnEntry, NativeKeyPayload, StateRuntimeView, TypeRuntimeRegistry,
+    TypedCommittedPropertyQueryResult, TypedValue, bool_typed, encode_structural_u64, u64_typed,
 };
 
 pub struct XorHasher;
@@ -426,7 +426,7 @@ impl TestStateRuntime {
     }
 }
 
-impl exec::StateRuntimeView for TestStateRuntime {
+impl StateRuntimeView for TestStateRuntime {
     fn encode_cell_key(
         &self,
         table: ir::TableId,

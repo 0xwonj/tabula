@@ -4,17 +4,17 @@ use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
 use tabula_core::{CommittedCellKey, TypeId};
 use tabula_ir as ir;
-use tabula_types::{TypedValue, typed_bool};
+use tabula_types::{
+    ContextValues, RelationEffect, StatePropertyEffect, TypedEventEffect, TypedStateEffect,
+    TypedValue, typed_bool,
+};
 
 use crate::machine::effects::EffectRecorder;
 use crate::machine::frame::LocalFrame;
 use crate::machine::ops;
 use crate::program::{ResolvedEntry, ResolvedExecutionProgram};
 use crate::state::Overlay;
-use crate::surface::{
-    CapabilityEffect, ContextValues, ExecContext, RelationEffect, StatePropertyEffect,
-    TypedEventEffect, TypedStateEffect,
-};
+use crate::surface::{CapabilityEffect, ExecContext};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TrapKind {

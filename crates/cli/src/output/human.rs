@@ -228,12 +228,8 @@ pub(crate) fn render_verify(output: &VerifyOutput) -> String {
 #[cfg(feature = "verify")]
 pub(crate) fn render_inspect_proof(output: &InspectProofOutput) -> String {
     format!(
-        "Embedded proof statement\nBinding digest: {}\nProof system: {}\nProof encoding: {}\nPublic-context digest: {}\nEvent digest: {}",
-        output.binding_digest_hex,
-        output.proof_system,
-        output.proof_encoding,
-        output.public_statement_file.public_context_digest_hex,
-        output.public_statement_file.event_digest_hex,
+        "Proof envelope\nBinding digest: {}\nProof system: {}\nProof encoding: {}",
+        output.binding_digest_hex, output.proof_system, output.proof_encoding,
     )
 }
 

@@ -13,7 +13,6 @@ tabula-chips = { workspace = true }
 tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-gadgets = { workspace = true }
 tabula-ir = { workspace = true }
-tabula-executor = { workspace = true }
 tabula-profile = { workspace = true }
 tabula-stark = { workspace = true }
 p3-air = { workspace = true }

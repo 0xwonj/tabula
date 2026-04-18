@@ -8,7 +8,7 @@ use common::{
 };
 use tabula_executor as exec;
 use tabula_ir as ir;
-use tabula_types::u64_typed;
+use tabula_types::{ContextValues, TxCall, u64_typed};
 
 #[test]
 fn batch_tx_writes_state_records_relation_capability_and_event_effects() {
@@ -22,12 +22,12 @@ fn batch_tx_writes_state_records_relation_capability_and_event_effects() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let mut context = exec::ContextValues::new();
+    let mut context = ContextValues::new();
     context.insert(ir::ContextFieldId(0), u64_typed(7));
 
     let journal = exec::execute_batch(
         &resolved_program(),
-        &[exec::TxCall {
+        &[TxCall {
             entry_id: ir::EntryId(1),
             params: vec![u64_typed(1), u64_typed(2), u64_typed(1)],
         }],
@@ -56,17 +56,17 @@ fn batch_keeps_failed_txs_separate_from_success_effects() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let mut context = exec::ContextValues::new();
+    let mut context = ContextValues::new();
     context.insert(ir::ContextFieldId(0), u64_typed(7));
 
     let journal = exec::execute_batch(
         &resolved_program(),
         &[
-            exec::TxCall {
+            TxCall {
                 entry_id: ir::EntryId(999),
                 params: vec![],
             },
-            exec::TxCall {
+            TxCall {
                 entry_id: ir::EntryId(1),
                 params: vec![u64_typed(1), u64_typed(2), u64_typed(1)],
             },
@@ -101,7 +101,7 @@ fn opaque_capability_effects_stay_in_execution_journal() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let mut context = exec::ContextValues::new();
+    let mut context = ContextValues::new();
     context.insert(ir::ContextFieldId(0), u64_typed(7));
 
     let journal = exec::execute_batch(
@@ -109,7 +109,7 @@ fn opaque_capability_effects_stay_in_execution_journal() {
             ir::CapabilityTotality::Total,
             ir::CapabilityProofVisibility::OpaqueRuntimeOnly,
         ),
-        &[exec::TxCall {
+        &[TxCall {
             entry_id: ir::EntryId(1),
             params: vec![u64_typed(1), u64_typed(2), u64_typed(1)],
         }],

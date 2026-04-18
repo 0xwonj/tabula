@@ -8,9 +8,9 @@ use tabula_commitment::{
     ColumnRootBinding, NativeDigest, PoseidonHasher, compute_state_roots_from_bindings,
 };
 #[cfg(feature = "prove")]
-use tabula_core::RootProfileId;
+use tabula_contract::PublicStatement;
 #[cfg(feature = "prove")]
-use tabula_machine::PublicStatement;
+use tabula_core::RootProfileId;
 #[cfg(feature = "verify")]
 pub use tabula_machine::{RootProofBackend, SmtRootProofBackend};
 #[cfg(feature = "prove")]

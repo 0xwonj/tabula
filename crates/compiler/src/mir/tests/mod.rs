@@ -10,8 +10,9 @@ use tabula_ir as ir;
 use tabula_profile::{TYPE_BOOL_ID, TYPE_BYTES32_ID, TYPE_U64_ID};
 use tabula_runtime::semantics::RuntimeProgram;
 use tabula_types::{
-    CommittedColumnEntry, NativeKeyPayload, TypeRuntimeRegistry, TypedCommittedPropertyQueryResult,
-    TypedValue, bool_typed, encode_structural_u64, u64_typed,
+    CommittedColumnEntry, ContextValues, NativeKeyPayload, StateRuntimeView, TxCall,
+    TypeRuntimeRegistry, TypedCommittedPropertyQueryResult, TypedValue, bool_typed,
+    encode_structural_u64, u64_typed,
 };
 
 use super::{
@@ -121,7 +122,7 @@ impl<'a> IrStateRuntime<'a> {
     }
 }
 
-impl exec::StateRuntimeView for IrStateRuntime<'_> {
+impl StateRuntimeView for IrStateRuntime<'_> {
     fn encode_cell_key(
         &self,
         table: ir::TableId,

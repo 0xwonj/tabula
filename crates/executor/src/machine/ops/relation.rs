@@ -2,10 +2,9 @@ use tabula_core::PortableValue;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
 use tabula_ir as ir;
-use tabula_types::{TypeRuntimeRegistry, TypedValue};
+use tabula_types::{RelationEffectKind, TypeRuntimeRegistry, TypedValue};
 
 use crate::machine::entry::{EntryMachineCore, OpFailure, fatal, semantic};
-use crate::surface::RelationEffectKind;
 
 pub(in crate::machine) fn execute<S: StateView>(
     machine: &mut EntryMachineCore<'_, '_, '_, S>,

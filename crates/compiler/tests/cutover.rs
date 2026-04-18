@@ -13,14 +13,15 @@ use tabula_ir::{ContextInput, EntryBatch, EntryCall};
 use tabula_profile::TYPE_U64_ID;
 use tabula_runtime::{TabulaRuntime, semantics::RuntimeProgram};
 use tabula_types::{
-    CommittedColumnEntry, NativeKeyPayload, TypeRuntimeRegistry, TypedCommittedPropertyQueryResult,
-    TypedValue, encode_structural_u64, u64_portable, u64_typed,
+    CommittedColumnEntry, ContextValues, NativeKeyPayload, StateRuntimeView, TxCall,
+    TypeRuntimeRegistry, TypedCommittedPropertyQueryResult, TypedValue, encode_structural_u64,
+    u64_portable, u64_typed,
 };
 
 #[derive(Default)]
 struct TestStateRuntime;
 
-impl exec::StateRuntimeView for TestStateRuntime {
+impl StateRuntimeView for TestStateRuntime {
     fn encode_cell_key(
         &self,
         table: tabula_ir::TableId,
@@ -165,11 +166,11 @@ tx set_balance(id: u64, amount: u64) {
         .expect("tx entry");
     let compiled_journal = exec::execute_batch(
         runtime_program.execution(),
-        &[exec::TxCall {
+        &[TxCall {
             entry_id: entry.id,
             params: vec![u64_typed(5), u64_typed(7)],
         }],
-        &exec::ContextValues::default(),
+        &ContextValues::default(),
         &InMemoryState::default(),
         &exec::ExecContext {
             hasher: &Blake3Hasher,

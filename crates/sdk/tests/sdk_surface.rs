@@ -376,24 +376,24 @@ fn prove_and_verify_native_execution() {
         .expect("execute");
     let proof = program.runner().prove(&execution).expect("prove");
 
-    assert_ne!(
-        proof.public_statement().public_context_digest.to_bytes(),
-        [0u8; 32]
-    );
-    assert_ne!(proof.public_statement().event_digest.to_bytes(), [0u8; 32]);
+    let statement = proof
+        .public_statement()
+        .expect("locally produced proof carries a public statement");
+    assert_ne!(statement.public_context_digest.to_bytes(), [0u8; 32]);
+    assert_ne!(statement.event_digest.to_bytes(), [0u8; 32]);
     assert!(proof.summary().chip_count > 0);
 
     program
         .verifier()
         .expect("prepare verifier")
-        .verify_public_statement(&proof, proof.public_statement())
+        .verify_public_statement(&proof, statement)
         .expect("program verifier accepts proof");
 
     let reopened = sdk.open(artifact).expect("reopen artifact");
     reopened
         .verifier()
         .expect("prepare verifier")
-        .verify_public_statement(&proof, proof.public_statement())
+        .verify_public_statement(&proof, statement)
         .expect("reopened verifier accepts proof");
 }
 
@@ -419,13 +419,19 @@ fn proof_binary_round_trip_reuses_contract_envelope() {
     let encoded = proof.encode_binary().expect("encode proof binary");
     let decoded = tabula_sdk::Proof::decode_binary(&encoded).expect("decode proof binary");
 
-    assert_eq!(proof.public_statement(), decoded.public_statement());
+    // The envelope wire format does not carry the public statement; a decoded
+    // proof has no associated statement and must be verified against one
+    // supplied out of band.
+    assert!(decoded.public_statement().is_none());
     assert_eq!(proof.binding_digest(), decoded.binding_digest());
 
+    let statement = proof
+        .public_statement()
+        .expect("locally produced proof carries a public statement");
     program
         .verifier()
         .expect("prepare verifier")
-        .verify_public_statement(&decoded, decoded.public_statement())
+        .verify_public_statement(&decoded, statement)
         .expect("verify decoded proof");
 }
 
@@ -448,7 +454,10 @@ fn public_statement_file_round_trip_reuses_shared_contract() {
         .expect("execute");
     let proof = program.runner().prove(&execution).expect("prove");
 
-    let file = tabula_sdk::PublicStatementFile::from_public_statement(proof.public_statement());
+    let statement = proof
+        .public_statement()
+        .expect("locally produced proof carries a public statement");
+    let file = tabula_sdk::PublicStatementFile::from_public_statement(statement);
     let encoded = serde_json::to_vec_pretty(&file).expect("encode statement file");
     let decoded =
         tabula_sdk::PublicStatementFile::from_json_bytes(&encoded).expect("decode statement file");
@@ -458,7 +467,7 @@ fn public_statement_file_round_trip_reuses_shared_contract() {
         decoded
             .to_public_statement()
             .expect("reconstruct statement"),
-        *proof.public_statement()
+        *statement
     );
 }
 
@@ -473,7 +482,7 @@ fn from_envelope_rejects_unknown_proof_system_ids() {
     .expect("deserialize envelope");
 
     let err =
-        tabula_sdk::Proof::from_envelope(&envelope).expect_err("unknown proof system must fail");
+        tabula_sdk::Proof::from_envelope(envelope).expect_err("unknown proof system must fail");
     assert!(
         err.to_string().contains("unsupported proof system id"),
         "unexpected error: {err}"
@@ -500,14 +509,24 @@ fn prepare_and_reuse_runtime_and_verifier() {
         .execute_and_prove(&snapshot, &batch, &context)
         .expect("first proof");
     verifier
-        .verify_public_statement(&first, first.public_statement())
+        .verify_public_statement(
+            &first,
+            first
+                .public_statement()
+                .expect("locally produced proof carries a public statement"),
+        )
         .expect("verify first proof");
 
     let (_, second) = runner
         .execute_and_prove(&snapshot, &batch, &context)
         .expect("second proof");
     verifier
-        .verify_public_statement(&second, second.public_statement())
+        .verify_public_statement(
+            &second,
+            second
+                .public_statement()
+                .expect("locally produced proof carries a public statement"),
+        )
         .expect("verify second proof");
 
     assert_eq!(first.binding_digest(), second.binding_digest());

@@ -10,8 +10,8 @@ use tabula_chips::static_table::trace::StaticTableRow;
 use tabula_contract::format::typed_tuple::TupleEncodingDefaults;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::Hasher;
-use tabula_executor as exec;
 use tabula_ir as ir;
+use tabula_types as exec;
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue};
 
 use super::context::LoweringCx;

@@ -1,6 +1,6 @@
 # tabula-machine
 
-`tabula-machine` is the advanced backend API for Tabula proving. It owns the
+`tabula-machine` is the pure backend primitive for Tabula proving. It owns the
 backend setup, proof generation, and proof verification once higher layers have
 already decided what should be proved and prepared the necessary inputs.
 
@@ -14,12 +14,34 @@ The concrete proof decomposition may evolve. The lasting boundary is that this
 crate owns backend proof assembly and verification, not semantic interpretation
 or runtime policy.
 
+## Canonical Surface
+
+External callers reach the backend through two borrowed facades around a
+configured [`TabulaMachine`]:
+
+- `BackendProver::new(&machine).prove_envelope(input)` returns the decoded
+  `TabulaProof` together with the contract-owned `ProofEnvelope` that wraps
+  the canonical encoded proof bytes (proof system `TABULA_STARK`, proof
+  encoding `TABULA_MACHINE_BINARY_V1`).
+- `BackendVerifier::new(&machine).verify_envelope(envelope, binding_digest)`
+  decodes the envelope bytes, verifies the machine proof, and returns the
+  decoded `TabulaProof` on success.
+- `BackendVerifier::new(&machine).verify_proof(&proof)` is the short path for
+  callers that already hold a decoded `TabulaProof` (for example, the runtime
+  after statement-level chip-opening checks).
+
+The machine proof binds only a 32-byte `binding_digest` into its Fiat-Shamir
+transcript — it does **not** carry the artifact-bound `PublicStatement` on the
+wire. Callers thread the public statement beside the proof and let the runtime
+or SDK layer own statement-first verification.
+
 ## Owns
 
 - immutable backend setup and configuration
 - backend trace construction from typed prepared inputs
 - backend proof generation and verification
-- the proof object and related backend proof types
+- the envelope-level prover/verifier facades (`BackendProver`,
+  `BackendVerifier`) and the decoded proof object
 - canonical encoding/decoding of the concrete machine proof bytes embedded in
   contract-owned `proof.bin`
 - explicit backend extension seams
@@ -32,6 +54,8 @@ or runtime policy.
 - deterministic execution
 - discovery of what a program semantically requires
 - native commitment semantics
+- the public statement or the statement-first verification policy
+  (those live in `tabula-contract` and `tabula-runtime`)
 
 ## Design Intent
 
@@ -41,6 +65,9 @@ or runtime policy.
   special-case wiring.
 - Preserve the separation between deciding what should be proved and deciding
   how prepared inputs are proved.
+- Force external callers through the envelope facade so the
+  "one canonical backend boundary" invariant is enforced by the type system,
+  not by convention: `TabulaMachine::prove`/`verify` are crate-internal.
 
 ## Core Contract
 
@@ -49,6 +76,9 @@ or runtime policy.
   runtime registries or semantic catalogs.
 - The stable handoff is typed prepared input (execution tier, ordered
   per-column stores, and root tier), not raw setup or trace internals.
+- The public surface is envelope-level: proofs leave and re-enter the machine
+  wrapped in a `ProofEnvelope`, never as naked bytes produced outside the
+  crate.
 - Proof shape may evolve, but the ownership boundary should stay: backend proof
   assembly lives here, while semantic and runtime policy lives above.
 - Extension points should remain explicit and mechanically validated.
@@ -78,8 +108,11 @@ Start with:
 Preserve the behaviors that prove this crate still owns the backend boundary:
 
 - prepared inputs can be turned into traces, proofs, and verification checks
+  through the envelope facade
 - structurally invalid backend inputs are rejected clearly
 - extension registration remains explicit and validated
+- the machine does not leak the public statement onto the proof wire or into
+  the Fiat-Shamir transcript
 
 ## Related Crates
 

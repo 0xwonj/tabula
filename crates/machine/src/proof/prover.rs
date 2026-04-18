@@ -53,7 +53,6 @@ impl<'a> Prover<'a> {
             execution,
             columns,
             root,
-            public_statement,
             binding_digest,
         } = input;
         let traces = build_proof_traces(proof_topology, execution.store, columns, root.store)?;
@@ -83,7 +82,7 @@ impl<'a> Prover<'a> {
             .collect::<Result<Vec<_>, ProveError>>()?;
 
         let mut transcript = MachineTranscript::new(config);
-        transcript.observe_public_statement_binding(&public_statement, &binding_digest);
+        transcript.observe_binding_digest(&binding_digest);
         for commitment in &commitments {
             transcript.observe_main_commitment(commitment);
         }
@@ -162,7 +161,6 @@ impl<'a> Prover<'a> {
             execution: exec_envelope,
             columns: column_entries,
             root: root_envelope,
-            public_statement,
             binding_digest,
         })
     }

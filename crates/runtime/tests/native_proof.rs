@@ -444,14 +444,8 @@ fn unary_bool_key_batch_executes_projects_and_proves() {
         .expect("prove and verify bool-key batch");
 
     assert!(verified.verified);
-    assert_ne!(
-        verified.proof.public_statement.old_root.to_bytes(),
-        [0u8; 32]
-    );
-    assert_ne!(
-        verified.proof.public_statement.new_root.to_bytes(),
-        [0u8; 32]
-    );
+    assert_ne!(verified.public_statement.old_root.to_bytes(), [0u8; 32]);
+    assert_ne!(verified.public_statement.new_root.to_bytes(), [0u8; 32]);
 }
 
 #[test]
@@ -521,14 +515,8 @@ fn unary_i64_key_batch_executes_projects_and_proves() {
         .expect("prove and verify i64-key batch");
 
     assert!(verified.verified);
-    assert_ne!(
-        verified.proof.public_statement.old_root.to_bytes(),
-        [0u8; 32]
-    );
-    assert_ne!(
-        verified.proof.public_statement.new_root.to_bytes(),
-        [0u8; 32]
-    );
+    assert_ne!(verified.public_statement.old_root.to_bytes(), [0u8; 32]);
+    assert_ne!(verified.public_statement.new_root.to_bytes(), [0u8; 32]);
 }
 
 #[test]
@@ -570,17 +558,10 @@ fn tx_batch_proves_and_verifies_mixed_surface() {
 
     assert!(verified.verified);
     assert_ne!(
-        verified
-            .proof
-            .public_statement
-            .public_context_digest
-            .to_bytes(),
+        verified.public_statement.public_context_digest.to_bytes(),
         [0u8; 32]
     );
-    assert_ne!(
-        verified.proof.public_statement.event_digest.to_bytes(),
-        [0u8; 32]
-    );
+    assert_ne!(verified.public_statement.event_digest.to_bytes(), [0u8; 32]);
     assert_ne!(verified.proof.binding_digest, [0u8; 32]);
 }
 
@@ -613,13 +594,13 @@ fn binding_digest_changes_with_batch_context_and_binding() {
 
     assert_ne!(prove_a.proof.binding_digest, prove_b.proof.binding_digest);
     assert_ne!(
-        prove_a.proof.public_statement.event_digest,
-        prove_b.proof.public_statement.event_digest
+        prove_a.public_statement.event_digest,
+        prove_b.public_statement.event_digest
     );
     assert_ne!(prove_a.proof.binding_digest, prove_c.proof.binding_digest);
     assert_ne!(
-        prove_a.proof.public_statement.public_context_digest,
-        prove_c.proof.public_statement.public_context_digest
+        prove_a.public_statement.public_context_digest,
+        prove_c.public_statement.public_context_digest
     );
 
     let alt_registered = register_program_from_source(proving_source_alt_scheme());
@@ -646,7 +627,7 @@ fn verifier_rejects_missing_column_proof_manifest_entry() {
     proved.proof.columns.pop();
 
     let err = runtime
-        .verify_public_statement(&proved.proof, &proved.proof.public_statement)
+        .verify_public_statement(&proved.proof, &proved.public_statement)
         .expect_err("missing column proof must fail verification");
     assert!(matches!(
         err,
@@ -663,7 +644,7 @@ fn verifier_rejects_permuted_column_proof_manifest_order() {
     proved.proof.columns.swap(0, 1);
 
     let err = runtime
-        .verify_public_statement(&proved.proof, &proved.proof.public_statement)
+        .verify_public_statement(&proved.proof, &proved.public_statement)
         .expect_err("permuted column proof order must fail verification");
     assert!(matches!(
         err,
@@ -680,7 +661,7 @@ fn verifier_rejects_duplicate_column_proof_manifest_entry() {
     proved.proof.columns[1].key = proved.proof.columns[0].key;
 
     let err = runtime
-        .verify_public_statement(&proved.proof, &proved.proof.public_statement)
+        .verify_public_statement(&proved.proof, &proved.public_statement)
         .expect_err("duplicate column proof manifest entry must fail verification");
     assert!(matches!(
         err,
@@ -694,7 +675,7 @@ fn verifier_rejects_duplicate_column_proof_manifest_entry() {
 #[test]
 fn verifier_rejects_wrong_public_context_digest() {
     let (runtime, proved) = prove_native_batch();
-    let mut wrong_statement = proved.proof.public_statement.clone();
+    let mut wrong_statement = proved.public_statement.clone();
     wrong_statement.public_context_digest.0[0] += KoalaBear::ONE;
 
     let err = runtime
@@ -710,7 +691,7 @@ fn verifier_rejects_wrong_public_context_digest() {
 #[test]
 fn verifier_rejects_wrong_applied_tx_digest() {
     let (runtime, proved) = prove_native_batch();
-    let mut wrong_statement = proved.proof.public_statement.clone();
+    let mut wrong_statement = proved.public_statement.clone();
     wrong_statement.applied_tx_digest.0[0] += KoalaBear::ONE;
 
     let err = runtime
@@ -726,7 +707,7 @@ fn verifier_rejects_wrong_applied_tx_digest() {
 #[test]
 fn verifier_rejects_wrong_event_digest() {
     let (runtime, proved) = prove_native_batch();
-    let mut wrong_statement = proved.proof.public_statement.clone();
+    let mut wrong_statement = proved.public_statement.clone();
     wrong_statement.event_digest.0[0] += KoalaBear::ONE;
 
     let err = runtime
@@ -752,7 +733,7 @@ fn verifier_rejects_mutated_public_context_chip_digest() {
     opening.public_values[0] += KoalaBear::ONE;
 
     let err = runtime
-        .verify_public_statement(&proved.proof, &proved.proof.public_statement)
+        .verify_public_statement(&proved.proof, &proved.public_statement)
         .expect_err("mutated public-context chip digest must fail verification");
     assert!(
         err.to_string().contains(
@@ -775,7 +756,7 @@ fn verifier_rejects_mutated_event_chip_digest() {
     opening.public_values[0] += KoalaBear::ONE;
 
     let err = runtime
-        .verify_public_statement(&proved.proof, &proved.proof.public_statement)
+        .verify_public_statement(&proved.proof, &proved.public_statement)
         .expect_err("mutated event chip digest must fail verification");
     assert!(
         err.to_string()

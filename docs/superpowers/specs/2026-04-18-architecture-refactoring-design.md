@@ -244,7 +244,9 @@ types come from contract.
 - Introduce `BackendProver`, `BackendVerifier` with envelope-level
   `prove_envelope` / `verify_envelope`.
 - Remove `public_statement` field from `TabulaProof`. `TabulaProof`
-  is `(ArtifactId, binding_digest, ProofEnvelope)` only.
+  retains only the decoded sub-proof envelopes plus `binding_digest`;
+  the 32-byte digest alone commits to the `(artifact,
+  public_statement)` pair, so no `ArtifactId` is carried on the proof.
 - Restructure `PreparedMachineInput` to not carry `PublicStatement`.
 - Remove wire-type re-exports from `tabula-machine`.
 - Prune dev-deps: remove `tabula-lang`, `tabula-executor` from

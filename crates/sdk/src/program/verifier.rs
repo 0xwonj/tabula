@@ -26,12 +26,6 @@ impl Verifier {
             .verify_public_statement(&proof.proof, expected_public_statement)?;
         Ok(())
     }
-
-    /// Verifies a proof against the public statement carried inside the proof.
-    pub fn verify_proof(&self, proof: &Proof) -> Result<(), SdkError> {
-        self.prepared.verify_proof(&proof.proof)?;
-        Ok(())
-    }
 }
 
 impl std::fmt::Debug for Verifier {

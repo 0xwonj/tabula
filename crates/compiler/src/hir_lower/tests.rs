@@ -9,8 +9,9 @@ use tabula_lang::hir;
 use tabula_profile::{TYPE_BYTES32_ID, TYPE_U64_ID};
 use tabula_runtime::semantics::RuntimeProgram;
 use tabula_types::{
-    CommittedColumnEntry, NativeKeyPayload, TypeRuntimeRegistry, TypedCommittedPropertyQueryResult,
-    TypedValue, encode_structural_u64, u64_typed,
+    CommittedColumnEntry, ContextValues, NativeKeyPayload, StateRuntimeView, TxCall,
+    TypeRuntimeRegistry, TypedCommittedPropertyQueryResult, TypedValue, encode_structural_u64,
+    u64_typed,
 };
 
 use super::lower_hir_to_mir;
@@ -61,7 +62,7 @@ impl<'a> IrStateRuntime<'a> {
     }
 }
 
-impl exec::StateRuntimeView for IrStateRuntime<'_> {
+impl StateRuntimeView for IrStateRuntime<'_> {
     fn encode_cell_key(
         &self,
         table: ir::TableId,
@@ -232,10 +233,10 @@ tx register(id: u64, tier: u64) {
         capability_executor: None,
         state_runtime: &state_runtime,
     };
-    let context = exec::ContextValues::default();
+    let context = ContextValues::default();
     let result = exec::execute_batch(
         runtime.execution(),
-        &[exec::TxCall {
+        &[TxCall {
             entry_id: ir::EntryId(1),
             params: vec![u64_typed(1), u64_typed(2)],
         }],

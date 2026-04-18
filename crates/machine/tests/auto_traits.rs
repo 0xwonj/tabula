@@ -68,13 +68,6 @@ fn machine_is_send_sync() {
 }
 
 #[test]
-fn public_statement_is_send_sync() {
-    use tabula_machine::PublicStatement;
-
-    assert_send_sync::<PublicStatement>();
-}
-
-#[test]
 fn chip_identification_types_are_send_sync() {
     use tabula_stark::air::interaction::BusId;
     use tabula_stark::chips::{ChipId, ChipIdAllocator};

@@ -6,8 +6,8 @@ use tabula_chips::execution::trace::Opcode;
 use tabula_chips::relation_transcript::RelationTranscriptCall;
 use tabula_contract::format::typed_tuple::TypedTupleRole;
 use tabula_core::error::TabulaError;
-use tabula_executor as exec;
 use tabula_ir as ir;
+use tabula_types as exec;
 
 use super::super::context::LoweringCx;
 use crate::relation_proof::relation_claim_from_effect;

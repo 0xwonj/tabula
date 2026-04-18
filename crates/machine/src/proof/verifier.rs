@@ -54,7 +54,7 @@ impl Verifier<'_> {
         }
 
         let mut transcript = MachineTranscript::new(config);
-        transcript.observe_public_statement_binding(&proof.public_statement, &proof.binding_digest);
+        transcript.observe_binding_digest(&proof.binding_digest);
         transcript.observe_envelope_commitment(&proof.execution);
         for column in &proof.columns {
             transcript.observe_envelope_commitment(&column.proof);

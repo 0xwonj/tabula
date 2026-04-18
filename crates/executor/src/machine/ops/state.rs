@@ -1,9 +1,8 @@
 use tabula_core::traits::StateView;
 use tabula_ir as ir;
-use tabula_types::bool_typed;
+use tabula_types::{StateEffectKind, bool_typed};
 
 use crate::machine::entry::{EntryMachineCore, OpFailure, fatal, semantic};
-use crate::surface::StateEffectKind;
 
 pub(in crate::machine) fn execute<S: StateView>(
     machine: &mut EntryMachineCore<'_, '_, '_, S>,

@@ -16,6 +16,9 @@ pub enum ProveError {
         /// Human-readable validation detail.
         detail: String,
     },
+    /// Encoding the proof into canonical bytes failed.
+    #[error("proof codec failure: {0}")]
+    ProofCodec(#[from] ProofCodecError),
     /// A chip's trace height is not a power of two.
     #[error("chip '{chip_id}' trace height {height} is not a power of two")]
     InvalidTraceHeight {
@@ -141,6 +144,23 @@ pub enum VerificationError {
         /// The nonzero cumsum.
         cumsum: [KoalaBear; 4],
     },
+    /// The wrapping proof envelope is malformed or declares an unknown proof
+    /// system or encoding.
+    #[error("unsupported proof envelope: {detail}")]
+    UnsupportedProofEnvelope {
+        /// Human-readable detail.
+        detail: String,
+    },
+    /// The wrapping proof envelope is well-formed but targets a backend or
+    /// encoding the current machine does not implement.
+    #[error("proof envelope targets a different backend: {detail}")]
+    BackendMismatch {
+        /// Human-readable detail.
+        detail: String,
+    },
+    /// Decoding the proof bytes from the envelope failed.
+    #[error("proof codec failure: {0}")]
+    ProofCodec(#[from] ProofCodecError),
 }
 
 /// Errors during machine proof codec encoding or decoding.

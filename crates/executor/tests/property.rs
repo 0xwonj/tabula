@@ -6,7 +6,7 @@ use common::{XorHasher, committed_u64_state, property_program, test_state_runtim
 use tabula_executor as exec;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BYTES32_ID, TYPE_U64_ID};
-use tabula_types::{bool_typed, u64_typed};
+use tabula_types::{ContextValues, bool_typed, u64_typed};
 
 #[test]
 fn property_read_minimum_records_effect_and_returns_row_tuple() {
@@ -22,7 +22,7 @@ fn property_read_minimum_records_effect_and_returns_row_tuple() {
         ir::FieldId(0),
         &[(10, 100, false), (5, 50, false), (20, 200, false)],
     );
-    let context = exec::ContextValues::new();
+    let context = ContextValues::new();
     let program = property_program(ir::StatePropertyQuery::Minimum, TYPE_U64_ID);
 
     let result = exec::execute_query(&program, ir::EntryId(0), &[], &context, &state, &exec)
@@ -57,7 +57,7 @@ fn property_read_maximum_returns_greatest_row_key() {
         ir::FieldId(0),
         &[(10, 100, false), (5, 50, false), (20, 200, false)],
     );
-    let context = exec::ContextValues::new();
+    let context = ContextValues::new();
     let program = property_program(ir::StatePropertyQuery::Maximum, TYPE_U64_ID);
 
     let result = exec::execute_query(&program, ir::EntryId(0), &[], &context, &state, &exec)
@@ -83,7 +83,7 @@ fn property_read_successor_and_predecessor_are_structural() {
         ir::FieldId(0),
         &[(10, 100, false), (5, 50, false), (20, 200, false)],
     );
-    let context = exec::ContextValues::new();
+    let context = ContextValues::new();
     let successor = property_program(
         ir::StatePropertyQuery::Successor {
             key: ir::ValueTupleRef(vec![ir::ValueRef::Literal(common::portable_u64(10))]),
@@ -124,7 +124,7 @@ fn property_read_no_match_returns_defaults_and_true_null_flag() {
         state_runtime: test_state_runtime(),
     };
     let state = committed_u64_state(ir::TableId(1), ir::FieldId(0), &[(10, 100, false)]);
-    let context = exec::ContextValues::new();
+    let context = ContextValues::new();
     let program = property_program(
         ir::StatePropertyQuery::Successor {
             key: ir::ValueTupleRef(vec![ir::ValueRef::Literal(common::portable_u64(10))]),
@@ -151,7 +151,7 @@ fn property_read_aggregate_is_unsupported_in_v1_adapter() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let context = exec::ContextValues::new();
+    let context = ContextValues::new();
     let program = property_program(
         ir::StatePropertyQuery::Aggregate {
             kind: ir::AggregateKind::Sum,
@@ -179,7 +179,7 @@ fn property_read_non_existence_range_is_unsupported_in_v1_adapter() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let context = exec::ContextValues::new();
+    let context = ContextValues::new();
     let program = property_program(
         ir::StatePropertyQuery::NonExistenceRange {
             lower: ir::ValueTupleRef(vec![ir::ValueRef::Literal(common::portable_u64(1))]),
@@ -208,7 +208,7 @@ fn property_read_uses_state_runtime_key_schema_instead_of_raw_ir_key_type() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let context = exec::ContextValues::new();
+    let context = ContextValues::new();
     let program = property_program(ir::StatePropertyQuery::Minimum, TYPE_BYTES32_ID);
 
     let result = exec::execute_query(&program, ir::EntryId(0), &[], &context, &state, &exec)

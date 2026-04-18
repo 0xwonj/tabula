@@ -1,6 +1,5 @@
 //! Stable machine proving input types.
 
-use tabula_contract::PublicStatement;
 use tabula_core::{ColId, TableId};
 use tabula_stark::trace::WitnessStore;
 
@@ -43,8 +42,6 @@ pub struct PreparedMachineInput {
     pub columns: Vec<PreparedColumnInput>,
     /// Prepared root-tier witness store.
     pub root: PreparedTierInput,
-    /// AIR-level public values.
-    pub public_statement: PublicStatement,
     /// Digest of the artifact-bound public statement bound into the transcript.
     pub binding_digest: [u8; 32],
 }

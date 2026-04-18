@@ -10,7 +10,7 @@ use tabula_core::{ColId, CommittedCellKey, CommittedKey, TableId};
 use tabula_executor as exec;
 use tabula_ir as ir;
 use tabula_profile::TYPE_BYTES32_ID;
-use tabula_types::u64_typed;
+use tabula_types::{ContextValues, u64_typed};
 
 #[test]
 fn query_reads_state_and_hashes_result() {
@@ -25,7 +25,7 @@ fn query_reads_state_and_hashes_result() {
         },
         portable_u64(42),
     );
-    let mut context = exec::ContextValues::new();
+    let mut context = ContextValues::new();
     context.insert(ir::ContextFieldId(0), u64_typed(7));
 
     let result = exec::execute_query(
@@ -58,7 +58,7 @@ fn query_checked_capability_failure_surfaces_execute_error() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let context = exec::ContextValues::new();
+    let context = ContextValues::new();
 
     let error = exec::execute_query(
         &capability_query_program(ir::CapabilityTotality::Checked),
@@ -92,7 +92,7 @@ fn query_total_capability_failure_still_surfaces_execute_error() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let context = exec::ContextValues::new();
+    let context = ContextValues::new();
 
     let error = exec::execute_query(
         &capability_query_program(ir::CapabilityTotality::Total),

@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
-use tabula_contract::PublicStatement;
 use tabula_stark::air::interaction::BusId;
 use tabula_stark::chips::ChipId;
 
@@ -72,8 +71,6 @@ pub struct TabulaProof {
     pub columns: Vec<ColumnProofEntry>,
     /// Tier 3: Root proof.
     pub root: SubProofEnvelope,
-    /// The public statement this proof attests to.
-    pub public_statement: PublicStatement,
     /// Canonical artifact-bound public-statement digest bound into the transcript.
     pub binding_digest: [u8; 32],
 }

@@ -121,7 +121,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     #[cfg(feature = "prove")]
     {
-        let public_statement = proof.public_statement();
+        let public_statement = proof
+            .public_statement()
+            .expect("locally produced proof carries a public statement");
         write_json(
             &output_dir.join("public_statement.json"),
             &PublicStatementFile::from_public_statement(public_statement),

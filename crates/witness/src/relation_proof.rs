@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use tabula_contract::StaticTableArtifact;
 use tabula_core::Digest;
 use tabula_core::error::TabulaError;
-use tabula_executor as exec;
 use tabula_ir as ir;
+use tabula_types as exec;
 
 use crate::{RelationClaim, RelationClaimKind};
 

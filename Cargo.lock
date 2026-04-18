@@ -1507,8 +1507,6 @@ dependencies = [
  "tabula-commitment",
  "tabula-contract",
  "tabula-core",
- "tabula-executor",
- "tabula-lang",
  "tabula-stark",
  "tabula-witness",
  "thiserror",
@@ -1620,6 +1618,7 @@ dependencies = [
  "p3-koala-bear",
  "serde",
  "tabula-core",
+ "tabula-ir",
  "tabula-profile",
 ]
 
@@ -1636,7 +1635,6 @@ dependencies = [
  "tabula-commitment",
  "tabula-contract",
  "tabula-core",
- "tabula-executor",
  "tabula-gadgets",
  "tabula-ir",
  "tabula-profile",

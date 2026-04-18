@@ -33,8 +33,6 @@ tabula-core = { workspace = true, features = ["test-utils"] }
 tabula-commitment = { workspace = true, features = ["stark"] }
 tabula-stark = { workspace = true }
 tabula-witness = { workspace = true }
-tabula-executor = { workspace = true }
-tabula-lang = { workspace = true }
 p3-koala-bear = { workspace = true }
 p3-field = { workspace = true }
 criterion = { version = "0.8", features = ["html_reports"] }

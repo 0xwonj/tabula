@@ -7,12 +7,11 @@ use tabula_core::{
     ColId, CommittedCellKey, CommittedKey, ProgramExecutionContract, RootProfileId,
     StateColumnContract, StateTableContract, TableId, TypeId,
 };
-use tabula_executor::StateRuntimeView;
 use tabula_ext::scheme::{ColumnBackendSetup, MaterializedColumnBackend};
 use tabula_profile::ResolvedColumnProfileRef;
 use tabula_types::{
-    CommittedColumnEntry, EncodingRuntimeRegistry, NativeKeyPayload, TableKeyCodec,
-    TypeRuntimeRegistry, TypedCommittedPropertyQueryResult, TypedValue,
+    CommittedColumnEntry, EncodingRuntimeRegistry, NativeKeyPayload, StateRuntimeView,
+    TableKeyCodec, TypeRuntimeRegistry, TypedCommittedPropertyQueryResult, TypedValue,
 };
 
 use crate::error::RuntimeError;

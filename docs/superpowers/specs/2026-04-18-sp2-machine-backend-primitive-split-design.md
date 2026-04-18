@@ -183,10 +183,6 @@ only if a future consumer needs it.
 `StateRuntimeView` is a trait that defines how the runtime exposes
 state to executor hosts. Its only implementer is inside runtime; it is
 consumed by executor via trait-object. It is not on the witness path.
-SP-2 leaves `StateRuntimeView` in executor; if the witness crate
-transitively depends on it (grep during implementation), we will
-decide at that point. Current audit shows witness does not reach for
-it.
 
 ---
 

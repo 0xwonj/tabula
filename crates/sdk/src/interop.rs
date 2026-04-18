@@ -18,9 +18,8 @@ use tabula_types::{EncodingRuntime, TypeRuntime};
 #[cfg(feature = "execute")]
 pub use tabula_executor::{
     CapabilityEffect, ExecutionJournal, ExecutionStateSummary, FailedTxExecution,
-    QueryExecutionResult, RelationEffect, RelationEffectKind, StateEffectKind, StatePropertyEffect,
-    SuccessfulTxExecution, TxExecutionOutcome, TypedEventEffect, TypedStateEffect,
-    TypedStateSnapshot, TypedStateWrite,
+    QueryExecutionResult, SuccessfulTxExecution, TxExecutionOutcome, TypedStateSnapshot,
+    TypedStateWrite,
 };
 #[cfg(feature = "prove")]
 use tabula_ext::root::RootBackendBundle;
@@ -30,6 +29,11 @@ pub use tabula_ext::scheme::ColumnBackendFactoryBundle;
 use tabula_machine::TabulaStarkConfig;
 #[cfg(feature = "execute")]
 pub use tabula_runtime::TabulaRuntime;
+#[cfg(feature = "execute")]
+pub use tabula_types::{
+    RelationEffect, RelationEffectKind, StateEffectKind, StatePropertyEffect, TypedEventEffect,
+    TypedStateEffect,
+};
 pub use tabula_types::{TypedCommittedPropertyQueryResult, TypedValue};
 
 use crate::{

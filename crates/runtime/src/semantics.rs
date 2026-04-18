@@ -17,7 +17,10 @@ use tabula_core::error::TabulaError;
 use tabula_core::{Digest, PortableValue};
 use tabula_executor as exec;
 use tabula_ir as ir;
-use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue};
+use tabula_types::{
+    ContextValues, EncodingRuntimeRegistry, RelationEffect, StatePropertyEffect,
+    TypeRuntimeRegistry, TypedEventEffect, TypedStateEffect, TypedValue,
+};
 
 /// A state column slot in the proof layout, identifying a (table, field) pair.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,9 +195,9 @@ pub struct ProofStateSlotJournal {
     /// The state slot this journal covers.
     pub slot: ProofStateSlot,
     /// All state cell reads/writes/deletes on this column.
-    pub state_effects: Vec<exec::TypedStateEffect>,
+    pub state_effects: Vec<TypedStateEffect>,
     /// All structural property reads on this column.
-    pub property_effects: Vec<exec::StatePropertyEffect>,
+    pub property_effects: Vec<StatePropertyEffect>,
 }
 
 /// Per-slot execution effects for a single journaled capability in one batch.
@@ -212,7 +215,7 @@ pub struct ProofRelationSlotJournal {
     /// The relation slot this journal covers.
     pub slot: RelationProofSlot,
     /// All lookups (assertions and evaluations) of this relation.
-    pub effects: Vec<exec::RelationEffect>,
+    pub effects: Vec<RelationEffect>,
 }
 
 /// The complete proof-visible journal for one executed batch.
@@ -247,7 +250,7 @@ pub struct ProofEventEffect {
     /// Zero-based transaction index within the batch.
     pub tx_index: u32,
     /// The concrete emitted event effect.
-    pub effect: exec::TypedEventEffect,
+    pub effect: TypedEventEffect,
 }
 
 /// Internal canonical public-context binding used while materializing proof-visible statements.
@@ -262,7 +265,7 @@ pub(crate) struct PublicContextBinding {
 /// Reduce an execution journal into per-slot proof journals.
 pub(crate) fn reduce_execution_journal(
     resolved_program: &ResolvedProofProgram,
-    context: &exec::ContextValues,
+    context: &ContextValues,
     execution_journal: &exec::ExecutionJournal,
     type_runtimes: &TypeRuntimeRegistry,
 ) -> Result<ProofJournal, TabulaError> {
@@ -387,7 +390,7 @@ pub(crate) fn reduce_execution_journal(
 /// Materialize the proved public statement from program, context, and execution journal.
 pub(crate) fn materialize_public_statement(
     resolved_program: &ResolvedProofProgram,
-    context: &exec::ContextValues,
+    context: &ContextValues,
     execution_journal: &exec::ExecutionJournal,
     materialization: PublicStatementMaterialization,
     type_runtimes: &TypeRuntimeRegistry,
@@ -447,7 +450,7 @@ fn parse_native_digest(bytes: Digest, label: &'static str) -> Result<NativeDiges
 
 pub(crate) fn encode_public_context(
     resolved_program: &ResolvedProofProgram,
-    context: &exec::ContextValues,
+    context: &ContextValues,
     type_runtimes: &TypeRuntimeRegistry,
 ) -> Result<Vec<PublicContextBinding>, TabulaError> {
     let schema = &resolved_program.program().context.fields;
@@ -660,8 +663,8 @@ mod tests {
     };
     use tabula_profile::{ENCODING_U64_ID, TYPE_U64_ID};
     use tabula_types::{
-        CommittedColumnEntry, EncodingRuntimeRegistry, NativeKeyPayload, TypeRuntimeRegistry,
-        TypedValue, u64_typed,
+        CommittedColumnEntry, EncodingRuntimeRegistry, NativeKeyPayload, StateRuntimeView, TxCall,
+        TypeRuntimeRegistry, TypedValue, u64_typed,
     };
 
     use super::*;
@@ -726,7 +729,7 @@ mod tests {
     #[derive(Default)]
     struct TestStateRuntime;
 
-    impl exec::StateRuntimeView for TestStateRuntime {
+    impl StateRuntimeView for TestStateRuntime {
         fn encode_cell_key(
             &self,
             table: ir::TableId,
@@ -1066,12 +1069,12 @@ mod tests {
             state_runtime: test_state_runtime(),
         };
         let state = InMemoryState::new();
-        let mut context = exec::ContextValues::new();
+        let mut context = ContextValues::new();
         context.insert(ir::ContextFieldId(0), u64_typed(7));
 
         let journal = exec::execute_batch(
             runtime_program.execution(),
-            &[exec::TxCall {
+            &[TxCall {
                 entry_id: ir::EntryId(0),
                 params: vec![u64_typed(2), u64_typed(1)],
             }],
@@ -1150,12 +1153,12 @@ mod tests {
             state_runtime: test_state_runtime(),
         };
         let state = InMemoryState::new();
-        let mut context = exec::ContextValues::new();
+        let mut context = ContextValues::new();
         context.insert(ir::ContextFieldId(0), u64_typed(9));
 
         let journal = exec::execute_batch(
             runtime_program.execution(),
-            &[exec::TxCall {
+            &[TxCall {
                 entry_id: ir::EntryId(0),
                 params: vec![u64_typed(2), u64_typed(1)],
             }],
@@ -1264,11 +1267,11 @@ mod tests {
             },
             portable_u64(8),
         );
-        let context = exec::ContextValues::new();
+        let context = ContextValues::new();
 
         let journal = exec::execute_batch(
             runtime_program.execution(),
-            &[exec::TxCall {
+            &[TxCall {
                 entry_id: ir::EntryId(0),
                 params: vec![],
             }],
@@ -1316,12 +1319,12 @@ mod tests {
             },
             portable_u64(1),
         );
-        let mut context = exec::ContextValues::new();
+        let mut context = ContextValues::new();
         context.insert(ir::ContextFieldId(0), u64_typed(11));
 
         let journal = exec::execute_batch(
             runtime_program.execution(),
-            &[exec::TxCall {
+            &[TxCall {
                 entry_id: ir::EntryId(0),
                 params: vec![u64_typed(2), u64_typed(1)],
             }],

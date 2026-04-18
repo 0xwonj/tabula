@@ -8,7 +8,7 @@ use common::{
 };
 use tabula_executor as exec;
 use tabula_ir as ir;
-use tabula_types::u64_typed;
+use tabula_types::{ContextValues, TxCall, u64_typed};
 
 #[test]
 fn checked_capability_failure_rolls_back_only_one_tx() {
@@ -24,7 +24,7 @@ fn checked_capability_failure_rolls_back_only_one_tx() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let mut context = exec::ContextValues::new();
+    let mut context = ContextValues::new();
     context.insert(ir::ContextFieldId(0), u64_typed(7));
 
     let journal = exec::execute_batch(
@@ -33,11 +33,11 @@ fn checked_capability_failure_rolls_back_only_one_tx() {
             ir::CapabilityProofVisibility::Journaled,
         ),
         &[
-            exec::TxCall {
+            TxCall {
                 entry_id: ir::EntryId(1),
                 params: vec![u64_typed(1), u64_typed(2), u64_typed(1)],
             },
-            exec::TxCall {
+            TxCall {
                 entry_id: ir::EntryId(1),
                 params: vec![u64_typed(3), u64_typed(4), u64_typed(2)],
             },
@@ -73,7 +73,7 @@ fn total_capability_failure_aborts_batch() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let mut context = exec::ContextValues::new();
+    let mut context = ContextValues::new();
     context.insert(ir::ContextFieldId(0), u64_typed(7));
 
     let error = exec::execute_batch(
@@ -81,7 +81,7 @@ fn total_capability_failure_aborts_batch() {
             ir::CapabilityTotality::Total,
             ir::CapabilityProofVisibility::Journaled,
         ),
-        &[exec::TxCall {
+        &[TxCall {
             entry_id: ir::EntryId(1),
             params: vec![u64_typed(1), u64_typed(2), u64_typed(1)],
         }],
@@ -106,12 +106,12 @@ fn capability_output_arity_mismatch_is_fatal() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let mut context = exec::ContextValues::new();
+    let mut context = ContextValues::new();
     context.insert(ir::ContextFieldId(0), u64_typed(7));
 
     let error = exec::execute_batch(
         &resolved_program(),
-        &[exec::TxCall {
+        &[TxCall {
             entry_id: ir::EntryId(1),
             params: vec![u64_typed(1), u64_typed(2), u64_typed(1)],
         }],
@@ -136,12 +136,12 @@ fn capability_output_type_mismatch_is_fatal() {
         state_runtime: test_state_runtime(),
     };
     let state = tabula_core::InMemoryState::new();
-    let mut context = exec::ContextValues::new();
+    let mut context = ContextValues::new();
     context.insert(ir::ContextFieldId(0), u64_typed(7));
 
     let error = exec::execute_batch(
         &resolved_program(),
-        &[exec::TxCall {
+        &[TxCall {
             entry_id: ir::EntryId(1),
             params: vec![u64_typed(1), u64_typed(2), u64_typed(1)],
         }],

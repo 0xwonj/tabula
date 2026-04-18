@@ -24,9 +24,12 @@ pub(crate) fn run(ctx: &AppContext, args: &ProveArgs) -> anyhow::Result<()> {
     write_bytes(&args.proof_out, &proof.encode_binary()?)?;
 
     ensure_parent_dir(&args.public_statement_out)?;
+    let public_statement = proof
+        .public_statement()
+        .expect("locally produced proof carries a public statement");
     write_json(
         &args.public_statement_out,
-        &PublicStatementFile::from_public_statement(proof.public_statement()),
+        &PublicStatementFile::from_public_statement(public_statement),
     )?;
 
     ensure_parent_dir(&args.summary_out)?;

@@ -12,8 +12,8 @@ use tabula_chips::relation_transcript::RelationTranscriptCall;
 use tabula_contract::format::typed_tuple::TupleEncodingDefaults;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::Hasher;
-use tabula_executor as exec;
 use tabula_ir as ir;
+use tabula_types as exec;
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue};
 
 use super::driver::LowerSuccessfulTxInput;

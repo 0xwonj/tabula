@@ -1,9 +1,10 @@
-//! Property read executor trait for state structural queries.
+//! Runtime-owned user-state view consumed by the executor and witness lowering.
 
 use tabula_core::error::TabulaError;
 use tabula_core::{CommittedCellKey, CommittedKey, CommittedPropertyQuery, TypeId};
 use tabula_ir as ir;
-use tabula_types::{
+
+use crate::{
     CommittedColumnEntry, NativeKeyPayload, TypedCommittedPropertyQueryResult, TypedValue,
 };
 

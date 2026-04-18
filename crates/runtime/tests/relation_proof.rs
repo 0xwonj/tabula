@@ -155,17 +155,10 @@ fn tx_batch_proves_and_verifies_static_relations_with_control() {
 
     assert!(verified.verified);
     assert_ne!(
-        verified
-            .proof
-            .public_statement
-            .public_context_digest
-            .to_bytes(),
+        verified.public_statement.public_context_digest.to_bytes(),
         [0u8; 32]
     );
-    assert_ne!(
-        verified.proof.public_statement.event_digest.to_bytes(),
-        [0u8; 32]
-    );
+    assert_ne!(verified.public_statement.event_digest.to_bytes(), [0u8; 32]);
 }
 
 #[test]
@@ -204,10 +197,7 @@ fn range_and_set_relations_normalize_and_prove() {
         .execute_and_prove(&snapshot, &batch, &ctx)
         .expect("prove normalized relations");
 
-    assert_ne!(
-        proved.proof.public_statement.event_digest.to_bytes(),
-        [0u8; 32]
-    );
-    assert_ne!(proved.proof.public_statement.old_root.to_bytes(), [0u8; 32]);
-    assert_ne!(proved.proof.public_statement.new_root.to_bytes(), [0u8; 32]);
+    assert_ne!(proved.public_statement.event_digest.to_bytes(), [0u8; 32]);
+    assert_ne!(proved.public_statement.old_root.to_bytes(), [0u8; 32]);
+    assert_ne!(proved.public_statement.new_root.to_bytes(), [0u8; 32]);
 }

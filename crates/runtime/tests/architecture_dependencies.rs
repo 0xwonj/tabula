@@ -265,21 +265,60 @@ fn runtime_relation_proof_prep_stays_witness_owned() {
 }
 
 #[test]
+fn runtime_prove_and_verify_route_through_backend_facade() {
+    let engine = read_workspace_file("crates/runtime/src/engine.rs");
+    let engine_prod = engine
+        .split("#[cfg(all(test, feature = \"prove\"))]")
+        .next()
+        .unwrap_or(engine.as_str());
+    assert!(
+        engine_prod.contains("BackendProver::new(&self.machine)")
+            && engine_prod.contains(".prove_envelope("),
+        "runtime prove path must go through BackendProver::prove_envelope"
+    );
+    for forbidden in [
+        leaked(&["self.machine.", "prove("]),
+        leaked(&["self.machine.", "verify("]),
+    ] {
+        assert!(
+            !engine_prod.contains(forbidden),
+            "runtime engine production path must not call '{forbidden}' directly — route through the BackendProver/BackendVerifier facade"
+        );
+    }
+
+    let verifier = read_workspace_file("crates/runtime/src/verifier.rs");
+    assert!(
+        verifier.contains("BackendVerifier::new(self.machine)")
+            && verifier.contains(".verify_proof("),
+        "runtime verifier path must go through BackendVerifier::verify_proof"
+    );
+    for forbidden in [
+        leaked(&["self.machine.", "verify("]),
+        leaked(&["self.machine.", "prove("]),
+    ] {
+        assert!(
+            !verifier.contains(forbidden),
+            "runtime verifier must not call '{forbidden}' directly — route through the BackendVerifier facade"
+        );
+    }
+}
+
+#[test]
 fn machine_input_uses_explicit_air_and_semantic_statement_names() {
     let machine_input = read_workspace_file("crates/machine/src/input/mod.rs");
 
     assert!(
-        machine_input.contains("pub public_statement: PublicStatement")
-            && machine_input.contains("pub binding_digest: [u8; 32]"),
-        "machine input must expose explicit public-statement and binding-digest fields"
+        machine_input.contains("pub binding_digest: [u8; 32]"),
+        "machine input must expose an explicit binding-digest field"
     );
     for forbidden in [
+        "pub public_statement: PublicStatement",
         "pub air_statement: PublicStatement",
         "pub semantic_statement_digest: [u8; 32]",
     ] {
         assert!(
             !machine_input.contains(forbidden),
-            "machine input must not use stale statement naming '{forbidden}'"
+            "machine input must not carry a statement on the backend primitive: '{forbidden}'"
         );
     }
 }
@@ -354,10 +393,6 @@ fn live_sources_do_not_reintroduce_legacy_capability_vocabulary() {
     let mut files = rust_sources_under("crates");
     files.extend(crate_readmes_under("crates"));
     files.extend(markdown_sources_under("docs/design", &[]));
-    files.extend(markdown_sources_under(
-        "docs/notes",
-        &["archive", "research"],
-    ));
     files.sort();
     files.dedup();
 

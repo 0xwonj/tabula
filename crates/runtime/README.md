@@ -65,9 +65,9 @@ policy-and-orchestration layer above execution and backend proving.
   program expectations to proof verification belong here, not in the machine
   layer.
 - The secure verification surface is statement-first:
-  `verify_public_statement(proof, expected_public_statement)`.
-- `verify_proof(proof)` is only a convenience wrapper around the proof's own
-  carried `PublicStatement` and the configured sealed artifact.
+  `verify_public_statement(proof, expected_public_statement)`. The machine
+  proof does **not** carry a `PublicStatement`; the caller must thread the
+  expected statement separately.
 - `PublicStatement` is the proved object.
 - `BoundStatement` is the verifier-side outer binding over artifact
   invariants plus the proved public statement.

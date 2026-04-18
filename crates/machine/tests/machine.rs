@@ -3,11 +3,8 @@
 mod common;
 
 use common::dummy_proof_column;
-use p3_field::PrimeCharacteristicRing;
-use p3_koala_bear::KoalaBear;
-use tabula_commitment::NativeDigest;
 use tabula_machine::{
-    PreparedMachineInput, PreparedTierInput, ProveError, PublicStatement, RootProofBackend,
+    BackendProver, PreparedMachineInput, PreparedTierInput, ProveError, RootProofBackend,
     SmtRootProofBackend, TabulaMachine, default_config,
 };
 use tabula_stark::chips::core_chips;
@@ -62,7 +59,7 @@ fn smt_root_proof_provides_two_chips() {
 }
 
 #[test]
-fn direct_machine_prove_is_not_gated_by_runtime_root_authority() {
+fn backend_prover_surface_is_not_gated_by_runtime_root_authority() {
     let machine = TabulaMachine::builder()
         .with_root_proof_backend(CustomRootProofBackend)
         .build()
@@ -76,17 +73,10 @@ fn direct_machine_prove_is_not_gated_by_runtime_root_authority() {
         root: PreparedTierInput {
             store: WitnessStore::new(),
         },
-        public_statement: PublicStatement {
-            old_root: NativeDigest([KoalaBear::ZERO; 8]),
-            new_root: NativeDigest([KoalaBear::ZERO; 8]),
-            public_context_digest: NativeDigest([KoalaBear::ZERO; 8]),
-            applied_tx_digest: NativeDigest([KoalaBear::ZERO; 8]),
-            event_digest: NativeDigest([KoalaBear::ZERO; 8]),
-        },
         binding_digest: [0u8; 32],
     };
 
-    match machine.prove(input) {
+    match BackendProver::new(&machine).prove_envelope(input) {
         Err(ProveError::InvalidProofInput { detail }) => {
             assert!(!detail.contains("root witness"));
             assert!(!detail.contains("RootWitnessContract"));

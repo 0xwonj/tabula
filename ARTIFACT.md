@@ -108,12 +108,17 @@ After `prove`, the example directory should contain:
 `verify` should succeed when run against the matching sealed program and
 `public_statement.json`.
 
-`inspect-proof` should print proof-envelope metadata and the carried public
-statement.
+`inspect-proof` should print proof-envelope metadata (proof system, proof
+encoding, binding digest). The envelope wire format does not carry the public
+statement; callers wanting statement-level fields must read
+`public_statement.json` directly.
 
 ## Output Meaning
 
 - `receipt.bin` is a CLI/runtime handoff file used to reconstruct the proving
   input. It is not the stable external verification object.
-- `proof.bin` is the proof envelope.
-- `public_statement.json` is the caller-supplied stable verification file.
+- `proof.bin` is the proof envelope wrapping the machine proof bytes. It
+  does **not** carry the public statement; verification requires a paired
+  `public_statement.json`.
+- `public_statement.json` is the caller-supplied stable verification file and
+  the sole carrier of the artifact-bound public statement across processes.

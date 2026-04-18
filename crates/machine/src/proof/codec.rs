@@ -8,13 +8,11 @@ use p3_field::{BasedVectorSpace, PrimeField32};
 use p3_fri::{CommitPhaseProofStep, FriProof, QueryProof};
 use p3_koala_bear::KoalaBear;
 use p3_merkle_tree::MerkleTreeMmcs;
-use tabula_commitment::NativeDigest;
 use tabula_core::{ColId, TableId};
 use tabula_stark::air::interaction::BusId;
 use tabula_stark::chips::ChipId;
 use tabula_stark::rap::ef4::ef4_coeffs;
 
-use crate::PublicStatement;
 use crate::backend::pcs::{Blake3FieldCompressor, Blake3FieldHasher};
 use crate::config::{EF4, PcsCommitment, PcsOpeningProof};
 use crate::input::ColumnSlotKey;
@@ -34,7 +32,6 @@ struct ProofDto {
     execution: SubProofEnvelopeDto,
     columns: Vec<ColumnProofEntryDto>,
     root: SubProofEnvelopeDto,
-    public_statement: AirStatementDto,
     binding_digest: [u8; 32],
 }
 
@@ -88,15 +85,6 @@ struct ChipOpeningDto {
 }
 
 #[derive(Clone, BorshSerialize, BorshDeserialize)]
-struct AirStatementDto {
-    old_root: [u8; 32],
-    new_root: [u8; 32],
-    public_context_digest: [u8; 32],
-    applied_tx_digest: [u8; 32],
-    event_digest: [u8; 32],
-}
-
-#[derive(Clone, BorshSerialize, BorshDeserialize)]
 struct MerkleCapDto {
     roots: Vec<[u32; 8]>,
 }
@@ -130,7 +118,7 @@ struct CommitPhaseProofStepDto {
 }
 
 /// Encode one machine proof into canonical proof bytes.
-pub fn encode_proof_bytes(proof: &TabulaProof) -> Result<Vec<u8>, ProofCodecError> {
+pub(crate) fn encode_proof_bytes(proof: &TabulaProof) -> Result<Vec<u8>, ProofCodecError> {
     let dto = ProofDto::from_proof(proof);
     borsh::to_vec(&dto).map_err(|error| ProofCodecError::Encode {
         detail: error.to_string(),
@@ -155,7 +143,6 @@ impl ProofDto {
                 .map(ColumnProofEntryDto::from_entry)
                 .collect(),
             root: SubProofEnvelopeDto::from_subproof(&proof.root),
-            public_statement: AirStatementDto::from_statement(&proof.public_statement),
             binding_digest: proof.binding_digest,
         }
     }
@@ -169,7 +156,6 @@ impl ProofDto {
                 .map(ColumnProofEntryDto::into_entry)
                 .collect::<Result<Vec<_>, _>>()?,
             root: self.root.into_subproof()?,
-            public_statement: self.public_statement.into_statement()?,
             binding_digest: self.binding_digest,
         })
     }
@@ -350,53 +336,6 @@ impl ChipOpeningDto {
                 .into_iter()
                 .map(|value| decode_kb(value, "public_values"))
                 .collect::<Result<Vec<_>, _>>()?,
-        })
-    }
-}
-
-impl AirStatementDto {
-    fn from_statement(statement: &PublicStatement) -> Self {
-        Self {
-            old_root: statement.old_root.to_bytes(),
-            new_root: statement.new_root.to_bytes(),
-            public_context_digest: statement.public_context_digest.to_bytes(),
-            applied_tx_digest: statement.applied_tx_digest.to_bytes(),
-            event_digest: statement.event_digest.to_bytes(),
-        }
-    }
-
-    fn into_statement(self) -> Result<PublicStatement, ProofCodecError> {
-        let old_root =
-            NativeDigest::from_bytes(&self.old_root).map_err(|error| ProofCodecError::Decode {
-                detail: format!("invalid old_root digest: {error}"),
-            })?;
-        let new_root =
-            NativeDigest::from_bytes(&self.new_root).map_err(|error| ProofCodecError::Decode {
-                detail: format!("invalid new_root digest: {error}"),
-            })?;
-        let public_context_digest =
-            NativeDigest::from_bytes(&self.public_context_digest).map_err(|error| {
-                ProofCodecError::Decode {
-                    detail: format!("invalid public_context_digest: {error}"),
-                }
-            })?;
-        let applied_tx_digest =
-            NativeDigest::from_bytes(&self.applied_tx_digest).map_err(|error| {
-                ProofCodecError::Decode {
-                    detail: format!("invalid applied_tx_digest: {error}"),
-                }
-            })?;
-        let event_digest = NativeDigest::from_bytes(&self.event_digest).map_err(|error| {
-            ProofCodecError::Decode {
-                detail: format!("invalid event_digest: {error}"),
-            }
-        })?;
-        Ok(PublicStatement {
-            old_root,
-            new_root,
-            public_context_digest,
-            applied_tx_digest,
-            event_digest,
         })
     }
 }
@@ -649,7 +588,6 @@ mod tests {
     use p3_koala_bear::KoalaBear;
 
     use super::{decode_proof_bytes, encode_proof_bytes};
-    use crate::PublicStatement;
     use crate::config::PcsCommitment;
     use crate::proof::model::{ProofTier, SubProofEnvelope, TabulaProof};
 
@@ -686,13 +624,6 @@ mod tests {
             execution: empty_subproof(ProofTier::Execution),
             columns: vec![],
             root: empty_subproof(ProofTier::Root),
-            public_statement: PublicStatement {
-                old_root: tabula_commitment::NativeDigest([KoalaBear::ZERO; 8]),
-                new_root: tabula_commitment::NativeDigest([KoalaBear::ZERO; 8]),
-                public_context_digest: tabula_commitment::NativeDigest([KoalaBear::ZERO; 8]),
-                applied_tx_digest: tabula_commitment::NativeDigest([KoalaBear::ZERO; 8]),
-                event_digest: tabula_commitment::NativeDigest([KoalaBear::ZERO; 8]),
-            },
             binding_digest: [7u8; 32],
         };
 

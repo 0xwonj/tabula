@@ -18,8 +18,6 @@ use super::{
     TxOutcomeOutput, TxOutcomeStatus, TypeOutput,
 };
 use crate::output::{type_name, value_output};
-#[cfg(feature = "verify")]
-use tabula_sdk::PublicStatementFile;
 
 pub(crate) fn check_output(artifact: &Artifact, input_kind: ProgramInputKind) -> CheckOutput {
     let schema = artifact.schema();
@@ -244,9 +242,7 @@ pub(crate) fn prove_output(
     artifact: &Artifact,
     proof: &tabula_sdk::Proof,
 ) -> anyhow::Result<ProveOutput> {
-    let envelope = proof
-        .to_envelope()
-        .map_err(|error| anyhow::anyhow!(error))?;
+    let envelope = proof.to_envelope();
     Ok(ProveOutput {
         version: "tabula.cli.prove.v1".to_string(),
         artifact_digest: artifact.digest().to_string(),
@@ -280,7 +276,6 @@ pub(crate) fn inspect_proof_output(
         binding_digest_hex: hex_encode(proof.binding_digest()),
         proof_system: envelope.proof_system.name().to_string(),
         proof_encoding: envelope.proof_encoding.name().to_string(),
-        public_statement_file: PublicStatementFile::from_public_statement(proof.public_statement()),
     }
 }
 
