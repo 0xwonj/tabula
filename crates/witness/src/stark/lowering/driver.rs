@@ -95,12 +95,6 @@ pub struct LoweringOutput {
     pub static_table_rows: Vec<StaticTableRow>,
     /// Relation claims aggregated across all successful txs.
     pub relation_claims: Vec<RelationClaim>,
-    /// Canonical public-context transcript items excluding the header block.
-    pub public_context_transcript_items: Vec<[KoalaBear; 8]>,
-    /// Canonical tx-batch transcript items excluding the header block.
-    pub tx_batch_transcript_items: Vec<[KoalaBear; 8]>,
-    /// Canonical event transcript items excluding the header block.
-    pub event_transcript_items: Vec<[KoalaBear; 8]>,
     /// Per-chip opaque scratchpad populated via the
     /// [`ChipWitnessKit`](tabula_stark::witness_kit::ChipWitnessKit)
     /// authoring protocol. The execution-store assembly driver drains
@@ -150,9 +144,6 @@ pub fn merge_lowering_outputs<'a>(
         instruction_records,
         static_table_rows: static_rows.into_values().collect(),
         relation_claims,
-        public_context_transcript_items: Vec::new(),
-        tx_batch_transcript_items: Vec::new(),
-        event_transcript_items: Vec::new(),
         kit_scratch,
     }
 }

@@ -325,3 +325,42 @@ fn build_rows(
 
     (rows, prev_digest)
 }
+
+/// Witness kit for [`PublicContextTranscriptChip`]. Uses the
+/// runtime-pre-stuff pattern: the runtime materializes the transcript
+/// item vector at batch level and installs it via [`Self::insert_items`]
+/// before `finalize`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PublicContextTranscriptKit;
+
+impl PublicContextTranscriptKit {
+    const CHIP_ID: ChipId = PUBLIC_CONTEXT_TRANSCRIPT_CHIP_ID;
+
+    /// Install the runtime-prepared transcript items into the kit's scratchpad.
+    pub fn insert_items(
+        scratch: &mut tabula_stark::witness_kit::KitScratch,
+        items: Vec<[KoalaBear; 8]>,
+    ) {
+        scratch.insert(Self::CHIP_ID, Box::new(items));
+    }
+}
+
+impl tabula_stark::witness_kit::ChipWitnessKit for PublicContextTranscriptKit {
+    fn chip_id(&self) -> ChipId {
+        Self::CHIP_ID
+    }
+
+    fn witness_store_label(&self) -> &'static str {
+        PUBLIC_CONTEXT_TRANSCRIPT_WITNESS_LABEL
+    }
+
+    fn finalize(
+        &self,
+        ctx: &mut tabula_stark::witness_kit::KitFinalizeContext<'_>,
+        store: &mut tabula_stark::trace::WitnessStore,
+    ) -> Result<(), tabula_stark::witness_kit::KitError> {
+        let items: Vec<[KoalaBear; 8]> = ctx.take_scratch(Self::CHIP_ID)?;
+        store.put(PUBLIC_CONTEXT_TRANSCRIPT_WITNESS_LABEL, items);
+        Ok(())
+    }
+}

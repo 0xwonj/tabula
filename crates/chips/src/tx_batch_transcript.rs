@@ -330,3 +330,39 @@ fn build_rows(
 
     (rows, prev_digest)
 }
+
+/// Witness kit for [`TxBatchTranscriptChip`]. Runtime-pre-stuff pattern.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TxBatchTranscriptKit;
+
+impl TxBatchTranscriptKit {
+    const CHIP_ID: ChipId = TX_BATCH_TRANSCRIPT_CHIP_ID;
+
+    /// Install the runtime-prepared transcript items into the kit's scratchpad.
+    pub fn insert_items(
+        scratch: &mut tabula_stark::witness_kit::KitScratch,
+        items: Vec<[KoalaBear; 8]>,
+    ) {
+        scratch.insert(Self::CHIP_ID, Box::new(items));
+    }
+}
+
+impl tabula_stark::witness_kit::ChipWitnessKit for TxBatchTranscriptKit {
+    fn chip_id(&self) -> ChipId {
+        Self::CHIP_ID
+    }
+
+    fn witness_store_label(&self) -> &'static str {
+        TX_BATCH_TRANSCRIPT_WITNESS_LABEL
+    }
+
+    fn finalize(
+        &self,
+        ctx: &mut tabula_stark::witness_kit::KitFinalizeContext<'_>,
+        store: &mut tabula_stark::trace::WitnessStore,
+    ) -> Result<(), tabula_stark::witness_kit::KitError> {
+        let items: Vec<[KoalaBear; 8]> = ctx.take_scratch(Self::CHIP_ID)?;
+        store.put(TX_BATCH_TRANSCRIPT_WITNESS_LABEL, items);
+        Ok(())
+    }
+}

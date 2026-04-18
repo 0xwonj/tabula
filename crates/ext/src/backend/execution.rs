@@ -1,11 +1,13 @@
 use tabula_chips::capability_transcript::CapabilityTranscriptChip;
-use tabula_chips::event_transcript::EventTranscriptChip;
+use tabula_chips::event_transcript::{EventTranscriptChip, EventTranscriptKit};
 use tabula_chips::ir_hash::{IrHashChip, IrHashKit};
 use tabula_chips::poseidon::PoseidonChip;
-use tabula_chips::public_context_transcript::PublicContextTranscriptChip;
+use tabula_chips::public_context_transcript::{
+    PublicContextTranscriptChip, PublicContextTranscriptKit,
+};
 use tabula_chips::relation_table::{RelationTableChip, RelationTableKit};
 use tabula_chips::relation_transcript::{RelationTranscriptChip, RelationTranscriptKit};
-use tabula_chips::tx_batch_transcript::TxBatchTranscriptChip;
+use tabula_chips::tx_batch_transcript::{TxBatchTranscriptChip, TxBatchTranscriptKit};
 use tabula_stark::trace::{BusConsumer, DynChip};
 
 use tabula_stark::witness_kit::ChipWitnessKit;
@@ -141,5 +143,13 @@ impl ExecutionBackend for PublicStatementTranscriptExecutionBackend {
 
     fn bus_consumers(&self) -> Vec<Box<dyn BusConsumer>> {
         vec![Box::new(PoseidonChip)]
+    }
+
+    fn witness_kits(&self) -> Vec<Box<dyn ChipWitnessKit>> {
+        vec![
+            Box::new(PublicContextTranscriptKit),
+            Box::new(TxBatchTranscriptKit),
+            Box::new(EventTranscriptKit),
+        ]
     }
 }

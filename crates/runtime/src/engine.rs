@@ -1623,9 +1623,18 @@ fn prepare_proof_artifacts(
         }
     }
     lowered.instruction_records = instruction_records;
-    lowered.public_context_transcript_items = public_context_transcript_items;
-    lowered.tx_batch_transcript_items = tx_batch_transcript_items;
-    lowered.event_transcript_items = event_transcript_items;
+    tabula_chips::public_context_transcript::PublicContextTranscriptKit::insert_items(
+        &mut lowered.kit_scratch,
+        public_context_transcript_items,
+    );
+    tabula_chips::tx_batch_transcript::TxBatchTranscriptKit::insert_items(
+        &mut lowered.kit_scratch,
+        tx_batch_transcript_items,
+    );
+    tabula_chips::event_transcript::EventTranscriptKit::insert_items(
+        &mut lowered.kit_scratch,
+        event_transcript_items,
+    );
     let relation_proof = prepare_relation_proof(
         runtime_program.semantic.execution().program(),
         &runtime_program.static_table_artifact,

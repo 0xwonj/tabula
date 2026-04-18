@@ -1,8 +1,10 @@
 #![allow(missing_docs)]
 use std::collections::{BTreeMap, BTreeSet};
 
+use tabula_chips::event_transcript::EventTranscriptKit;
 use tabula_chips::ir_hash::IrHashKit;
 use tabula_chips::ir_hash::{IR_HASH_WITNESS_LABEL, IrHashCall};
+use tabula_chips::public_context_transcript::PublicContextTranscriptKit;
 use tabula_chips::relation_table::{
     RELATION_TABLE_WITNESS_LABEL, RelationTableKit, RelationTableWitnessRow,
 };
@@ -10,6 +12,7 @@ use tabula_chips::relation_transcript::{
     RELATION_TRANSCRIPT_WITNESS_LABEL, RelationTranscriptCall, RelationTranscriptKit,
 };
 use tabula_chips::static_table::trace::StaticTableRow;
+use tabula_chips::tx_batch_transcript::TxBatchTranscriptKit;
 use tabula_commitment::PoseidonHasher;
 use tabula_contract::{StaticTableArtifact, TupleEncodingDefaults, TupleEncodingSelection};
 use tabula_core::error::TabulaError;
@@ -225,6 +228,9 @@ fn lowers_an_empty_tx_entry_and_builds_execution_store() {
     registry.register(Box::new(IrHashKit));
     registry.register(Box::new(RelationTranscriptKit));
     registry.register(Box::new(RelationTableKit));
+    registry.register(Box::new(PublicContextTranscriptKit));
+    registry.register(Box::new(TxBatchTranscriptKit));
+    registry.register(Box::new(EventTranscriptKit));
     let store = prepare_execution_store(&mut merged, &registry).expect("execution store");
 
     assert!(
