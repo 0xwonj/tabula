@@ -251,11 +251,17 @@ fn verifier_path_is_single_sourced_in_verifier_module() {
 
 #[test]
 fn runtime_relation_proof_prep_stays_witness_owned() {
+    // `RelationTableWitnessRow` intentionally dropped: SP-3 S3.2 migrated
+    // the relation-table witness row construction out of `tabula-witness`
+    // (so witness stays chip-agnostic) into the runtime call site that
+    // already drives the chip-kit scratchpad pre-stuff. The actual relation
+    // proof preparation (`prepare_relation_proof`, transcript digests)
+    // still lives in witness — that is what the rest of this guardrail
+    // continues to protect.
     assert_source_prefix_omits(
         "crates/runtime/src/engine.rs",
         "#[cfg(all(test, feature = \"prove\"))]",
         &[
-            "RelationTableWitnessRow",
             "RelationTranscriptCall",
             "compute_typed_tuple_digest",
             "typed_tuple_transcript",

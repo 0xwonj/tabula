@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use tabula_chips::ir_hash::IrHashKit;
 use tabula_chips::ir_hash::{IR_HASH_WITNESS_LABEL, IrHashCall};
-use tabula_chips::relation_table::{RELATION_TABLE_WITNESS_LABEL, RelationTableWitnessRow};
+use tabula_chips::relation_table::{
+    RELATION_TABLE_WITNESS_LABEL, RelationTableKit, RelationTableWitnessRow,
+};
 use tabula_chips::relation_transcript::{
     RELATION_TRANSCRIPT_WITNESS_LABEL, RelationTranscriptCall, RelationTranscriptKit,
 };
@@ -206,11 +208,24 @@ fn lowers_an_empty_tx_entry_and_builds_execution_store() {
     let mut merged = merge_lowering_outputs([&lowered], kit_scratch);
     let relation_proof = prepare_relation_proof(&program, &empty_static_table_artifact(), &[])
         .expect("prepare empty relation proof");
+    RelationTableKit::insert_rows(
+        &mut merged.kit_scratch,
+        relation_proof
+            .table_rows()
+            .iter()
+            .map(|row| RelationTableWitnessRow {
+                relation_id: row.relation_id,
+                input_digest: row.input_digest,
+                output_digest: row.output_digest,
+                lookup_mult: row.lookup_mult,
+            })
+            .collect(),
+    );
     let mut registry = ChipKitRegistry::new();
     registry.register(Box::new(IrHashKit));
     registry.register(Box::new(RelationTranscriptKit));
-    let store =
-        prepare_execution_store(&mut merged, &relation_proof, &registry).expect("execution store");
+    registry.register(Box::new(RelationTableKit));
+    let store = prepare_execution_store(&mut merged, &registry).expect("execution store");
 
     assert!(
         store.contains::<Vec<tabula_chips::execution::trace::InstructionRecord>>(

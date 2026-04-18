@@ -1648,8 +1648,23 @@ fn prepare_proof_artifacts(
     ) {
         kit_registry.register_all(backend.witness_kits());
     }
-    let execution_store = prepare_execution_store(&mut lowered, &relation_proof, &kit_registry)
-        .map_err(RuntimeError::TraceBuild)?;
+    tabula_chips::relation_table::RelationTableKit::insert_rows(
+        &mut lowered.kit_scratch,
+        relation_proof
+            .table_rows()
+            .iter()
+            .map(
+                |row| tabula_chips::relation_table::RelationTableWitnessRow {
+                    relation_id: row.relation_id,
+                    input_digest: row.input_digest,
+                    output_digest: row.output_digest,
+                    lookup_mult: row.lookup_mult,
+                },
+            )
+            .collect(),
+    );
+    let execution_store =
+        prepare_execution_store(&mut lowered, &kit_registry).map_err(RuntimeError::TraceBuild)?;
 
     let prepared_columns = runtime_program
         .column_slots
