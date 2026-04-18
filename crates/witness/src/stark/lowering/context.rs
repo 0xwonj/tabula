@@ -7,7 +7,6 @@ use p3_koala_bear::KoalaBear;
 
 use tabula_chips::execution::MAX_SLOTS;
 use tabula_chips::execution::trace::InstructionRecord;
-use tabula_chips::relation_transcript::RelationTranscriptCall;
 use tabula_contract::format::typed_tuple::TupleEncodingDefaults;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::Hasher;
@@ -33,7 +32,6 @@ pub(crate) struct LoweringCx<'a, const W: usize> {
     pub(crate) state_runtime: &'a dyn exec::StateRuntimeView,
     pub(crate) records: Vec<InstructionRecord>,
     pub(crate) kit_scratch: &'a mut KitScratch,
-    pub(crate) relation_transcript_calls: Vec<RelationTranscriptCall>,
     pub(crate) relation_claims: Vec<RelationClaim>,
     pub(crate) slots: Vec<Option<TypedValue>>,
     pub(crate) slot_fes: Vec<Vec<KoalaBear>>,
@@ -191,7 +189,6 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
             state_runtime: input.state_runtime,
             records: Vec::with_capacity(input.entry.body.ops.len() + max_local_slot),
             kit_scratch,
-            relation_transcript_calls: Vec::new(),
             relation_claims: Vec::new(),
             slots,
             slot_fes,

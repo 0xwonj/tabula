@@ -6,7 +6,6 @@ use tabula_core::error::TabulaError;
 use tabula_chips::public_context_transcript::PUBLIC_CONTEXT_TRANSCRIPT_WITNESS_LABEL;
 use tabula_chips::relation_table::RELATION_TABLE_WITNESS_LABEL;
 use tabula_chips::relation_table::RelationTableWitnessRow;
-use tabula_chips::relation_transcript::RELATION_TRANSCRIPT_WITNESS_LABEL;
 use tabula_chips::tx_batch_transcript::TX_BATCH_TRANSCRIPT_WITNESS_LABEL;
 use tabula_stark::trace::{WitnessStore, witness_labels};
 use tabula_stark::witness_kit::KitFinalizeContext;
@@ -49,10 +48,6 @@ pub fn prepare_execution_store(
     store.put(
         EVENT_TRANSCRIPT_WITNESS_LABEL,
         lowering.event_transcript_items.clone(),
-    );
-    store.put(
-        RELATION_TRANSCRIPT_WITNESS_LABEL,
-        lowering.relation_transcript_calls.clone(),
     );
     store.put(
         RELATION_TABLE_WITNESS_LABEL,

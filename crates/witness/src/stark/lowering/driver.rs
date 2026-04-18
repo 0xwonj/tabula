@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use p3_koala_bear::KoalaBear;
 
 use tabula_chips::execution::trace::InstructionRecord;
-use tabula_chips::relation_transcript::RelationTranscriptCall;
 use tabula_chips::static_table::trace::StaticTableRow;
 use tabula_contract::format::typed_tuple::TupleEncodingDefaults;
 use tabula_core::error::TabulaError;
@@ -94,8 +93,6 @@ pub struct LoweringOutput {
     pub instruction_records: Vec<InstructionRecord>,
     /// Static table rows accumulated from lookup-like operations.
     pub static_table_rows: Vec<StaticTableRow>,
-    /// Relation transcript calls consumed by the dedicated relation transcript lane.
-    pub relation_transcript_calls: Vec<RelationTranscriptCall>,
     /// Relation claims aggregated across all successful txs.
     pub relation_claims: Vec<RelationClaim>,
     /// Canonical public-context transcript items excluding the header block.
@@ -119,8 +116,6 @@ pub struct TxLoweringOutput {
     pub instruction_records: Vec<InstructionRecord>,
     /// Static table rows accumulated while lowering this entry.
     pub static_table_rows: Vec<StaticTableRow>,
-    /// Relation transcript calls for this tx.
-    pub relation_transcript_calls: Vec<RelationTranscriptCall>,
     /// Relation claims for this tx.
     pub relation_claims: Vec<RelationClaim>,
 }
@@ -137,12 +132,10 @@ pub fn merge_lowering_outputs<'a>(
 ) -> LoweringOutput {
     let mut instruction_records = Vec::new();
     let mut static_rows: BTreeMap<(u32, u16, u64), StaticTableRow> = BTreeMap::new();
-    let mut relation_transcript_calls = Vec::new();
     let mut relation_claims = Vec::new();
 
     for output in outputs {
         instruction_records.extend(output.instruction_records.iter().cloned());
-        relation_transcript_calls.extend(output.relation_transcript_calls.iter().cloned());
         relation_claims.extend(output.relation_claims.iter().cloned());
         for row in &output.static_table_rows {
             let key = (row.table_id, row.col_id, row.row_key);
@@ -156,7 +149,6 @@ pub fn merge_lowering_outputs<'a>(
     LoweringOutput {
         instruction_records,
         static_table_rows: static_rows.into_values().collect(),
-        relation_transcript_calls,
         relation_claims,
         public_context_transcript_items: Vec::new(),
         tx_batch_transcript_items: Vec::new(),
@@ -178,7 +170,6 @@ pub fn lower_successful_tx<const W: usize>(
     Ok(TxLoweringOutput {
         instruction_records: lowering.records,
         static_table_rows: Vec::new(),
-        relation_transcript_calls: lowering.relation_transcript_calls,
         relation_claims: lowering.relation_claims,
     })
 }

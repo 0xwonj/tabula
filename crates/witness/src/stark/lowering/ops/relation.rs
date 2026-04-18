@@ -3,7 +3,7 @@
 use p3_koala_bear::KoalaBear;
 
 use tabula_chips::execution::trace::Opcode;
-use tabula_chips::relation_transcript::RelationTranscriptCall;
+use tabula_chips::relation_transcript::RelationTranscriptKit;
 use tabula_contract::format::typed_tuple::TypedTupleRole;
 use tabula_core::error::TabulaError;
 use tabula_ir as ir;
@@ -55,7 +55,8 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
             });
         }
 
-        let input_call = RelationTranscriptCall::from_typed_values(
+        let input_projection = RelationTranscriptKit::push_from_typed_values(
+            self.kit_scratch,
             self.tx_index,
             effect.effect_ordinal_in_entry,
             op_index as u32,
@@ -64,7 +65,8 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
             self.tuple_encoding_defaults,
             self.encoding_runtimes,
         )?;
-        let output_call = RelationTranscriptCall::from_typed_values(
+        let output_projection = RelationTranscriptKit::push_from_typed_values(
+            self.kit_scratch,
             self.tx_index,
             effect.effect_ordinal_in_entry,
             op_index as u32,
@@ -80,25 +82,23 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
         rec.relation_id = Some(relation.0);
         rec.instruction_index = Some(op_index as u32);
         rec.relation_input_digest = Some(core::array::from_fn(|idx| {
-            KoalaBear::new(input_call.digest[idx])
+            KoalaBear::new(input_projection.digest[idx])
         }));
         rec.relation_output_digest = Some(core::array::from_fn(|idx| {
-            KoalaBear::new(output_call.digest[idx])
+            KoalaBear::new(output_projection.digest[idx])
         }));
 
         for (index, (value_ref, value)) in args.0.iter().zip(effect.inputs.iter()).enumerate() {
             let slot = self.resolve_operand_slot(value_ref, value, false, &[])?;
             rec.relation_input_used[index] = true;
             rec.relation_input_type_ids[index] = value.type_id().0;
-            rec.relation_input_vals[index] = input_call.tuple_values[index];
+            rec.relation_input_vals[index] = input_projection.tuple_values[index];
             rec.relation_input_sel[index][slot] = true;
         }
 
-        let input_digest = input_call.digest;
-        let output_digest = output_call.digest;
+        let input_digest = input_projection.digest;
+        let output_digest = output_projection.digest;
         self.records.push(rec);
-        self.relation_transcript_calls.push(input_call);
-        self.relation_transcript_calls.push(output_call);
         self.relation_claims.push(relation_claim_from_effect(
             self.tx_index,
             effect,
@@ -164,7 +164,8 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
             });
         }
 
-        let input_call = RelationTranscriptCall::from_typed_values(
+        let input_projection = RelationTranscriptKit::push_from_typed_values(
+            self.kit_scratch,
             self.tx_index,
             effect.effect_ordinal_in_entry,
             op_index as u32,
@@ -173,7 +174,8 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
             self.tuple_encoding_defaults,
             self.encoding_runtimes,
         )?;
-        let output_call = RelationTranscriptCall::from_typed_values(
+        let output_projection = RelationTranscriptKit::push_from_typed_values(
+            self.kit_scratch,
             self.tx_index,
             effect.effect_ordinal_in_entry,
             op_index as u32,
@@ -189,17 +191,17 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
         rec.relation_id = Some(relation.0);
         rec.instruction_index = Some(op_index as u32);
         rec.relation_input_digest = Some(core::array::from_fn(|idx| {
-            KoalaBear::new(input_call.digest[idx])
+            KoalaBear::new(input_projection.digest[idx])
         }));
         rec.relation_output_digest = Some(core::array::from_fn(|idx| {
-            KoalaBear::new(output_call.digest[idx])
+            KoalaBear::new(output_projection.digest[idx])
         }));
 
         for (index, (value_ref, value)) in inputs.0.iter().zip(effect.inputs.iter()).enumerate() {
             let slot = self.resolve_operand_slot(value_ref, value, false, &[])?;
             rec.relation_input_used[index] = true;
             rec.relation_input_type_ids[index] = value.type_id().0;
-            rec.relation_input_vals[index] = input_call.tuple_values[index];
+            rec.relation_input_vals[index] = input_projection.tuple_values[index];
             rec.relation_input_sel[index][slot] = true;
         }
 
@@ -211,15 +213,13 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
             rec.writes.push((dst_slot, encoded, false));
             rec.relation_output_used[index] = true;
             rec.relation_output_type_ids[index] = output.type_id().0;
-            rec.relation_output_vals[index] = output_call.tuple_values[index];
+            rec.relation_output_vals[index] = output_projection.tuple_values[index];
             rec.relation_output_sel[index][dst_slot] = true;
         }
 
-        let input_digest = input_call.digest;
-        let output_digest = output_call.digest;
+        let input_digest = input_projection.digest;
+        let output_digest = output_projection.digest;
         self.records.push(rec);
-        self.relation_transcript_calls.push(input_call);
-        self.relation_transcript_calls.push(output_call);
         self.relation_claims.push(relation_claim_from_effect(
             self.tx_index,
             effect,

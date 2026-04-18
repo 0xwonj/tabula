@@ -4,7 +4,7 @@ use tabula_chips::ir_hash::{IrHashChip, IrHashKit};
 use tabula_chips::poseidon::PoseidonChip;
 use tabula_chips::public_context_transcript::PublicContextTranscriptChip;
 use tabula_chips::relation_table::RelationTableChip;
-use tabula_chips::relation_transcript::RelationTranscriptChip;
+use tabula_chips::relation_transcript::{RelationTranscriptChip, RelationTranscriptKit};
 use tabula_chips::tx_batch_transcript::TxBatchTranscriptChip;
 use tabula_stark::trace::{BusConsumer, DynChip};
 
@@ -105,6 +105,10 @@ impl ExecutionBackend for RelationExecutionBackend {
             Box::new(RelationTranscriptChip),
             Box::new(RelationTableChip),
         ]
+    }
+
+    fn witness_kits(&self) -> Vec<Box<dyn ChipWitnessKit>> {
+        vec![Box::new(RelationTranscriptKit)]
     }
 }
 

@@ -5,7 +5,7 @@ use tabula_chips::ir_hash::IrHashKit;
 use tabula_chips::ir_hash::{IR_HASH_WITNESS_LABEL, IrHashCall};
 use tabula_chips::relation_table::{RELATION_TABLE_WITNESS_LABEL, RelationTableWitnessRow};
 use tabula_chips::relation_transcript::{
-    RELATION_TRANSCRIPT_WITNESS_LABEL, RelationTranscriptCall,
+    RELATION_TRANSCRIPT_WITNESS_LABEL, RelationTranscriptCall, RelationTranscriptKit,
 };
 use tabula_chips::static_table::trace::StaticTableRow;
 use tabula_commitment::PoseidonHasher;
@@ -201,7 +201,6 @@ fn lowers_an_empty_tx_entry_and_builds_execution_store() {
 
     assert!(lowered.instruction_records.is_empty());
     assert!(lowered.static_table_rows.is_empty());
-    assert!(lowered.relation_transcript_calls.is_empty());
     assert!(lowered.relation_claims.is_empty());
 
     let mut merged = merge_lowering_outputs([&lowered], kit_scratch);
@@ -209,6 +208,7 @@ fn lowers_an_empty_tx_entry_and_builds_execution_store() {
         .expect("prepare empty relation proof");
     let mut registry = ChipKitRegistry::new();
     registry.register(Box::new(IrHashKit));
+    registry.register(Box::new(RelationTranscriptKit));
     let store =
         prepare_execution_store(&mut merged, &relation_proof, &registry).expect("execution store");
 
