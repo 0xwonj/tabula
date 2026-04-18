@@ -4,13 +4,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use p3_koala_bear::KoalaBear;
 
 use tabula_chips::execution::trace::InstructionRecord;
-use tabula_chips::ir_hash::IrHashCall;
 use tabula_chips::relation_transcript::RelationTranscriptCall;
 use tabula_chips::static_table::trace::StaticTableRow;
 use tabula_contract::format::typed_tuple::TupleEncodingDefaults;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::Hasher;
 use tabula_ir as ir;
+use tabula_stark::witness_kit::KitScratch;
 use tabula_types as exec;
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue};
 
@@ -88,14 +88,12 @@ pub struct ParamPreludeSlot {
 }
 
 /// Output of full native execution lowering.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LoweringOutput {
     /// Instruction records for all opcodes across all successful txs.
     pub instruction_records: Vec<InstructionRecord>,
     /// Static table rows accumulated from lookup-like operations.
     pub static_table_rows: Vec<StaticTableRow>,
-    /// Canonical IR-hash calls consumed by the dedicated hash lane.
-    pub ir_hash_calls: Vec<IrHashCall>,
     /// Relation transcript calls consumed by the dedicated relation transcript lane.
     pub relation_transcript_calls: Vec<RelationTranscriptCall>,
     /// Relation claims aggregated across all successful txs.
@@ -106,6 +104,12 @@ pub struct LoweringOutput {
     pub tx_batch_transcript_items: Vec<[KoalaBear; 8]>,
     /// Canonical event transcript items excluding the header block.
     pub event_transcript_items: Vec<[KoalaBear; 8]>,
+    /// Per-chip opaque scratchpad populated via the
+    /// [`ChipWitnessKit`](tabula_stark::witness_kit::ChipWitnessKit)
+    /// authoring protocol. The execution-store assembly driver drains
+    /// this map during `prepare_execution_store` by invoking each
+    /// registered kit's `finalize`.
+    pub kit_scratch: KitScratch,
 }
 
 /// Output of lowering one successful native transaction.
@@ -115,8 +119,6 @@ pub struct TxLoweringOutput {
     pub instruction_records: Vec<InstructionRecord>,
     /// Static table rows accumulated while lowering this entry.
     pub static_table_rows: Vec<StaticTableRow>,
-    /// Canonical IR-hash calls consumed by the dedicated hash lane.
-    pub ir_hash_calls: Vec<IrHashCall>,
     /// Relation transcript calls for this tx.
     pub relation_transcript_calls: Vec<RelationTranscriptCall>,
     /// Relation claims for this tx.
@@ -124,18 +126,22 @@ pub struct TxLoweringOutput {
 }
 
 /// Merge per-tx lowering outputs into one execution-tier bundle.
+///
+/// The caller owns the shared [`KitScratch`] that opcode handlers
+/// pushed rows into across tx calls and moves it into the merged
+/// [`LoweringOutput`] here. Per-chip row order therefore matches the
+/// emission order across the batch without a post-hoc merge step.
 pub fn merge_lowering_outputs<'a>(
     outputs: impl IntoIterator<Item = &'a TxLoweringOutput>,
+    kit_scratch: KitScratch,
 ) -> LoweringOutput {
     let mut instruction_records = Vec::new();
     let mut static_rows: BTreeMap<(u32, u16, u64), StaticTableRow> = BTreeMap::new();
-    let mut ir_hash_calls = Vec::new();
     let mut relation_transcript_calls = Vec::new();
     let mut relation_claims = Vec::new();
 
     for output in outputs {
         instruction_records.extend(output.instruction_records.iter().cloned());
-        ir_hash_calls.extend(output.ir_hash_calls.iter().cloned());
         relation_transcript_calls.extend(output.relation_transcript_calls.iter().cloned());
         relation_claims.extend(output.relation_claims.iter().cloned());
         for row in &output.static_table_rows {
@@ -150,25 +156,28 @@ pub fn merge_lowering_outputs<'a>(
     LoweringOutput {
         instruction_records,
         static_table_rows: static_rows.into_values().collect(),
-        ir_hash_calls,
         relation_transcript_calls,
         relation_claims,
         public_context_transcript_items: Vec::new(),
         tx_batch_transcript_items: Vec::new(),
         event_transcript_items: Vec::new(),
+        kit_scratch,
     }
 }
 
 /// Lower one successful native transaction into witness-ready execution records.
+///
+/// The shared `kit_scratch` is threaded through the lowering context so
+/// chip kits can push rows inline as opcode handlers execute.
 pub fn lower_successful_tx<const W: usize>(
     input: LowerSuccessfulTxInput<'_>,
+    kit_scratch: &mut KitScratch,
 ) -> Result<TxLoweringOutput, TabulaError> {
-    let mut lowering = LoweringCx::<W>::new(input)?;
+    let mut lowering = LoweringCx::<W>::new(input, kit_scratch)?;
     lowering.lower_entry()?;
     Ok(TxLoweringOutput {
         instruction_records: lowering.records,
         static_table_rows: Vec::new(),
-        ir_hash_calls: lowering.ir_hash_calls,
         relation_transcript_calls: lowering.relation_transcript_calls,
         relation_claims: lowering.relation_claims,
     })

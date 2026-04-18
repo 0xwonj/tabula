@@ -24,7 +24,6 @@
 
 use std::any::Any;
 use std::collections::BTreeMap;
-use std::marker::PhantomData;
 
 use crate::chips::ChipId;
 use crate::trace::WitnessStore;
@@ -34,28 +33,40 @@ use crate::trace::WitnessStore;
 /// private row buffer type.
 pub type KitScratch = BTreeMap<ChipId, Box<dyn Any + Send>>;
 
-/// Opaque borrow surfaced to a [`ChipWitnessKit::finalize`] call. In S1
-/// this is a stub; later stages (starting S2) populate it with the
-/// merged core lowering output, prepared relation proof handles, and
-/// the kit's downcastable scratchpad entry.
+/// Borrow surfaced to a [`ChipWitnessKit::finalize`] call. Currently
+/// exposes the kit's scratchpad entry via a downcast-and-take accessor.
+/// Later stages may surface additional read-only borrows (e.g. prepared
+/// relation proof handles).
 pub struct KitFinalizeContext<'a> {
-    _marker: PhantomData<&'a ()>,
+    scratch: &'a mut KitScratch,
 }
 
 impl<'a> KitFinalizeContext<'a> {
-    /// Construct an empty finalize context. Used by internal drivers;
+    /// Construct a finalize context borrowing the driver's scratchpad.
+    /// Intended to be called by the witness-tier lowering driver only;
     /// kits receive this by borrow and never construct their own.
     #[doc(hidden)]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
+    pub fn new(scratch: &'a mut KitScratch) -> Self {
+        Self { scratch }
     }
-}
 
-impl Default for KitFinalizeContext<'_> {
-    fn default() -> Self {
-        Self::new()
+    /// Remove the entry under `chip_id` and downcast to `T`.
+    ///
+    /// Returns `T::default()` when no entry is present — kits that are
+    /// registered but whose backends never emitted a row still need a
+    /// well-formed (possibly empty) row buffer to publish under their
+    /// witness-store label.
+    pub fn take_scratch<T>(&mut self, chip_id: ChipId) -> Result<T, KitError>
+    where
+        T: Any + Default + Send,
+    {
+        match self.scratch.remove(&chip_id) {
+            None => Ok(T::default()),
+            Some(boxed) => boxed
+                .downcast::<T>()
+                .map(|b| *b)
+                .map_err(|_| KitError::DowncastFailed(chip_id)),
+        }
     }
 }
 
@@ -97,4 +108,40 @@ pub trait ChipWitnessKit: Send + Sync {
         ctx: &mut KitFinalizeContext<'_>,
         store: &mut WitnessStore,
     ) -> Result<(), KitError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_CHIP: ChipId = ChipId(9999);
+
+    #[test]
+    fn take_scratch_returns_default_when_absent() {
+        let mut scratch = KitScratch::new();
+        let mut ctx = KitFinalizeContext::new(&mut scratch);
+        let v: Vec<u32> = ctx.take_scratch(TEST_CHIP).expect("absent -> default");
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn take_scratch_round_trips_stored_vector() {
+        let mut scratch = KitScratch::new();
+        scratch.insert(TEST_CHIP, Box::new(vec![1u32, 2, 3]));
+        let mut ctx = KitFinalizeContext::new(&mut scratch);
+        let v: Vec<u32> = ctx.take_scratch(TEST_CHIP).expect("present -> value");
+        assert_eq!(v, vec![1, 2, 3]);
+        assert!(scratch.get(&TEST_CHIP).is_none(), "entry consumed");
+    }
+
+    #[test]
+    fn take_scratch_reports_downcast_failure() {
+        let mut scratch = KitScratch::new();
+        scratch.insert(TEST_CHIP, Box::new(42u64));
+        let mut ctx = KitFinalizeContext::new(&mut scratch);
+        let err = ctx
+            .take_scratch::<Vec<u32>>(TEST_CHIP)
+            .expect_err("type mismatch");
+        assert!(matches!(err, KitError::DowncastFailed(c) if c == TEST_CHIP));
+    }
 }

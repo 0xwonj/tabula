@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 use std::collections::{BTreeMap, BTreeSet};
 
+use tabula_chips::ir_hash::IrHashKit;
 use tabula_chips::ir_hash::{IR_HASH_WITNESS_LABEL, IrHashCall};
 use tabula_chips::relation_table::{RELATION_TABLE_WITNESS_LABEL, RelationTableWitnessRow};
 use tabula_chips::relation_transcript::{
@@ -17,12 +18,14 @@ use tabula_profile::{
     TYPE_U64_ID,
 };
 use tabula_stark::trace::witness_labels;
+use tabula_stark::witness_kit::KitScratch;
 use tabula_types::{
     CommittedColumnEntry, NativeKeyPayload, TxCall, TypedCommittedPropertyQueryResult, TypedValue,
 };
 use tabula_witness::prepare_relation_proof;
 use tabula_witness::stark::{
-    LowerSuccessfulTxInput, lower_successful_tx, merge_lowering_outputs, prepare_execution_store,
+    ChipKitRegistry, LowerSuccessfulTxInput, lower_successful_tx, merge_lowering_outputs,
+    prepare_execution_store,
 };
 
 struct NoopStateRuntime;
@@ -169,39 +172,45 @@ fn lowers_an_empty_tx_entry_and_builds_execution_store() {
     let param_slots = Vec::new();
     let event_item_bases = BTreeMap::new();
 
-    let lowered = lower_successful_tx::<3>(LowerSuccessfulTxInput {
-        tx_index: 0,
-        program: &program,
-        call: &call,
-        entry: &program.entries[0],
-        context: &context,
-        state_effects: &[],
-        event_effects: &[],
-        property_effects: &[],
-        relation_effects: &[],
-        empty_columns: &empty_columns,
-        type_runtimes: &type_runtimes,
-        encoding_runtimes: &encoding_runtimes,
-        tuple_encoding_defaults: &tuple_encoding_defaults,
-        hasher: &hasher,
-        state_runtime: &state_runtime,
-        context_slots: &context_slots,
-        param_slots: &param_slots,
-        aux_slot_limit: tabula_chips::execution::MAX_SLOTS,
-        event_item_bases: &event_item_bases,
-    })
+    let mut kit_scratch = KitScratch::new();
+    let lowered = lower_successful_tx::<3>(
+        LowerSuccessfulTxInput {
+            tx_index: 0,
+            program: &program,
+            call: &call,
+            entry: &program.entries[0],
+            context: &context,
+            state_effects: &[],
+            event_effects: &[],
+            property_effects: &[],
+            relation_effects: &[],
+            empty_columns: &empty_columns,
+            type_runtimes: &type_runtimes,
+            encoding_runtimes: &encoding_runtimes,
+            tuple_encoding_defaults: &tuple_encoding_defaults,
+            hasher: &hasher,
+            state_runtime: &state_runtime,
+            context_slots: &context_slots,
+            param_slots: &param_slots,
+            aux_slot_limit: tabula_chips::execution::MAX_SLOTS,
+            event_item_bases: &event_item_bases,
+        },
+        &mut kit_scratch,
+    )
     .expect("lower tx");
 
     assert!(lowered.instruction_records.is_empty());
     assert!(lowered.static_table_rows.is_empty());
-    assert!(lowered.ir_hash_calls.is_empty());
     assert!(lowered.relation_transcript_calls.is_empty());
     assert!(lowered.relation_claims.is_empty());
 
-    let merged = merge_lowering_outputs([&lowered]);
+    let mut merged = merge_lowering_outputs([&lowered], kit_scratch);
     let relation_proof = prepare_relation_proof(&program, &empty_static_table_artifact(), &[])
         .expect("prepare empty relation proof");
-    let store = prepare_execution_store(&merged, &relation_proof).expect("execution store");
+    let mut registry = ChipKitRegistry::new();
+    registry.register(Box::new(IrHashKit));
+    let store =
+        prepare_execution_store(&mut merged, &relation_proof, &registry).expect("execution store");
 
     assert!(
         store.contains::<Vec<tabula_chips::execution::trace::InstructionRecord>>(

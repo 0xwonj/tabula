@@ -46,8 +46,8 @@ use tabula_types::{
 use tabula_witness::stark::prepare_execution_store;
 #[cfg(feature = "prove")]
 use tabula_witness::stark::{
-    ContextPreludeSlot, LowerSuccessfulTxInput, ParamPreludeSlot, lower_successful_tx,
-    merge_lowering_outputs,
+    ChipKitRegistry, ContextPreludeSlot, LowerSuccessfulTxInput, ParamPreludeSlot,
+    lower_successful_tx, merge_lowering_outputs,
 };
 #[cfg(feature = "prove")]
 use tabula_witness::{
@@ -433,6 +433,8 @@ struct RuntimeProgramState {
     column_slots: Vec<ColumnProofSlot>,
     artifact_context: ArtifactContext,
     relation_policy: RelationPolicy,
+    #[cfg(feature = "prove")]
+    uses_ir_hash: bool,
     static_table_artifact: StaticTableArtifact,
     #[cfg(feature = "prove")]
     tuple_encoding_defaults: TupleEncodingDefaults,
@@ -566,6 +568,8 @@ impl RuntimeBuilder {
             column_slots,
             artifact_context: program_setup.artifact_context,
             relation_policy: program_setup.relation_policy,
+            #[cfg(feature = "prove")]
+            uses_ir_hash: program_setup.uses_ir_hash,
             static_table_artifact: self.registered_program.static_table_artifact().clone(),
             #[cfg(feature = "prove")]
             tuple_encoding_defaults: self.registered_program.tuple_encoding_defaults().clone(),
@@ -1504,6 +1508,7 @@ fn prepare_proof_artifacts(
 
     let mut lowered_txs = BTreeMap::new();
     let empty_event_item_bases = BTreeMap::new();
+    let mut kit_scratch = tabula_stark::witness_kit::KitScratch::new();
     for tx in executed.successful_txs() {
         for effect in &tx.state_effects {
             let slot = *column_index
@@ -1573,34 +1578,37 @@ fn prepare_proof_artifacts(
         })?;
         lowered_txs.insert(
             tx.tx_index,
-            lower_successful_tx::<3>(LowerSuccessfulTxInput {
-                tx_index: tx.tx_index,
-                program: runtime_program.semantic.execution().program(),
-                call,
-                entry,
-                context,
-                state_effects: &tx.state_effects,
-                event_effects: &tx.event_effects,
-                property_effects: &tx.property_effects,
-                relation_effects: &tx.relation_effects,
-                empty_columns: &empty_columns,
-                type_runtimes: &runtime_program.type_runtimes,
-                encoding_runtimes: &runtime_program.encoding_runtimes,
-                tuple_encoding_defaults: &runtime_program.tuple_encoding_defaults,
-                hasher: &PoseidonHasher::new(),
-                state_runtime: &runtime_program.state,
-                context_slots: context_slots.as_slice(),
-                param_slots: param_slots.as_slice(),
-                aux_slot_limit: statement_slot_layout.aux_slot_limit,
-                event_item_bases: event_item_bases_by_tx
-                    .get(&tx.tx_index)
-                    .unwrap_or(&empty_event_item_bases),
-            })
+            lower_successful_tx::<3>(
+                LowerSuccessfulTxInput {
+                    tx_index: tx.tx_index,
+                    program: runtime_program.semantic.execution().program(),
+                    call,
+                    entry,
+                    context,
+                    state_effects: &tx.state_effects,
+                    event_effects: &tx.event_effects,
+                    property_effects: &tx.property_effects,
+                    relation_effects: &tx.relation_effects,
+                    empty_columns: &empty_columns,
+                    type_runtimes: &runtime_program.type_runtimes,
+                    encoding_runtimes: &runtime_program.encoding_runtimes,
+                    tuple_encoding_defaults: &runtime_program.tuple_encoding_defaults,
+                    hasher: &PoseidonHasher::new(),
+                    state_runtime: &runtime_program.state,
+                    context_slots: context_slots.as_slice(),
+                    param_slots: param_slots.as_slice(),
+                    aux_slot_limit: statement_slot_layout.aux_slot_limit,
+                    event_item_bases: event_item_bases_by_tx
+                        .get(&tx.tx_index)
+                        .unwrap_or(&empty_event_item_bases),
+                },
+                &mut kit_scratch,
+            )
             .map_err(RuntimeError::TraceBuild)?,
         );
     }
 
-    let mut lowered = merge_lowering_outputs(lowered_txs.values());
+    let mut lowered = merge_lowering_outputs(lowered_txs.values(), kit_scratch);
     let mut instruction_records = context_records;
     for tx_index in 0..txs.len() {
         let (_, prelude_records) =
@@ -1633,8 +1641,15 @@ fn prepare_proof_artifacts(
         });
     }
 
-    let execution_store =
-        prepare_execution_store(&lowered, &relation_proof).map_err(RuntimeError::TraceBuild)?;
+    let mut kit_registry = ChipKitRegistry::new();
+    for backend in crate::bootstrap::program::execution_backends_for(
+        runtime_program.uses_ir_hash,
+        runtime_program.relation_policy,
+    ) {
+        kit_registry.register_all(backend.witness_kits());
+    }
+    let execution_store = prepare_execution_store(&mut lowered, &relation_proof, &kit_registry)
+        .map_err(RuntimeError::TraceBuild)?;
 
     let prepared_columns = runtime_program
         .column_slots
@@ -2388,27 +2403,31 @@ tx scan(id: u64) {
         let param_slots = Vec::new();
         let event_item_bases = BTreeMap::new();
 
-        let error = lower_successful_tx::<EXECUTION_STANDARD_VALUE_WIDTH>(LowerSuccessfulTxInput {
-            tx_index: tx.tx_index,
-            program: runtime.execution_program().program(),
-            call: &typed_txs[0],
-            entry,
-            context: &typed_context,
-            state_effects: &tx.state_effects,
-            event_effects: &tx.event_effects,
-            property_effects: &tx.property_effects,
-            relation_effects: &duplicated_effects,
-            empty_columns: &BTreeSet::new(),
-            type_runtimes: runtime.type_runtimes(),
-            encoding_runtimes: runtime.encoding_runtimes(),
-            tuple_encoding_defaults: &runtime.runtime_program.tuple_encoding_defaults,
-            hasher: &PoseidonHasher::new(),
-            state_runtime: &runtime.runtime_program.state,
-            context_slots: &context_slots,
-            param_slots: &param_slots,
-            aux_slot_limit: tabula_chips::execution::MAX_SLOTS,
-            event_item_bases: &event_item_bases,
-        })
+        let mut kit_scratch = tabula_stark::witness_kit::KitScratch::new();
+        let error = lower_successful_tx::<EXECUTION_STANDARD_VALUE_WIDTH>(
+            LowerSuccessfulTxInput {
+                tx_index: tx.tx_index,
+                program: runtime.execution_program().program(),
+                call: &typed_txs[0],
+                entry,
+                context: &typed_context,
+                state_effects: &tx.state_effects,
+                event_effects: &tx.event_effects,
+                property_effects: &tx.property_effects,
+                relation_effects: &duplicated_effects,
+                empty_columns: &BTreeSet::new(),
+                type_runtimes: runtime.type_runtimes(),
+                encoding_runtimes: runtime.encoding_runtimes(),
+                tuple_encoding_defaults: &runtime.runtime_program.tuple_encoding_defaults,
+                hasher: &PoseidonHasher::new(),
+                state_runtime: &runtime.runtime_program.state,
+                context_slots: &context_slots,
+                param_slots: &param_slots,
+                aux_slot_limit: tabula_chips::execution::MAX_SLOTS,
+                event_item_bases: &event_item_bases,
+            },
+            &mut kit_scratch,
+        )
         .expect_err("duplicate relation effects must fail");
 
         assert!(

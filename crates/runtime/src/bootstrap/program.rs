@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tabula_compiler::RegisteredProgram;
 use tabula_contract::ArtifactContext;
 use tabula_core::RootProfileId;
+use tabula_ext::backend::ExecutionBackend;
 use tabula_ext::backend::ProofColumn;
 use tabula_ext::backend::execution::{
     IrHashExecutionBackend, PublicStatementTranscriptExecutionBackend, RelationExecutionBackend,
@@ -85,6 +86,28 @@ fn artifact_context_from_registered_program(
     )
 }
 
+/// Execution backends contributing AIRs, trace chips, and witness kits
+/// for a given program shape, in a deterministic registration order.
+///
+/// Consumed by both the machine builder (which needs AIRs / trace
+/// chips) and the proving-time witness driver (which needs the kits
+/// published by each backend). Keeping one authoritative selector
+/// guarantees machine and witness agree on which backends are live.
+pub(crate) fn execution_backends_for(
+    uses_ir_hash: bool,
+    relation_policy: RelationPolicy,
+) -> Vec<Arc<dyn ExecutionBackend>> {
+    let mut backends: Vec<Arc<dyn ExecutionBackend>> =
+        vec![Arc::new(PublicStatementTranscriptExecutionBackend)];
+    if uses_ir_hash {
+        backends.push(Arc::new(IrHashExecutionBackend));
+    }
+    if relation_policy.requires_artifact_root() {
+        backends.push(Arc::new(RelationExecutionBackend));
+    }
+    backends
+}
+
 pub(crate) fn build_registered_program_machine(
     shape: &ProgramSetup,
     machine_stark_config: &TabulaStarkConfig,
@@ -92,17 +115,8 @@ pub(crate) fn build_registered_program_machine(
 ) -> Result<TabulaMachine, RuntimeError> {
     let mut machine_builder = build_machine_builder(machine_stark_config, root_proof_backend)
         .with_columns(shape.machine_columns.iter().cloned());
-    machine_builder = attach_execution_backend(
-        machine_builder,
-        Arc::new(PublicStatementTranscriptExecutionBackend),
-    );
-    if shape.uses_ir_hash {
-        machine_builder =
-            attach_execution_backend(machine_builder, Arc::new(IrHashExecutionBackend));
-    }
-    if shape.relation_policy.requires_artifact_root() {
-        machine_builder =
-            attach_execution_backend(machine_builder, Arc::new(RelationExecutionBackend));
+    for backend in execution_backends_for(shape.uses_ir_hash, shape.relation_policy) {
+        machine_builder = attach_execution_backend(machine_builder, backend);
     }
     machine_builder.build().map_err(RuntimeError::MachineSetup)
 }

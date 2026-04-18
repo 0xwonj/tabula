@@ -7,12 +7,12 @@ use p3_koala_bear::KoalaBear;
 
 use tabula_chips::execution::MAX_SLOTS;
 use tabula_chips::execution::trace::InstructionRecord;
-use tabula_chips::ir_hash::IrHashCall;
 use tabula_chips::relation_transcript::RelationTranscriptCall;
 use tabula_contract::format::typed_tuple::TupleEncodingDefaults;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::Hasher;
 use tabula_ir as ir;
+use tabula_stark::witness_kit::KitScratch;
 use tabula_types as exec;
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry, TypedValue};
 
@@ -32,7 +32,7 @@ pub(crate) struct LoweringCx<'a, const W: usize> {
     pub(crate) hasher: &'a dyn Hasher,
     pub(crate) state_runtime: &'a dyn exec::StateRuntimeView,
     pub(crate) records: Vec<InstructionRecord>,
-    pub(crate) ir_hash_calls: Vec<IrHashCall>,
+    pub(crate) kit_scratch: &'a mut KitScratch,
     pub(crate) relation_transcript_calls: Vec<RelationTranscriptCall>,
     pub(crate) relation_claims: Vec<RelationClaim>,
     pub(crate) slots: Vec<Option<TypedValue>>,
@@ -56,7 +56,10 @@ pub(crate) struct LoweringCx<'a, const W: usize> {
 }
 
 impl<'a, const W: usize> LoweringCx<'a, W> {
-    pub(crate) fn new(input: LowerSuccessfulTxInput<'a>) -> Result<Self, TabulaError> {
+    pub(crate) fn new(
+        input: LowerSuccessfulTxInput<'a>,
+        kit_scratch: &'a mut KitScratch,
+    ) -> Result<Self, TabulaError> {
         let mut state_effects_by_op = BTreeMap::new();
         for effect in input.state_effects {
             if state_effects_by_op
@@ -187,7 +190,7 @@ impl<'a, const W: usize> LoweringCx<'a, W> {
             hasher: input.hasher,
             state_runtime: input.state_runtime,
             records: Vec::with_capacity(input.entry.body.ops.len() + max_local_slot),
-            ir_hash_calls: Vec::new(),
+            kit_scratch,
             relation_transcript_calls: Vec::new(),
             relation_claims: Vec::new(),
             slots,

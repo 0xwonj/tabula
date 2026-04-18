@@ -1,6 +1,6 @@
 use tabula_chips::capability_transcript::CapabilityTranscriptChip;
 use tabula_chips::event_transcript::EventTranscriptChip;
-use tabula_chips::ir_hash::IrHashChip;
+use tabula_chips::ir_hash::{IrHashChip, IrHashKit};
 use tabula_chips::poseidon::PoseidonChip;
 use tabula_chips::public_context_transcript::PublicContextTranscriptChip;
 use tabula_chips::relation_table::RelationTableChip;
@@ -55,6 +55,10 @@ impl ExecutionBackend for IrHashExecutionBackend {
 
     fn dyn_chips(&self) -> Vec<Box<dyn DynChip>> {
         vec![Box::new(IrHashChip)]
+    }
+
+    fn witness_kits(&self) -> Vec<Box<dyn ChipWitnessKit>> {
+        vec![Box::new(IrHashKit)]
     }
 }
 

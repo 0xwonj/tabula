@@ -1,10 +1,13 @@
 //! STARK-specific witness lowering and witness-store assembly helpers.
 
 pub mod execution_store;
+pub mod kit_registry;
 pub mod lowering;
 mod memory;
 mod roots;
 pub mod schemes;
+
+pub use kit_registry::ChipKitRegistry;
 
 pub(crate) use memory::rows::{AccessRow, InitRow};
 
