@@ -4,6 +4,7 @@
 > some later sections.
 > Current canonical verification vocabulary and verifier model live in
 > [`../../design/architecture.md#verification-vocabulary`](../../design/architecture.md#verification-vocabulary).
+> _Note: references to `Verifier` / `TabulaRuntime::prove` predate SP-4 (landed 2026-04-19); current canonical surface is `PreparedVerifier` / `PreparedProver`._
 
 > **Status**: Updated implementation roadmap through V3 structured control and
 > core-first native proving

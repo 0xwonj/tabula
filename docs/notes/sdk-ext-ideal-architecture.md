@@ -3,6 +3,7 @@
 > Status: proposed target
 > Audience: maintainers
 > Scope: ideal product-facing structure for `tabula-sdk` and `tabula-ext`
+> _Note: references to `Verifier` / `TabulaRuntime::prove` predate SP-4 (landed 2026-04-19); current canonical surface is `PreparedVerifier` / `PreparedProver`._
 
 This note defines the target public architecture for Tabula after the
 capability vocabulary cleanup. It is a target design, not a description of the

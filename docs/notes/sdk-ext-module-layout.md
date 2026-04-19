@@ -314,6 +314,8 @@ use tabula_sdk::{
     Runner, Sdk, SdkBuilder, State, Statement, TransactionBatch, Verifier,
 };
 
+> _Note: references to `Verifier` / `TabulaRuntime::prove` predate SP-4 (landed 2026-04-19); current canonical surface is `PreparedVerifier` / `PreparedProver`._
+
 use tabula_ext::{
     Capability, EncodingContribution, Extension, ExtensionBuilder, RootBackend,
     SchemeContribution, TypeContribution,

@@ -389,3 +389,39 @@ new warnings; `missing_docs` respected on new public items.
   `KitScratch` or relation pre-stuff onto the handle, per-batch
   determinism breaks. The S2 determinism check (two proves on
   the same handle) is the tripwire.
+
+---
+
+## SP-4 Landed Notes (2026-04-19)
+
+Implementation landed per stages S0–S5. Summary of material deviations
+from the original spec §3/§4:
+
+- `PreparedVerifier::verify` returns `Result<BoundStatement, RuntimeError>`
+  rather than spec §1's `Result<BoundStatement, VerifyError>`; there
+  is no separate `VerifyError` type — `RuntimeError` continues to
+  cover both prove and verify errors per spec §3.4's "No new error
+  hierarchy." This matches `PreparedProver::prove`'s
+  `Result<ProveResult, RuntimeError>`.
+- The SDK's internal method is spelled
+  `Sdk::prepare_prepared_prover` / `prepare_prepared_verifier` to
+  avoid collision with the runtime free functions
+  `tabula_runtime::prepare_prover` / `prepare_verifier` at every
+  import site. External SDK interop surface exposes both under the
+  natural names `interop::prepare_prover` / `interop::prepare_verifier`.
+- `TabulaRuntime` lost its `root_backend_bundle` field entirely in S4
+  (not just its `prove` method). The execute surface never consumed
+  this field, so carrying it would have been dead state.
+- `PreparedRuntimeState` was introduced as a `pub(crate)` newtype
+  factored from the old private `RuntimeProgramState`. Both
+  `TabulaRuntime` and `PreparedProver` embed it by value.
+
+### Known follow-ups
+
+- `prepare_verifier` vs the verifier builder — SP-4 ships both. SP-6
+  call on whether to drop the builder in favor of an options struct.
+- `TabulaRuntime` facade disposition (rename / fold into execute
+  module / leave) — SP-5 owns.
+- Stale `docs/notes/*.md` references that pre-date SP-4 may still use
+  `Verifier` / `TabulaRuntime::prove`; authority lives in `docs/design/`
+  and crate READMEs now.

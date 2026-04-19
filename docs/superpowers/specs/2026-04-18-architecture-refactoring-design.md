@@ -298,6 +298,10 @@ formal.
 
 ### SP-4 — Runtime symmetric prepared handles
 
+> **Status: Landed 2026-04-19.** See
+> [SP-4 design spec](2026-04-19-sp4-runtime-prepared-handles-design.md)
+> and its Landed Notes section for details.
+
 **Goal:** `tabula-runtime` exposes `PreparedProver` and
 `PreparedVerifier` with matching shape.
 

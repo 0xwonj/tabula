@@ -1,5 +1,7 @@
 # Program Redesign Notes
 
+> _Note: references to `Verifier` / `TabulaRuntime::prove` predate SP-4 (landed 2026-04-19); current canonical surface is `PreparedVerifier` / `PreparedProver`._
+
 This directory contains the redesign document bundle produced for the new
 Tabula language/compiler architecture.
 
