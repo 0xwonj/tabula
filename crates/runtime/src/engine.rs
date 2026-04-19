@@ -230,7 +230,7 @@ pub(crate) fn prepare_proof_request_on_prepared_state(
         &typed_context,
         input.executed,
     )?;
-    let public_statement = materialize_public_statement_on_state(
+    let public_statement = crate::statement::materialize_public_statement_on_state(
         state,
         &typed_context,
         runtime_ir::PublicStatementMaterialization {
@@ -366,29 +366,6 @@ fn decode_context_input_on_state(
         typed.insert(*field_id, decoded);
     }
     Ok(typed)
-}
-
-#[cfg(feature = "prove")]
-fn materialize_public_statement_on_state(
-    state: &PreparedRuntimeState,
-    context: &ContextValues,
-    materialization: runtime_ir::PublicStatementMaterialization,
-    execution_journal: &exec::ExecutionJournal,
-) -> Result<PublicStatement, RuntimeError> {
-    runtime_ir::materialize_public_statement(
-        state.semantic.proof(),
-        context,
-        execution_journal,
-        materialization,
-        &state.type_runtimes,
-        &state.encoding_runtimes,
-        &state.tuple_encoding_defaults,
-    )
-    .map_err(|error| {
-        RuntimeError::from(VerifyError::StatementBuild {
-            detail: error.to_string(),
-        })
-    })
 }
 
 /// Shared factory that constructs the prepared runtime state consumed by both the execute
@@ -695,7 +672,7 @@ impl TabulaRuntime {
         context: &ir::ContextInput,
     ) -> Result<ExecutionReceipt, RuntimeError> {
         let journal = self.execute_batch(snapshot, batch, context)?;
-        let state_after = materialize_post_state(snapshot, &journal, self.type_runtimes())?;
+        let state_after = crate::statement::materialize_post_state(snapshot, &journal, self.type_runtimes())?;
         Ok(ExecutionReceipt {
             snapshot: snapshot.clone(),
             batch: batch.clone(),
@@ -814,30 +791,6 @@ impl TabulaRuntime {
     ) -> Result<ContextValues, RuntimeError> {
         decode_context_input_on_state(&self.runtime_program, context)
     }
-}
-
-fn materialize_post_state(
-    snapshot: &CommittedStateSnapshot,
-    journal: &exec::ExecutionJournal,
-    type_runtimes: &TypeRuntimeRegistry,
-) -> Result<CommittedStateSnapshot, RuntimeError> {
-    let mut state_after = snapshot.clone();
-    for write in &journal.state_summary.write_set_final {
-        let table = ir::TableId(write.key.table.0);
-        let field = ir::FieldId(write.key.col.0);
-        match &write.value {
-            Some(value) => {
-                let portable = type_runtimes.encode_typed(value).map_err(|source| {
-                    ExecuteError::Validation {
-                        detail: source.to_string(),
-                    }
-                })?;
-                state_after.insert_materialized(write.key.clone(), portable);
-            }
-            None => state_after.remove_materialized(table, &write.key.key, field),
-        }
-    }
-    Ok(state_after)
 }
 
 #[cfg(feature = "prove")]
@@ -1659,7 +1612,7 @@ fn prepare_proof_machine_input(
         &typed_context,
         input.executed,
     )?;
-    let public_statement = materialize_public_statement_on_state(
+    let public_statement = crate::statement::materialize_public_statement_on_state(
         state,
         &typed_context,
         runtime_ir::PublicStatementMaterialization {

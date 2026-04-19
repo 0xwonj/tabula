@@ -55,6 +55,8 @@ pub mod semantics;
 #[cfg(feature = "verify")]
 mod snapshot;
 #[cfg(feature = "verify")]
+mod statement;
+#[cfg(feature = "verify")]
 mod state_runtime;
 #[cfg(feature = "verify")]
 mod verifier;
