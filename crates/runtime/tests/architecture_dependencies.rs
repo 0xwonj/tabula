@@ -405,31 +405,50 @@ fn crate_readmes_under(rel: &str) -> Vec<PathBuf> {
     files
 }
 
-/// SP-3 §2.5 guardrail — **off mode** (S1): scans `crates/witness/src/**/*.rs`
-/// for `use tabula_chips::...` paths and reports anything outside the
-/// allowlist without failing. S4 flipped this to assertive for the
-/// execution-tier surface only; column- and root-tier sources remain
-/// out of SP-3 scope (plan §9) and are skipped via `DEFERRED_TIER_PREFIXES`.
+/// SP-3 §2.5 guardrail — enforces that execution-tier witness sources
+/// reference `tabula_chips::` only through the allowlisted vocabulary,
+/// and never by bare row-type tail (catching re-exports and inline
+/// fully-qualified paths that would sidestep a `use`-line-only scanner).
 ///
-/// Allowlist (from SP-3 §2.5):
+/// Every file under `crates/witness/src/` must fall into exactly one
+/// bucket:
+///
+/// - `DEFERRED_TIER_PREFIXES` — column/root-tier subtrees (SP-3 §9
+///   non-goals). Skipped; will migrate in a future spike.
+/// - everything else — scanned strictly. A file landing in a brand-new
+///   subdirectory is scanned by default; relaxing it requires adding
+///   the path to `DEFERRED_TIER_PREFIXES` with an explicit rationale.
+///
+/// Allowed path tails (SP-3 §2.5):
 /// - protocol-level identifiers: `Opcode`, `CmpOp`, `MAX_SLOTS`,
 ///   `EXECUTION_STANDARD_VALUE_WIDTH`,
 /// - witness-store label constants: any `*_WITNESS_LABEL`,
 /// - crypto helpers: `native_key_payload_prefix3`, `poseidon2_permutation`,
 /// - core row types: `InstructionRecord`, `StaticTableRow`,
 /// - shared helpers: `EntrySource`,
-/// - `*Kit` types (post-S2 — witness ops files import the kit, never
+/// - the concrete kit type set (witness ops files import the kit, never
 ///   the row type).
 #[test]
 fn sp3_witness_chip_import_guardrail() {
-    /// Relative path prefixes (under `crates/witness/src/`) skipped by
-    /// the execution-tier guardrail. These tiers intentionally stay
-    /// chip-aware per SP-3 §9 non-goals and will migrate in a future
-    /// spike.
+    /// Subtrees skipped by the guardrail. These tiers intentionally
+    /// stay chip-aware per SP-3 §9 non-goals. Expanding this list
+    /// requires explicit justification.
     const DEFERRED_TIER_PREFIXES: &[&str] = &[
         "crates/witness/src/stark/memory",
         "crates/witness/src/stark/roots",
         "crates/witness/src/stark/schemes",
+    ];
+
+    /// Concrete set of kit types witness ops files may name. Replaces
+    /// the looser `ends_with("Kit")` rule so a hypothetical chip row
+    /// type named `FooKit` would still be rejected.
+    const ALLOWED_KITS: &[&str] = &[
+        "IrHashKit",
+        "RelationTranscriptKit",
+        "RelationTableKit",
+        "PublicContextTranscriptKit",
+        "TxBatchTranscriptKit",
+        "EventTranscriptKit",
     ];
 
     fn last_segment(path: &str) -> &str {
@@ -449,7 +468,89 @@ fn sp3_witness_chip_import_guardrail() {
                 | "StaticTableRow"
                 | "EntrySource"
         ) || tail.ends_with("_WITNESS_LABEL")
-            || tail.ends_with("Kit")
+            || ALLOWED_KITS.contains(&tail)
+    }
+
+    fn scan_use_line(line: &str, path: &Path, forbidden: &mut Vec<(PathBuf, String)>) {
+        let trimmed = line.trim_start();
+        let Some(rest) = trimmed.strip_prefix("use tabula_chips::") else {
+            return;
+        };
+        let body = rest.trim_end_matches(';').trim();
+        if let Some(open) = body.find('{') {
+            let prefix = &body[..open];
+            let close = body.rfind('}').unwrap_or(body.len());
+            let group = &body[open + 1..close];
+            for item in group.split(',') {
+                let item = item.trim();
+                if item.is_empty() {
+                    continue;
+                }
+                let head = item.split(" as ").next().unwrap_or(item).trim();
+                let tail = last_segment(head);
+                if !allowed(tail) {
+                    forbidden.push((
+                        path.to_path_buf(),
+                        format!("tabula_chips::{prefix}{head}"),
+                    ));
+                }
+            }
+        } else {
+            let head = body.split(" as ").next().unwrap_or(body).trim();
+            let tail = last_segment(head);
+            if !allowed(tail) {
+                forbidden.push((path.to_path_buf(), format!("tabula_chips::{head}")));
+            }
+        }
+    }
+
+    /// Also look for `tabula_chips::…::Ident` occurrences outside a
+    /// `use` line — i.e. inline fully-qualified references and
+    /// re-exports from other crates that pass a forbidden tail through.
+    fn scan_inline_fqn(line: &str, path: &Path, forbidden: &mut Vec<(PathBuf, String)>) {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("use tabula_chips::") || trimmed.starts_with("//") {
+            return;
+        }
+        let mut rest = line;
+        while let Some(at) = rest.find("tabula_chips::") {
+            rest = &rest[at + "tabula_chips::".len()..];
+            // Read the Rust path that follows: segments of [A-Za-z0-9_]
+            // joined by `::`. Stop at the first non-matching char.
+            let mut end = 0;
+            let bytes = rest.as_bytes();
+            let mut i = 0;
+            while i < bytes.len() {
+                let c = bytes[i];
+                let ident = c.is_ascii_alphanumeric() || c == b'_';
+                let sep = i + 1 < bytes.len()
+                    && c == b':'
+                    && bytes[i + 1] == b':'
+                    && i > 0
+                    && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+                if ident {
+                    end = i + 1;
+                    i += 1;
+                } else if sep {
+                    end = i + 2;
+                    i += 2;
+                } else {
+                    break;
+                }
+            }
+            if end == 0 {
+                continue;
+            }
+            let path_seg = &rest[..end];
+            let tail = last_segment(path_seg);
+            if !allowed(tail) {
+                forbidden.push((
+                    path.to_path_buf(),
+                    format!("tabula_chips::{path_seg} (inline FQN)"),
+                ));
+            }
+            rest = &rest[end..];
+        }
     }
 
     let sources = rust_sources_under("crates/witness/src");
@@ -465,39 +566,14 @@ fn sp3_witness_chip_import_guardrail() {
         }
         let source = fs::read_to_string(&path).expect("read witness source");
         for line in source.lines() {
-            let trimmed = line.trim_start();
-            let Some(rest) = trimmed.strip_prefix("use tabula_chips::") else {
-                continue;
-            };
-            let body = rest.trim_end_matches(';').trim();
-            if let Some(open) = body.find('{') {
-                let prefix = &body[..open];
-                let close = body.rfind('}').unwrap_or(body.len());
-                let group = &body[open + 1..close];
-                for item in group.split(',') {
-                    let item = item.trim();
-                    if item.is_empty() {
-                        continue;
-                    }
-                    let head = item.split(" as ").next().unwrap_or(item).trim();
-                    let tail = last_segment(head);
-                    if !allowed(tail) {
-                        forbidden.push((path.clone(), format!("tabula_chips::{prefix}{head}")));
-                    }
-                }
-            } else {
-                let head = body.split(" as ").next().unwrap_or(body).trim();
-                let tail = last_segment(head);
-                if !allowed(tail) {
-                    forbidden.push((path.clone(), format!("tabula_chips::{head}")));
-                }
-            }
+            scan_use_line(line, &path, &mut forbidden);
+            scan_inline_fqn(line, &path, &mut forbidden);
         }
     }
 
     assert!(
         forbidden.is_empty(),
-        "SP-3 guardrail: {} forbidden chip-row import(s) under tabula-witness execution-tier surface:\n{}",
+        "SP-3 guardrail: {} forbidden chip reference(s) under tabula-witness execution-tier surface:\n{}",
         forbidden.len(),
         forbidden
             .iter()
