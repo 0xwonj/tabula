@@ -36,7 +36,9 @@ pub use format::typed_tuple::{TupleEncodingDefaults, TupleEncodingSelection};
 pub use public_statement::{PublicStatement, PublicStatementError};
 
 // Sealed artifact
-pub use sealed_artifact::{SEALED_ARTIFACT_SCHEMA_VERSION, SealedArtifact, SealedArtifactError};
+pub use sealed_artifact::{
+    SEALED_ARTIFACT_SCHEMA_VERSION, SealedArtifact, SealedArtifactError, compute_profile_hash,
+};
 
 // Sealed policy types
 pub use sealed_relation_policy::SealedRelationPolicy;

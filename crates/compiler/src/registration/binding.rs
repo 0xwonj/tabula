@@ -6,19 +6,6 @@ use tabula_core::ProgramExecutionContract;
 use tabula_ir as ir;
 use tabula_profile::ProfileCatalog;
 
-pub(crate) fn compute_profile_hash(
-    execution_contract: &ProgramExecutionContract,
-    profile_catalog: &ProfileCatalog,
-) -> anyhow::Result<[u8; 32]> {
-    let mut hasher = Hasher::new();
-    hasher.update(b"tabula.driver.profile_hash.v1");
-    hasher.update(&borsh::to_vec(execution_contract)?);
-    let profile_catalog_bytes = serde_json::to_vec(profile_catalog)?;
-    hasher.update(&(profile_catalog_bytes.len() as u32).to_be_bytes());
-    hasher.update(&profile_catalog_bytes);
-    Ok(*hasher.finalize().as_bytes())
-}
-
 pub(crate) fn compute_semantic_hash(
     program: &ir::Program,
     execution_contract: &ProgramExecutionContract,
@@ -54,6 +41,7 @@ mod tests {
     use super::*;
     use tabula_contract::{
         CONTRACT_SCHEMA_VERSION, STATEMENT_SCHEMA_VERSION, VERIFIER_PROFILE_VERSION,
+        compute_profile_hash,
     };
     use tabula_core::{
         ColId, ColumnProfileId, CommittedKeyLayout, EncodingProfileId, KeyComponentSchema,

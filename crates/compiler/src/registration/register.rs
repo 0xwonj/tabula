@@ -1,7 +1,7 @@
 use tabula_contract::{
-    CONTRACT_SCHEMA_VERSION, ContractMetadataEnvelope, STATEMENT_SCHEMA_VERSION,
-    SealedArtifact, SealedRelationPolicy, TupleEncodingDefaults, TupleEncodingSelection,
-    VERIFIER_PROFILE_VERSION,
+    CONTRACT_SCHEMA_VERSION, ContractMetadataEnvelope, STATEMENT_SCHEMA_VERSION, SealedArtifact,
+    SealedRelationPolicy, TupleEncodingDefaults, TupleEncodingSelection, VERIFIER_PROFILE_VERSION,
+    compute_profile_hash,
 };
 use tabula_ir as ir;
 
@@ -12,9 +12,7 @@ use crate::pipeline::{
     compile_program_source_with_catalogs,
 };
 use crate::registration::RegistrationContext;
-use crate::registration::binding::{
-    compute_profile_hash, compute_program_binding, compute_semantic_hash,
-};
+use crate::registration::binding::{compute_program_binding, compute_semantic_hash};
 use crate::registration::keys::seal_execution_contract;
 use crate::registration::static_tables::build_static_table_artifact;
 
@@ -58,7 +56,7 @@ fn register_compiled_program_with_context(
         build_static_table_artifact(validated.as_program(), context, &tuple_encoding_defaults)
             .map_err(|source| CompilerError::InvalidProgram(anyhow::anyhow!(source.to_string())))?;
     let profile_hash = compute_profile_hash(&execution_contract, &profile_catalog)
-        .map_err(CompilerError::InvalidProgram)?;
+        .map_err(|source| CompilerError::InvalidProgram(anyhow::Error::new(source)))?;
     let semantic_hash = compute_semantic_hash(
         validated.as_program(),
         &execution_contract,

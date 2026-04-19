@@ -253,11 +253,13 @@ impl SealedArtifact {
     }
 }
 
-/// Compute the profile hash from sealed execution contract and profile catalog.
+/// Compute the profile hash from a sealed execution contract and profile catalog.
 ///
-/// Relocated from `tabula-compiler::registration::binding::compute_profile_hash`.
-/// Uses the same domain-separated blake3 hash to ensure identical output.
-fn compute_profile_hash(
+/// Domain-separated blake3 hash (`"tabula.driver.profile_hash.v1"`) used both
+/// by the compiler to seed `ContractMetadataEnvelope.profile_hash` at
+/// registration time and by [`SealedArtifact::validate`] to fail closed when
+/// sealed fields drift out of sync with the sealed envelope.
+pub fn compute_profile_hash(
     execution_contract: &ProgramExecutionContract,
     profile_catalog: &ProfileCatalog,
 ) -> Result<[u8; 32], SealedArtifactError> {
