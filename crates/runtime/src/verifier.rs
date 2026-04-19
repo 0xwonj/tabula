@@ -24,11 +24,17 @@ use crate::bootstrap::program::{
 use crate::error::RuntimeError;
 use crate::host::HostEnvironment;
 
-/// Prepared verifier-only state derived from the sealed artifact and machine setup.
-struct VerifierState {
-    context: ArtifactContext,
-    relation_policy: RelationPolicy,
-    machine: TabulaMachine,
+/// Prepared verifier state derived from the sealed artifact and machine setup.
+///
+/// Public so downstream consumers (SDK, tests, future prover) can name
+/// the prepared-once state without going through a builder.
+pub struct VerifierState {
+    /// Artifact-bound transcript context sealed at prepare time.
+    pub context: ArtifactContext,
+    /// Relation-policy decision derived from program analysis.
+    pub relation_policy: RelationPolicy,
+    /// STARK machine backing verification.
+    pub machine: TabulaMachine,
 }
 
 impl VerifierState {
@@ -42,12 +48,15 @@ impl VerifierState {
 }
 
 /// Verifier built once per registered native program.
-pub struct Verifier {
+///
+/// Cheap to share via [`Arc`]; [`PreparedVerifier::verify`] takes
+/// `&self` so callers can drive it from multiple threads.
+pub struct PreparedVerifier {
     prepared: VerifierState,
 }
 
-/// Fluent builder for [`Verifier`].
-pub struct VerifierBuilder {
+/// Fluent builder for [`PreparedVerifier`].
+pub struct PreparedVerifierBuilder {
     registered_program: RegisteredProgram,
     host_environment: HostEnvironment,
     machine_stark_config: TabulaStarkConfig,
@@ -57,10 +66,17 @@ pub struct VerifierBuilder {
     root_proof_backend: Arc<dyn RootProofBackend>,
 }
 
-impl Verifier {
+impl PreparedVerifier {
     /// Create a builder for one registered native program.
-    pub fn builder(registered_program: RegisteredProgram) -> Result<VerifierBuilder, RuntimeError> {
-        VerifierBuilder::new(registered_program)
+    pub fn builder(
+        registered_program: RegisteredProgram,
+    ) -> Result<PreparedVerifierBuilder, RuntimeError> {
+        PreparedVerifierBuilder::new(registered_program)
+    }
+
+    /// Borrow the prepared verify-side state.
+    pub fn state(&self) -> &VerifierState {
+        &self.prepared
     }
 
     /// Borrow the transcript-bound program binding.
@@ -73,19 +89,24 @@ impl Verifier {
         &self.prepared.machine
     }
 
-    /// Verify one native proof against an externally supplied expected public statement.
-    pub fn verify_public_statement(
+    /// Verify one native proof against an externally supplied expected public
+    /// statement and return the artifact-bound statement on success.
+    pub fn verify(
         &self,
         proof: &TabulaProof,
         expected_public_statement: &PublicStatement,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<BoundStatement, RuntimeError> {
         self.prepared
             .verifier_core()
-            .verify_public_statement(proof, expected_public_statement)
+            .verify_public_statement(proof, expected_public_statement)?;
+        Ok(BoundStatement::new(
+            self.prepared.context.clone(),
+            expected_public_statement.clone(),
+        ))
     }
 }
 
-impl VerifierBuilder {
+impl PreparedVerifierBuilder {
     fn new(registered_program: RegisteredProgram) -> Result<Self, RuntimeError> {
         registered_program
             .validate_sealed_artifact()
@@ -140,8 +161,8 @@ impl VerifierBuilder {
         self
     }
 
-    /// Build the native verifier.
-    pub fn build(self) -> Result<Verifier, RuntimeError> {
+    /// Build the prepared verifier.
+    pub fn build(self) -> Result<PreparedVerifier, RuntimeError> {
         validate_core_first_program(self.registered_program.program())?;
         #[cfg(feature = "prove")]
         let proof_backend = self.root_backend_bundle.proof_backend();
@@ -166,7 +187,7 @@ impl VerifierBuilder {
             &self.machine_stark_config,
             proof_backend,
         )?;
-        Ok(Verifier {
+        Ok(PreparedVerifier {
             prepared: VerifierState {
                 context: program_setup.artifact_context,
                 relation_policy: program_setup.relation_policy,
@@ -174,6 +195,15 @@ impl VerifierBuilder {
             },
         })
     }
+}
+
+/// Convenience constructor: `prepare_verifier(reg)` is sugar over
+/// `PreparedVerifier::builder(reg)?.build()` using the standard host
+/// environment, machine config, and root backend.
+pub fn prepare_verifier(
+    registered_program: RegisteredProgram,
+) -> Result<PreparedVerifier, RuntimeError> {
+    PreparedVerifier::builder(registered_program)?.build()
 }
 
 pub(crate) fn relation_table_root_from_proof(
@@ -294,7 +324,7 @@ fn verify_proved_public_statement_digests(
     Ok(())
 }
 
-/// Shared statement-first verification path used by both `Verifier` and `TabulaRuntime`.
+/// Shared statement-first verification path used by both `PreparedVerifier` and `TabulaRuntime`.
 #[derive(Clone, Copy)]
 struct VerifierCore<'a> {
     context: &'a ArtifactContext,
@@ -362,3 +392,11 @@ pub(crate) fn verify_public_statement_with_context(
     }
     .verify_public_statement(proof, expected_public_statement)
 }
+
+// Static guarantee that PreparedVerifier is cheap to share across threads.
+// The SDK's cache and any future concurrent driver relies on this.
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<PreparedVerifier>();
+    assert_send_sync::<VerifierState>();
+};

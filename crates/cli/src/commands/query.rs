@@ -24,7 +24,7 @@ pub(crate) fn run(ctx: &AppContext, args: &QueryArgs) -> anyhow::Result<()> {
         .runner()
         .query_symbol(&state, &args.query, params, &context)?;
     let output = query_run_output(&loaded.artifact, &args.query, &result);
-    if ctx.wants_json(args.json) {
+    if AppContext::wants_json(args.json) {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         println!("{}", render_query(&output));

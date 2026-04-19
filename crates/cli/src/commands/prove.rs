@@ -36,7 +36,7 @@ pub(crate) fn run(ctx: &AppContext, args: &ProveArgs) -> anyhow::Result<()> {
     write_json(&args.summary_out, proof.summary())?;
 
     let output = prove_output(&loaded.artifact, &proof)?;
-    if ctx.wants_json(args.json) {
+    if AppContext::wants_json(args.json) {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         println!("{}", render_prove(&output));

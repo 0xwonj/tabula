@@ -34,7 +34,7 @@ pub(crate) fn run(ctx: &AppContext, args: &ExecuteArgs) -> anyhow::Result<()> {
         write_bytes(path, &bytes)?;
     }
 
-    if ctx.wants_json(args.json) {
+    if AppContext::wants_json(args.json) {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!("{}", render_execution(&report));

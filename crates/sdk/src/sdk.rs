@@ -23,7 +23,7 @@ pub(crate) struct SdkInner {
     #[cfg(feature = "execute")]
     pub(crate) runtime_cache: Mutex<BTreeMap<String, Arc<tabula_runtime::TabulaRuntime>>>,
     #[cfg(feature = "verify")]
-    pub(crate) verifier_cache: Mutex<BTreeMap<String, Arc<tabula_runtime::Verifier>>>,
+    pub(crate) verifier_cache: Mutex<BTreeMap<String, Arc<tabula_runtime::PreparedVerifier>>>,
 }
 
 impl Sdk {
@@ -123,7 +123,7 @@ impl Sdk {
     pub(crate) fn prepare_verifier(
         &self,
         artifact: &Artifact,
-    ) -> Result<Arc<tabula_runtime::Verifier>, SdkError> {
+    ) -> Result<Arc<tabula_runtime::PreparedVerifier>, SdkError> {
         let key = self.cache_key("verifier", artifact);
         let cache = self
             .inner
@@ -168,8 +168,11 @@ impl Sdk {
     }
 
     #[cfg(feature = "verify")]
-    fn build_verifier(&self, artifact: &Artifact) -> Result<tabula_runtime::Verifier, SdkError> {
-        let builder = tabula_runtime::Verifier::builder(artifact.registered().clone())
+    fn build_verifier(
+        &self,
+        artifact: &Artifact,
+    ) -> Result<tabula_runtime::PreparedVerifier, SdkError> {
+        let builder = tabula_runtime::PreparedVerifier::builder(artifact.registered().clone())
             .map_err(SdkError::from)?
             .with_host_environment(self.inner.environment.inner.host_environment.clone())
             .with_machine_stark_config(self.inner.environment.inner.machine_stark_config.clone());

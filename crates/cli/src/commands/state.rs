@@ -75,7 +75,7 @@ fn inspect(ctx: &AppContext, args: &StateInspectArgs) -> anyhow::Result<()> {
         None => None,
     };
     let output = state_output(program.as_ref(), &state, args.table.as_deref(), args.raw);
-    if ctx.wants_json(args.json) {
+    if AppContext::wants_json(args.json) {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         println!("{}", render_state(&output));

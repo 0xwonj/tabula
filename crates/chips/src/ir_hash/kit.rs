@@ -32,15 +32,16 @@ impl IrHashKit {
         let entry = scratch
             .entry(Self::CHIP_ID)
             .or_insert_with(|| Box::<Vec<IrHashCall>>::default());
-        let buf = entry
-            .downcast_mut::<Vec<IrHashCall>>()
-            .ok_or_else(|| TabulaError::ProofError {
-                phase: "witness_kit_push",
-                detail: format!(
-                    "IrHashKit scratch downcast failed for chip {}",
-                    Self::CHIP_ID
-                ),
-            })?;
+        let buf =
+            entry
+                .downcast_mut::<Vec<IrHashCall>>()
+                .ok_or_else(|| TabulaError::ProofError {
+                    phase: "witness_kit_push",
+                    detail: format!(
+                        "IrHashKit scratch downcast failed for chip {}",
+                        Self::CHIP_ID
+                    ),
+                })?;
         buf.push(call);
         Ok(digest)
     }

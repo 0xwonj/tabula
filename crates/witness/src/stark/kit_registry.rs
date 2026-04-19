@@ -68,7 +68,7 @@ impl ChipKitRegistry {
 
     /// Iterate the kits in drive order.
     pub fn iter(&self) -> impl Iterator<Item = &dyn ChipWitnessKit> {
-        self.kits.iter().map(|k| k.as_ref())
+        self.kits.iter().map(std::convert::AsRef::as_ref)
     }
 
     /// `true` when no kits are registered.

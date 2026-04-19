@@ -20,8 +20,10 @@ use crate::state_runtime::ResolvedStateRuntime;
 
 /// Verifier-side relation policy derived from the sealed program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RelationPolicy {
+pub enum RelationPolicy {
+    /// No relation tables are used; the artifact root is not checked.
     Disabled,
+    /// Relation tables are used; the artifact root must match.
     RequireArtifactRoot,
 }
 
@@ -34,7 +36,8 @@ impl RelationPolicy {
         }
     }
 
-    pub(crate) const fn requires_artifact_root(self) -> bool {
+    /// Returns `true` when the policy requires the artifact relation-table root.
+    pub const fn requires_artifact_root(self) -> bool {
         matches!(self, Self::RequireArtifactRoot)
     }
 }

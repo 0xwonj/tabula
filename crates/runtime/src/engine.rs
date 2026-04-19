@@ -1853,7 +1853,7 @@ fn prepare_column_slot(
 #[cfg(all(test, feature = "prove"))]
 mod relation_proof_tests {
     use super::*;
-    use crate::Verifier;
+    use crate::PreparedVerifier;
     use crate::verifier::relation_table_root_from_proof;
 
     use std::cmp::Ordering;
@@ -2713,7 +2713,7 @@ tx scan(id: u64) {
     fn relation_chip_public_values_truncation_fails_runtime_verification() {
         let (registered, runtime) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
-        let verifier = Verifier::builder(registered)
+        let verifier = PreparedVerifier::builder(registered)
             .expect("create verifier builder")
             .build()
             .expect("build verifier");
@@ -2745,7 +2745,7 @@ tx scan(id: u64) {
         );
 
         let verifier_err = verifier
-            .verify_public_statement(&proved.proof, &proved.public_statement)
+            .verify(&proved.proof, &proved.public_statement)
             .expect_err("truncated relation chip public values must fail verifier validation");
         assert!(
             verifier_err
@@ -2759,7 +2759,7 @@ tx scan(id: u64) {
     fn relation_chip_public_values_append_fails_runtime_verification() {
         let (registered, runtime) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
-        let verifier = Verifier::builder(registered)
+        let verifier = PreparedVerifier::builder(registered)
             .expect("create verifier builder")
             .build()
             .expect("build verifier");
@@ -2791,7 +2791,7 @@ tx scan(id: u64) {
         );
 
         let verifier_err = verifier
-            .verify_public_statement(&proved.proof, &proved.public_statement)
+            .verify(&proved.proof, &proved.public_statement)
             .expect_err("extended relation chip public values must fail verifier validation");
         assert!(
             verifier_err
@@ -2805,7 +2805,7 @@ tx scan(id: u64) {
     fn missing_relation_chip_opening_still_fails_runtime_verification() {
         let (registered, runtime) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
-        let verifier = Verifier::builder(registered)
+        let verifier = PreparedVerifier::builder(registered)
             .expect("create verifier builder")
             .build()
             .expect("build verifier");
@@ -2834,7 +2834,7 @@ tx scan(id: u64) {
         );
 
         let verifier_err = verifier
-            .verify_public_statement(&proved.proof, &proved.public_statement)
+            .verify(&proved.proof, &proved.public_statement)
             .expect_err("missing relation chip opening must fail verifier validation");
         assert!(
             verifier_err
@@ -2859,7 +2859,7 @@ tx scan(id: u64) {
             "unexpected runtime build error: {err}"
         );
 
-        let err = Verifier::builder(registered)
+        let err = PreparedVerifier::builder(registered)
             .expect("create verifier builder")
             .with_root_backend_bundle(RootBackendBundle::new(EmptyFamilyRootBackend))
             .build()
@@ -2964,7 +2964,7 @@ tx scan(id: u64) {
             "unexpected runtime build error: {rendered}"
         );
 
-        let err = Verifier::builder(registered)
+        let err = PreparedVerifier::builder(registered)
             .expect("create verifier builder")
             .build()
             .err()
@@ -3001,7 +3001,7 @@ tx scan(id: u64) {
             .with_host_environment(host_environment.clone())
             .build()
             .expect("build runtime with extra host runtimes");
-        let verifier = Verifier::builder(registered.clone())
+        let verifier = PreparedVerifier::builder(registered.clone())
             .expect("create verifier builder")
             .with_host_environment(host_environment)
             .build()
@@ -3022,7 +3022,7 @@ tx scan(id: u64) {
             registered.static_table_artifact().root
         );
         verifier
-            .verify_public_statement(&proved.proof, &proved.public_statement)
+            .verify(&proved.proof, &proved.public_statement)
             .expect("verify proof under custom host environment");
     }
 }

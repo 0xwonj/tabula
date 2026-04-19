@@ -26,7 +26,7 @@ pub(crate) fn run(ctx: &AppContext, args: &VerifyArgs) -> anyhow::Result<()> {
         .verify_public_statement(&proof, &statement)?;
 
     let output = verify_output(&loaded.artifact, &proof)?;
-    if ctx.wants_json(args.json) {
+    if AppContext::wants_json(args.json) {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         println!("{}", render_verify(&output));

@@ -31,8 +31,9 @@
 //! # Feature gating
 //!
 //! - **No features** (default): shared semantic helpers and error types only.
-//! - **`verify`**: adds [`Verifier`] and [`VerifierBuilder`] for
-//!   native proof verification against registered programs.
+//! - **`verify`**: adds [`PreparedVerifier`], [`PreparedVerifierBuilder`],
+//!   the [`prepare_verifier`] free function, and the public
+//!   [`VerifierState`] type for native proof verification.
 //! - **`prove`**: adds [`TabulaRuntime`], [`RuntimeBuilder`], and the full
 //!   native witness → trace → prove pipeline. Implies `verify`.
 
@@ -54,6 +55,8 @@ mod verifier;
 pub use error::{RuntimeError, RuntimeResult};
 
 #[cfg(feature = "verify")]
+pub use bootstrap::program::RelationPolicy;
+#[cfg(feature = "verify")]
 pub use engine::{CommittedStateSnapshot, ExecutionReceipt, RuntimeBuilder, TabulaRuntime};
 #[cfg(feature = "prove")]
 pub use engine::{ProveInput, ProveResult, VerifiedResult};
@@ -64,4 +67,4 @@ pub use proof_summary::ProofSummary;
 #[cfg(feature = "verify")]
 pub use tabula_contract::{BoundStatement, PublicStatement};
 #[cfg(feature = "verify")]
-pub use verifier::{Verifier, VerifierBuilder};
+pub use verifier::{PreparedVerifier, PreparedVerifierBuilder, VerifierState, prepare_verifier};

@@ -132,7 +132,9 @@ fn runtime_root_exposes_only_the_final_native_surface() {
             "pub use engine::{CommittedStateSnapshot, ExecutionReceipt, RuntimeBuilder, TabulaRuntime};"
         ) && runtime_lib.contains("pub use tabula_contract::{BoundStatement, PublicStatement};")
             && runtime_lib.contains("pub use engine::{ProveInput, ProveResult, VerifiedResult};")
-            && runtime_lib.contains("pub use verifier::{Verifier, VerifierBuilder};"),
+            && runtime_lib.contains(
+                "pub use verifier::{PreparedVerifier, PreparedVerifierBuilder, VerifierState, prepare_verifier};"
+            ),
         "runtime root must re-export the canonical native runtime and verifier types"
     );
     for forbidden in [
@@ -216,8 +218,8 @@ fn native_proof_path_stays_bridge_free() {
         "crates/runtime/src/engine.rs",
         &[
             "struct VerifierCore",
-            "pub struct VerifierBuilder",
-            "pub struct Verifier {",
+            "pub struct PreparedVerifierBuilder",
+            "pub struct PreparedVerifier {",
             "fn validate_core_first_program(",
             "fn materialize_registered_state_runtime(",
             "fn program_uses_hash(",
@@ -239,8 +241,8 @@ fn verifier_path_is_single_sourced_in_verifier_module() {
     let verifier_source = read_workspace_file("crates/runtime/src/verifier.rs");
     assert!(
         verifier_source.contains("struct VerifierCore")
-            && verifier_source.contains("pub struct VerifierBuilder")
-            && verifier_source.contains("pub struct Verifier"),
+            && verifier_source.contains("pub struct PreparedVerifierBuilder")
+            && verifier_source.contains("pub struct PreparedVerifier"),
         "runtime verifier module must own the canonical verification path"
     );
     assert!(
@@ -278,7 +280,7 @@ fn runtime_relation_proof_prep_stays_witness_owned() {
 /// because the runtime is the only workspace crate that may construct a
 /// `TabulaMachine` and drive it directly. `tabula-sdk` reaches the backend
 /// exclusively through `tabula_runtime::TabulaRuntime::prove` and through
-/// `Verifier` — it does not depend on `tabula-machine` except for re-exported
+/// `PreparedVerifier` — it does not depend on `tabula-machine` except for re-exported
 /// envelope types. If that changes (e.g. SDK gains a direct `TabulaMachine`
 /// handle), extend `facade_routing_paths` below to cover `crates/sdk/src/**`.
 #[test]
@@ -428,6 +430,7 @@ fn crate_readmes_under(rel: &str) -> Vec<PathBuf> {
 /// - shared helpers: `EntrySource`,
 /// - the concrete kit type set (witness ops files import the kit, never
 ///   the row type).
+///
 /// Subtrees skipped by the guardrail. These tiers intentionally
 /// stay chip-aware per SP-3 §9 non-goals. Expanding this list
 /// requires explicit justification.
@@ -488,10 +491,7 @@ fn sp3_scan_use_stmt(stmt: &str, path: &Path, forbidden: &mut Vec<(PathBuf, Stri
             let head = item.split(" as ").next().unwrap_or(item).trim();
             let tail = sp3_last_segment(head);
             if !sp3_allowed(tail) {
-                forbidden.push((
-                    path.to_path_buf(),
-                    format!("tabula_chips::{prefix}{head}"),
-                ));
+                forbidden.push((path.to_path_buf(), format!("tabula_chips::{prefix}{head}")));
             }
         }
     } else {
@@ -607,7 +607,8 @@ fn sp3_guardrail_detects_multiline_grouped_chip_imports() {
 #[test]
 fn sp3_guardrail_accepts_multiline_allowed_imports() {
     // Multi-line grouped imports for allowed kits must NOT be flagged.
-    let src = "use tabula_chips::{\n    ir_hash::IrHashKit,\n    relation_table::RelationTableKit,\n};\n";
+    let src =
+        "use tabula_chips::{\n    ir_hash::IrHashKit,\n    relation_table::RelationTableKit,\n};\n";
     let mut forbidden = Vec::new();
     sp3_collect_chip_refs(src, Path::new("synthetic.rs"), &mut forbidden);
     assert!(

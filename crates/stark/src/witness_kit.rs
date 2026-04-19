@@ -176,7 +176,7 @@ mod tests {
         let mut ctx = KitFinalizeContext::new(&mut scratch);
         let v: Vec<u32> = ctx.take_scratch(TEST_CHIP).expect("present -> value");
         assert_eq!(v, vec![1, 2, 3]);
-        assert!(scratch.get(&TEST_CHIP).is_none(), "entry consumed");
+        assert!(!scratch.contains_key(&TEST_CHIP), "entry consumed");
     }
 
     #[test]

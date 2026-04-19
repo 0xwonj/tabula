@@ -6,7 +6,7 @@ use tabula_contract::PublicStatement;
 /// Prepared verification handle for one `(artifact, environment)` pair.
 #[derive(Clone)]
 pub struct Verifier {
-    prepared: Arc<tabula_runtime::Verifier>,
+    prepared: Arc<tabula_runtime::PreparedVerifier>,
 }
 
 impl Verifier {
@@ -23,7 +23,7 @@ impl Verifier {
         expected_public_statement: &PublicStatement,
     ) -> Result<(), SdkError> {
         self.prepared
-            .verify_public_statement(&proof.proof, expected_public_statement)?;
+            .verify(&proof.proof, expected_public_statement)?;
         Ok(())
     }
 }

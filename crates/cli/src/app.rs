@@ -22,7 +22,7 @@ impl AppContext {
     }
 
     /// Resolve whether a command should print JSON.
-    pub(crate) const fn wants_json(&self, explicit_json: bool) -> bool {
+    pub(crate) const fn wants_json(explicit_json: bool) -> bool {
         explicit_json
     }
 }
