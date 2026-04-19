@@ -10,6 +10,7 @@ pub mod format;
 mod metadata_envelope;
 mod proof_envelope;
 pub mod public_statement;
+mod sealed_artifact;
 mod sealed_relation_policy;
 mod verification;
 mod versions;
@@ -33,6 +34,9 @@ pub use binding::{ProgramBinding, access_bus_field_names};
 pub use format::static_tables::{StaticTableArtifact, StaticTableArtifactRow};
 pub use format::typed_tuple::{TupleEncodingDefaults, TupleEncodingSelection};
 pub use public_statement::{PublicStatement, PublicStatementError};
+
+// Sealed artifact
+pub use sealed_artifact::{SEALED_ARTIFACT_SCHEMA_VERSION, SealedArtifact, SealedArtifactError};
 
 // Sealed policy types
 pub use sealed_relation_policy::SealedRelationPolicy;

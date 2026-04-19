@@ -1402,6 +1402,7 @@ dependencies = [
  "sha2",
  "tabula-commitment",
  "tabula-core",
+ "tabula-profile",
  "thiserror",
 ]
 
