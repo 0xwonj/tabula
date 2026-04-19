@@ -9,7 +9,9 @@ use tabula_chips::relation_table::RELATION_TABLE_CHIP_ID;
 use tabula_chips::tx_batch_transcript::TX_BATCH_TRANSCRIPT_CHIP_ID;
 use tabula_commitment::NativeDigest;
 use tabula_compiler::RegisteredProgram;
-use tabula_contract::{ArtifactContext, BoundStatement, ProgramBinding, PublicStatement};
+use tabula_contract::{
+    ArtifactContext, BoundStatement, ProgramBinding, PublicStatement, SealedRelationPolicy,
+};
 use tabula_core::Digest;
 #[cfg(feature = "prove")]
 use tabula_ext::root::RootBackendBundle;
@@ -18,8 +20,7 @@ use tabula_ext::root::{RootProofBackend, SmtRootProofBackend};
 use tabula_machine::{BackendVerifier, TabulaMachine, TabulaProof, TabulaStarkConfig};
 
 use crate::bootstrap::program::{
-    RelationPolicy, build_registered_program_machine, resolve_program_setup,
-    validate_core_first_program,
+    build_registered_program_machine, resolve_program_setup, validate_core_first_program,
 };
 use crate::error::RuntimeError;
 use crate::host::HostEnvironment;
@@ -32,7 +33,7 @@ pub struct VerifierState {
     /// Artifact-bound transcript context sealed at prepare time.
     pub context: ArtifactContext,
     /// Relation-policy decision derived from program analysis.
-    pub relation_policy: RelationPolicy,
+    pub relation_policy: SealedRelationPolicy,
     /// STARK machine backing verification.
     pub machine: TabulaMachine,
 }

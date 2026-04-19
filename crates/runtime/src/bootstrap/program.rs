@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tabula_compiler::RegisteredProgram;
 use tabula_contract::ArtifactContext;
+use tabula_contract::SealedRelationPolicy;
 use tabula_core::RootProfileId;
 use tabula_ext::backend::ExecutionBackend;
 use tabula_ext::backend::ProofColumn;
@@ -18,27 +19,16 @@ use crate::error::RuntimeError;
 use crate::host::SchemeFactoryMap;
 use crate::state_runtime::ResolvedStateRuntime;
 
-/// Verifier-side relation policy derived from the sealed program.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RelationPolicy {
-    /// No relation tables are used; the artifact root is not checked.
-    Disabled,
-    /// Relation tables are used; the artifact root must match.
-    RequireArtifactRoot,
-}
-
-impl RelationPolicy {
-    pub(crate) fn from_program(program: &ir::Program) -> Self {
-        if program_uses_relations(program) {
-            Self::RequireArtifactRoot
-        } else {
-            Self::Disabled
-        }
-    }
-
-    /// Returns `true` when the policy requires the artifact relation-table root.
-    pub const fn requires_artifact_root(self) -> bool {
-        matches!(self, Self::RequireArtifactRoot)
+/// Derive the [`SealedRelationPolicy`] for a program by scanning its IR opcodes.
+///
+/// This helper lives here until T4 moves it into the compiler registration path,
+/// at which point the policy will be sealed once at registration time instead of
+/// being recomputed at prepare time.
+pub(crate) fn relation_policy_from_program(program: &ir::Program) -> SealedRelationPolicy {
+    if program_uses_relations(program) {
+        SealedRelationPolicy::RequireArtifactRoot
+    } else {
+        SealedRelationPolicy::Disabled
     }
 }
 
@@ -48,7 +38,7 @@ pub(crate) struct ProgramSetup {
     pub(crate) artifact_context: ArtifactContext,
     pub(crate) resolved_state: ResolvedStateRuntime,
     pub(crate) machine_columns: Vec<Arc<dyn ProofColumn>>,
-    pub(crate) relation_policy: RelationPolicy,
+    pub(crate) relation_policy: SealedRelationPolicy,
     pub(crate) uses_ir_hash: bool,
 }
 
@@ -74,7 +64,7 @@ pub(crate) fn resolve_program_setup(
         artifact_context: artifact_context_from_registered_program(registered_program),
         resolved_state,
         machine_columns,
-        relation_policy: RelationPolicy::from_program(registered_program.program()),
+        relation_policy: relation_policy_from_program(registered_program.program()),
         uses_ir_hash: program_uses_hash(registered_program.program()),
     })
 }
@@ -98,7 +88,7 @@ fn artifact_context_from_registered_program(
 /// guarantees machine and witness agree on which backends are live.
 pub(crate) fn execution_backends_for(
     uses_ir_hash: bool,
-    relation_policy: RelationPolicy,
+    relation_policy: SealedRelationPolicy,
 ) -> Vec<Arc<dyn ExecutionBackend>> {
     let mut backends: Vec<Arc<dyn ExecutionBackend>> =
         vec![Arc::new(PublicStatementTranscriptExecutionBackend)];

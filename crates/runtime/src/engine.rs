@@ -19,7 +19,9 @@ use tabula_contract::BoundStatement;
 use tabula_contract::ProofEnvelope;
 #[cfg(feature = "prove")]
 use tabula_contract::TupleEncodingDefaults;
-use tabula_contract::{ArtifactContext, ProgramBinding, PublicStatement, StaticTableArtifact};
+use tabula_contract::{
+    ArtifactContext, ProgramBinding, PublicStatement, SealedRelationPolicy, StaticTableArtifact,
+};
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
 use tabula_core::{ColId, CommittedCellKey, CommittedKey, Digest, PortableValue, TableId};
@@ -56,8 +58,7 @@ use tabula_witness::{
 };
 
 use crate::bootstrap::program::{
-    RelationPolicy, build_registered_program_machine, resolve_program_setup,
-    validate_core_first_program,
+    build_registered_program_machine, resolve_program_setup, validate_core_first_program,
 };
 use crate::error::RuntimeError;
 use crate::host::HostEnvironment;
@@ -441,7 +442,7 @@ pub(crate) struct PreparedRuntimeState {
     #[cfg(feature = "prove")]
     pub(crate) column_slots: Vec<ColumnProofSlot>,
     pub(crate) artifact_context: ArtifactContext,
-    pub(crate) relation_policy: RelationPolicy,
+    pub(crate) relation_policy: SealedRelationPolicy,
     #[cfg(feature = "prove")]
     pub(crate) uses_ir_hash: bool,
     pub(crate) static_table_artifact: StaticTableArtifact,

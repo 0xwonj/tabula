@@ -59,7 +59,7 @@ mod verifier;
 pub use error::{RuntimeError, RuntimeResult};
 
 #[cfg(feature = "verify")]
-pub use bootstrap::program::RelationPolicy;
+pub use tabula_contract::SealedRelationPolicy;
 #[cfg(feature = "verify")]
 pub use engine::{CommittedStateSnapshot, ExecutionReceipt, RuntimeBuilder, TabulaRuntime};
 #[cfg(feature = "prove")]
