@@ -5,6 +5,7 @@
 //! full static table to one public root.
 use tabula_stark::air::interaction::BusId;
 use tabula_stark::chips::ChipId;
+use tabula_stark::witness_kit::LogicalRelationTableRow;
 
 /// Witness-store label consumed by [`RelationTableChip`].
 pub const RELATION_TABLE_WITNESS_LABEL: &str = "relation_table_rows";
@@ -26,4 +27,15 @@ pub struct RelationTableWitnessRow {
     pub output_digest: [u32; 8],
     /// Multiplicity on the lookup bus.
     pub lookup_mult: u32,
+}
+
+impl From<LogicalRelationTableRow> for RelationTableWitnessRow {
+    fn from(row: LogicalRelationTableRow) -> Self {
+        Self {
+            relation_id: row.relation_id,
+            input_digest: row.input_digest,
+            output_digest: row.output_digest,
+            lookup_mult: row.lookup_mult,
+        }
+    }
 }

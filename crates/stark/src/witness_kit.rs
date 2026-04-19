@@ -57,6 +57,8 @@
 use std::any::Any;
 use std::collections::BTreeMap;
 
+use p3_koala_bear::KoalaBear;
+
 use crate::chips::ChipId;
 use crate::trace::WitnessStore;
 
@@ -150,6 +152,76 @@ pub mod sealed {
     /// requirement that this impl must appear in a non-`tabula-stark`
     /// crate makes any new chip visible as a distinct line in review.
     pub trait Sealed {}
+}
+
+/// Logical opcode tag for execution-prelude records constructed by the
+/// runtime.
+///
+/// Each variant corresponds to the subset of chip [`Opcode`] variants that
+/// the runtime prelude builder emits when staging context/tx items. The
+/// chip-side `From` impl (in `tabula-chips`) maps each tag onto its
+/// chip-internal counterpart.
+///
+/// [`Opcode`]: tabula_chips::execution::trace::Opcode
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogicalOpcodeTag {
+    /// Canonical public-context load item.
+    LoadContext,
+    /// Canonical transaction header item.
+    TxBegin,
+    /// Canonical transaction parameter load item.
+    LoadParam,
+}
+
+/// Logical view of one execution-prelude row emitted by the runtime when
+/// staging public-statement and tx-parameter items into the execution
+/// witness store.
+///
+/// Only the fields the runtime actually populates live here; all other
+/// chip-row fields inherit their current defaults when the row is lifted
+/// into `InstructionRecord` at the chip boundary. This keeps the runtime
+/// free of chip-internal layout while preserving byte-identity of the
+/// produced chip rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicalExecutionPrelude {
+    /// Which prelude opcode this row stands for (context/tx-begin/param).
+    pub opcode: LogicalOpcodeTag,
+    /// Transaction index this prelude row belongs to (0 for context items).
+    pub tx_index: u32,
+    /// Public-statement item index; `None` when the row is not visible on
+    /// the public-statement transcript.
+    pub proof_meta0: Option<u32>,
+    /// Opcode-specific metadata slot 1 (field id, entry id, or param index
+    /// depending on the opcode).
+    pub proof_meta1: Option<u32>,
+    /// Opcode-specific metadata slot 2 (type id or param count, depending
+    /// on the opcode).
+    pub proof_meta2: Option<u32>,
+    /// Reserved execution slots written by this prelude row.
+    pub written_slots: Vec<usize>,
+    /// Encoded field-element payload for this prelude row.
+    pub src1_val: Vec<KoalaBear>,
+    /// Per-slot writes: `(slot_index, value_fes, is_null)`.
+    pub writes: Vec<(usize, Vec<KoalaBear>, bool)>,
+}
+
+/// Logical view of one static relation-table witness row.
+///
+/// Mirrors the chip-side `RelationTableWitnessRow` one-for-one. Runtime
+/// code builds `Vec<LogicalRelationTableRow>` from prepared relation
+/// proofs and hands them to the chip-side relation-table kit via a
+/// `From`-based conversion so the runtime never names the chip row type
+/// directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicalRelationTableRow {
+    /// Relation identifier.
+    pub relation_id: u32,
+    /// Canonical input-tuple digest.
+    pub input_digest: [u32; 8],
+    /// Canonical output-tuple digest.
+    pub output_digest: [u32; 8],
+    /// Multiplicity on the relation lookup bus.
+    pub lookup_mult: u32,
 }
 
 /// The chip-authoring protocol for witness-tier row contribution.

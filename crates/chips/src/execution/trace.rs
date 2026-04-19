@@ -11,6 +11,7 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use tabula_gadgets::bool_fe;
 use tabula_stark::air::columns::borrow_cols_mut;
+use tabula_stark::witness_kit::{LogicalExecutionPrelude, LogicalOpcodeTag};
 use tabula_types::NativeKeyPayload;
 
 use super::columns::{EXECUTION_STANDARD_VALUE_WIDTH, ExecutionCols, MAX_SLOTS, execution_width};
@@ -237,6 +238,32 @@ impl Default for InstructionRecord {
             proof_meta1: None,
             proof_meta2: None,
             proof_meta3: None,
+        }
+    }
+}
+
+impl From<LogicalOpcodeTag> for Opcode {
+    fn from(tag: LogicalOpcodeTag) -> Self {
+        match tag {
+            LogicalOpcodeTag::LoadContext => Opcode::LoadContext,
+            LogicalOpcodeTag::TxBegin => Opcode::TxBegin,
+            LogicalOpcodeTag::LoadParam => Opcode::LoadParam,
+        }
+    }
+}
+
+impl From<LogicalExecutionPrelude> for InstructionRecord {
+    fn from(prelude: LogicalExecutionPrelude) -> Self {
+        InstructionRecord {
+            opcode: prelude.opcode.into(),
+            tx_index: prelude.tx_index,
+            proof_meta0: prelude.proof_meta0,
+            proof_meta1: prelude.proof_meta1,
+            proof_meta2: prelude.proof_meta2,
+            written_slots: prelude.written_slots,
+            src1_val: prelude.src1_val,
+            writes: prelude.writes,
+            ..InstructionRecord::default()
         }
     }
 }
