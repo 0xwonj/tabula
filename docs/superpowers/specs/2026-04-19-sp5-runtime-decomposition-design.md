@@ -83,7 +83,7 @@ guardrails (§12), not only in the close-out checklist.
 6. `ChipWitnessKit` authoring convention tightened (§9): `sealed::Sealed`
    supertrait + trybuild compile-fail **and** compile-pass probes.
    Explicitly **not** a type-level seal (documented).
-7. `VerifierState`, `PreparedOptions`, and all prepared-handle public
+7. `PreparedVerifierState`, `PreparedOptions`, and all prepared-handle public
    types marked `#[non_exhaustive]`. Public structs expose
    fields through accessors, not `pub` struct literals (§5).
 8. `SnapshotCellRecord` codec disposition resolved (§10).
@@ -780,7 +780,7 @@ task that could affect proof bytes.
 12. **Tighten `ChipWitnessKit` authoring convention.** Add
     `sealed::Sealed`; each blessed chip adds one impl line. Trybuild
     compile-fail + compile-pass probes.
-13. **`#[non_exhaustive]` + accessor sweep** on `VerifierState`,
+13. **`#[non_exhaustive]` + accessor sweep** on `PreparedVerifierState`,
     `PreparedOptions`, and any remaining public prepared-handle types.
     Remove `pub` from struct fields where setters exist; add accessors.
 14. **SDK migration Pass 2** (tighten). Each `matches!` widened in
@@ -828,7 +828,7 @@ the API-shape change with a safe wrappers-first migration. Task 9
 - `ChipWitnessKit` authoring-convention trybuild compile-fail +
   compile-pass probes green. `sealed::Sealed` is documented as
   convention, not a seal.
-- `VerifierState`, `PreparedOptions`, remaining prepared-handle types
+- `PreparedVerifierState`, `PreparedOptions`, remaining prepared-handle types
   marked `#[non_exhaustive]`; `pub` fields replaced by accessors where
   setters exist.
 - `SnapshotCellRecord` stays in `runtime::snapshot` with documented

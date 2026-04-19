@@ -1,7 +1,7 @@
 //! Prepared prover handle for one registered native program.
 //!
 //! [`PreparedProver`] is the canonical way to get a prove-capable
-//! runtime handle. It owns the prepared-once state (`VerifierState`,
+//! runtime handle. It owns the prepared-once state (`PreparedVerifierState`,
 //! machine, chip-kit registry, root backend bundle) and exposes
 //! [`PreparedProver::prove`] for per-batch proving. The handle is
 //! `Send + Sync` and cheap to share via `Arc`.
@@ -26,7 +26,7 @@ use crate::prepared_state::{
 use crate::proof_summary::ProofSummary;
 use crate::semantics as runtime_ir;
 use crate::snapshot::CommittedStateSnapshot;
-use crate::verifier::VerifierState;
+use crate::verifier::PreparedVerifierState;
 
 /// Inputs for native proving.
 pub struct ProveInput<'a> {
@@ -192,13 +192,13 @@ pub(crate) fn prepare_proof_request_on_prepared_state(
 #[non_exhaustive]
 pub struct PreparedProver {
     /// Prove-specific prepared state (semantic, state runtime, etc.).
-    pub(crate) runtime_program: PreparedRuntimeState,
+    pub(crate) state: PreparedRuntimeState,
     /// Root proof-backend bundle shared across prove calls.
     pub(crate) root_backend_bundle: RootBackendBundle,
     /// Chip-kit registry built once at handle construction time.
     pub(crate) kit_registry: ChipKitRegistry,
     /// Verify-side state: context, relation policy, and STARK machine.
-    verifier_state: VerifierState,
+    verifier_state: PreparedVerifierState,
 }
 
 impl PreparedProver {
@@ -219,16 +219,16 @@ impl PreparedProver {
 
     /// Installed type runtimes.
     pub fn type_runtimes(&self) -> &TypeRuntimeRegistry {
-        &self.runtime_program.type_runtimes
+        &self.state.type_runtimes
     }
 
     /// Installed encoding runtimes.
     pub fn encoding_runtimes(&self) -> &EncodingRuntimeRegistry {
-        &self.runtime_program.encoding_runtimes
+        &self.state.encoding_runtimes
     }
 
     /// Borrow the prepared verify-side state (shared semantics with `PreparedVerifier`).
-    pub fn state(&self) -> &VerifierState {
+    pub fn state(&self) -> &PreparedVerifierState {
         &self.verifier_state
     }
 
@@ -245,7 +245,7 @@ impl PreparedProver {
     /// statement in one call.
     pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProofOutcome, ProveError> {
         prepare_proof_request_on_prepared_state(
-            &self.runtime_program,
+            &self.state,
             &self.root_backend_bundle,
             &self.kit_registry,
             self.verifier_state.machine(),
@@ -295,14 +295,14 @@ pub fn prepare_prover(
         opts.root_backend().0.clone(),
     )
     .map_err(route_to_prove)?;
-    let kit_registry = build_chip_kit_registry(&prepared.runtime_program);
-    let verifier_state = VerifierState::new(
-        prepared.runtime_program.artifact_context.clone(),
-        prepared.runtime_program.relation_policy,
+    let kit_registry = build_chip_kit_registry(&prepared.state);
+    let verifier_state = PreparedVerifierState::new(
+        prepared.state.artifact_context.clone(),
+        prepared.state.relation_policy,
         prepared.machine,
     );
     Ok(PreparedProver {
-        runtime_program: prepared.runtime_program,
+        state: prepared.state,
         root_backend_bundle: prepared.root_backend_bundle,
         kit_registry,
         verifier_state,
@@ -334,7 +334,7 @@ impl std::fmt::Debug for PreparedProver {
                 "static_table_root",
                 &self.verifier_state.context().static_table_root,
             )
-            .field("relation_policy", &self.runtime_program.relation_policy)
+            .field("relation_policy", &self.state.relation_policy)
             .finish_non_exhaustive()
     }
 }

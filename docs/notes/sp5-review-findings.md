@@ -100,7 +100,7 @@ Grouped by theme. Duplicates across passes are merged with cross-reference label
 | **I-S-1** | B-I-6 | `ProveInput` has `pub` fields **and** a `::new` constructor. Pick one: either all `pub` fields + `#[non_exhaustive]` (builder-free init), or private fields + `::new` + accessors. Mixed pattern invites future drift. |
 | **I-S-2** | D-02 | `ProveResult` and `VerifiedResult` are near-duplicates (same private fields, same accessors). Collapse to one type with an optional `bound_statement: Option<BoundStatement>`, or introduce a shared `ProofOutcome` base. Current shape is code duplication that will rot. |
 | **I-S-3** | D-04 | `PreparedOptions` builder methods (`with_host_environment`, `with_machine_stark_config`, `with_root_backend`, …) lack `#[must_use]`. Builders that return `Self` must be `#[must_use]` or callers silently drop the modification. |
-| **I-S-4** | D-05 | Public handle types (`PreparedProver`, `PreparedVerifier`, `PreparedExecutor`, `PreparedOptions`, `VerifierState`, `ProveResult`, `VerifiedResult`) lack `Debug`. At minimum, derive a non-secret-leaking `Debug` or implement manually. Rust ecosystem expectation for any `pub` struct. |
+| **I-S-4** | D-05 | Public handle types (`PreparedProver`, `PreparedVerifier`, `PreparedExecutor`, `PreparedOptions`, `PreparedVerifierState`, `ProveResult`, `VerifiedResult`) lack `Debug`. At minimum, derive a non-secret-leaking `Debug` or implement manually. Rust ecosystem expectation for any `pub` struct. |
 | **I-S-5** | D-07 | `Arc::try_unwrap(x).unwrap_or_else(\|shared\| (*shared).clone())` is spelled `Arc::unwrap_or_clone(x)` in `std` since 1.76. Use it. Three occurrences (executor, prover, verifier prepare paths). |
 
 ### I-N — Naming consistency (4 findings)
@@ -109,7 +109,7 @@ Grouped by theme. Duplicates across passes are merged with cross-reference label
 |---|---|---|
 | **I-N-1** | D-01 | Three handles have inconsistent field names for the same prepared-state concept: `PreparedExecutor { state }`, `PreparedVerifier { prepared }`, `PreparedProver { runtime_program, verifier_state, kit_registry, … }`. Converge on one name — recommend `state: PreparedRuntimeState` (executor) or `prepared: PreparedRuntimeState` (verifier); apply to all three. |
 | **I-N-2** | D-12 | `PreparedRuntimeBuild::runtime_program: PreparedRuntimeState` is misnamed; the field is prepared state, not a program. Rename to `state` or `prepared`. |
-| **I-N-3** | D-13 | `VerifierState` re-exported as top-level. Since `PreparedProver` also holds one, it is not "the verifier's" state; it is the prepared runtime's verify-side state. Rename to `PreparedVerifierState` for symmetry with `PreparedRuntimeState`. |
+| **I-N-3** | D-13 | `PreparedVerifierState` re-exported as top-level. Since `PreparedProver` also holds one, it is not "the verifier's" state; it is the prepared runtime's verify-side state. Rename to `PreparedPreparedVerifierState` for symmetry with `PreparedRuntimeState`. |
 | **I-N-4** | D-08 | `crates/runtime/src/lib.rs:24` comment still mentions "engine". `engine.rs` was deleted in T10; the comment is stale. |
 
 ### I-M — Module structure + guardrails (4 findings)
@@ -214,7 +214,7 @@ equality).
 **Work (single commit):**
 1. Unify `PreparedProver` / `PreparedVerifier` / `PreparedExecutor` state-field name. Apply pick across all three. Recommend `state`.
 2. Rename `PreparedRuntimeBuild::runtime_program` → `state`.
-3. Rename `VerifierState` → `PreparedVerifierState`; adjust re-exports and docs.
+3. Rename `PreparedVerifierState` → `PreparedPreparedVerifierState`; adjust re-exports and docs.
 4. Delete stale "engine" reference at `crates/runtime/src/lib.rs:24`.
 
 **Agent:** sonnet (rename sweep).

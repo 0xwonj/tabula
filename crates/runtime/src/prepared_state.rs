@@ -70,7 +70,7 @@ pub(crate) struct PreparedRuntimeState {
 /// the root-backend bundle.
 #[cfg(feature = "verify")]
 pub(crate) struct PreparedRuntimeBuild {
-    pub(crate) runtime_program: PreparedRuntimeState,
+    pub(crate) state: PreparedRuntimeState,
     pub(crate) machine: TabulaMachine,
     #[cfg(feature = "prove")]
     pub(crate) root_backend_bundle: RootBackendBundle,
@@ -147,7 +147,7 @@ pub(crate) fn build_prepared_runtime(
     let machine =
         build_registered_program_machine(&program_setup, machine_stark_config, proof_backend)?;
 
-    let runtime_program = PreparedRuntimeState {
+    let state = PreparedRuntimeState {
         semantic,
         state: program_setup.resolved_state.clone(),
         #[cfg(feature = "prove")]
@@ -164,7 +164,7 @@ pub(crate) fn build_prepared_runtime(
     };
 
     Ok(PreparedRuntimeBuild {
-        runtime_program,
+        state,
         machine,
         #[cfg(feature = "prove")]
         root_backend_bundle,

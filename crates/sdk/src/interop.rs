@@ -32,7 +32,7 @@ pub use tabula_runtime::PreparedExecutor;
 #[cfg(feature = "prove")]
 pub use tabula_runtime::PreparedProver;
 #[cfg(feature = "verify")]
-pub use tabula_runtime::{PreparedVerifier, VerifierState};
+pub use tabula_runtime::{PreparedVerifier, PreparedVerifierState};
 #[cfg(feature = "execute")]
 pub use tabula_types::{
     RelationEffect, RelationEffectKind, StateEffectKind, StatePropertyEffect, TypedEventEffect,

@@ -624,7 +624,7 @@ fn untaken_relation_branches_emit_no_relation_claims_or_positive_lookup_counts()
         .expect("execute guarded batch");
 
     let (machine_input, _public_statement) = crate::proof_artifacts::prepare_proof_machine_input(
-        &prover.runtime_program,
+        &prover.state,
         &prover.root_backend_bundle,
         &prover.kit_registry,
         &prove_input(&snapshot, &batch, &context, &executed),
@@ -664,7 +664,7 @@ fn tampering_relation_table_rows_breaks_proving() {
 
     let (mut machine_input, _public_statement) =
         crate::proof_artifacts::prepare_proof_machine_input(
-            &prover.runtime_program,
+            &prover.state,
             &prover.root_backend_bundle,
             &prover.kit_registry,
             &prove_input(&snapshot, &batch, &context, &executed),
@@ -711,7 +711,7 @@ fn tampering_execution_bound_relation_outputs_breaks_proving() {
 
     let (mut machine_input, _public_statement) =
         crate::proof_artifacts::prepare_proof_machine_input(
-            &prover.runtime_program,
+            &prover.state,
             &prover.root_backend_bundle,
             &prover.kit_registry,
             &prove_input(&snapshot, &batch, &context, &executed),
@@ -758,7 +758,7 @@ fn tampering_relation_effect_identity_breaks_proving() {
 
     let (mut machine_input, _public_statement) =
         crate::proof_artifacts::prepare_proof_machine_input(
-            &prover.runtime_program,
+            &prover.state,
             &prover.root_backend_bundle,
             &prover.kit_registry,
             &prove_input(&snapshot, &batch, &context, &executed),
@@ -866,7 +866,7 @@ fn relation_proof_root_matches_registered_artifact_and_chip_public_values() {
         .expect("extract relation chip root");
 
     assert_eq!(
-        prover.runtime_program.static_table_artifact.root,
+        prover.state.static_table_artifact.root,
         registered.static_table_artifact().root
     );
     assert_eq!(
@@ -879,7 +879,7 @@ fn relation_proof_root_matches_registered_artifact_and_chip_public_values() {
             &batch,
             prover.type_runtimes(),
             prover.encoding_runtimes(),
-            &prover.runtime_program.tuple_encoding_defaults,
+            &prover.state.tuple_encoding_defaults,
         )
         .expect("batch digest"),
         proved.public_statement.applied_tx_digest.to_bytes()
@@ -1073,7 +1073,7 @@ fn event_transcript_witness_matches_execution_event_rows() {
         crate::prelude::decode_entry_batch_on_state(state, &batch).expect("decode batch");
 
     let prepared = crate::proof_artifacts::prepare_proof_artifacts(
-        &prover.runtime_program,
+        &prover.state,
         &prover.root_backend_bundle,
         &prover.kit_registry,
         &snapshot,
@@ -1184,7 +1184,7 @@ fn host_runtime_overrides_do_not_change_compiler_sealed_static_table_root() {
         .expect("prove relation batch under custom host environment");
 
     assert_eq!(
-        prover.runtime_program.static_table_artifact.root,
+        prover.state.static_table_artifact.root,
         registered.static_table_artifact().root
     );
     verifier

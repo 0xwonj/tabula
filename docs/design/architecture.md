@@ -45,7 +45,7 @@ The verifier model is layered:
 - `PublicStatement` is the proved public object.
 - `ArtifactContext` is the artifact-derived binding context recomputed
   from the sealed artifact.
-- `VerifierState` is the runtime-internal prepared verifier state:
+- `PreparedVerifierState` is the runtime-internal prepared verifier state:
   artifact binding context plus relation policy plus machine verifier state.
 - `PreparedVerifier::verify` is the verify-only surface: `verify(&self, proof,
   expected_public_statement) -> Result<BoundStatement, RuntimeError>`.

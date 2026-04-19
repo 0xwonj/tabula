@@ -180,7 +180,7 @@ pub fn prepare_executor(
     // execution is zero-crypto. Drop them so the handle's footprint is
     // purely the prepared state.
     Ok(PreparedExecutor {
-        state: Arc::new(build.runtime_program),
+        state: Arc::new(build.state),
     })
 }
 

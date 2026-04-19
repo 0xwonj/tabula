@@ -23,13 +23,13 @@ use crate::options::PreparedOptions;
 /// Public so downstream consumers (SDK, tests, future prover) can name
 /// the prepared-once state without going through a builder.
 #[non_exhaustive]
-pub struct VerifierState {
+pub struct PreparedVerifierState {
     context: ArtifactContext,
     relation_policy: SealedRelationPolicy,
     machine: TabulaMachine,
 }
 
-impl VerifierState {
+impl PreparedVerifierState {
     /// Construct a verifier state from its three parts (crate-internal).
     pub(crate) fn new(
         context: ArtifactContext,
@@ -65,23 +65,23 @@ impl VerifierState {
 /// `&self` so callers can drive it from multiple threads.
 #[non_exhaustive]
 pub struct PreparedVerifier {
-    prepared: VerifierState,
+    state: PreparedVerifierState,
 }
 
 impl PreparedVerifier {
     /// Borrow the prepared verify-side state.
-    pub fn state(&self) -> &VerifierState {
-        &self.prepared
+    pub fn state(&self) -> &PreparedVerifierState {
+        &self.state
     }
 
     /// Borrow the transcript-bound program binding.
     pub fn binding(&self) -> &ProgramBinding {
-        &self.prepared.context.binding
+        &self.state.context.binding
     }
 
     /// The STARK machine backing this verifier.
     pub fn machine(&self) -> &TabulaMachine {
-        &self.prepared.machine
+        &self.state.machine
     }
 
     /// Verify one native proof against an externally supplied expected public
@@ -92,7 +92,7 @@ impl PreparedVerifier {
         expected_public_statement: &PublicStatement,
     ) -> Result<BoundStatement, VerifyError> {
         let bound = BoundStatement::new(
-            self.prepared.context.clone(),
+            self.state.context.clone(),
             expected_public_statement.clone(),
         );
         let expected_binding_digest =
@@ -109,22 +109,22 @@ impl PreparedVerifier {
         }
         verify_proved_public_statement_digests(
             proof,
-            &self.prepared.machine,
+            &self.state.machine,
             expected_public_statement,
         )
         .map_err(route_to_verify)?;
-        match relation_table_root_from_proof(proof, &self.prepared.machine)
+        match relation_table_root_from_proof(proof, &self.state.machine)
             .map_err(route_to_verify)?
         {
-            Some(root) if self.prepared.relation_policy.requires_artifact_root() => {
-                if root != self.prepared.context.static_table_root {
+            Some(root) if self.state.relation_policy.requires_artifact_root() => {
+                if root != self.state.context.static_table_root {
                     return Err(VerifyError::Validation {
                         detail: "relation table chip root does not match the verifier artifact"
                             .to_string(),
                     });
                 }
             }
-            None if self.prepared.relation_policy.requires_artifact_root() => {
+            None if self.state.relation_policy.requires_artifact_root() => {
                 return Err(VerifyError::Validation {
                     detail: "relation table chip opening is missing from the execution proof"
                         .to_string(),
@@ -132,7 +132,7 @@ impl PreparedVerifier {
             }
             _ => {}
         }
-        BackendVerifier::new(&self.prepared.machine)
+        BackendVerifier::new(&self.state.machine)
             .verify_proof(proof)
             .map_err(VerifyError::Verification)?;
         Ok(bound)
@@ -191,7 +191,7 @@ pub fn prepare_verifier(
     )
     .map_err(route_to_verify)?;
     Ok(PreparedVerifier {
-        prepared: VerifierState::new(
+        state: PreparedVerifierState::new(
             program_setup.artifact_context,
             program_setup.relation_policy,
             machine,
@@ -345,9 +345,9 @@ fn route_to_verify(error: RuntimeError) -> VerifyError {
     }
 }
 
-impl std::fmt::Debug for VerifierState {
+impl std::fmt::Debug for PreparedVerifierState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifierState")
+        f.debug_struct("PreparedVerifierState")
             .field("binding", &self.context.binding)
             .field("static_table_root", &self.context.static_table_root)
             .field("relation_policy", &self.relation_policy)
@@ -358,7 +358,7 @@ impl std::fmt::Debug for VerifierState {
 impl std::fmt::Debug for PreparedVerifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PreparedVerifier")
-            .field("state", &self.prepared)
+            .field("state", &self.state)
             .finish_non_exhaustive()
     }
 }
@@ -368,5 +368,5 @@ impl std::fmt::Debug for PreparedVerifier {
 const _: fn() = || {
     fn assert_send_sync_static<T: Send + Sync + 'static>() {}
     assert_send_sync_static::<PreparedVerifier>();
-    assert_send_sync_static::<VerifierState>();
+    assert_send_sync_static::<PreparedVerifierState>();
 };
