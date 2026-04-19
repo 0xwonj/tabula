@@ -7,3 +7,5 @@ book/build/
 .omx/
 .codex
 .codex/
+# SP-4 byte-identity scaffolding — deleted in S5
+/s0-reference/
