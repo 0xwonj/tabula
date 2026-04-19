@@ -32,7 +32,7 @@ use tabula_executor as exec;
 use tabula_witness::stark::{ContextPreludeSlot, ParamPreludeSlot};
 
 #[cfg(feature = "prove")]
-use crate::engine::{ContextPreludeArtifacts, PublicStatementSlotLayout};
+use crate::proof_artifacts::{ContextPreludeArtifacts, PublicStatementSlotLayout};
 #[cfg(feature = "prove")]
 use crate::semantics as runtime_ir;
 

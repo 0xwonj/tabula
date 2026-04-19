@@ -53,6 +53,8 @@ mod prelude;
 #[cfg(feature = "verify")]
 mod prepared_state;
 #[cfg(feature = "prove")]
+mod proof_artifacts;
+#[cfg(feature = "prove")]
 mod proof_summary;
 #[cfg(feature = "prove")]
 mod prover;
