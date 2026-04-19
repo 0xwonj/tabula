@@ -152,15 +152,23 @@ Runtime is the bridge from sealed semantics to concrete execution and proving
 resources. The runtime surface is structured around prepared handles with
 "prepare once, drive many" semantics:
 
-- `PreparedVerifier` — prepare-once verify-only handle constructed via
-  `prepare_verifier(registered_program)`. Shares prepared state (`VerifierState`)
-  with `PreparedProver`. `Send + Sync`.
-- `PreparedProver` — prepare-once prove-only handle constructed via
-  `prepare_prover(registered_program)`. Threadlocal `KitScratch` per
-  prove call. `Send + Sync`. (prove-feature only.)
-- `TabulaRuntime` — verify-feature execute-only facade for batch execution,
-  query execution, and logical-state projection. Final disposition deferred
-  to SP-5.
+- `PreparedVerifier` — verify-only handle constructed via
+  `prepare_verifier(Arc<SealedArtifact>, &PreparedOptions)`. The verifier is
+  IR-free; `SealedArtifact` carries the seal-time `relation_policy` and
+  `uses_ir_hash`. `Send + Sync + 'static`.
+- `PreparedProver` — prove-only handle constructed via
+  `prepare_prover(Arc<RegisteredProgram>, &PreparedOptions)`. Fresh
+  `KitScratch` per prove call. `Send + Sync + 'static`. (prove-feature only.)
+- `PreparedExecutor` — execute-only handle constructed via
+  `prepare_executor(Arc<RegisteredProgram>, &PreparedOptions)`. Owns batch
+  execution, query execution, and logical-state projection.
+  `Send + Sync + 'static`.
+
+The input-type asymmetry (`SealedArtifact` vs `RegisteredProgram`) is
+structural: the verifier is a pure binding check and must remain IR-free,
+while prover and executor must lower or execute IR. All three handles expose
+`&self` operations with stack-local per-call state, so the same handle is
+safe for concurrent driving.
 
 ### Proof Backend
 
