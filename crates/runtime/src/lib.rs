@@ -32,8 +32,9 @@
 //!
 //! - **No features** (default): shared semantic helpers and error types only.
 //! - **`verify`**: adds [`PreparedVerifier`], [`PreparedVerifierBuilder`],
-//!   the [`prepare_verifier`] free function, and the public
-//!   [`VerifierState`] type for native proof verification.
+//!   the [`prepare_verifier`] free function, the public
+//!   [`VerifierState`] type for native proof verification, and the
+//!   [`PreparedExecutor`] / [`prepare_executor`] execute-only surface.
 //! - **`prove`**: adds [`TabulaRuntime`], [`RuntimeBuilder`],
 //!   [`PreparedProver`], [`PreparedProverBuilder`], the
 //!   [`prepare_prover`] free function, and the full native
@@ -46,6 +47,8 @@ mod engine;
 mod error;
 #[cfg(feature = "verify")]
 mod execution;
+#[cfg(feature = "verify")]
+mod executor;
 #[cfg(feature = "verify")]
 mod host;
 #[cfg(feature = "verify")]
@@ -83,6 +86,8 @@ pub use tabula_contract::SealedRelationPolicy;
 pub use engine::{CommittedStateSnapshot, ExecutionReceipt, RuntimeBuilder, TabulaRuntime};
 #[cfg(feature = "prove")]
 pub use engine::{ProveInput, ProveResult, VerifiedResult};
+#[cfg(feature = "verify")]
+pub use executor::{PreparedExecutor, prepare_executor};
 #[cfg(feature = "verify")]
 pub use host::{HostEnvironment, InstalledSchemes, RuntimeRegistries, SmtScheme, SsmcScheme};
 #[cfg(feature = "verify")]
