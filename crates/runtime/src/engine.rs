@@ -65,6 +65,10 @@ use crate::host::HostEnvironment;
 use crate::proof_summary::ProofSummary;
 use crate::semantics as runtime_ir;
 use crate::snapshot::LogicalStateCell;
+// TODO(SP-5): remove this re-export once the `runtime_root_exposes_only_the_final_native_surface`
+// architecture test relaxes the literal-string pin on the `pub use engine::{...}` line in
+// `crates/runtime/src/lib.rs`. Until then, the relocated type must be reachable through
+// `engine::` to keep that pin satisfied.
 pub use crate::snapshot::CommittedStateSnapshot;
 use crate::state_runtime::ResolvedStateRuntime;
 
