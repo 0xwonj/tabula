@@ -236,11 +236,11 @@ that enforces these rules against `Cargo.toml` dep lists.
 
 ## 4. Sub-Project Decomposition
 
-Nine sub-projects. SP-1 through SP-4 are landed; SP-1.5 closes SP-1's
-structural gap (SealedArtifact introduction) and is a hard prerequisite
-for SP-5; the remaining five execute in the order described in §5
-(SP-5 and SP-8 may run in parallel). Each has its own design doc +
-ultraplan + implementation session.
+Nine sub-projects. SP-1 through SP-5 (incl. SP-1.5) are landed; the
+remaining sub-projects execute in the order described in §5 (SP-6, SP-7,
+and SP-8 are the active queue, with SP-8 and SP-6 runnable in parallel
+once coordinated around the verifier module). Each has its own design
+doc + ultraplan + implementation session.
 
 ### SP-1 — Contract wire-type consolidation (foundation)
 
@@ -439,6 +439,11 @@ becomes IR-free. Closes the structural gap left open at the end of SP-1.
   (seal-time correctness of `relation_policy` and `uses_ir_hash`).
 
 ### SP-5 — Runtime decomposition + executor symmetry
+
+> **Status: Landed 2026-04-20.** See
+> [SP-5 design spec](2026-04-19-sp5-runtime-decomposition-design.md)
+> §18 Landed for the per-task commit log, the final byte-identity
+> verification, and deviations from the original ordering.
 
 **Goal:** Finish the runtime prepared-handle story begun in SP-4.
 Promote the residual `TabulaRuntime` into a third symmetric handle
@@ -657,8 +662,8 @@ The sequence is not arbitrary:
    for verifier, `Arc<RegisteredProgram>` for prover/executor) cleanly.
    SP-5's byte-identity gate stays pure-module surgery — no wire-type
    reshuffling mixed in.
-6. **SP-5 and SP-8 run in parallel** once SP-1.5 has landed. They are
-   independent:
+6. **SP-5 and SP-8 run in parallel** once SP-1.5 has landed. (SP-5
+   landed 2026-04-20; SP-8 remains active.) They are independent:
    - SP-5 touches only `tabula-runtime` (decomposition, executor
      symmetry, error narrowing, pre-stuff API) and the
      `ChipWitnessKit` seal in `tabula-stark`.
@@ -717,7 +722,15 @@ negative test pair) can be parallelized via subagent dispatch.
   SP-5.
 - **SP-5** *(resolved ahead of execution)*: `ChipWitnessKit` is
   **sealed**. Third-party chip authoring is deferred; workspace
-  chips remain the only implementers.
+  chips remain the only implementers. Landed via the
+  `pub mod sealed { pub trait Sealed {} }` authoring-convention
+  pattern + trybuild compile-fail/compile-pass probes; documented
+  as convention, not a true type-level seal.
+- **SP-5 — `SnapshotCellRecord` codec disposition** *(resolved)*:
+  stays in `runtime::snapshot` as a runtime-internal codec with
+  rationale comment. The record never crosses the proof-visible
+  wire boundary, so it is not a `tabula-contract` concern.
+  (Closes the SP-5 entry in the "Still open" list below.)
 - **SealedArtifact introduction timing** *(resolved)*: introduced in
   SP-1.5, **before** SP-5. Bundling it into SP-5 would muddy the
   byte-identity gate; deferring it past SP-5 would force a second
@@ -740,8 +753,6 @@ negative test pair) can be parallelized via subagent dispatch.
   type live elsewhere?
 - **SP-2**: Exact final shape of `PreparedMachineInput` and
   `TabulaProof` after public_statement removal.
-- **SP-5**: Final disposition of `SnapshotCellRecord` borsh codec
-  (tabula-contract vs. documented runtime-internal module).
 - **SP-6**: Do SDK wrapper types (`sdk::Proof` etc.) survive?
 - **SP-7**: Does `tabula-ext`'s `authoring`/`runtime`/`backend`
   vocabulary collapse into the function axis, or survive with
