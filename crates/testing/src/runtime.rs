@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use tabula_contract::SealedArtifact;
 use tabula_runtime::{
-    PreparedProver, PreparedVerifier, ProveResult, TabulaRuntime, VerifiedResult,
+    PreparedOptions, PreparedProver, PreparedVerifier, ProveResult, TabulaRuntime, VerifiedResult,
+    prepare_prover, prepare_verifier,
 };
 
 use crate::exec::register_program_from_source;
@@ -30,18 +31,14 @@ pub fn runtime_from_source(source: &str) -> TabulaRuntime {
 
 /// Build a [`PreparedProver`] from one registered program.
 pub fn build_prover(registered: tabula_compiler::RegisteredProgram) -> PreparedProver {
-    PreparedProver::builder(registered)
-        .expect("create prover builder")
-        .build()
-        .expect("build prepared prover")
+    let opts = PreparedOptions::try_standard().expect("standard prepared options");
+    prepare_prover(Arc::new(registered), &opts).expect("build prepared prover")
 }
 
 /// Build a [`PreparedVerifier`] from a sealed artifact.
 pub fn build_verifier(sealed: Arc<SealedArtifact>) -> PreparedVerifier {
-    PreparedVerifier::builder(sealed)
-        .expect("create verifier builder")
-        .build()
-        .expect("build prepared verifier")
+    let opts = PreparedOptions::try_standard().expect("standard prepared options");
+    prepare_verifier(sealed, &opts).expect("build prepared verifier")
 }
 
 /// Build a [`PreparedVerifier`] from a registered program (extracts the sealed artifact).

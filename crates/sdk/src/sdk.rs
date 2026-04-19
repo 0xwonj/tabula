@@ -177,14 +177,8 @@ impl Sdk {
         artifact: &Artifact,
     ) -> Result<tabula_runtime::PreparedVerifier, SdkError> {
         let sealed = Arc::new(artifact.sealed_artifact().clone());
-        let builder = tabula_runtime::PreparedVerifier::builder(sealed)
-            .map_err(SdkError::from)?
-            .with_host_environment(self.inner.environment.inner.host_environment.clone())
-            .with_machine_stark_config(self.inner.environment.inner.machine_stark_config.clone());
-        #[cfg(feature = "prove")]
-        let builder = builder
-            .with_root_backend_bundle(self.inner.environment.inner.root_backend_bundle.clone());
-        builder.build().map_err(SdkError::from)
+        let opts = self.prepared_options()?;
+        tabula_runtime::prepare_verifier(sealed, &opts).map_err(SdkError::from)
     }
 
     #[cfg(feature = "prove")]
@@ -226,12 +220,23 @@ impl Sdk {
         &self,
         artifact: &Artifact,
     ) -> Result<tabula_runtime::PreparedProver, SdkError> {
-        let builder = tabula_runtime::PreparedProver::builder(artifact.registered().clone())
-            .map_err(SdkError::from)?
+        let registered = Arc::new(artifact.registered().clone());
+        let opts = self.prepared_options()?;
+        tabula_runtime::prepare_prover(registered, &opts).map_err(SdkError::from)
+    }
+
+    /// Build a `PreparedOptions` seeded with this SDK's environment.
+    #[cfg(feature = "verify")]
+    fn prepared_options(&self) -> Result<tabula_runtime::PreparedOptions, SdkError> {
+        let opts = tabula_runtime::PreparedOptions::try_standard()
+            .map_err(tabula_runtime::RuntimeError::from)?
             .with_host_environment(self.inner.environment.inner.host_environment.clone())
-            .with_machine_stark_config(self.inner.environment.inner.machine_stark_config.clone())
-            .with_root_backend_bundle(self.inner.environment.inner.root_backend_bundle.clone());
-        builder.build().map_err(SdkError::from)
+            .with_machine_stark_config(self.inner.environment.inner.machine_stark_config.clone());
+        #[cfg(feature = "prove")]
+        let opts = opts.with_root_backend(tabula_runtime::RootBackend::from_bundle(
+            self.inner.environment.inner.root_backend_bundle.clone(),
+        ));
+        Ok(opts)
     }
 
     fn cache_key(&self, mode: &str, artifact: &Artifact) -> String {

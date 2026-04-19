@@ -21,6 +21,7 @@ use tabula_machine::{BackendVerifier, TabulaMachine, TabulaProof, TabulaStarkCon
 use crate::bootstrap::program::{build_registered_program_machine, resolve_sealed_artifact_setup};
 use crate::error::{RuntimeError, SetupError, VerifyError};
 use crate::host::HostEnvironment;
+use crate::options::PreparedOptions;
 
 /// Prepared verifier state derived from the sealed artifact and machine setup.
 ///
@@ -230,17 +231,24 @@ impl PreparedVerifierBuilder {
     }
 }
 
-/// Convenience constructor: `prepare_verifier(sealed)` is sugar over
-/// `PreparedVerifier::builder(sealed)?.build()` using the standard host
-/// environment, machine config, and root backend.
+/// Build a [`PreparedVerifier`] from a sealed artifact and an option
+/// bundle.
 ///
 /// The verifier path is IR-free: it takes `Arc<SealedArtifact>` and does
 /// not require a `RegisteredProgram`. The prover and executor paths stay
 /// on `Arc<RegisteredProgram>` because they execute IR.
 pub fn prepare_verifier(
-    sealed_artifact: Arc<SealedArtifact>,
+    sealed: Arc<SealedArtifact>,
+    opts: &PreparedOptions,
 ) -> Result<PreparedVerifier, RuntimeError> {
-    PreparedVerifier::builder(sealed_artifact)?.build()
+    let builder = PreparedVerifier::builder(sealed)?
+        .with_host_environment(opts.host_environment().clone())
+        .with_machine_stark_config(opts.machine_stark_config().clone());
+    #[cfg(feature = "prove")]
+    let builder = builder.with_root_backend_bundle(opts.root_backend().0.clone());
+    #[cfg(not(feature = "prove"))]
+    let builder = builder.with_root_proof_backend_arc(Arc::clone(&opts.root_backend().0));
+    builder.build()
 }
 
 pub(crate) fn relation_table_root_from_proof(

@@ -49,6 +49,8 @@ mod execution;
 #[cfg(feature = "verify")]
 mod host;
 #[cfg(feature = "verify")]
+mod options;
+#[cfg(feature = "verify")]
 mod prelude;
 #[cfg(feature = "verify")]
 mod prepared_state;
@@ -83,6 +85,8 @@ pub use engine::{CommittedStateSnapshot, ExecutionReceipt, RuntimeBuilder, Tabul
 pub use engine::{ProveInput, ProveResult, VerifiedResult};
 #[cfg(feature = "verify")]
 pub use host::{HostEnvironment, InstalledSchemes, RuntimeRegistries, SmtScheme, SsmcScheme};
+#[cfg(feature = "verify")]
+pub use options::{PreparedOptions, RootBackend};
 #[cfg(feature = "prove")]
 pub use proof_summary::ProofSummary;
 #[cfg(feature = "prove")]

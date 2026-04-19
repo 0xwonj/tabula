@@ -370,7 +370,6 @@ impl TabulaRuntime {
 #[cfg(all(test, feature = "prove"))]
 mod relation_proof_tests {
     use super::*;
-    use crate::PreparedVerifier;
     use crate::verifier::relation_table_root_from_proof;
     use tabula_core::error::TabulaError;
 
@@ -600,10 +599,10 @@ tx scan(id: u64) {
             .expect("create runtime builder")
             .build()
             .expect("build runtime");
-        let prover = crate::PreparedProver::builder(registered.clone())
-            .expect("create prover builder")
-            .build()
-            .expect("build prepared prover");
+        let opts = crate::PreparedOptions::try_standard().expect("standard options");
+        let prover =
+            crate::prepare_prover(std::sync::Arc::new(registered.clone()), &opts)
+                .expect("build prepared prover");
         (registered, runtime, prover)
     }
 
@@ -1212,10 +1211,14 @@ tx scan(id: u64) {
     #[test]
     fn relation_proof_root_matches_registered_artifact_and_chip_public_values() {
         let (registered, runtime, prover) = runtime_for_source(relation_source());
-        let verifier = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
-            .expect("create verifier builder")
-            .build()
-            .expect("build verifier");
+        let verifier = {
+            let opts = crate::PreparedOptions::try_standard().expect("standard options");
+            crate::prepare_verifier(
+                std::sync::Arc::new(registered.sealed().clone()),
+                &opts,
+            )
+            .expect("build verifier")
+        };
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id: entry_id(&runtime, "enroll"),
             params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
@@ -1269,10 +1272,14 @@ tx scan(id: u64) {
     fn relation_chip_public_values_truncation_fails_verification() {
         let (registered, runtime, prover) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
-        let verifier = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
-            .expect("create verifier builder")
-            .build()
-            .expect("build verifier");
+        let verifier = {
+            let opts = crate::PreparedOptions::try_standard().expect("standard options");
+            crate::prepare_verifier(
+                std::sync::Arc::new(registered.sealed().clone()),
+                &opts,
+            )
+            .expect("build verifier")
+        };
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id: entry_id(&runtime, "enroll"),
             params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
@@ -1313,10 +1320,14 @@ tx scan(id: u64) {
     fn relation_chip_public_values_append_fails_verification() {
         let (registered, runtime, prover) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
-        let verifier = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
-            .expect("create verifier builder")
-            .build()
-            .expect("build verifier");
+        let verifier = {
+            let opts = crate::PreparedOptions::try_standard().expect("standard options");
+            crate::prepare_verifier(
+                std::sync::Arc::new(registered.sealed().clone()),
+                &opts,
+            )
+            .expect("build verifier")
+        };
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id: entry_id(&runtime, "enroll"),
             params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
@@ -1357,10 +1368,14 @@ tx scan(id: u64) {
     fn missing_relation_chip_opening_still_fails_verification() {
         let (registered, runtime, prover) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
-        let verifier = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
-            .expect("create verifier builder")
-            .build()
-            .expect("build verifier");
+        let verifier = {
+            let opts = crate::PreparedOptions::try_standard().expect("standard options");
+            crate::prepare_verifier(
+                std::sync::Arc::new(registered.sealed().clone()),
+                &opts,
+            )
+            .expect("build verifier")
+        };
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id: entry_id(&runtime, "enroll"),
             params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
@@ -1409,12 +1424,16 @@ tx scan(id: u64) {
             "unexpected runtime build error: {err}"
         );
 
-        let err = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
-            .expect("create verifier builder")
-            .with_root_backend_bundle(RootBackendBundle::new(EmptyFamilyRootBackend))
-            .build()
-            .err()
-            .expect("verifier build must reject unsupported bundled root families");
+        let err = {
+            let opts = crate::PreparedOptions::try_standard()
+                .expect("standard options")
+                .with_root_backend(crate::RootBackend::from_bundle(
+                    RootBackendBundle::new(EmptyFamilyRootBackend),
+                ));
+            crate::prepare_verifier(std::sync::Arc::new(registered.sealed().clone()), &opts)
+        }
+        .err()
+        .expect("verifier build must reject unsupported bundled root families");
         assert!(
             err.to_string()
                 .contains("bundled root authority does not support binding family"),
@@ -1429,10 +1448,11 @@ tx scan(id: u64) {
             .expect("create runtime builder")
             .build()
             .expect("build runtime");
-        let prover = crate::PreparedProver::builder(registered)
-            .expect("create prover builder")
-            .build()
-            .expect("build prover");
+        let prover = {
+            let opts = crate::PreparedOptions::try_standard().expect("standard options");
+            crate::prepare_prover(std::sync::Arc::new(registered), &opts)
+                .expect("build prover")
+        };
         let snapshot = runtime.empty_state_snapshot();
         let register = runtime
             .execution_program()
@@ -1546,16 +1566,23 @@ tx scan(id: u64) {
             .with_host_environment(host_environment.clone())
             .build()
             .expect("build runtime with extra host runtimes");
-        let prover = crate::PreparedProver::builder(registered.clone())
-            .expect("create prover builder")
-            .with_host_environment(host_environment.clone())
-            .build()
-            .expect("build prover with extra host runtimes");
-        let verifier = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
-            .expect("create verifier builder")
-            .with_host_environment(host_environment)
-            .build()
-            .expect("build verifier with extra host runtimes");
+        let prover = {
+            let opts = crate::PreparedOptions::try_standard()
+                .expect("standard options")
+                .with_host_environment(host_environment.clone());
+            crate::prepare_prover(std::sync::Arc::new(registered.clone()), &opts)
+                .expect("build prover with extra host runtimes")
+        };
+        let verifier = {
+            let opts = crate::PreparedOptions::try_standard()
+                .expect("standard options")
+                .with_host_environment(host_environment);
+            crate::prepare_verifier(
+                std::sync::Arc::new(registered.sealed().clone()),
+                &opts,
+            )
+            .expect("build verifier with extra host runtimes")
+        };
 
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id: entry_id(&runtime, "enroll"),

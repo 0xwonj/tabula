@@ -6,6 +6,8 @@
 //! [`PreparedProver::prove`] for per-batch proving. The handle is
 //! `Send + Sync` and cheap to share via `Arc`.
 
+use std::sync::Arc;
+
 use tabula_compiler::RegisteredProgram;
 use tabula_contract::ProgramBinding;
 use tabula_core::Digest;
@@ -22,6 +24,7 @@ use crate::prepared_state::{
 };
 use crate::error::{ProveError, RuntimeError, SetupError, VerifyError};
 use crate::host::HostEnvironment;
+use crate::options::PreparedOptions;
 use crate::verifier::VerifierState;
 
 /// Prepared prover handle for one registered native program.
@@ -184,11 +187,23 @@ impl PreparedProverBuilder {
     }
 }
 
-/// Convenience constructor: sugar over `PreparedProver::builder(reg)?.build()`.
+/// Build a [`PreparedProver`] from a shared registered program and an
+/// option bundle.
+///
+/// This is the canonical way to construct a prover handle: it replaces
+/// the legacy [`PreparedProver::builder`] + per-knob `with_*` chain
+/// with a single options argument. The builder is still available but
+/// will be removed once the decomposition settles (SP-5 Task 10).
 pub fn prepare_prover(
-    registered_program: RegisteredProgram,
+    registered: Arc<RegisteredProgram>,
+    opts: &PreparedOptions,
 ) -> Result<PreparedProver, RuntimeError> {
-    PreparedProver::builder(registered_program)?.build()
+    let program = Arc::try_unwrap(registered).unwrap_or_else(|shared| (*shared).clone());
+    PreparedProver::builder(program)?
+        .with_host_environment(opts.host_environment().clone())
+        .with_machine_stark_config(opts.machine_stark_config().clone())
+        .with_root_backend_bundle(opts.root_backend().0.clone())
+        .build()
 }
 
 // Load-bearing Send+Sync: PreparedProver must be cheap to share via Arc.
@@ -238,7 +253,9 @@ tx enroll(id: u64, tier: u64) {
         tabula_executor::ExecutionJournal,
     ) {
         let registered = register_program_from_source(simple_source());
-        let prover = prepare_prover(registered.clone()).expect("build PreparedProver");
+        let opts = PreparedOptions::try_standard().expect("standard prepared options");
+        let prover = prepare_prover(Arc::new(registered.clone()), &opts)
+            .expect("build PreparedProver");
 
         // Use a TabulaRuntime to run execute_batch; prover and runtime share the same
         // registered program so their prepared states are equivalent.
