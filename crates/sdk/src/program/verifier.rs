@@ -25,7 +25,9 @@ impl Verifier {
         expected_public_statement: &PublicStatement,
     ) -> Result<(), SdkError> {
         self.prepared
-            .verify(&proof.proof, expected_public_statement)?;
+            .verify(&proof.proof, expected_public_statement)
+            .map_err(tabula_runtime::RuntimeError::from)
+            .map_err(SdkError::from)?;
         Ok(())
     }
 }

@@ -45,6 +45,20 @@ where
     CommittedStateSnapshot::from_cells(&state.state, &state.type_runtimes, cells)
 }
 
+/// Decode and validate one committed snapshot payload against the sealed state contract.
+///
+/// Accepts cells with already-encoded (committed) keys; validates the payload
+/// and returns a ready-to-use [`CommittedStateSnapshot`].
+pub(crate) fn decode_committed_snapshot<I>(
+    state: &PreparedRuntimeState,
+    cells: I,
+) -> Result<CommittedStateSnapshot, RuntimeError>
+where
+    I: IntoIterator<Item = (ir::TableId, Vec<u8>, ir::FieldId, PortableValue)>,
+{
+    CommittedStateSnapshot::from_committed_cells(&state.state, &state.type_runtimes, cells)
+}
+
 /// Project one committed snapshot back into logical keyed cells.
 pub(crate) fn project_logical_state(
     state: &PreparedRuntimeState,

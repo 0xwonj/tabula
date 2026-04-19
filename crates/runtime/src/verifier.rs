@@ -27,6 +27,7 @@ use crate::options::PreparedOptions;
 ///
 /// Public so downstream consumers (SDK, tests, future prover) can name
 /// the prepared-once state without going through a builder.
+#[non_exhaustive]
 pub struct VerifierState {
     /// Artifact-bound transcript context sealed at prepare time.
     pub context: ArtifactContext,
@@ -40,6 +41,7 @@ pub struct VerifierState {
 ///
 /// Cheap to share via Arc; [`PreparedVerifier::verify`] takes
 /// `&self` so callers can drive it from multiple threads.
+#[non_exhaustive]
 pub struct PreparedVerifier {
     prepared: VerifierState,
 }
@@ -84,7 +86,7 @@ impl PreparedVerifier {
         &self,
         proof: &TabulaProof,
         expected_public_statement: &PublicStatement,
-    ) -> Result<BoundStatement, RuntimeError> {
+    ) -> Result<BoundStatement, VerifyError> {
         let bound = BoundStatement::new(
             self.prepared.context.clone(),
             expected_public_statement.clone(),
@@ -99,30 +101,30 @@ impl PreparedVerifier {
             return Err(VerifyError::Validation {
                 detail: "proof binding digest does not match the artifact-bound public statement"
                     .to_string(),
-            }
-            .into());
+            });
         }
         verify_proved_public_statement_digests(
             proof,
             &self.prepared.machine,
             expected_public_statement,
-        )?;
-        match relation_table_root_from_proof(proof, &self.prepared.machine)? {
+        )
+        .map_err(route_to_verify)?;
+        match relation_table_root_from_proof(proof, &self.prepared.machine)
+            .map_err(route_to_verify)?
+        {
             Some(root) if self.prepared.relation_policy.requires_artifact_root() => {
                 if root != self.prepared.context.static_table_root {
                     return Err(VerifyError::Validation {
                         detail: "relation table chip root does not match the verifier artifact"
                             .to_string(),
-                    }
-                    .into());
+                    });
                 }
             }
             None if self.prepared.relation_policy.requires_artifact_root() => {
                 return Err(VerifyError::Validation {
                     detail: "relation table chip opening is missing from the execution proof"
                         .to_string(),
-                }
-                .into());
+                });
             }
             _ => {}
         }
@@ -240,15 +242,16 @@ impl PreparedVerifierBuilder {
 pub fn prepare_verifier(
     sealed: Arc<SealedArtifact>,
     opts: &PreparedOptions,
-) -> Result<PreparedVerifier, RuntimeError> {
-    let builder = PreparedVerifier::builder(sealed)?
+) -> Result<PreparedVerifier, VerifyError> {
+    let builder = PreparedVerifier::builder(sealed)
+        .map_err(route_to_verify)?
         .with_host_environment(opts.host_environment().clone())
         .with_machine_stark_config(opts.machine_stark_config().clone());
     #[cfg(feature = "prove")]
     let builder = builder.with_root_backend_bundle(opts.root_backend().0.clone());
     #[cfg(not(feature = "prove"))]
     let builder = builder.with_root_proof_backend_arc(Arc::clone(&opts.root_backend().0));
-    builder.build()
+    builder.build().map_err(route_to_verify)
 }
 
 pub(crate) fn relation_table_root_from_proof(
@@ -377,10 +380,27 @@ fn verify_proved_public_statement_digests(
     Ok(())
 }
 
+/// Narrow a [`RuntimeError`] to [`VerifyError`] for the verifier surface.
+///
+/// Internal helpers (`execution_chip_digest_from_proof`,
+/// `relation_table_root_from_proof`, `verify_proved_public_statement_digests`)
+/// and the builder chain return `RuntimeError` wrapping `VerifyError` or
+/// `SetupError`. All `Verify` variants map directly; setup and other phases
+/// observed on the verifier surface are pre-verification steps and map to
+/// `VerifyError::Validation` with a preserved detail string.
+fn route_to_verify(error: RuntimeError) -> VerifyError {
+    match error {
+        RuntimeError::Verify(inner) => inner,
+        other => VerifyError::Validation {
+            detail: other.to_string(),
+        },
+    }
+}
+
 // Static guarantee that PreparedVerifier is cheap to share across threads.
 // The SDK's cache and any future concurrent driver relies on this.
 const _: fn() = || {
-    fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<PreparedVerifier>();
-    assert_send_sync::<VerifierState>();
+    fn assert_send_sync_static<T: Send + Sync + 'static>() {}
+    assert_send_sync_static::<PreparedVerifier>();
+    assert_send_sync_static::<VerifierState>();
 };

@@ -707,10 +707,10 @@ fn verifier_rejects_missing_column_proof_manifest_entry() {
         .expect_err("missing column proof must fail verification");
     assert!(matches!(
         err,
-        tabula_runtime::RuntimeError::Verify(tabula_runtime::VerifyError::Verification(VerificationError::ColumnProofCountMismatch {
+        tabula_runtime::VerifyError::Verification(VerificationError::ColumnProofCountMismatch {
             expected: 2,
             got: 1
-        }))
+        })
     ));
 }
 
@@ -724,10 +724,10 @@ fn verifier_rejects_permuted_column_proof_manifest_order() {
         .expect_err("permuted column proof order must fail verification");
     assert!(matches!(
         err,
-        tabula_runtime::RuntimeError::Verify(tabula_runtime::VerifyError::Verification(VerificationError::ColumnOrderMismatch {
+        tabula_runtime::VerifyError::Verification(VerificationError::ColumnOrderMismatch {
             index: 0,
             ..
-        }))
+        })
     ));
 }
 
@@ -741,10 +741,10 @@ fn verifier_rejects_duplicate_column_proof_manifest_entry() {
         .expect_err("duplicate column proof manifest entry must fail verification");
     assert!(matches!(
         err,
-        tabula_runtime::RuntimeError::Verify(tabula_runtime::VerifyError::Verification(VerificationError::ColumnOrderMismatch {
+        tabula_runtime::VerifyError::Verification(VerificationError::ColumnOrderMismatch {
             index: 1,
             ..
-        }))
+        })
     ));
 }
 

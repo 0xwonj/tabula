@@ -13,8 +13,6 @@
 //! is shared — the handle holds it behind `Arc` so multiple executors over
 //! the same program can share the expensive setup.
 
-#![cfg(feature = "verify")]
-
 use std::sync::Arc;
 
 use tabula_compiler::RegisteredProgram;
@@ -61,6 +59,22 @@ impl PreparedExecutor {
     /// Create an empty committed state snapshot for this program.
     pub fn empty_state_snapshot(&self) -> CommittedStateSnapshot {
         CommittedStateSnapshot::empty()
+    }
+
+    /// Decode and validate one committed snapshot payload against this program's sealed state
+    /// contract.
+    ///
+    /// Accepts cells with already-encoded (committed) keys; validates the payload and returns a
+    /// ready-to-use [`CommittedStateSnapshot`]. Prefer [`Self::materialize_logical_state`] when
+    /// building snapshots from logical (decoded) keys.
+    pub fn decode_committed_snapshot<I>(
+        &self,
+        cells: I,
+    ) -> Result<CommittedStateSnapshot, ExecuteError>
+    where
+        I: IntoIterator<Item = (ir::TableId, Vec<u8>, ir::FieldId, PortableValue)>,
+    {
+        execution::decode_committed_snapshot(&self.state, cells).map_err(route_to_execute)
     }
 
     /// Materialize one logical keyed state input into a committed snapshot.
@@ -126,11 +140,13 @@ impl PreparedExecutor {
 pub fn prepare_executor(
     registered: Arc<RegisteredProgram>,
     opts: &PreparedOptions,
-) -> Result<PreparedExecutor, RuntimeError> {
+) -> Result<PreparedExecutor, ExecuteError> {
     let program = Arc::try_unwrap(registered).unwrap_or_else(|shared| (*shared).clone());
     program
         .validate_sealed_artifact()
-        .map_err(SetupError::CompilerValidation)?;
+        .map_err(|e| ExecuteError::Validation {
+            detail: e.to_string(),
+        })?;
     let host_environment: HostEnvironment = opts.host_environment().clone();
     let machine_stark_config = opts.machine_stark_config().clone();
     #[cfg(feature = "prove")]
@@ -146,7 +162,10 @@ pub fn prepare_executor(
         root_backend,
         #[cfg(not(feature = "prove"))]
         root_backend,
-    )?;
+    )
+    .map_err(|e| ExecuteError::Validation {
+        detail: e.to_string(),
+    })?;
     // The executor does not need the machine or the root-backend bundle:
     // execution is zero-crypto. Drop them so the handle's footprint is
     // purely the prepared state.
@@ -169,9 +188,9 @@ fn route_to_execute(error: RuntimeError) -> ExecuteError {
         RuntimeError::Setup(SetupError::Validation { detail }) => {
             ExecuteError::Validation { detail }
         }
-        other => ExecuteError::Validation {
-            detail: other.to_string(),
-        },
+        other => unreachable!(
+            "execution helpers only produce Execute or Setup::Validation, got: {other:?}"
+        ),
     }
 }
 

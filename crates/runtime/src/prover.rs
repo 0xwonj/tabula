@@ -34,6 +34,7 @@ use crate::verifier::VerifierState;
 /// artifacts) is allocated fresh inside each [`PreparedProver::prove`]
 /// call — calling `prove` twice on the same handle with the same input
 /// must produce byte-identical output.
+#[non_exhaustive]
 pub struct PreparedProver {
     /// Prove-specific prepared state (semantic, state runtime, etc.).
     pub(crate) runtime_program: PreparedRuntimeState,
@@ -98,7 +99,7 @@ impl PreparedProver {
     /// lives in locals inside this call. Calling `prove` twice on
     /// the same handle with the same input must produce byte-identical
     /// output.
-    pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, RuntimeError> {
+    pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, ProveError> {
         prepare_proof_request_on_prepared_state(
             &self.runtime_program,
             &self.root_backend_bundle,
@@ -106,6 +107,7 @@ impl PreparedProver {
             &self.verifier_state.machine,
             input,
         )
+        .map_err(route_to_prove)
     }
 
     /// Generate and verify a proof in one call.
@@ -113,15 +115,15 @@ impl PreparedProver {
         &self,
         verifier: &crate::PreparedVerifier,
         input: &ProveInput<'_>,
-    ) -> Result<VerifiedResult, RuntimeError> {
+    ) -> Result<VerifiedResult, ProveError> {
         let prove_result = self.prove(input)?;
         verifier
             .verify(&prove_result.proof, &prove_result.public_statement)
             .map_err(|e| match e {
-                RuntimeError::Verify(VerifyError::Verification(source)) => {
-                    RuntimeError::Prove(ProveError::PostVerify(source))
-                }
-                other => other,
+                VerifyError::Verification(source) => ProveError::PostVerify(source),
+                other => ProveError::WitnessGeneration {
+                    detail: other.to_string(),
+                },
             })?;
         Ok(VerifiedResult {
             proof: prove_result.proof,
@@ -197,19 +199,38 @@ impl PreparedProverBuilder {
 pub fn prepare_prover(
     registered: Arc<RegisteredProgram>,
     opts: &PreparedOptions,
-) -> Result<PreparedProver, RuntimeError> {
+) -> Result<PreparedProver, ProveError> {
     let program = Arc::try_unwrap(registered).unwrap_or_else(|shared| (*shared).clone());
-    PreparedProver::builder(program)?
+    PreparedProver::builder(program)
+        .map_err(route_to_prove)?
         .with_host_environment(opts.host_environment().clone())
         .with_machine_stark_config(opts.machine_stark_config().clone())
         .with_root_backend_bundle(opts.root_backend().0.clone())
         .build()
+        .map_err(route_to_prove)
 }
 
-// Load-bearing Send+Sync: PreparedProver must be cheap to share via Arc.
+/// Narrow a [`RuntimeError`] to [`ProveError`] for the prover surface.
+///
+/// `prepare_proof_request_on_prepared_state` and the builder chain produce
+/// `RuntimeError::Prove(_)`, `RuntimeError::Verify(_)` (statement-build
+/// during pre-prove decode), `RuntimeError::Execute(_)` (decode steps), and
+/// `RuntimeError::Setup(_)` (machine / validation failures on handle build).
+/// All non-`Prove` variants are pre-prove setup or decode steps; they map to
+/// `ProveError::WitnessGeneration` with a preserved detail string.
+fn route_to_prove(error: RuntimeError) -> ProveError {
+    match error {
+        RuntimeError::Prove(inner) => inner,
+        other => ProveError::WitnessGeneration {
+            detail: other.to_string(),
+        },
+    }
+}
+
+// Load-bearing Send+Sync+'static: PreparedProver must be cheap to share via Arc.
 const _: fn() = || {
-    fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<PreparedProver>();
+    fn assert_send_sync_static<T: Send + Sync + 'static>() {}
+    assert_send_sync_static::<PreparedProver>();
 };
 
 #[cfg(test)]

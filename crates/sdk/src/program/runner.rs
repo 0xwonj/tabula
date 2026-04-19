@@ -320,12 +320,15 @@ impl Runner {
             .program
             .sdk()
             .prepare_prepared_prover(self.program.artifact())?;
-        let result = prover.prove(&tabula_runtime::ProveInput {
-            snapshot: &receipt.inner.snapshot,
-            batch: &receipt.inner.batch,
-            context: &receipt.inner.context,
-            executed: &receipt.inner.journal,
-        })?;
+        let result = prover
+            .prove(&tabula_runtime::ProveInput {
+                snapshot: &receipt.inner.snapshot,
+                batch: &receipt.inner.batch,
+                context: &receipt.inner.context,
+                executed: &receipt.inner.journal,
+            })
+            .map_err(tabula_runtime::RuntimeError::from)
+            .map_err(SdkError::from)?;
         Ok(Proof::from_prove_result(result))
     }
 

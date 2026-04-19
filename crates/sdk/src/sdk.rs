@@ -178,7 +178,9 @@ impl Sdk {
     ) -> Result<tabula_runtime::PreparedVerifier, SdkError> {
         let sealed = Arc::new(artifact.sealed_artifact().clone());
         let opts = self.prepared_options()?;
-        tabula_runtime::prepare_verifier(sealed, &opts).map_err(SdkError::from)
+        tabula_runtime::prepare_verifier(sealed, &opts)
+            .map_err(tabula_runtime::RuntimeError::from)
+            .map_err(SdkError::from)
     }
 
     #[cfg(feature = "prove")]
@@ -222,7 +224,9 @@ impl Sdk {
     ) -> Result<tabula_runtime::PreparedProver, SdkError> {
         let registered = Arc::new(artifact.registered().clone());
         let opts = self.prepared_options()?;
-        tabula_runtime::prepare_prover(registered, &opts).map_err(SdkError::from)
+        tabula_runtime::prepare_prover(registered, &opts)
+            .map_err(tabula_runtime::RuntimeError::from)
+            .map_err(SdkError::from)
     }
 
     /// Build a `PreparedOptions` seeded with this SDK's environment.
@@ -414,13 +418,13 @@ tx touch(id: u64) {
         assert!(matches!(
             first,
             SdkError::Runtime(
-                RuntimeError::Setup(_) | RuntimeError::Verify(_) | RuntimeError::Execute(_)
+                RuntimeError::Prove(_) | RuntimeError::Setup(_) | RuntimeError::Verify(_) | RuntimeError::Execute(_)
             )
         ));
         assert!(matches!(
             second,
             SdkError::Runtime(
-                RuntimeError::Setup(_) | RuntimeError::Verify(_) | RuntimeError::Execute(_)
+                RuntimeError::Prove(_) | RuntimeError::Setup(_) | RuntimeError::Verify(_) | RuntimeError::Execute(_)
             )
         ));
         assert!(sdk.inner.prover_cache.lock().is_ok());
