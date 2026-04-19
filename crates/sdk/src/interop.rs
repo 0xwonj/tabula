@@ -310,6 +310,15 @@ pub fn prepare_prover(
     sdk.prepare_prepared_prover(artifact)
 }
 
+/// Prepare the cached native verifier for one artifact.
+#[cfg(feature = "verify")]
+pub fn prepare_verifier(
+    sdk: &Sdk,
+    artifact: &Artifact,
+) -> Result<Arc<tabula_runtime::PreparedVerifier>, SdkError> {
+    sdk.prepare_prepared_verifier(artifact)
+}
+
 /// Construct one SDK execution receipt from raw runtime-owned parts.
 #[cfg(feature = "execute")]
 pub fn execution_receipt_from_raw_parts(parts: RawExecutionReceiptParts) -> ExecutionReceipt {

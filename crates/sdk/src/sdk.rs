@@ -124,7 +124,7 @@ impl Sdk {
     }
 
     #[cfg(feature = "verify")]
-    pub(crate) fn prepare_verifier(
+    pub(crate) fn prepare_prepared_verifier(
         &self,
         artifact: &Artifact,
     ) -> Result<Arc<tabula_runtime::PreparedVerifier>, SdkError> {
@@ -141,7 +141,7 @@ impl Sdk {
         }
         drop(cache);
 
-        let built = Arc::new(self.build_verifier(artifact)?);
+        let built = Arc::new(self.build_prepared_verifier(artifact)?);
         let mut cache =
             self.inner
                 .verifier_cache
@@ -172,7 +172,7 @@ impl Sdk {
     }
 
     #[cfg(feature = "verify")]
-    fn build_verifier(
+    fn build_prepared_verifier(
         &self,
         artifact: &Artifact,
     ) -> Result<tabula_runtime::PreparedVerifier, SdkError> {
@@ -354,12 +354,16 @@ tx touch(id: u64) {
 
     #[cfg(all(feature = "compile", feature = "verify", feature = "execute"))]
     #[test]
-    fn prepare_verifier_reuses_cached_instance() {
+    fn prepare_prepared_verifier_reuses_cached_instance() {
         let sdk = Sdk::standard().expect("build standard sdk");
         let artifact = sdk.compile(SIMPLE_SOURCE).expect("compile simple source");
 
-        let first = sdk.prepare_verifier(&artifact).expect("build verifier");
-        let second = sdk.prepare_verifier(&artifact).expect("reuse verifier");
+        let first = sdk
+            .prepare_prepared_verifier(&artifact)
+            .expect("build verifier");
+        let second = sdk
+            .prepare_prepared_verifier(&artifact)
+            .expect("reuse verifier");
 
         assert!(Arc::ptr_eq(&first, &second));
         let cache = sdk.inner.verifier_cache.lock().expect("verifier cache");
@@ -410,14 +414,14 @@ tx touch(id: u64) {
 
     #[cfg(all(feature = "compile", feature = "verify", feature = "execute"))]
     #[test]
-    fn prepare_verifier_build_failure_does_not_poison_cache() {
+    fn prepare_prepared_verifier_build_failure_does_not_poison_cache() {
         let sdk = sdk_with_empty_runtime_host();
         let artifact = sdk.compile(SIMPLE_SOURCE).expect("compile simple source");
 
-        let Err(first) = sdk.prepare_verifier(&artifact) else {
+        let Err(first) = sdk.prepare_prepared_verifier(&artifact) else {
             panic!("verifier build must fail without host environment");
         };
-        let Err(second) = sdk.prepare_verifier(&artifact) else {
+        let Err(second) = sdk.prepare_prepared_verifier(&artifact) else {
             panic!("repeated verifier build failure must stay recoverable");
         };
 
