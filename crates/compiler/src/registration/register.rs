@@ -1,7 +1,9 @@
 use tabula_contract::{
     CONTRACT_SCHEMA_VERSION, ContractMetadataEnvelope, STATEMENT_SCHEMA_VERSION,
-    TupleEncodingDefaults, TupleEncodingSelection, VERIFIER_PROFILE_VERSION,
+    SealedArtifact, SealedRelationPolicy, TupleEncodingDefaults, TupleEncodingSelection,
+    VERIFIER_PROFILE_VERSION,
 };
+use tabula_ir as ir;
 
 use crate::CompilerCatalogs;
 use crate::error::{CompilerError, CompilerResult};
@@ -77,17 +79,54 @@ fn register_compiled_program_with_context(
     )
     .map_err(CompilerError::InvalidProgram)?;
 
-    Ok(RegisteredProgram {
-        artifact_schema_version: REGISTERED_PROGRAM_SCHEMA_VERSION,
-        validated,
+    // Seal-time compute relation_policy and uses_ir_hash by scanning IR opcodes.
+    let relation_policy = relation_policy_from_program(validated.as_program());
+    let uses_ir_hash = uses_ir_hash_in_program(validated.as_program());
+
+    let sealed = SealedArtifact::new(
         execution_contract,
         profile_catalog,
         tuple_encoding_defaults,
-        capability_manifest,
         static_table_artifact,
         metadata_envelope,
         binding,
+        relation_policy,
+        uses_ir_hash,
+    );
+
+    Ok(RegisteredProgram {
+        artifact_schema_version: REGISTERED_PROGRAM_SCHEMA_VERSION,
+        sealed,
+        validated,
+        capability_manifest,
     })
+}
+
+/// Derive the sealed relation policy for a program by scanning its IR opcodes.
+///
+/// Returns [`SealedRelationPolicy::RequireArtifactRoot`] if the program contains
+/// any `AssertRelation` or `EvalRelation` ops, otherwise
+/// [`SealedRelationPolicy::Disabled`].
+fn relation_policy_from_program(program: &ir::Program) -> SealedRelationPolicy {
+    let uses_relations = program
+        .entries
+        .iter()
+        .flat_map(|entry| entry.body.ops.iter())
+        .any(|op| matches!(op, ir::Op::AssertRelation { .. } | ir::Op::EvalRelation { .. }));
+    if uses_relations {
+        SealedRelationPolicy::RequireArtifactRoot
+    } else {
+        SealedRelationPolicy::Disabled
+    }
+}
+
+/// Return `true` if the program contains any `Hash` ops.
+fn uses_ir_hash_in_program(program: &ir::Program) -> bool {
+    program
+        .entries
+        .iter()
+        .flat_map(|entry| entry.body.ops.iter())
+        .any(|op| matches!(op, ir::Op::Hash { .. }))
 }
 
 /// Compile and register rewritten source into a native sealed artifact.

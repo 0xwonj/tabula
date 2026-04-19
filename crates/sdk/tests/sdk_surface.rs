@@ -244,7 +244,7 @@ fn load_artifact_accepts_fresh_registered_payload() {
 fn load_artifact_rejects_mutated_binding_program_hash() {
     let sdk = sdk();
     let mut value = artifact_json_value(&sdk, SDK_SURFACE_SOURCE);
-    value["binding"]["program_hash"] =
+    value["sealed"]["binding"]["program_hash"] =
         json!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
 
     let err = sdk
@@ -260,7 +260,7 @@ fn load_artifact_rejects_mutated_binding_program_hash() {
 fn load_artifact_rejects_mutated_binding_metadata_hash() {
     let sdk = sdk();
     let mut value = artifact_json_value(&sdk, SDK_SURFACE_SOURCE);
-    value["binding"]["metadata_hash"] =
+    value["sealed"]["binding"]["metadata_hash"] =
         json!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
 
     let err = sdk
@@ -276,7 +276,7 @@ fn load_artifact_rejects_mutated_binding_metadata_hash() {
 fn load_artifact_rejects_mutated_static_table_root() {
     let sdk = sdk();
     let mut value = artifact_json_value(&sdk, SDK_SURFACE_SOURCE);
-    value["static_table_artifact"]["root"][0] = json!(19);
+    value["sealed"]["static_table_artifact"]["root"][0] = json!(19);
 
     let err = sdk
         .load_artifact(&serde_json::to_vec(&value).expect("serialize mutated artifact payload"))
@@ -291,7 +291,7 @@ fn load_artifact_rejects_mutated_static_table_root() {
 fn load_artifact_rejects_mutated_static_table_rows() {
     let sdk = sdk();
     let mut value = artifact_json_value(&sdk, SDK_SURFACE_SOURCE);
-    value["static_table_artifact"]["rows"] = json!([{
+    value["sealed"]["static_table_artifact"]["rows"] = json!([{
         "relation_id": 99,
         "input_digest": [0, 0, 0, 0, 0, 0, 0, 0],
         "output_digest": [0, 0, 0, 0, 0, 0, 0, 0]

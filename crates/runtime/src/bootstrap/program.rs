@@ -19,19 +19,6 @@ use crate::error::RuntimeError;
 use crate::host::SchemeFactoryMap;
 use crate::state_runtime::ResolvedStateRuntime;
 
-/// Derive the [`SealedRelationPolicy`] for a program by scanning its IR opcodes.
-///
-/// This helper lives here until T4 moves it into the compiler registration path,
-/// at which point the policy will be sealed once at registration time instead of
-/// being recomputed at prepare time.
-pub(crate) fn relation_policy_from_program(program: &ir::Program) -> SealedRelationPolicy {
-    if program_uses_relations(program) {
-        SealedRelationPolicy::RequireArtifactRoot
-    } else {
-        SealedRelationPolicy::Disabled
-    }
-}
-
 /// Shared registered-program setup used by both runtime proving and verification.
 #[derive(Clone)]
 pub(crate) struct ProgramSetup {
@@ -64,8 +51,8 @@ pub(crate) fn resolve_program_setup(
         artifact_context: artifact_context_from_registered_program(registered_program),
         resolved_state,
         machine_columns,
-        relation_policy: relation_policy_from_program(registered_program.program()),
-        uses_ir_hash: program_uses_hash(registered_program.program()),
+        relation_policy: registered_program.sealed().relation_policy(),
+        uses_ir_hash: registered_program.sealed().uses_ir_hash(),
     })
 }
 
@@ -148,25 +135,4 @@ pub(crate) fn validate_core_first_program(program: &ir::Program) -> Result<(), R
         }
     }
     Ok(())
-}
-
-pub(crate) fn program_uses_hash(program: &ir::Program) -> bool {
-    program
-        .entries
-        .iter()
-        .flat_map(|entry| entry.body.ops.iter())
-        .any(|op| matches!(op, ir::Op::Hash { .. }))
-}
-
-pub(crate) fn program_uses_relations(program: &ir::Program) -> bool {
-    program
-        .entries
-        .iter()
-        .flat_map(|entry| entry.body.ops.iter())
-        .any(|op| {
-            matches!(
-                op,
-                ir::Op::AssertRelation { .. } | ir::Op::EvalRelation { .. }
-            )
-        })
 }

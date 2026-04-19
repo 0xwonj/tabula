@@ -294,7 +294,7 @@ fn compiler_parse_rejects_mutated_artifact_schema_version() {
 #[test]
 fn compiler_parse_rejects_mutated_metadata_version() {
     let mut value = registered_artifact_value(relation_source());
-    value["metadata_envelope"]["statement_schema_version"] = json!(u32::MAX);
+    value["sealed"]["metadata_envelope"]["statement_schema_version"] = json!(u32::MAX);
 
     let err = parse_registered_artifact_value(&value)
         .expect_err("mutated statement schema version must fail closed");
@@ -307,12 +307,12 @@ fn compiler_parse_rejects_mutated_metadata_version() {
 #[test]
 fn compiler_parse_rejects_mutated_profile_hash() {
     let mut value = registered_artifact_value(relation_source());
-    value["metadata_envelope"]["profile_hash"][0] = json!(17);
+    value["sealed"]["metadata_envelope"]["profile_hash"][0] = json!(17);
 
     let err =
         parse_registered_artifact_value(&value).expect_err("mutated profile hash must fail closed");
     assert!(
-        err.to_string().contains("profile hash mismatch"),
+        err.to_string().contains("profile hash"),
         "unexpected error: {err}"
     );
 }
@@ -320,7 +320,7 @@ fn compiler_parse_rejects_mutated_profile_hash() {
 #[test]
 fn compiler_parse_rejects_mutated_semantic_hash() {
     let mut value = registered_artifact_value(relation_source());
-    value["metadata_envelope"]["semantic_hash"][0] = json!(23);
+    value["sealed"]["metadata_envelope"]["semantic_hash"][0] = json!(23);
 
     let err = parse_registered_artifact_value(&value)
         .expect_err("mutated semantic hash must fail closed");

@@ -87,9 +87,6 @@ pub enum CompilerError {
         /// Human-readable mismatch detail.
         detail: String,
     },
-    /// Compiled artifact metadata mismatched current semantic policy.
-    #[error("contract metadata mismatch: {0}")]
-    ContractMetadataMismatch(#[source] tabula_contract::ContractValidationError),
 }
 
 /// Errors returned while mutating compiler-owned sealing catalogs.

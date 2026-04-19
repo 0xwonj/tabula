@@ -233,6 +233,17 @@ fn native_proof_path_stays_bridge_free() {
             "fn program_uses_relations(",
         ],
     );
+    // SP-1.5 T4: relation_policy and uses_ir_hash are now sealed at registration
+    // time and stored in SealedArtifact. The runtime must not rescan IR for
+    // these — they must be read from sealed fields.
+    assert_source_omits(
+        "crates/runtime/src/bootstrap/program.rs",
+        &[
+            "fn relation_policy_from_program(",
+            "fn program_uses_hash(",
+            "fn program_uses_relations(",
+        ],
+    );
     // SP-4 S4.1: prove surface removed from TabulaRuntime; callers migrated to PreparedProver/PreparedVerifier.
     assert_source_omits(
         "crates/runtime/src/engine.rs",
