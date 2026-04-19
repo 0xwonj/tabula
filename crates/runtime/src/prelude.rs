@@ -25,9 +25,9 @@ use crate::prepared_state::PreparedRuntimeState;
 use std::collections::BTreeMap;
 
 #[cfg(feature = "prove")]
-use tabula_chips::execution::trace::InstructionRecord;
-#[cfg(feature = "prove")]
 use tabula_executor as exec;
+#[cfg(feature = "prove")]
+use tabula_stark::witness_kit::{LogicalExecutionPrelude, LogicalOpcodeTag};
 #[cfg(feature = "prove")]
 use tabula_witness::stark::{ContextPreludeSlot, ParamPreludeSlot};
 
@@ -36,7 +36,8 @@ use crate::proof_artifacts::{ContextPreludeArtifacts, PublicStatementSlotLayout}
 #[cfg(feature = "prove")]
 use crate::semantics as runtime_ir;
 
-pub(crate) fn decode_entry_batch_on_state(
+#[doc(hidden)]
+pub fn decode_entry_batch_on_state(
     state: &PreparedRuntimeState,
     batch: &ir::EntryBatch,
 ) -> Result<Vec<TxCall>, RuntimeError> {
@@ -110,7 +111,8 @@ pub(crate) fn decode_params_on_state(
         .collect()
 }
 
-pub(crate) fn decode_context_input_on_state(
+#[doc(hidden)]
+pub fn decode_context_input_on_state(
     state: &PreparedRuntimeState,
     context: &ir::ContextInput,
 ) -> Result<ContextValues, RuntimeError> {
@@ -203,8 +205,8 @@ pub(crate) fn build_context_prelude(
             value: typed.clone(),
             encoded: encoded.field_elements.to_vec(),
         });
-        records.push(InstructionRecord {
-            opcode: tabula_chips::execution::trace::Opcode::LoadContext,
+        records.push(LogicalExecutionPrelude {
+            opcode: LogicalOpcodeTag::LoadContext,
             tx_index: 0,
             proof_meta0: Some(item_index as u32),
             proof_meta1: Some(binding.field.0),
@@ -212,7 +214,6 @@ pub(crate) fn build_context_prelude(
             written_slots: vec![slot],
             src1_val: encoded.field_elements.to_vec(),
             writes: vec![(slot, encoded.field_elements.to_vec(), false)],
-            ..InstructionRecord::default()
         });
     }
     Ok((slots, records, item_blocks))
@@ -226,17 +227,19 @@ pub(crate) fn build_param_prelude(
     call: &TxCall,
     tx_item_index_base: u32,
     tx_index: u32,
-) -> Result<(Vec<ParamPreludeSlot>, Vec<InstructionRecord>), RuntimeError> {
+) -> Result<(Vec<ParamPreludeSlot>, Vec<LogicalExecutionPrelude>), RuntimeError> {
     let mut slots = Vec::with_capacity(entry.params.len());
     let mut records = Vec::with_capacity(entry.params.len() + 1);
 
-    records.push(InstructionRecord {
-        opcode: tabula_chips::execution::trace::Opcode::TxBegin,
+    records.push(LogicalExecutionPrelude {
+        opcode: LogicalOpcodeTag::TxBegin,
         tx_index,
         proof_meta0: Some(tx_item_index_base),
         proof_meta1: Some(call.entry_id.0),
         proof_meta2: Some(entry.params.len() as u32),
-        ..InstructionRecord::default()
+        written_slots: Vec::new(),
+        src1_val: Vec::new(),
+        writes: Vec::new(),
     });
 
     for (param_index, param) in entry.params.iter().enumerate() {
@@ -266,8 +269,8 @@ pub(crate) fn build_param_prelude(
             encoded: encoded.field_elements.to_vec(),
         });
 
-        records.push(InstructionRecord {
-            opcode: tabula_chips::execution::trace::Opcode::LoadParam,
+        records.push(LogicalExecutionPrelude {
+            opcode: LogicalOpcodeTag::LoadParam,
             tx_index,
             proof_meta0: Some(tx_item_index_base + 1 + param_index as u32),
             proof_meta1: Some(param_index as u32),
@@ -275,7 +278,6 @@ pub(crate) fn build_param_prelude(
             written_slots: vec![slot],
             src1_val: encoded.field_elements.to_vec(),
             writes: vec![(slot, encoded.field_elements.to_vec(), false)],
-            ..InstructionRecord::default()
         });
     }
 

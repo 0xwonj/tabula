@@ -6,11 +6,8 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use tabula_chips::execution::MAX_SLOTS;
-use tabula_chips::execution::trace::InstructionRecord;
 use tabula_commitment::PoseidonHasher;
-#[cfg(all(test, feature = "prove"))]
-use tabula_contract::BoundStatement;
-use tabula_contract::PublicStatement;
+use tabula_contract::{BoundStatement, PublicStatement};
 use tabula_core::{ColId, TableId};
 use tabula_executor as exec;
 use tabula_ext::backend::column::{ColumnProofContext, PreparedColumnDelta, PreparedColumnProof};
@@ -48,10 +45,21 @@ pub(crate) struct PreparedColumnArtifacts {
     input: PreparedColumnInput,
 }
 
-pub(crate) struct PreparedArtifacts {
-    pub(crate) public_statement: PublicStatement,
-    pub(crate) execution: PreparedTierInput,
+/// Prove-path intermediate artifacts: public statement, per-tier
+/// prepared inputs (execution + columns + root), and binding-digest
+/// inputs.
+///
+/// Exposed under `#[doc(hidden)]` to `crates/runtime/tests/` only; not
+/// part of the stable public surface.
+#[doc(hidden)]
+pub struct PreparedArtifacts {
+    /// Assembled public statement reflecting proved state.
+    pub public_statement: PublicStatement,
+    /// Prepared execution-tier input (witness store + records).
+    pub execution: PreparedTierInput,
+    /// Prepared per-column tier inputs.
     pub(crate) columns: Vec<PreparedColumnArtifacts>,
+    /// Prepared root-tier input.
     pub(crate) root: PreparedTierInput,
 }
 
@@ -81,7 +89,7 @@ pub(crate) struct PublicStatementSlotLayout {
 
 pub(crate) type ContextPreludeArtifacts = (
     Vec<ContextPreludeSlot>,
-    Vec<InstructionRecord>,
+    Vec<tabula_stark::witness_kit::LogicalExecutionPrelude>,
     Vec<[p3_koala_bear::KoalaBear; 8]>,
 );
 
@@ -132,7 +140,8 @@ pub(crate) fn context_public_statement_bindings(
     })
 }
 
-pub(crate) fn prepare_proof_artifacts(
+#[doc(hidden)]
+pub fn prepare_proof_artifacts(
     runtime_program: &PreparedRuntimeState,
     root_backend_bundle: &RootBackendBundle,
     kit_registry: &ChipKitRegistry,
@@ -403,7 +412,8 @@ pub(crate) fn prepare_proof_artifacts(
     }
 
     let mut lowered = merge_lowering_outputs(lowered_txs.values(), kit_scratch);
-    let mut instruction_records = context_records;
+    let mut instruction_records = Vec::new();
+    instruction_records.extend(context_records.into_iter().map(Into::into));
     for tx_index in 0..txs.len() {
         let (_, prelude_records) =
             tx_prelude_by_index.get(&(tx_index as u32)).ok_or_else(|| {
@@ -411,7 +421,7 @@ pub(crate) fn prepare_proof_artifacts(
                     detail: format!("missing tx prelude for tx {tx_index}"),
                 }
             })?;
-        instruction_records.extend(prelude_records.iter().cloned());
+        instruction_records.extend(prelude_records.iter().cloned().map(Into::into));
         if let Some(lowered_tx) = lowered_txs.get(&(tx_index as u32)) {
             instruction_records.extend(lowered_tx.instruction_records.iter().cloned());
         }
@@ -450,14 +460,15 @@ pub(crate) fn prepare_proof_artifacts(
         relation_proof
             .table_rows()
             .iter()
-            .map(
-                |row| tabula_chips::relation_table::RelationTableWitnessRow {
+            .map(|row| {
+                tabula_stark::witness_kit::LogicalRelationTableRow {
                     relation_id: row.relation_id,
                     input_digest: row.input_digest,
                     output_digest: row.output_digest,
                     lookup_mult: row.lookup_mult,
-                },
-            )
+                }
+                .into()
+            })
             .collect(),
     );
     let execution_store =
@@ -654,11 +665,13 @@ fn prepare_column_slot(
 
 /// Prepare the machine input and public statement without running the prover.
 ///
-/// Exposed only for tests that need to tamper with witness store contents
-/// before proving. Production code must use
+/// Exposed only for tests (in-crate and `crates/runtime/tests/`) that
+/// need to tamper with witness store contents before proving. Production
+/// code must use
 /// [`crate::prover::prepare_proof_request_on_prepared_state`] instead.
-#[cfg(all(test, feature = "prove"))]
-pub(crate) fn prepare_proof_machine_input(
+/// Not part of the stable public surface.
+#[doc(hidden)]
+pub fn prepare_proof_machine_input(
     state: &PreparedRuntimeState,
     root_backend_bundle: &RootBackendBundle,
     kit_registry: &ChipKitRegistry,

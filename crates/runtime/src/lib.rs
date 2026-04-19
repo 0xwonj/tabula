@@ -51,11 +51,13 @@ mod host;
 #[cfg(feature = "verify")]
 mod options;
 #[cfg(feature = "verify")]
-mod prelude;
+#[doc(hidden)]
+pub mod prelude;
 #[cfg(feature = "verify")]
 mod prepared_state;
 #[cfg(feature = "prove")]
-mod proof_artifacts;
+#[doc(hidden)]
+pub mod proof_artifacts;
 #[cfg(feature = "prove")]
 mod proof_summary;
 #[cfg(feature = "prove")]

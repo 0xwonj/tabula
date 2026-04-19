@@ -920,13 +920,43 @@ artifact at close-out.)
 
 ### Deviations from §16
 
-- **Task 11** (separate typed pre-stuff extraction in `tabula-stark`) was
-  folded into Task 10. The guardrail invariant
-  (`tabula_chips::*Row` absent from `crates/runtime/src/**`) held at T10
-  close without introducing `LogicalRelationTableRow` /
-  `LogicalExecutionPrelude` logical-row types. Deferring those types
-  avoids adding API surface that has no current consumer; the boundary
-  is enforced by the guardrail test, not by the type split.
+- **Task 11** (typed pre-stuff extraction in `tabula-stark`) was initially
+  folded into Task 10 with the (incorrect) claim that the guardrail
+  invariant held at T10 close without introducing logical row types and
+  without a guardrail test. The post-branch SP-5 review surfaced the
+  violation as blocker B-1 (`docs/notes/sp5-review-findings.md`): three
+  runtime files still imported and constructed
+  `tabula_chips::execution::trace::InstructionRecord` and
+  `tabula_chips::relation_table::RelationTableWitnessRow`
+  (`crates/runtime/src/{proof_artifacts.rs, prelude.rs, prover_relation_tests.rs}`),
+  and the guardrail file `crates/runtime/tests/no_chip_rows_in_runtime.rs`
+  did not exist.
+
+  **Resolution (SP-5 Fix F0, 2026-04-20).** Implemented §8 as originally
+  specced:
+  1. `feat(stark): introduce LogicalRelationTableRow + LogicalExecutionPrelude`
+     (commit `e5c064a`) — added `LogicalRelationTableRow`,
+     `LogicalExecutionPrelude`, and `LogicalOpcodeTag` in
+     `tabula-stark::witness_kit`; the corresponding
+     `From<LogicalX> for ChipX` impls live in `tabula-chips`
+     (`tabula-stark -> tabula-chips` is forbidden by the dep graph; the
+     runtime-never-imports-chip-rows invariant is preserved by placing
+     the conversion inside the chip crate).
+  2. `fix(runtime): restore §8 chip-row boundary; land guardrail test`
+     (this commit) — rewired the three runtime src files onto the logical
+     types, moved four tests that fundamentally tamper with chip-row
+     internals from `crates/runtime/src/prover_relation_tests.rs` to
+     `crates/runtime/tests/prover_tampering.rs`, and landed
+     `crates/runtime/tests/no_chip_rows_in_runtime.rs` as a passing
+     guardrail. Three gates re-ran green (`cargo test`,
+     `cargo clippy -D warnings`, `scripts/sp5_byte_identity.sh`);
+     byte-identity matched the baseline unchanged (this was internal
+     rewiring — no proof-visible bytes touched).
+
+  Post-F0 state: `tabula_chips::execution::trace::InstructionRecord` and
+  `tabula_chips::relation_table::RelationTableWitnessRow` do not appear
+  under `crates/runtime/src/**/*.rs`; the guardrail test enforces this
+  on every run.
 - Task 15 produced no commit; its work was an audit whose findings
   fed into the T16 gate and this Landed section.
 

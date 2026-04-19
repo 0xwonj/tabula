@@ -254,17 +254,28 @@ impl From<LogicalOpcodeTag> for Opcode {
 
 impl From<LogicalExecutionPrelude> for InstructionRecord {
     fn from(prelude: LogicalExecutionPrelude) -> Self {
-        InstructionRecord {
+        // Mirror the original `..InstructionRecord::default()` pattern the
+        // runtime used: only override row fields the logical value
+        // actually carries, leaving the rest at their chip-side defaults
+        // so prelude rows stay byte-identical to the pre-boundary form.
+        let mut record = InstructionRecord {
             opcode: prelude.opcode.into(),
             tx_index: prelude.tx_index,
             proof_meta0: prelude.proof_meta0,
             proof_meta1: prelude.proof_meta1,
             proof_meta2: prelude.proof_meta2,
-            written_slots: prelude.written_slots,
-            src1_val: prelude.src1_val,
-            writes: prelude.writes,
             ..InstructionRecord::default()
+        };
+        if !prelude.written_slots.is_empty() {
+            record.written_slots = prelude.written_slots;
         }
+        if !prelude.src1_val.is_empty() {
+            record.src1_val = prelude.src1_val;
+        }
+        if !prelude.writes.is_empty() {
+            record.writes = prelude.writes;
+        }
+        record
     }
 }
 

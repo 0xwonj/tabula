@@ -1,8 +1,13 @@
 //! Integration tests for the relation-proof path.
 //!
-//! Included into [`crate::prover`] via `#[path]` so tests retain
-//! `pub(crate)` access to `PreparedProver` fields without adding
-//! accessors that are not needed outside of tests.
+//! Included into [`crate::prover`] via `#[path]` so tests can reach
+//! crate-internal helpers through `super::*` without threading every
+//! dependency through the `#[doc(hidden)] pub` surface. Tamper-class
+//! tests that fundamentally need to name chip-layer row types live in
+//! `crates/runtime/tests/prover_tampering.rs` (per SP-5 §8), where they
+//! consume the `#[doc(hidden)] pub` accessors on `PreparedProver`
+//! (`prepared_state`, `root_backend_bundle`, `kit_registry`) plus the
+//! re-exported `prelude` / `proof_artifacts` modules.
 
 use super::*;
 use crate::host::HostEnvironment;
@@ -16,11 +21,8 @@ use std::sync::Arc;
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use std::collections::{BTreeMap, BTreeSet};
-use tabula_chips::event_transcript::EVENT_TRANSCRIPT_WITNESS_LABEL;
 use tabula_chips::execution::EXECUTION_STANDARD_VALUE_WIDTH;
-use tabula_chips::execution::trace::{InstructionRecord, Opcode};
 use tabula_chips::relation_table::RELATION_TABLE_CHIP_ID;
-use tabula_chips::relation_table::{RELATION_TABLE_WITNESS_LABEL, RelationTableWitnessRow};
 use tabula_chips::relation_transcript::{
     RELATION_TRANSCRIPT_WITNESS_LABEL, RelationTranscriptCall,
 };
@@ -36,7 +38,6 @@ use tabula_profile::{
     HostValueFamily, NullSemantics, TranscriptSerialization, TypeCapabilities, TypeDescriptor,
     ZeroValueSpec,
 };
-use tabula_stark::trace::witness_labels;
 use tabula_testing::exec::{
     context_input, register_program_from_source, register_program_from_source_with_catalogs,
     tx_batch,
@@ -89,95 +90,15 @@ tx enroll(flag: bool, id: u64, tier: u64) {
 "#
 }
 
-fn event_debug_source() -> &'static str {
-    r#"
-program EventTranscriptDebug
-
-context {
-  caller: u64;
-}
-
-event Registered(id: u64, actor: u64);
-
-tx register(id: u64) {
-  emit Registered(id, caller);
-  return;
-}
-"#
-}
-
-fn extract_event_items(records: &[InstructionRecord]) -> Vec<(u32, [KoalaBear; 8])> {
-    let mut items = records
-        .iter()
-        .filter_map(|record| match record.opcode {
-            Opcode::EmitEventHeader => Some((
-                record.proof_meta0.expect("event header item index"),
-                [
-                    KoalaBear::ONE,
-                    KoalaBear::new(record.tx_index),
-                    KoalaBear::new(
-                        record
-                            .instruction_index
-                            .expect("event header instruction index"),
-                    ),
-                    KoalaBear::new(record.proof_meta1.expect("event header ordinal")),
-                    KoalaBear::new(record.proof_meta2.expect("event header id")),
-                    KoalaBear::new(record.proof_meta3.expect("event header arg count")),
-                    KoalaBear::ZERO,
-                    KoalaBear::ZERO,
-                ],
-            )),
-            Opcode::EmitEventArg => Some((
-                record.proof_meta0.expect("event arg item index"),
-                [
-                    KoalaBear::new(2),
-                    KoalaBear::new(record.tx_index),
-                    KoalaBear::new(record.proof_meta1.expect("event arg ordinal")),
-                    KoalaBear::new(record.proof_meta2.expect("event arg index")),
-                    KoalaBear::new(record.proof_meta3.expect("event arg type id")),
-                    *record.src1_val.first().expect("event arg limb 0"),
-                    *record.src1_val.get(1).expect("event arg limb 1"),
-                    *record.src1_val.get(2).expect("event arg limb 2"),
-                ],
-            )),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    items.sort_unstable_by_key(|(item_index, _)| *item_index);
-    items
-}
-
-fn guarded_relation_source() -> &'static str {
-    r#"
-program GuardedRelation
-
-context {
-  caller: u64;
-}
-
-state {
-  table accounts(key id: u64) {
-    tier: u64 @ssmc;
-  }
-}
-
-relation PromoteTier(tier: u64) -> promoted: u64 = map {
-  1 => 2,
-  2 => 3,
-  3 => 3,
-};
-
-tx maybe_promote(flag: bool, id: u64, tier: u64) {
-  if flag {
-    let promoted = eval relation PromoteTier(tier);
-    accounts[id].tier = promoted;
-  } else {
-    assert true;
-  }
-  return;
-}
-"#
-}
+// `event_debug_source`, `extract_event_items`, and the
+// `event_transcript_witness_matches_execution_event_rows` test were moved
+// to `crates/runtime/tests/prover_tampering.rs` as part of SP-5 Fix F0b.
+// Same for the three other tests that read or mutate chip-row fields
+// directly: `untaken_relation_branches_emit_no_relation_claims_or_positive_lookup_counts`,
+// `tampering_relation_table_rows_breaks_proving`, and
+// `tampering_execution_bound_relation_outputs_breaks_proving`.
+// They live outside `crates/runtime/src/` so the §8 chip-row boundary
+// guardrail does not trip on their imports.
 
 fn capability_source() -> &'static str {
     r#"
@@ -198,10 +119,6 @@ fn relation_context(caller: u64, epoch: u64) -> ir::ContextInput {
         (ir::ContextFieldId(0), u64_portable(caller)),
         (ir::ContextFieldId(1), u64_portable(epoch)),
     ])
-}
-
-fn guarded_context(caller: u64) -> ir::ContextInput {
-    context_input([(ir::ContextFieldId(0), u64_portable(caller))])
 }
 
 fn relation_snapshot(registered: &RegisteredProgram) -> CommittedStateSnapshot {
@@ -611,139 +528,6 @@ fn lowering_rejects_duplicate_relation_effect_origins() {
 }
 
 #[test]
-fn untaken_relation_branches_emit_no_relation_claims_or_positive_lookup_counts() {
-    let (registered, executor, prover) = executor_and_prover_for_source(guarded_relation_source());
-    let batch = tx_batch(vec![ir::EntryCall {
-        entry_id: entry_id_for(&executor, "maybe_promote"),
-        params: vec![bool_portable(false), u64_portable(0), u64_portable(2)],
-    }]);
-    let context = guarded_context(7);
-    let snapshot = relation_snapshot(&registered);
-    let executed = executor
-        .execute_batch(&snapshot, &batch, &context)
-        .expect("execute guarded batch");
-
-    let (machine_input, _public_statement) = crate::proof_artifacts::prepare_proof_machine_input(
-        &prover.runtime_program,
-        &prover.root_backend_bundle,
-        &prover.kit_registry,
-        &prove_input(&snapshot, &batch, &context, &executed),
-    )
-    .expect("prepare proof request");
-
-    let transcript_calls = machine_input
-        .execution
-        .store
-        .get::<Vec<RelationTranscriptCall>>(RELATION_TRANSCRIPT_WITNESS_LABEL)
-        .expect("relation transcript calls");
-    let lookup_rows = machine_input
-        .execution
-        .store
-        .get::<Vec<RelationTableWitnessRow>>(RELATION_TABLE_WITNESS_LABEL)
-        .expect("relation lookup rows");
-
-    assert!(transcript_calls.is_empty());
-    assert!(
-        lookup_rows.iter().all(|row| row.lookup_mult == 0),
-        "untaken branches must not contribute positive relation lookup multiplicities",
-    );
-}
-
-#[test]
-fn tampering_relation_table_rows_breaks_proving() {
-    let (registered, executor, prover) = executor_and_prover_for_source(relation_source());
-    let batch = tx_batch(vec![ir::EntryCall {
-        entry_id: entry_id_for(&executor, "enroll"),
-        params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
-    }]);
-    let context = relation_context(7, 11);
-    let snapshot = relation_snapshot(&registered);
-    let executed = executor
-        .execute_batch(&snapshot, &batch, &context)
-        .expect("execute batch");
-
-    let (mut machine_input, _public_statement) =
-        crate::proof_artifacts::prepare_proof_machine_input(
-            &prover.runtime_program,
-            &prover.root_backend_bundle,
-            &prover.kit_registry,
-            &prove_input(&snapshot, &batch, &context, &executed),
-        )
-        .expect("prepare proof request");
-
-    let mut rows = machine_input
-        .execution
-        .store
-        .get::<Vec<RelationTableWitnessRow>>(RELATION_TABLE_WITNESS_LABEL)
-        .expect("relation lookup rows")
-        .clone();
-    assert!(!rows.is_empty(), "expected relation lookup rows");
-    let tampered = rows
-        .iter_mut()
-        .find(|row| row.lookup_mult > 0)
-        .expect("expected at least one consumed relation lookup row");
-    tampered.output_digest[0] = tampered.output_digest[0].wrapping_add(1);
-    machine_input
-        .execution
-        .store
-        .put(RELATION_TABLE_WITNESS_LABEL, rows);
-
-    assert!(
-        BackendProver::new(prover.machine())
-            .prove_envelope(machine_input)
-            .is_err(),
-        "tampered relation lookup rows must fail proving"
-    );
-}
-
-#[test]
-fn tampering_execution_bound_relation_outputs_breaks_proving() {
-    let (registered, executor, prover) = executor_and_prover_for_source(relation_source());
-    let batch = tx_batch(vec![ir::EntryCall {
-        entry_id: entry_id_for(&executor, "enroll"),
-        params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
-    }]);
-    let context = relation_context(7, 11);
-    let snapshot = relation_snapshot(&registered);
-    let executed = executor
-        .execute_batch(&snapshot, &batch, &context)
-        .expect("execute batch");
-
-    let (mut machine_input, _public_statement) =
-        crate::proof_artifacts::prepare_proof_machine_input(
-            &prover.runtime_program,
-            &prover.root_backend_bundle,
-            &prover.kit_registry,
-            &prove_input(&snapshot, &batch, &context, &executed),
-        )
-        .expect("prepare proof request");
-
-    let mut records = machine_input
-        .execution
-        .store
-        .get::<Vec<InstructionRecord>>(witness_labels::EXECUTION_RECORDS)
-        .expect("execution records")
-        .clone();
-    let eval_record = records
-        .iter_mut()
-        .find(|record| record.opcode == Opcode::RelationProof && record.relation_is_eval)
-        .expect("relation eval execution record");
-    eval_record.relation_output_vals[0][0] += KoalaBear::ONE;
-
-    machine_input
-        .execution
-        .store
-        .put(witness_labels::EXECUTION_RECORDS, records);
-
-    assert!(
-        BackendProver::new(prover.machine())
-            .prove_envelope(machine_input)
-            .is_err(),
-        "tampered relation output binding must fail proving"
-    );
-}
-
-#[test]
 fn tampering_relation_effect_identity_breaks_proving() {
     let (registered, executor, prover) = executor_and_prover_for_source(relation_source());
     let batch = tx_batch(vec![ir::EntryCall {
@@ -1050,62 +834,6 @@ fn bundled_root_authority_rejects_unsupported_binding_families() {
     );
 }
 
-#[test]
-fn event_transcript_witness_matches_execution_event_rows() {
-    let registered = register_program_from_source(event_debug_source());
-    let opts = crate::PreparedOptions::try_standard().expect("standard options");
-    let executor = prepare_executor(Arc::new(registered.clone()), &opts).expect("build executor");
-    let prover = crate::prepare_prover(Arc::new(registered), &opts).expect("build prover");
-    let snapshot = executor.empty_state_snapshot();
-    let register = executor
-        .entry_id_by_symbol("register")
-        .expect("register entry");
-    let batch = tx_batch(vec![ir::EntryCall {
-        entry_id: register,
-        params: vec![u64_portable(1)],
-    }]);
-    let context = context_input([(ir::ContextFieldId(0), u64_portable(7))]);
-    let executed = executor
-        .execute_batch(&snapshot, &batch, &context)
-        .expect("execute event batch");
-    let state = &*executor.state;
-    let typed_context =
-        crate::prelude::decode_context_input_on_state(state, &context).expect("decode context");
-    let typed_txs =
-        crate::prelude::decode_entry_batch_on_state(state, &batch).expect("decode batch");
-
-    let prepared = crate::proof_artifacts::prepare_proof_artifacts(
-        &prover.runtime_program,
-        &prover.root_backend_bundle,
-        &prover.kit_registry,
-        &snapshot,
-        &typed_txs,
-        &typed_context,
-        &executed,
-    )
-    .expect("prepare proof artifacts");
-
-    let records = prepared
-        .execution
-        .store
-        .get::<Vec<InstructionRecord>>(witness_labels::EXECUTION_RECORDS)
-        .expect("execution records");
-    let transcript_items = prepared
-        .execution
-        .store
-        .get::<Vec<[KoalaBear; 8]>>(EVENT_TRANSCRIPT_WITNESS_LABEL)
-        .expect("event transcript items");
-
-    let execution_items = extract_event_items(records);
-    let witness_items = transcript_items
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(index, block)| (index as u32, block))
-        .collect::<Vec<_>>();
-
-    assert_eq!(execution_items, witness_items);
-}
 
 #[test]
 fn native_runtime_rejects_capability_calls_with_explicit_subset_error() {
