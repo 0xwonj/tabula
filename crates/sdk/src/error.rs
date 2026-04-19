@@ -82,5 +82,11 @@ pub enum SdkError {
     },
 }
 
+impl From<tabula_runtime::ExecuteError> for SdkError {
+    fn from(error: tabula_runtime::ExecuteError) -> Self {
+        SdkError::Runtime(tabula_runtime::RuntimeError::from(error))
+    }
+}
+
 /// Build/install errors returned by the configurable SDK path.
 pub type InstallError = SdkError;

@@ -2,7 +2,7 @@
 
 use anyhow::Context as _;
 use tabula_sdk::PublicStatementFile;
-use tabula_sdk::interop::prepare_runtime;
+use tabula_sdk::interop::prepare_executor;
 
 use crate::app::AppContext;
 use crate::cli::ProveArgs;
@@ -16,8 +16,8 @@ pub(crate) fn run(ctx: &AppContext, args: &ProveArgs) -> anyhow::Result<()> {
     let receipt_bytes = std::fs::read(&args.receipt)
         .with_context(|| format!("failed to read {}", args.receipt.display()))?;
     let bridge = decode_receipt_bridge(&receipt_bytes)?;
-    let runtime = prepare_runtime(ctx.sdk(), &loaded.artifact)?;
-    let receipt = sdk_receipt_from_bridge(runtime.as_ref(), bridge)?;
+    let executor = prepare_executor(ctx.sdk(), &loaded.artifact)?;
+    let receipt = sdk_receipt_from_bridge(executor.as_ref(), bridge)?;
     let proof = loaded.program.runner().prove(&receipt)?;
 
     ensure_parent_dir(&args.proof_out)?;

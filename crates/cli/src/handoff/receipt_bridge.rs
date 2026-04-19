@@ -295,7 +295,7 @@ pub(crate) fn decode_receipt_bridge(bytes: &[u8]) -> anyhow::Result<ReceiptBridg
 
 #[cfg(feature = "prove")]
 pub(crate) fn sdk_receipt_from_bridge(
-    runtime: &tabula_sdk::interop::TabulaRuntime,
+    executor: &tabula_sdk::interop::PreparedExecutor,
     bridge: ReceiptBridge,
 ) -> anyhow::Result<tabula_sdk::ExecutionReceipt> {
     Ok(tabula_sdk::interop::execution_receipt_from_raw_parts(
@@ -303,12 +303,12 @@ pub(crate) fn sdk_receipt_from_bridge(
             #[cfg(feature = "prove")]
             program_digest: bridge.program_digest,
             state_before: bridge.state_before,
-            snapshot: committed_snapshot_from_portable(runtime, &bridge.snapshot)?,
+            snapshot: committed_snapshot_from_portable(executor, &bridge.snapshot)?,
             batch: bridge.batch,
             context: bridge.context,
             state_after: bridge.state_after,
             state_after_snapshot: committed_snapshot_from_portable(
-                runtime,
+                executor,
                 &bridge.state_after_snapshot,
             )?,
             journal: execution_journal_from_portable(&bridge.journal),
@@ -334,10 +334,10 @@ fn portable_committed_snapshot(
 
 #[cfg(feature = "prove")]
 fn committed_snapshot_from_portable(
-    runtime: &tabula_sdk::interop::TabulaRuntime,
+    executor: &tabula_sdk::interop::PreparedExecutor,
     snapshot: &CommittedStateSnapshotBridge,
 ) -> anyhow::Result<tabula_sdk::interop::CommittedStateSnapshot> {
-    runtime
+    executor
         .decode_committed_snapshot(
             snapshot
                 .cells

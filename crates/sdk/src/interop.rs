@@ -28,11 +28,11 @@ pub use tabula_ext::scheme::ColumnBackendFactoryBundle;
 #[cfg(feature = "execute")]
 use tabula_machine::TabulaStarkConfig;
 #[cfg(feature = "execute")]
-pub use tabula_runtime::TabulaRuntime;
+pub use tabula_runtime::PreparedExecutor;
 #[cfg(feature = "prove")]
-pub use tabula_runtime::{PreparedProver, PreparedProverBuilder};
+pub use tabula_runtime::PreparedProver;
 #[cfg(feature = "verify")]
-pub use tabula_runtime::{PreparedVerifier, PreparedVerifierBuilder, VerifierState};
+pub use tabula_runtime::{PreparedVerifier, VerifierState};
 #[cfg(feature = "execute")]
 pub use tabula_types::{
     RelationEffect, RelationEffectKind, StateEffectKind, StatePropertyEffect, TypedEventEffect,
@@ -292,13 +292,13 @@ pub fn share_encoding_runtime(runtime: impl EncodingRuntime + 'static) -> Arc<dy
     Arc::new(runtime)
 }
 
-/// Prepare the cached native runtime for one artifact.
+/// Prepare the cached native executor for one artifact.
 #[cfg(feature = "execute")]
-pub fn prepare_runtime(
+pub fn prepare_executor(
     sdk: &Sdk,
     artifact: &Artifact,
-) -> Result<Arc<tabula_runtime::TabulaRuntime>, SdkError> {
-    sdk.prepare_runtime(artifact)
+) -> Result<Arc<tabula_runtime::PreparedExecutor>, SdkError> {
+    sdk.prepare_executor(artifact)
 }
 
 /// Prepare the cached native prover for one artifact.

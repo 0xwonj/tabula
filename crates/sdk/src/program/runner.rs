@@ -350,8 +350,10 @@ impl Runner {
         self.program.tx(symbol)
     }
 
-    fn runtime(&self) -> Result<std::sync::Arc<tabula_runtime::TabulaRuntime>, SdkError> {
-        self.program.sdk().prepare_runtime(self.program.artifact())
+    fn runtime(&self) -> Result<std::sync::Arc<tabula_runtime::PreparedExecutor>, SdkError> {
+        self.program
+            .sdk()
+            .prepare_executor(self.program.artifact())
     }
 }
 

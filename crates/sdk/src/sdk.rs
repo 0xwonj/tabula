@@ -21,7 +21,7 @@ pub struct Sdk {
 pub(crate) struct SdkInner {
     pub(crate) environment: Environment,
     #[cfg(feature = "execute")]
-    pub(crate) runtime_cache: Mutex<BTreeMap<String, Arc<tabula_runtime::TabulaRuntime>>>,
+    pub(crate) executor_cache: Mutex<BTreeMap<String, Arc<tabula_runtime::PreparedExecutor>>>,
     #[cfg(feature = "verify")]
     pub(crate) verifier_cache: Mutex<BTreeMap<String, Arc<tabula_runtime::PreparedVerifier>>>,
     #[cfg(feature = "prove")]
@@ -45,7 +45,7 @@ impl Sdk {
             inner: Arc::new(SdkInner {
                 environment,
                 #[cfg(feature = "execute")]
-                runtime_cache: Mutex::new(BTreeMap::new()),
+                executor_cache: Mutex::new(BTreeMap::new()),
                 #[cfg(feature = "verify")]
                 verifier_cache: Mutex::new(BTreeMap::new()),
                 #[cfg(feature = "prove")]
@@ -91,33 +91,33 @@ impl Sdk {
     }
 
     #[cfg(feature = "execute")]
-    pub(crate) fn prepare_runtime(
+    pub(crate) fn prepare_executor(
         &self,
         artifact: &Artifact,
-    ) -> Result<Arc<tabula_runtime::TabulaRuntime>, SdkError> {
+    ) -> Result<Arc<tabula_runtime::PreparedExecutor>, SdkError> {
         let key = self.cache_key("runner", artifact);
         let cache = self
             .inner
-            .runtime_cache
+            .executor_cache
             .lock()
             .map_err(|_| SdkError::Synchronization {
-                detail: "sdk runtime cache mutex poisoned".to_string(),
+                detail: "sdk executor cache mutex poisoned".to_string(),
             })?;
-        if let Some(runtime) = cache.get(&key) {
-            return Ok(Arc::clone(runtime));
+        if let Some(executor) = cache.get(&key) {
+            return Ok(Arc::clone(executor));
         }
         drop(cache);
 
-        let built = Arc::new(self.build_runtime(artifact)?);
+        let built = Arc::new(self.build_executor(artifact)?);
         let mut cache = self
             .inner
-            .runtime_cache
+            .executor_cache
             .lock()
             .map_err(|_| SdkError::Synchronization {
-                detail: "sdk runtime cache mutex poisoned".to_string(),
+                detail: "sdk executor cache mutex poisoned".to_string(),
             })?;
-        if let Some(runtime) = cache.get(&key) {
-            return Ok(Arc::clone(runtime));
+        if let Some(executor) = cache.get(&key) {
+            return Ok(Arc::clone(executor));
         }
         cache.insert(key, Arc::clone(&built));
         Ok(built)
@@ -157,18 +157,15 @@ impl Sdk {
     }
 
     #[cfg(feature = "execute")]
-    fn build_runtime(
+    fn build_executor(
         &self,
         artifact: &Artifact,
-    ) -> Result<tabula_runtime::TabulaRuntime, SdkError> {
-        let builder = tabula_runtime::TabulaRuntime::builder(artifact.registered().clone())
-            .map_err(SdkError::from)?
-            .with_host_environment(self.inner.environment.inner.host_environment.clone())
-            .with_machine_stark_config(self.inner.environment.inner.machine_stark_config.clone());
-        #[cfg(feature = "prove")]
-        let builder = builder
-            .with_root_backend_bundle(self.inner.environment.inner.root_backend_bundle.clone());
-        builder.build().map_err(SdkError::from)
+    ) -> Result<tabula_runtime::PreparedExecutor, SdkError> {
+        let registered = Arc::new(artifact.registered().clone());
+        let opts = self.prepared_options()?;
+        tabula_runtime::prepare_executor(registered, &opts)
+            .map_err(tabula_runtime::RuntimeError::from)
+            .map_err(SdkError::from)
     }
 
     #[cfg(feature = "verify")]
@@ -230,7 +227,7 @@ impl Sdk {
     }
 
     /// Build a `PreparedOptions` seeded with this SDK's environment.
-    #[cfg(feature = "verify")]
+    #[cfg(any(feature = "execute", feature = "verify", feature = "prove"))]
     fn prepared_options(&self) -> Result<tabula_runtime::PreparedOptions, SdkError> {
         let opts = tabula_runtime::PreparedOptions::try_standard()
             .map_err(tabula_runtime::RuntimeError::from)?
@@ -307,28 +304,28 @@ tx touch(id: u64) {
 
     #[cfg(all(feature = "compile", feature = "execute"))]
     #[test]
-    fn prepare_runtime_reuses_cached_instance() {
+    fn prepare_executor_reuses_cached_instance() {
         let sdk = Sdk::standard().expect("build standard sdk");
         let artifact = compile_simple_artifact(&sdk);
 
-        let first = sdk.prepare_runtime(&artifact).expect("build runtime");
-        let second = sdk.prepare_runtime(&artifact).expect("reuse runtime");
+        let first = sdk.prepare_executor(&artifact).expect("build runtime");
+        let second = sdk.prepare_executor(&artifact).expect("reuse runtime");
 
         assert!(Arc::ptr_eq(&first, &second));
-        let cache = sdk.inner.runtime_cache.lock().expect("runtime cache");
+        let cache = sdk.inner.executor_cache.lock().expect("runtime cache");
         assert_eq!(cache.len(), 1);
     }
 
     #[cfg(all(feature = "compile", feature = "execute"))]
     #[test]
-    fn prepare_runtime_build_failure_does_not_poison_cache() {
+    fn prepare_executor_build_failure_does_not_poison_cache() {
         let sdk = sdk_with_empty_runtime_host();
         let artifact = compile_simple_artifact(&sdk);
 
-        let Err(first) = sdk.prepare_runtime(&artifact) else {
+        let Err(first) = sdk.prepare_executor(&artifact) else {
             panic!("runtime build must fail without host environment");
         };
-        let Err(second) = sdk.prepare_runtime(&artifact) else {
+        let Err(second) = sdk.prepare_executor(&artifact) else {
             panic!("repeated runtime build failure must stay recoverable");
         };
 
@@ -344,22 +341,22 @@ tx touch(id: u64) {
                 RuntimeError::Setup(_) | RuntimeError::Verify(_) | RuntimeError::Execute(_)
             )
         ));
-        assert!(sdk.inner.runtime_cache.lock().is_ok());
+        assert!(sdk.inner.executor_cache.lock().is_ok());
     }
 
     #[cfg(all(feature = "compile", feature = "execute"))]
     #[test]
-    fn poisoned_runtime_cache_returns_typed_error() {
+    fn poisoned_executor_cache_returns_typed_error() {
         let sdk = Sdk::standard().expect("build standard sdk");
         let poisoned = sdk.clone();
         let join = std::thread::spawn(move || {
-            let _guard = poisoned.inner.runtime_cache.lock().expect("runtime cache");
+            let _guard = poisoned.inner.executor_cache.lock().expect("runtime cache");
             panic!("poison runtime cache mutex");
         });
         assert!(join.join().is_err(), "poisoning thread must panic");
 
         let artifact = compile_simple_artifact(&sdk);
-        let Err(error) = sdk.prepare_runtime(&artifact) else {
+        let Err(error) = sdk.prepare_executor(&artifact) else {
             panic!("poisoned cache must surface as typed error");
         };
 
