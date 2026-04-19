@@ -13,9 +13,31 @@ The current path is explicitly split into:
 
 - `tabula_runtime::semantics` for semantic execution-journal reduction and
   public-statement materialization
-- crate-root `tabula_runtime::{RuntimeBuilder, TabulaRuntime, Verifier,
+- crate-root `tabula_runtime::{PreparedVerifier, PreparedProver, TabulaRuntime,
   CommittedStateSnapshot, PublicStatement, BoundStatement, ...}` for
-  native runtime setup, execution, proving, and verification orchestration
+  prepared handles and execute-only orchestration
+
+## Public API Surface
+
+The main surfaces are:
+
+- **`PreparedVerifier`** (verify-feature) — constructed via `prepare_verifier(registered)`
+  or `PreparedVerifierBuilder`. Verify-only handle. `Send + Sync`.
+  - `verify(&self, proof, expected) -> Result<BoundStatement, RuntimeError>`
+
+- **`PreparedProver`** (prove-feature, implies verify) — constructed via
+  `prepare_prover(registered)` or `PreparedProverBuilder`. Prove-only handle.
+  `Send + Sync`. Fresh `KitScratch` per call.
+  - `prove(&self, input) -> Result<ProveResult, RuntimeError>`
+
+- **`TabulaRuntime`** (verify-feature) — execute-only facade. Built via
+  `RuntimeBuilder`. Supports the execute surface only:
+  - `execute_batch*`, `execute_query`, `materialize_logical_state`,
+    `decode_committed_snapshot`, `project_logical_state`, `empty_state_snapshot`
+
+The design is "prepare once, drive many": both prepared handles are cheap to
+share via `Arc` and support concurrent use. `TabulaRuntime` survives as the
+execute surface; its final disposition is owned by SP-5.
 
 ## Role
 
