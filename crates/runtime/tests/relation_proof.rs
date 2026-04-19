@@ -145,7 +145,7 @@ fn tx_batch_proves_and_verifies_static_relations_with_control() {
     let verified = prover
         .prove_and_verify(
             &verifier,
-            &tabula_runtime::ProveInput::new(&snapshot, &batch, &ctx, &executed),
+            &tabula_runtime::ProveInput { snapshot: &snapshot, batch: &batch, context: &ctx, executed: &executed },
         )
         .expect("prove and verify relation batch");
 
@@ -200,7 +200,7 @@ fn range_and_set_relations_normalize_and_prove() {
     let proved = prover
         .prove_and_verify(
             &verifier,
-            &tabula_runtime::ProveInput::new(&snapshot, &batch, &ctx, &executed),
+            &tabula_runtime::ProveInput { snapshot: &snapshot, batch: &batch, context: &ctx, executed: &executed },
         )
         .expect("prove normalized relations");
 

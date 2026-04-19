@@ -129,7 +129,7 @@ fn runtime_root_exposes_only_the_final_native_surface() {
     );
     assert!(
         runtime_lib.contains("pub use tabula_contract::{BoundStatement, PublicStatement};")
-            && runtime_lib.contains("pub use prover::{ProveInput, ProveResult, VerifiedResult};")
+            && runtime_lib.contains("pub use prover::{ProofOutcome, ProveInput};")
             && runtime_lib
                 .contains("pub use verifier::{PreparedVerifier, VerifierState, prepare_verifier};")
             && runtime_lib.contains("pub use prover::{PreparedProver, prepare_prover};")

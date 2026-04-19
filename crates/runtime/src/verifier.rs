@@ -345,6 +345,24 @@ fn route_to_verify(error: RuntimeError) -> VerifyError {
     }
 }
 
+impl std::fmt::Debug for VerifierState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VerifierState")
+            .field("binding", &self.context.binding)
+            .field("static_table_root", &self.context.static_table_root)
+            .field("relation_policy", &self.relation_policy)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for PreparedVerifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedVerifier")
+            .field("state", &self.prepared)
+            .finish_non_exhaustive()
+    }
+}
+
 // Static guarantee that PreparedVerifier is cheap to share across threads.
 // The SDK's cache and any future concurrent driver relies on this.
 const _: fn() = || {

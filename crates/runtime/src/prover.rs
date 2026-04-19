@@ -29,7 +29,6 @@ use crate::snapshot::CommittedStateSnapshot;
 use crate::verifier::VerifierState;
 
 /// Inputs for native proving.
-#[non_exhaustive]
 pub struct ProveInput<'a> {
     /// Committed pre-state.
     pub snapshot: &'a CommittedStateSnapshot,
@@ -41,33 +40,27 @@ pub struct ProveInput<'a> {
     pub executed: &'a exec::ExecutionJournal,
 }
 
-impl<'a> ProveInput<'a> {
-    /// Construct one proving input from its four parts.
-    pub fn new(
-        snapshot: &'a CommittedStateSnapshot,
-        batch: &'a ir::EntryBatch,
-        context: &'a ir::ContextInput,
-        executed: &'a exec::ExecutionJournal,
-    ) -> Self {
-        Self {
-            snapshot,
-            batch,
-            context,
-            executed,
-        }
-    }
-}
-
-/// Result of native proof generation.
+/// Result of proof generation, optionally accompanied by a verified bound statement.
+///
+/// Returned by both [`PreparedProver::prove`] (where `bound_statement` is `None`) and
+/// [`PreparedProver::prove_and_verify`] (where `bound_statement` is `Some`, carrying the
+/// artifact-bound statement confirmed by the verifier). Collapsing the two previous result
+/// types (`ProveResult` / `VerifiedResult`) here removes the duplication and makes the
+/// post-verify bound statement accessible as a first-class value.
 #[non_exhaustive]
-pub struct ProveResult {
+pub struct ProofOutcome {
     proof: TabulaProof,
     envelope: ProofEnvelope,
     public_statement: PublicStatement,
+    /// Artifact-bound statement confirmed by the verifier.
+    ///
+    /// Present when this outcome was produced by [`PreparedProver::prove_and_verify`];
+    /// `None` when produced by [`PreparedProver::prove`].
+    pub bound_statement: Option<BoundStatement>,
     summary: ProofSummary,
 }
 
-impl ProveResult {
+impl ProofOutcome {
     /// The generated STARK proof (decoded form).
     pub fn proof(&self) -> &TabulaProof {
         &self.proof
@@ -88,70 +81,42 @@ impl ProveResult {
         &self.summary
     }
 
-    /// Consume and unpack all four result parts.
-    pub fn into_parts(self) -> (TabulaProof, ProofEnvelope, PublicStatement, ProofSummary) {
-        (
-            self.proof,
-            self.envelope,
-            self.public_statement,
-            self.summary,
-        )
-    }
-}
-
-/// Result of prove + verify.
-#[non_exhaustive]
-pub struct VerifiedResult {
-    proof: TabulaProof,
-    envelope: ProofEnvelope,
-    public_statement: PublicStatement,
-    verified: bool,
-    summary: ProofSummary,
-}
-
-impl VerifiedResult {
-    /// The generated STARK proof (decoded form).
-    pub fn proof(&self) -> &TabulaProof {
-        &self.proof
-    }
-
-    /// Wire-format envelope around the encoded proof bytes.
-    pub fn envelope(&self) -> &ProofEnvelope {
-        &self.envelope
-    }
-
-    /// The artifact-bound public statement that accompanies `proof`.
-    pub fn public_statement(&self) -> &PublicStatement {
-        &self.public_statement
-    }
-
-    /// Whether verification passed.
+    /// Whether the proof was verified inline.
+    ///
+    /// `true` iff this outcome carries a `bound_statement` (i.e., was produced by
+    /// [`PreparedProver::prove_and_verify`]).
     pub fn verified(&self) -> bool {
-        self.verified
+        self.bound_statement.is_some()
     }
 
-    /// Human-readable machine summary.
-    pub fn summary(&self) -> &ProofSummary {
-        &self.summary
-    }
-
-    /// Consume and unpack all result parts.
+    /// Consume and unpack all parts.
+    ///
+    /// Returns `(proof, envelope, public_statement, bound_statement, summary)`.
     pub fn into_parts(
         self,
     ) -> (
         TabulaProof,
         ProofEnvelope,
         PublicStatement,
-        bool,
+        Option<BoundStatement>,
         ProofSummary,
     ) {
         (
             self.proof,
             self.envelope,
             self.public_statement,
-            self.verified,
+            self.bound_statement,
             self.summary,
         )
+    }
+}
+
+impl std::fmt::Debug for ProofOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProofOutcome")
+            .field("verified", &self.bound_statement.is_some())
+            .field("summary", &self.summary)
+            .finish_non_exhaustive()
     }
 }
 
@@ -166,7 +131,7 @@ pub(crate) fn prepare_proof_request_on_prepared_state(
     kit_registry: &ChipKitRegistry,
     machine: &TabulaMachine,
     input: &ProveInput<'_>,
-) -> Result<ProveResult, RuntimeError> {
+) -> Result<ProofOutcome, RuntimeError> {
     let typed_context = crate::prelude::decode_context_input_on_state(state, input.context)?;
     let typed_txs = crate::prelude::decode_entry_batch_on_state(state, input.batch)?;
     let applied_tx_digest = runtime_ir::compute_applied_tx_digest(
@@ -208,10 +173,11 @@ pub(crate) fn prepare_proof_request_on_prepared_state(
         .prove_envelope(machine_input)
         .map_err(ProveError::Proving)?;
     let summary = ProofSummary::from_proof(&proof);
-    Ok(ProveResult {
+    Ok(ProofOutcome {
         proof,
         envelope,
         public_statement,
+        bound_statement: None,
         summary,
     })
 }
@@ -273,7 +239,11 @@ impl PreparedProver {
     /// lives in locals inside this call. Calling `prove` twice on
     /// the same handle with the same input must produce byte-identical
     /// output.
-    pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, ProveError> {
+    ///
+    /// The returned [`ProofOutcome`] has `bound_statement: None`; use
+    /// [`PreparedProver::prove_and_verify`] to obtain the verified bound
+    /// statement in one call.
+    pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProofOutcome, ProveError> {
         prepare_proof_request_on_prepared_state(
             &self.runtime_program,
             &self.root_backend_bundle,
@@ -285,21 +255,21 @@ impl PreparedProver {
     }
 
     /// Generate and verify a proof in one call.
+    ///
+    /// The returned [`ProofOutcome`] has `bound_statement: Some(…)` carrying
+    /// the artifact-bound statement confirmed by `verifier`.
     pub fn prove_and_verify(
         &self,
         verifier: &crate::PreparedVerifier,
         input: &ProveInput<'_>,
-    ) -> Result<VerifiedResult, ProveError> {
-        let prove_result = self.prove(input)?;
-        verifier
-            .verify(&prove_result.proof, &prove_result.public_statement)
+    ) -> Result<ProofOutcome, ProveError> {
+        let outcome = self.prove(input)?;
+        let bound = verifier
+            .verify(&outcome.proof, &outcome.public_statement)
             .map_err(ProveError::PostVerify)?;
-        Ok(VerifiedResult {
-            proof: prove_result.proof,
-            envelope: prove_result.envelope,
-            public_statement: prove_result.public_statement,
-            verified: true,
-            summary: prove_result.summary,
+        Ok(ProofOutcome {
+            bound_statement: Some(bound),
+            ..outcome
         })
     }
 }
@@ -314,7 +284,7 @@ pub fn prepare_prover(
     registered: Arc<RegisteredProgram>,
     opts: &PreparedOptions,
 ) -> Result<PreparedProver, ProveError> {
-    let program = Arc::try_unwrap(registered).unwrap_or_else(|shared| (*shared).clone());
+    let program = Arc::unwrap_or_clone(registered);
     program
         .validate_sealed_artifact()
         .map_err(|e| ProveError::Setup(crate::error::SetupError::CompilerValidation(e)))?;
@@ -353,6 +323,19 @@ fn route_to_prove(error: RuntimeError) -> ProveError {
         RuntimeError::Setup(inner) => ProveError::Setup(inner),
         RuntimeError::Verify(inner) => ProveError::Verify(inner),
         RuntimeError::Execute(inner) => ProveError::Execute(inner),
+    }
+}
+
+impl std::fmt::Debug for PreparedProver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedProver")
+            .field("binding", &self.verifier_state.context().binding)
+            .field(
+                "static_table_root",
+                &self.verifier_state.context().static_table_root,
+            )
+            .field("relation_policy", &self.runtime_program.relation_policy)
+            .finish_non_exhaustive()
     }
 }
 

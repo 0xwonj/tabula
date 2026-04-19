@@ -35,18 +35,21 @@ impl PreparedOptions {
     }
 
     /// Replace the host-owned runtime registries and scheme factories.
+    #[must_use]
     pub fn with_host_environment(mut self, host_environment: HostEnvironment) -> Self {
         self.host_environment = host_environment;
         self
     }
 
     /// Override the machine STARK configuration.
+    #[must_use]
     pub fn with_machine_stark_config(mut self, machine_stark_config: TabulaStarkConfig) -> Self {
         self.machine_stark_config = machine_stark_config;
         self
     }
 
     /// Override the root-backend selection.
+    #[must_use]
     pub fn with_root_backend(mut self, root_backend: RootBackend) -> Self {
         self.root_backend = root_backend;
         self
@@ -68,6 +71,14 @@ impl PreparedOptions {
     }
 }
 
+impl std::fmt::Debug for PreparedOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedOptions")
+            .field("root_backend", &self.root_backend)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Root-backend selection used by prepared handles.
 ///
 /// On `prove`, this wraps a full [`tabula_ext::root::RootBackendBundle`]
@@ -78,11 +89,29 @@ impl PreparedOptions {
 #[derive(Clone)]
 pub struct RootBackend(pub(crate) tabula_ext::root::RootBackendBundle);
 
+#[cfg(feature = "prove")]
+impl std::fmt::Debug for RootBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RootBackend")
+            .field("kind", &"prove")
+            .finish_non_exhaustive()
+    }
+}
+
 /// Root-backend selection used by prepared handles (verify-only build).
 #[cfg(all(feature = "verify", not(feature = "prove")))]
 #[non_exhaustive]
 #[derive(Clone)]
 pub struct RootBackend(pub(crate) Arc<dyn tabula_ext::root::RootProofBackend>);
+
+#[cfg(all(feature = "verify", not(feature = "prove")))]
+impl std::fmt::Debug for RootBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RootBackend")
+            .field("kind", &"verify-only")
+            .finish_non_exhaustive()
+    }
+}
 
 impl RootBackend {
     /// Standard root backend (SMT on verify-only, bundled SMT on prove).

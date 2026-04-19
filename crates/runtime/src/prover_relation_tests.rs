@@ -1032,8 +1032,7 @@ fn bundled_root_authority_rejects_unsupported_binding_families() {
             EmptyFamilyRootBackend,
         )));
     let err = crate::prepare_prover(Arc::new(registered.clone()), &opts)
-        .err()
-        .expect("prover build must reject unsupported bundled root families");
+        .expect_err("prover build must reject unsupported bundled root families");
     assert!(
         err.to_string()
             .contains("bundled root authority does not support binding family"),
@@ -1041,8 +1040,7 @@ fn bundled_root_authority_rejects_unsupported_binding_families() {
     );
 
     let err = crate::prepare_verifier(Arc::new(registered.sealed().clone()), &opts)
-        .err()
-        .expect("verifier build must reject unsupported bundled root families");
+        .expect_err("verifier build must reject unsupported bundled root families");
     assert!(
         err.to_string()
             .contains("bundled root authority does not support binding family"),
@@ -1129,8 +1127,7 @@ fn native_runtime_rejects_capability_calls_with_explicit_subset_error() {
     // mechanism there.
     let opts = crate::PreparedOptions::try_standard().expect("standard options");
     let err = prepare_executor(Arc::new(registered.clone()), &opts)
-        .err()
-        .expect("capability-backed program must be rejected before native proving");
+        .expect_err("capability-backed program must be rejected before native proving");
     let rendered = err.to_string();
     assert!(
         rendered.contains("outside the current native proving subset"),

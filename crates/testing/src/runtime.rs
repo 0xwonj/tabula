@@ -4,17 +4,17 @@ use std::sync::Arc;
 
 use tabula_contract::SealedArtifact;
 use tabula_runtime::{
-    PreparedExecutor, PreparedOptions, PreparedProver, PreparedVerifier, ProveResult,
-    VerifiedResult, prepare_executor, prepare_prover, prepare_verifier,
+    PreparedExecutor, PreparedOptions, PreparedProver, PreparedVerifier, ProofOutcome,
+    prepare_executor, prepare_prover, prepare_verifier,
 };
 
 use crate::exec::register_program_from_source;
 
-/// Shared name for the runtime proof output.
-pub type ProvedExecution = ProveResult;
+/// Shared name for the runtime proof output (prove or prove-and-verify).
+pub type ProvedExecution = ProofOutcome;
 
 /// Shared name for prove-and-verify output.
-pub type VerifiedExecution = VerifiedResult;
+pub type VerifiedExecution = ProofOutcome;
 
 /// Build a [`PreparedExecutor`] from one registered program.
 pub fn build_executor(registered: tabula_compiler::RegisteredProgram) -> PreparedExecutor {

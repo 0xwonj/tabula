@@ -155,7 +155,7 @@ pub fn prepare_executor(
     registered: Arc<RegisteredProgram>,
     opts: &PreparedOptions,
 ) -> Result<PreparedExecutor, ExecuteError> {
-    let program = Arc::try_unwrap(registered).unwrap_or_else(|shared| (*shared).clone());
+    let program = Arc::unwrap_or_clone(registered);
     program
         .validate_sealed_artifact()
         .map_err(|e| ExecuteError::Setup(crate::error::SetupError::CompilerValidation(e)))?;
@@ -203,6 +203,15 @@ fn route_to_execute(error: RuntimeError) -> ExecuteError {
         RuntimeError::Verify(inner) => ExecuteError::Validation {
             detail: format!("unexpected verify-phase error on executor surface: {inner}"),
         },
+    }
+}
+
+impl std::fmt::Debug for PreparedExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedExecutor")
+            .field("artifact_context", &self.state.artifact_context)
+            .field("relation_policy", &self.state.relation_policy)
+            .finish_non_exhaustive()
     }
 }
 

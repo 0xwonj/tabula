@@ -320,13 +320,13 @@ impl Runner {
             .program
             .sdk()
             .prepare_prepared_prover(self.program.artifact())?;
-        let result = prover.prove(&tabula_runtime::ProveInput::new(
-            receipt.inner.snapshot(),
-            receipt.inner.batch(),
-            receipt.inner.context(),
-            receipt.inner.journal(),
-        ))?;
-        Ok(Proof::from_prove_result(result))
+        let outcome = prover.prove(&tabula_runtime::ProveInput {
+            snapshot: receipt.inner.snapshot(),
+            batch: receipt.inner.batch(),
+            context: receipt.inner.context(),
+            executed: receipt.inner.journal(),
+        })?;
+        Ok(Proof::from_proof_outcome(outcome))
     }
 
     /// Execute a batch and immediately generate a STARK proof in one call.

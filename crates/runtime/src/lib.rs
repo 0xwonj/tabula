@@ -90,7 +90,7 @@ pub use proof_summary::ProofSummary;
 #[cfg(feature = "prove")]
 pub use prover::{PreparedProver, prepare_prover};
 #[cfg(feature = "prove")]
-pub use prover::{ProveInput, ProveResult, VerifiedResult};
+pub use prover::{ProofOutcome, ProveInput};
 #[cfg(feature = "verify")]
 pub use snapshot::CommittedStateSnapshot;
 #[cfg(feature = "verify")]
