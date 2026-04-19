@@ -46,6 +46,8 @@ mod engine;
 mod error;
 #[cfg(feature = "verify")]
 mod host;
+#[cfg(feature = "verify")]
+mod prelude;
 #[cfg(feature = "prove")]
 mod proof_summary;
 #[cfg(feature = "prove")]

@@ -48,8 +48,8 @@ use tabula_types::{
 use tabula_witness::stark::prepare_execution_store;
 #[cfg(feature = "prove")]
 use tabula_witness::stark::{
-    ChipKitRegistry, ContextPreludeSlot, LowerSuccessfulTxInput, ParamPreludeSlot,
-    lower_successful_tx, merge_lowering_outputs,
+    ChipKitRegistry, ContextPreludeSlot, LowerSuccessfulTxInput, lower_successful_tx,
+    merge_lowering_outputs,
 };
 #[cfg(feature = "prove")]
 use tabula_witness::{
@@ -210,8 +210,8 @@ pub(crate) fn prepare_proof_request_on_prepared_state(
     machine: &TabulaMachine,
     input: &ProveInput<'_>,
 ) -> Result<ProveResult, RuntimeError> {
-    let typed_context = decode_context_input_on_state(state, input.context)?;
-    let typed_txs = decode_entry_batch_on_state(state, input.batch)?;
+    let typed_context = crate::prelude::decode_context_input_on_state(state, input.context)?;
+    let typed_txs = crate::prelude::decode_entry_batch_on_state(state, input.batch)?;
     let applied_tx_digest = runtime_ir::compute_applied_tx_digest(
         input.batch,
         &state.type_runtimes,
@@ -257,115 +257,6 @@ pub(crate) fn prepare_proof_request_on_prepared_state(
         public_statement,
         summary,
     })
-}
-
-fn decode_entry_batch_on_state(
-    state: &PreparedRuntimeState,
-    batch: &ir::EntryBatch,
-) -> Result<Vec<TxCall>, RuntimeError> {
-    batch
-        .calls
-        .iter()
-        .map(|call| decode_entry_call_on_state(state, call))
-        .collect()
-}
-
-fn decode_entry_call_on_state(
-    state: &PreparedRuntimeState,
-    call: &ir::EntryCall,
-) -> Result<TxCall, RuntimeError> {
-    let entry = state
-        .semantic
-        .execution()
-        .entry_definition(call.entry_id)
-        .map_err(|error| VerifyError::Validation {
-            detail: error.to_string(),
-        })?;
-    if entry.kind != ir::EntryKind::Tx {
-        return Err(VerifyError::Validation {
-            detail: format!("entry {} is not a tx entry", call.entry_id.0),
-        }
-        .into());
-    }
-    let params = decode_params_on_state(state, &entry.params, &call.params)?;
-    Ok(TxCall {
-        entry_id: call.entry_id,
-        params,
-    })
-}
-
-fn decode_params_on_state(
-    state: &PreparedRuntimeState,
-    expected: &[ir::ParamDecl],
-    params: &[PortableValue],
-) -> Result<Vec<TypedValue>, RuntimeError> {
-    if expected.len() != params.len() {
-        return Err(VerifyError::Validation {
-            detail: format!(
-                "expected {} params but received {}",
-                expected.len(),
-                params.len()
-            ),
-        }
-        .into());
-    }
-    expected
-        .iter()
-        .zip(params)
-        .map(|(param, value)| {
-            if value.type_id() != param.ty {
-                return Err(VerifyError::Validation {
-                    detail: format!(
-                        "param {} expects type {} but received {}",
-                        param.symbol,
-                        param.ty.0,
-                        value.type_id().0
-                    ),
-                }
-                .into());
-            }
-            state.type_runtimes.decode_portable(value).map_err(|error| {
-                RuntimeError::from(VerifyError::Validation {
-                    detail: error.to_string(),
-                })
-            })
-        })
-        .collect()
-}
-
-fn decode_context_input_on_state(
-    state: &PreparedRuntimeState,
-    context: &ir::ContextInput,
-) -> Result<ContextValues, RuntimeError> {
-    let mut typed = ContextValues::new();
-    for (field_id, value) in &context.fields {
-        let field = state
-            .semantic
-            .execution()
-            .context_field(*field_id)
-            .map_err(|error| VerifyError::Validation {
-                detail: error.to_string(),
-            })?;
-        if value.type_id() != field.ty {
-            return Err(VerifyError::Validation {
-                detail: format!(
-                    "context field {} expects type {} but received {}",
-                    field.symbol,
-                    field.ty.0,
-                    value.type_id().0
-                ),
-            }
-            .into());
-        }
-        let decoded = state
-            .type_runtimes
-            .decode_portable(value)
-            .map_err(|error| VerifyError::Validation {
-                detail: error.to_string(),
-            })?;
-        typed.insert(*field_id, decoded);
-    }
-    Ok(typed)
 }
 
 /// Shared factory that constructs the prepared runtime state consumed by both the execute
@@ -754,7 +645,7 @@ impl TabulaRuntime {
     }
 
     fn decode_entry_batch(&self, batch: &ir::EntryBatch) -> Result<Vec<TxCall>, RuntimeError> {
-        decode_entry_batch_on_state(&self.runtime_program, batch)
+        crate::prelude::decode_entry_batch_on_state(&self.runtime_program, batch)
     }
 
     fn decode_query_params(
@@ -782,14 +673,14 @@ impl TabulaRuntime {
         expected: &[ir::ParamDecl],
         params: &[PortableValue],
     ) -> Result<Vec<TypedValue>, RuntimeError> {
-        decode_params_on_state(&self.runtime_program, expected, params)
+        crate::prelude::decode_params_on_state(&self.runtime_program, expected, params)
     }
 
     fn decode_context_input(
         &self,
         context: &ir::ContextInput,
     ) -> Result<ContextValues, RuntimeError> {
-        decode_context_input_on_state(&self.runtime_program, context)
+        crate::prelude::decode_context_input_on_state(&self.runtime_program, context)
     }
 }
 
@@ -835,14 +726,14 @@ impl PreparedArtifacts {
 }
 
 #[cfg(feature = "prove")]
-struct PublicStatementSlotLayout {
-    aux_slot_limit: usize,
-    context_slots: Vec<(ir::ContextFieldId, usize)>,
-    param_slot_base: usize,
+pub(crate) struct PublicStatementSlotLayout {
+    pub(crate) aux_slot_limit: usize,
+    pub(crate) context_slots: Vec<(ir::ContextFieldId, usize)>,
+    pub(crate) param_slot_base: usize,
 }
 
 #[cfg(feature = "prove")]
-type ContextPreludeArtifacts = (
+pub(crate) type ContextPreludeArtifacts = (
     Vec<ContextPreludeSlot>,
     Vec<InstructionRecord>,
     Vec<[p3_koala_bear::KoalaBear; 8]>,
@@ -895,170 +786,6 @@ fn context_public_statement_bindings(
             detail: error.to_string(),
         })
     })
-}
-
-#[cfg(feature = "prove")]
-fn build_context_prelude(
-    runtime_program: &PreparedRuntimeState,
-    context_bindings: &[runtime_ir::PublicContextBinding],
-    layout: &PublicStatementSlotLayout,
-) -> Result<ContextPreludeArtifacts, RuntimeError> {
-    let canonical_bindings =
-        runtime_ir::canonical_public_context(context_bindings).map_err(|error| {
-            VerifyError::StatementBuild {
-                detail: error.to_string(),
-            }
-        })?;
-    let item_blocks = runtime_ir::canonical_public_context_payload(
-        context_bindings,
-        &runtime_program.type_runtimes,
-        &runtime_program.encoding_runtimes,
-        &runtime_program.tuple_encoding_defaults,
-    )
-    .map_err(|error| VerifyError::StatementBuild {
-        detail: error.to_string(),
-    })?
-    .into_iter()
-    .skip(1)
-    .collect::<Vec<_>>();
-
-    let mut slots = Vec::with_capacity(canonical_bindings.len());
-    let mut records = Vec::with_capacity(canonical_bindings.len());
-    for (item_index, binding) in canonical_bindings.iter().enumerate() {
-        let slot = layout
-            .context_slots
-            .iter()
-            .find_map(|(field_id, slot)| (*field_id == binding.field).then_some(*slot))
-            .ok_or_else(|| VerifyError::Validation {
-                detail: format!(
-                    "missing reserved execution slot for context field {}",
-                    binding.field.0
-                ),
-            })?;
-        let typed = runtime_program
-            .type_runtimes
-            .decode_portable(&binding.value)
-            .map_err(|source| VerifyError::StatementBuild {
-                detail: source.to_string(),
-            })?;
-        let encoded = runtime_ir::encode_public_statement_value(
-            &typed,
-            &runtime_program.encoding_runtimes,
-            &runtime_program.tuple_encoding_defaults,
-        )
-        .map_err(|source| VerifyError::StatementBuild {
-            detail: source.to_string(),
-        })?;
-        slots.push(ContextPreludeSlot {
-            field_id: binding.field,
-            slot,
-            value: typed.clone(),
-            encoded: encoded.field_elements.to_vec(),
-        });
-        records.push(InstructionRecord {
-            opcode: tabula_chips::execution::trace::Opcode::LoadContext,
-            tx_index: 0,
-            proof_meta0: Some(item_index as u32),
-            proof_meta1: Some(binding.field.0),
-            proof_meta2: Some(encoded.type_id.0),
-            written_slots: vec![slot],
-            src1_val: encoded.field_elements.to_vec(),
-            writes: vec![(slot, encoded.field_elements.to_vec(), false)],
-            ..InstructionRecord::default()
-        });
-    }
-    Ok((slots, records, item_blocks))
-}
-
-#[cfg(feature = "prove")]
-fn build_param_prelude(
-    runtime_program: &PreparedRuntimeState,
-    layout: &PublicStatementSlotLayout,
-    entry: &ir::Entry,
-    call: &TxCall,
-    tx_item_index_base: u32,
-    tx_index: u32,
-) -> Result<(Vec<ParamPreludeSlot>, Vec<InstructionRecord>), RuntimeError> {
-    let mut slots = Vec::with_capacity(entry.params.len());
-    let mut records = Vec::with_capacity(entry.params.len() + 1);
-
-    records.push(InstructionRecord {
-        opcode: tabula_chips::execution::trace::Opcode::TxBegin,
-        tx_index,
-        proof_meta0: Some(tx_item_index_base),
-        proof_meta1: Some(call.entry_id.0),
-        proof_meta2: Some(entry.params.len() as u32),
-        ..InstructionRecord::default()
-    });
-
-    for (param_index, param) in entry.params.iter().enumerate() {
-        let value =
-            call.params
-                .get(param_index)
-                .cloned()
-                .ok_or_else(|| VerifyError::Validation {
-                    detail: format!(
-                        "tx {tx_index} is missing parameter {} for entry {}",
-                        param.symbol, entry.symbol
-                    ),
-                })?;
-        let encoded = runtime_ir::encode_public_statement_value(
-            &value,
-            &runtime_program.encoding_runtimes,
-            &runtime_program.tuple_encoding_defaults,
-        )
-        .map_err(|source| VerifyError::StatementBuild {
-            detail: source.to_string(),
-        })?;
-        let slot = layout.param_slot_base + param_index;
-        slots.push(ParamPreludeSlot {
-            param_id: param.id,
-            slot,
-            value: value.clone(),
-            encoded: encoded.field_elements.to_vec(),
-        });
-
-        records.push(InstructionRecord {
-            opcode: tabula_chips::execution::trace::Opcode::LoadParam,
-            tx_index,
-            proof_meta0: Some(tx_item_index_base + 1 + param_index as u32),
-            proof_meta1: Some(param_index as u32),
-            proof_meta2: Some(encoded.type_id.0),
-            written_slots: vec![slot],
-            src1_val: encoded.field_elements.to_vec(),
-            writes: vec![(slot, encoded.field_elements.to_vec(), false)],
-            ..InstructionRecord::default()
-        });
-    }
-
-    Ok((slots, records))
-}
-
-#[cfg(feature = "prove")]
-fn build_event_item_bases(
-    executed: &exec::ExecutionJournal,
-) -> (
-    BTreeMap<u32, BTreeMap<usize, u32>>,
-    Vec<runtime_ir::ProofEventEffect>,
-) {
-    let mut per_tx = BTreeMap::new();
-    let mut events = Vec::new();
-    let mut next_item_index = 0u32;
-
-    for tx in executed.successful_txs() {
-        let mut per_op = BTreeMap::new();
-        for effect in &tx.event_effects {
-            per_op.insert(effect.op_index, next_item_index);
-            next_item_index += 1 + effect.args.len() as u32;
-            events.push(runtime_ir::ProofEventEffect {
-                tx_index: tx.tx_index,
-                effect: effect.clone(),
-            });
-        }
-        per_tx.insert(tx.tx_index, per_op);
-    }
-
-    (per_tx, events)
 }
 
 #[cfg(feature = "prove")]
@@ -1156,9 +883,9 @@ fn prepare_proof_artifacts(
     let statement_slot_layout =
         build_public_statement_slot_layout(&canonical_context_ids, max_param_count)?;
     let (context_slots, context_records, public_context_transcript_items) =
-        build_context_prelude(runtime_program, &context_bindings, &statement_slot_layout)?;
+        crate::prelude::build_context_prelude(runtime_program, &context_bindings, &statement_slot_layout)?;
 
-    let (event_item_bases_by_tx, proof_events) = build_event_item_bases(executed);
+    let (event_item_bases_by_tx, proof_events) = crate::prelude::build_event_item_bases(executed);
     let event_transcript_items = runtime_ir::canonical_event_log_payload(
         &proof_events,
         &runtime_program.encoding_runtimes,
@@ -1213,7 +940,7 @@ fn prepare_proof_artifacts(
             .map_err(|error| ProveError::WitnessGeneration {
                 detail: error.to_string(),
             })?;
-        let (param_slots, records) = build_param_prelude(
+        let (param_slots, records) = crate::prelude::build_param_prelude(
             runtime_program,
             &statement_slot_layout,
             entry,
@@ -1592,8 +1319,8 @@ fn prepare_proof_machine_input(
     kit_registry: &ChipKitRegistry,
     input: &ProveInput<'_>,
 ) -> Result<(PreparedMachineInput, PublicStatement), RuntimeError> {
-    let typed_context = decode_context_input_on_state(state, input.context)?;
-    let typed_txs = decode_entry_batch_on_state(state, input.batch)?;
+    let typed_context = crate::prelude::decode_context_input_on_state(state, input.context)?;
+    let typed_txs = crate::prelude::decode_entry_batch_on_state(state, input.batch)?;
     let applied_tx_digest = runtime_ir::compute_applied_tx_digest(
         input.batch,
         &state.type_runtimes,
