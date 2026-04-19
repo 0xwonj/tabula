@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use p3_field::PrimeCharacteristicRing;
+use tabula_ext::backend::prelude::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use tabula_commitment::NativeDigest;
 use tabula_contract::PublicStatement;

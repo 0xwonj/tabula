@@ -50,6 +50,7 @@ mod host;
 mod proof_summary;
 #[cfg(feature = "prove")]
 mod prover;
+#[cfg(feature = "verify")]
 pub mod semantics;
 #[cfg(feature = "verify")]
 mod state_runtime;

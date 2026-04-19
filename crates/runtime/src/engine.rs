@@ -19,9 +19,9 @@ use tabula_contract::BoundStatement;
 use tabula_contract::ProofEnvelope;
 #[cfg(feature = "prove")]
 use tabula_contract::TupleEncodingDefaults;
-use tabula_contract::{
-    ArtifactContext, ProgramBinding, PublicStatement, SealedRelationPolicy, StaticTableArtifact,
-};
+use tabula_contract::{ArtifactContext, ProgramBinding, SealedRelationPolicy, StaticTableArtifact};
+#[cfg(feature = "prove")]
+use tabula_contract::PublicStatement;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
 use tabula_core::{ColId, CommittedCellKey, CommittedKey, Digest, PortableValue, TableId};
@@ -37,7 +37,9 @@ use tabula_ir as ir;
 use tabula_machine::{
     BackendProver, ColumnSlotKey, PreparedColumnInput, PreparedMachineInput, PreparedTierInput,
 };
-use tabula_machine::{TabulaMachine, TabulaProof, TabulaStarkConfig};
+use tabula_machine::{TabulaMachine, TabulaStarkConfig};
+#[cfg(feature = "prove")]
+use tabula_machine::TabulaProof;
 #[cfg(feature = "prove")]
 use tabula_types::CommittedColumnEntry;
 #[cfg(feature = "prove")]

@@ -10,13 +10,16 @@
 # We target tabula-cli, which sits at the top of the feature-propagation chain
 # (cli → sdk → runtime → ext) and exercises the full prove/verify path.
 #
-# KNOWN PRE-EXISTING ISSUE: `--features verify` alone currently fails to compile.
-# crates/runtime/src/semantics.rs uses p3_field::PrimeCharacteristicRing and
-# KoalaBear::ZERO unconditionally, but p3-field is only in the `prove` feature
-# set (not `verify`). Additionally, engine.rs has unused imports that are only
-# used under `prove`. This is a pre-existing bug on main/SP-1.5 HEAD, not
-# introduced by SP-5 Task 0. The verify-only shape failure is tracked as a
-# concern for SP-5 runtime decomposition work.
+# KNOWN PRE-EXISTING ISSUE: `--features verify` alone still fails to compile.
+# The initial Task 0 investigation fixed three unconditional imports
+# (engine.rs `PublicStatement` / `TabulaProof`, semantics.rs
+# `p3_field::PrimeCharacteristicRing`) and gated `pub mod semantics` behind
+# the verify feature. The remaining 13 errors under `--features verify` are
+# dead-code warnings (workspace `unused = deny`) in semantics.rs for items
+# consumed only under `prove` (ProofJournal, PublicStatementMaterialization,
+# canonical_public_context, etc.). Gating each individual item is invasive
+# and touches semantics.rs, which is explicitly out of SP-5 scope (§4.2).
+# Tracked as a follow-up "verify-only refinement" task.
 #
 # Wiring into CI is a follow-up (no CI system is present in this repo yet).
 
