@@ -34,8 +34,10 @@
 //! - **`verify`**: adds [`PreparedVerifier`], [`PreparedVerifierBuilder`],
 //!   the [`prepare_verifier`] free function, and the public
 //!   [`VerifierState`] type for native proof verification.
-//! - **`prove`**: adds [`TabulaRuntime`], [`RuntimeBuilder`], and the full
-//!   native witness → trace → prove pipeline. Implies `verify`.
+//! - **`prove`**: adds [`TabulaRuntime`], [`RuntimeBuilder`],
+//!   [`PreparedProver`], [`PreparedProverBuilder`], the
+//!   [`prepare_prover`] free function, and the full native
+//!   witness → trace → prove pipeline. Implies `verify`.
 
 #[cfg(feature = "verify")]
 mod bootstrap;
@@ -46,6 +48,8 @@ mod error;
 mod host;
 #[cfg(feature = "prove")]
 mod proof_summary;
+#[cfg(feature = "prove")]
+mod prover;
 pub mod semantics;
 #[cfg(feature = "verify")]
 mod state_runtime;
@@ -64,6 +68,8 @@ pub use engine::{ProveInput, ProveResult, VerifiedResult};
 pub use host::{HostEnvironment, InstalledSchemes, RuntimeRegistries, SmtScheme, SsmcScheme};
 #[cfg(feature = "prove")]
 pub use proof_summary::ProofSummary;
+#[cfg(feature = "prove")]
+pub use prover::{PreparedProver, PreparedProverBuilder, prepare_prover};
 #[cfg(feature = "verify")]
 pub use tabula_contract::{BoundStatement, PublicStatement};
 #[cfg(feature = "verify")]

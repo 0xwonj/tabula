@@ -14,12 +14,12 @@ use tabula_chips::execution::trace::InstructionRecord;
 use tabula_commitment::PoseidonHasher;
 use tabula_compiler::RegisteredProgram;
 #[cfg(feature = "prove")]
+use tabula_contract::BoundStatement;
+#[cfg(feature = "prove")]
 use tabula_contract::ProofEnvelope;
 #[cfg(feature = "prove")]
 use tabula_contract::TupleEncodingDefaults;
-use tabula_contract::{
-    ArtifactContext, BoundStatement, ProgramBinding, PublicStatement, StaticTableArtifact,
-};
+use tabula_contract::{ArtifactContext, ProgramBinding, PublicStatement, StaticTableArtifact};
 use tabula_core::error::TabulaError;
 use tabula_core::traits::StateView;
 use tabula_core::{ColId, CommittedCellKey, CommittedKey, Digest, PortableValue, TableId};
@@ -38,9 +38,10 @@ use tabula_machine::{
 use tabula_machine::{TabulaMachine, TabulaProof, TabulaStarkConfig};
 #[cfg(feature = "prove")]
 use tabula_types::CommittedColumnEntry;
+#[cfg(feature = "prove")]
+use tabula_types::StateEffectKind;
 use tabula_types::{
-    ContextValues, EncodingRuntimeRegistry, StateEffectKind, TxCall, TypeRuntimeRegistry,
-    TypedValue,
+    ContextValues, EncodingRuntimeRegistry, TxCall, TypeRuntimeRegistry, TypedValue,
 };
 #[cfg(feature = "prove")]
 use tabula_witness::stark::prepare_execution_store;
@@ -461,6 +462,210 @@ pub(crate) struct PreparedRuntimeBuild {
     pub(crate) root_backend_bundle: RootBackendBundle,
 }
 
+/// Build the [`ChipKitRegistry`] derived from a prepared runtime state.
+///
+/// This runs once at handle-build time (shared between `TabulaRuntime`
+/// and `PreparedProver`). Per-prove work must still allocate a fresh
+/// `KitScratch` — see SP-4 §2.5 on the SP-3 boundary.
+#[cfg(feature = "prove")]
+pub(crate) fn build_chip_kit_registry(state: &PreparedRuntimeState) -> ChipKitRegistry {
+    let mut kit_registry = ChipKitRegistry::new();
+    for backend in
+        crate::bootstrap::program::execution_backends_for(state.uses_ir_hash, state.relation_policy)
+    {
+        kit_registry.register_all(backend.witness_kits());
+    }
+    kit_registry
+}
+
+/// Shared prove pipeline entry point used by both [`TabulaRuntime`] and [`crate::PreparedProver`].
+///
+/// Prepares the machine input and public statement for one already-executed tx batch.
+/// All per-batch mutable state (KitScratch, column artifacts) lives in locals inside
+/// this call — calling it twice with the same input produces byte-identical output.
+#[cfg(feature = "prove")]
+pub(crate) fn prepare_proof_request_on_prepared_state(
+    state: &PreparedRuntimeState,
+    root_backend_bundle: &RootBackendBundle,
+    kit_registry: &ChipKitRegistry,
+    machine: &TabulaMachine,
+    input: &ProveInput<'_>,
+) -> Result<ProveResult, RuntimeError> {
+    let typed_context = decode_context_input_on_state(state, input.context)?;
+    let typed_txs = decode_entry_batch_on_state(state, input.batch)?;
+    let applied_tx_digest = runtime_ir::compute_applied_tx_digest(
+        input.batch,
+        &state.type_runtimes,
+        &state.encoding_runtimes,
+        &state.tuple_encoding_defaults,
+    )
+    .map_err(|error| RuntimeError::StatementBuild {
+        detail: error.to_string(),
+    })?;
+    let proof_artifacts = prepare_proof_artifacts(
+        state,
+        root_backend_bundle,
+        kit_registry,
+        input.snapshot,
+        &typed_txs,
+        &typed_context,
+        input.executed,
+    )?;
+    let public_statement = materialize_public_statement_on_state(
+        state,
+        &typed_context,
+        runtime_ir::PublicStatementMaterialization {
+            applied_tx_digest,
+            old_state_root: proof_artifacts.public_statement.old_root.to_bytes(),
+            new_state_root: proof_artifacts.public_statement.new_root.to_bytes(),
+        },
+        input.executed,
+    )?;
+    let binding_digest =
+        BoundStatement::new(state.artifact_context.clone(), public_statement.clone())
+            .binding_digest()
+            .map_err(|error| RuntimeError::StatementBuild {
+                detail: error.to_string(),
+            })?;
+    let machine_input = proof_artifacts.into_prepared_machine_input(binding_digest);
+    let (proof, envelope) = BackendProver::new(machine)
+        .prove_envelope(machine_input)
+        .map_err(RuntimeError::Proving)?;
+    let summary = crate::proof_summary::ProofSummary::from_proof(&proof);
+    Ok(ProveResult {
+        proof,
+        envelope,
+        public_statement,
+        summary,
+    })
+}
+
+fn decode_entry_batch_on_state(
+    state: &PreparedRuntimeState,
+    batch: &ir::EntryBatch,
+) -> Result<Vec<TxCall>, RuntimeError> {
+    batch
+        .calls
+        .iter()
+        .map(|call| decode_entry_call_on_state(state, call))
+        .collect()
+}
+
+fn decode_entry_call_on_state(
+    state: &PreparedRuntimeState,
+    call: &ir::EntryCall,
+) -> Result<TxCall, RuntimeError> {
+    let entry = state
+        .semantic
+        .execution()
+        .entry_definition(call.entry_id)
+        .map_err(|error| RuntimeError::ValidationFailed {
+            detail: error.to_string(),
+        })?;
+    if entry.kind != ir::EntryKind::Tx {
+        return Err(RuntimeError::ValidationFailed {
+            detail: format!("entry {} is not a tx entry", call.entry_id.0),
+        });
+    }
+    let params = decode_params_on_state(state, &entry.params, &call.params)?;
+    Ok(TxCall {
+        entry_id: call.entry_id,
+        params,
+    })
+}
+
+fn decode_params_on_state(
+    state: &PreparedRuntimeState,
+    expected: &[ir::ParamDecl],
+    params: &[PortableValue],
+) -> Result<Vec<TypedValue>, RuntimeError> {
+    if expected.len() != params.len() {
+        return Err(RuntimeError::ValidationFailed {
+            detail: format!(
+                "expected {} params but received {}",
+                expected.len(),
+                params.len()
+            ),
+        });
+    }
+    expected
+        .iter()
+        .zip(params)
+        .map(|(param, value)| {
+            if value.type_id() != param.ty {
+                return Err(RuntimeError::ValidationFailed {
+                    detail: format!(
+                        "param {} expects type {} but received {}",
+                        param.symbol,
+                        param.ty.0,
+                        value.type_id().0
+                    ),
+                });
+            }
+            state.type_runtimes.decode_portable(value).map_err(|error| {
+                RuntimeError::ValidationFailed {
+                    detail: error.to_string(),
+                }
+            })
+        })
+        .collect()
+}
+
+fn decode_context_input_on_state(
+    state: &PreparedRuntimeState,
+    context: &ir::ContextInput,
+) -> Result<ContextValues, RuntimeError> {
+    let mut typed = ContextValues::new();
+    for (field_id, value) in &context.fields {
+        let field = state
+            .semantic
+            .execution()
+            .context_field(*field_id)
+            .map_err(|error| RuntimeError::ValidationFailed {
+                detail: error.to_string(),
+            })?;
+        if value.type_id() != field.ty {
+            return Err(RuntimeError::ValidationFailed {
+                detail: format!(
+                    "context field {} expects type {} but received {}",
+                    field.symbol,
+                    field.ty.0,
+                    value.type_id().0
+                ),
+            });
+        }
+        let decoded = state
+            .type_runtimes
+            .decode_portable(value)
+            .map_err(|error| RuntimeError::ValidationFailed {
+                detail: error.to_string(),
+            })?;
+        typed.insert(*field_id, decoded);
+    }
+    Ok(typed)
+}
+
+#[cfg(feature = "prove")]
+fn materialize_public_statement_on_state(
+    state: &PreparedRuntimeState,
+    context: &ContextValues,
+    materialization: runtime_ir::PublicStatementMaterialization,
+    execution_journal: &exec::ExecutionJournal,
+) -> Result<PublicStatement, RuntimeError> {
+    runtime_ir::materialize_public_statement(
+        state.semantic.proof(),
+        context,
+        execution_journal,
+        materialization,
+        &state.type_runtimes,
+        &state.encoding_runtimes,
+        &state.tuple_encoding_defaults,
+    )
+    .map_err(|error| RuntimeError::StatementBuild {
+        detail: error.to_string(),
+    })
+}
+
 /// Shared factory that constructs the prepared runtime state consumed by both the execute
 /// and prove surfaces.
 #[cfg(feature = "verify")]
@@ -617,10 +822,14 @@ impl RuntimeBuilder {
             #[cfg(not(feature = "prove"))]
             self.root_proof_backend,
         )?;
+        #[cfg(feature = "prove")]
+        let kit_registry = build_chip_kit_registry(&prepared.runtime_program);
         Ok(TabulaRuntime {
             runtime_program: prepared.runtime_program,
             #[cfg(feature = "prove")]
             root_backend_bundle: prepared.root_backend_bundle,
+            #[cfg(feature = "prove")]
+            kit_registry,
             machine: prepared.machine,
         })
     }
@@ -631,6 +840,8 @@ pub struct TabulaRuntime {
     runtime_program: PreparedRuntimeState,
     #[cfg(feature = "prove")]
     root_backend_bundle: RootBackendBundle,
+    #[cfg(feature = "prove")]
+    kit_registry: ChipKitRegistry,
     machine: TabulaMachine,
 }
 
@@ -844,41 +1055,20 @@ impl TabulaRuntime {
         })
     }
 
-    #[cfg(feature = "prove")]
-    fn materialize_public_statement_typed(
-        &self,
-        context: &ContextValues,
-        materialization: runtime_ir::PublicStatementMaterialization,
-        execution_journal: &exec::ExecutionJournal,
-    ) -> Result<PublicStatement, RuntimeError> {
-        runtime_ir::materialize_public_statement(
-            self.proof_program(),
-            context,
-            execution_journal,
-            materialization,
-            self.type_runtimes(),
-            &self.runtime_program.encoding_runtimes,
-            &self.runtime_program.tuple_encoding_defaults,
-        )
-        .map_err(|error| RuntimeError::StatementBuild {
-            detail: error.to_string(),
-        })
-    }
-
     /// Generate a proof for one already-executed tx batch.
+    ///
+    /// Retained for S3 call-site migration; prefer [`crate::PreparedProver::prove`].
+    /// Delegates to the shared prepared-state code path so byte-identity
+    /// stays honest through SP-4 S2/S3.
     #[cfg(feature = "prove")]
     pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, RuntimeError> {
-        let (machine_input, public_statement) = self.prepare_proof_request(input)?;
-        let (proof, envelope) = BackendProver::new(&self.machine)
-            .prove_envelope(machine_input)
-            .map_err(RuntimeError::Proving)?;
-        let summary = ProofSummary::from_proof(&proof);
-        Ok(ProveResult {
-            proof,
-            envelope,
-            public_statement,
-            summary,
-        })
+        prepare_proof_request_on_prepared_state(
+            &self.runtime_program,
+            &self.root_backend_bundle,
+            &self.kit_registry,
+            &self.machine,
+            input,
+        )
     }
 
     /// Verify a native proof against an externally supplied expected public statement.
@@ -927,82 +1117,12 @@ impl TabulaRuntime {
         })
     }
 
-    #[cfg(feature = "prove")]
-    fn prepare_proof_request(
-        &self,
-        input: &ProveInput<'_>,
-    ) -> Result<(PreparedMachineInput, PublicStatement), RuntimeError> {
-        let typed_context = self.decode_context_input(input.context)?;
-        let typed_txs = self.decode_entry_batch(input.batch)?;
-        let applied_tx_digest = runtime_ir::compute_applied_tx_digest(
-            input.batch,
-            self.type_runtimes(),
-            &self.runtime_program.encoding_runtimes,
-            &self.runtime_program.tuple_encoding_defaults,
-        )
-        .map_err(|error| RuntimeError::StatementBuild {
-            detail: error.to_string(),
-        })?;
-        let proof_artifacts = prepare_proof_artifacts(
-            &self.runtime_program,
-            &self.root_backend_bundle,
-            input.snapshot,
-            &typed_txs,
-            &typed_context,
-            input.executed,
-        )?;
-        let public_statement = self.materialize_public_statement_typed(
-            &typed_context,
-            runtime_ir::PublicStatementMaterialization {
-                applied_tx_digest,
-                old_state_root: proof_artifacts.public_statement.old_root.to_bytes(),
-                new_state_root: proof_artifacts.public_statement.new_root.to_bytes(),
-            },
-            input.executed,
-        )?;
-        let binding_digest = self
-            .bound_statement(&public_statement)
-            .binding_digest()
-            .map_err(|error| RuntimeError::StatementBuild {
-                detail: error.to_string(),
-            })?;
-        let machine_input = proof_artifacts.into_prepared_machine_input(binding_digest);
-        Ok((machine_input, public_statement))
-    }
-
-    fn bound_statement(&self, public_statement: &PublicStatement) -> BoundStatement {
-        BoundStatement::new(self.artifact_context(), public_statement.clone())
-    }
-
     fn artifact_context(&self) -> ArtifactContext {
         self.runtime_program.artifact_context.clone()
     }
 
     fn decode_entry_batch(&self, batch: &ir::EntryBatch) -> Result<Vec<TxCall>, RuntimeError> {
-        batch
-            .calls
-            .iter()
-            .map(|call| self.decode_entry_call(call))
-            .collect()
-    }
-
-    fn decode_entry_call(&self, call: &ir::EntryCall) -> Result<TxCall, RuntimeError> {
-        let entry = self
-            .execution_program()
-            .entry_definition(call.entry_id)
-            .map_err(|error| RuntimeError::ValidationFailed {
-                detail: error.to_string(),
-            })?;
-        if entry.kind != ir::EntryKind::Tx {
-            return Err(RuntimeError::ValidationFailed {
-                detail: format!("entry {} is not a tx entry", call.entry_id.0),
-            });
-        }
-        let params = self.decode_params(&entry.params, &call.params)?;
-        Ok(TxCall {
-            entry_id: call.entry_id,
-            params,
-        })
+        decode_entry_batch_on_state(&self.runtime_program, batch)
     }
 
     fn decode_query_params(
@@ -1029,69 +1149,14 @@ impl TabulaRuntime {
         expected: &[ir::ParamDecl],
         params: &[PortableValue],
     ) -> Result<Vec<TypedValue>, RuntimeError> {
-        if expected.len() != params.len() {
-            return Err(RuntimeError::ValidationFailed {
-                detail: format!(
-                    "expected {} params but received {}",
-                    expected.len(),
-                    params.len()
-                ),
-            });
-        }
-        expected
-            .iter()
-            .zip(params)
-            .map(|(param, value)| {
-                if value.type_id() != param.ty {
-                    return Err(RuntimeError::ValidationFailed {
-                        detail: format!(
-                            "param {} expects type {} but received {}",
-                            param.symbol,
-                            param.ty.0,
-                            value.type_id().0
-                        ),
-                    });
-                }
-                self.type_runtimes()
-                    .decode_portable(value)
-                    .map_err(|error| RuntimeError::ValidationFailed {
-                        detail: error.to_string(),
-                    })
-            })
-            .collect()
+        decode_params_on_state(&self.runtime_program, expected, params)
     }
 
     fn decode_context_input(
         &self,
         context: &ir::ContextInput,
     ) -> Result<ContextValues, RuntimeError> {
-        let mut typed = ContextValues::new();
-        for (field_id, value) in &context.fields {
-            let field = self
-                .execution_program()
-                .context_field(*field_id)
-                .map_err(|error| RuntimeError::ValidationFailed {
-                    detail: error.to_string(),
-                })?;
-            if value.type_id() != field.ty {
-                return Err(RuntimeError::ValidationFailed {
-                    detail: format!(
-                        "context field {} expects type {} but received {}",
-                        field.symbol,
-                        field.ty.0,
-                        value.type_id().0
-                    ),
-                });
-            }
-            let decoded = self
-                .type_runtimes()
-                .decode_portable(value)
-                .map_err(|error| RuntimeError::ValidationFailed {
-                    detail: error.to_string(),
-                })?;
-            typed.insert(*field_id, decoded);
-        }
-        Ok(typed)
+        decode_context_input_on_state(&self.runtime_program, context)
     }
 }
 
@@ -1387,6 +1452,7 @@ fn build_event_item_bases(
 fn prepare_proof_artifacts(
     runtime_program: &PreparedRuntimeState,
     root_backend_bundle: &RootBackendBundle,
+    kit_registry: &ChipKitRegistry,
     snapshot: &CommittedStateSnapshot,
     txs: &[TxCall],
     context: &ContextValues,
@@ -1690,13 +1756,6 @@ fn prepare_proof_artifacts(
         });
     }
 
-    let mut kit_registry = ChipKitRegistry::new();
-    for backend in crate::bootstrap::program::execution_backends_for(
-        runtime_program.uses_ir_hash,
-        runtime_program.relation_policy,
-    ) {
-        kit_registry.register_all(backend.witness_kits());
-    }
     tabula_chips::relation_table::RelationTableKit::insert_rows(
         &mut lowered.kit_scratch,
         relation_proof
@@ -1713,7 +1772,7 @@ fn prepare_proof_artifacts(
             .collect(),
     );
     let execution_store =
-        prepare_execution_store(&mut lowered, &kit_registry).map_err(RuntimeError::TraceBuild)?;
+        prepare_execution_store(&mut lowered, kit_registry).map_err(RuntimeError::TraceBuild)?;
 
     let prepared_columns = runtime_program
         .column_slots
@@ -1888,6 +1947,58 @@ fn prepare_column_slot(
         (None, false) => {}
     }
     Ok((slot.table, slot.col, proof))
+}
+
+/// Prepare the machine input and public statement without running the prover.
+///
+/// Exposed only for tests that need to tamper with witness store contents
+/// before proving. Production code must use [`prepare_proof_request_on_prepared_state`]
+/// or [`TabulaRuntime::prove`] instead.
+#[cfg(all(test, feature = "prove"))]
+fn prepare_proof_machine_input(
+    state: &PreparedRuntimeState,
+    root_backend_bundle: &RootBackendBundle,
+    kit_registry: &ChipKitRegistry,
+    input: &ProveInput<'_>,
+) -> Result<(PreparedMachineInput, PublicStatement), RuntimeError> {
+    let typed_context = decode_context_input_on_state(state, input.context)?;
+    let typed_txs = decode_entry_batch_on_state(state, input.batch)?;
+    let applied_tx_digest = runtime_ir::compute_applied_tx_digest(
+        input.batch,
+        &state.type_runtimes,
+        &state.encoding_runtimes,
+        &state.tuple_encoding_defaults,
+    )
+    .map_err(|error| RuntimeError::StatementBuild {
+        detail: error.to_string(),
+    })?;
+    let proof_artifacts = prepare_proof_artifacts(
+        state,
+        root_backend_bundle,
+        kit_registry,
+        input.snapshot,
+        &typed_txs,
+        &typed_context,
+        input.executed,
+    )?;
+    let public_statement = materialize_public_statement_on_state(
+        state,
+        &typed_context,
+        runtime_ir::PublicStatementMaterialization {
+            applied_tx_digest,
+            old_state_root: proof_artifacts.public_statement.old_root.to_bytes(),
+            new_state_root: proof_artifacts.public_statement.new_root.to_bytes(),
+        },
+        input.executed,
+    )?;
+    let binding_digest =
+        BoundStatement::new(state.artifact_context.clone(), public_statement.clone())
+            .binding_digest()
+            .map_err(|error| RuntimeError::StatementBuild {
+                detail: error.to_string(),
+            })?;
+    let machine_input = proof_artifacts.into_prepared_machine_input(binding_digest);
+    Ok((machine_input, public_statement))
 }
 
 #[cfg(all(test, feature = "prove"))]
@@ -2513,9 +2624,13 @@ tx scan(id: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute guarded batch");
 
-        let (machine_input, _public_statement) = runtime
-            .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
-            .expect("prepare proof request");
+        let (machine_input, _public_statement) = prepare_proof_machine_input(
+            &runtime.runtime_program,
+            &runtime.root_backend_bundle,
+            &runtime.kit_registry,
+            &prove_input(&snapshot, &batch, &context, &executed),
+        )
+        .expect("prepare proof request");
 
         let transcript_calls = machine_input
             .execution
@@ -2548,9 +2663,13 @@ tx scan(id: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute batch");
 
-        let (mut machine_input, _public_statement) = runtime
-            .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
-            .expect("prepare proof request");
+        let (mut machine_input, _public_statement) = prepare_proof_machine_input(
+            &runtime.runtime_program,
+            &runtime.root_backend_bundle,
+            &runtime.kit_registry,
+            &prove_input(&snapshot, &batch, &context, &executed),
+        )
+        .expect("prepare proof request");
 
         let mut rows = machine_input
             .execution
@@ -2590,9 +2709,13 @@ tx scan(id: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute batch");
 
-        let (mut machine_input, _public_statement) = runtime
-            .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
-            .expect("prepare proof request");
+        let (mut machine_input, _public_statement) = prepare_proof_machine_input(
+            &runtime.runtime_program,
+            &runtime.root_backend_bundle,
+            &runtime.kit_registry,
+            &prove_input(&snapshot, &batch, &context, &executed),
+        )
+        .expect("prepare proof request");
 
         let mut records = machine_input
             .execution
@@ -2632,9 +2755,13 @@ tx scan(id: u64) {
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute batch");
 
-        let (mut machine_input, _public_statement) = runtime
-            .prepare_proof_request(&prove_input(&snapshot, &batch, &context, &executed))
-            .expect("prepare proof request");
+        let (mut machine_input, _public_statement) = prepare_proof_machine_input(
+            &runtime.runtime_program,
+            &runtime.root_backend_bundle,
+            &runtime.kit_registry,
+            &prove_input(&snapshot, &batch, &context, &executed),
+        )
+        .expect("prepare proof request");
 
         let mut calls = machine_input
             .execution
@@ -2944,6 +3071,7 @@ tx scan(id: u64) {
         let prepared = prepare_proof_artifacts(
             &runtime.runtime_program,
             &runtime.root_backend_bundle,
+            &runtime.kit_registry,
             &snapshot,
             &typed_txs,
             &typed_context,

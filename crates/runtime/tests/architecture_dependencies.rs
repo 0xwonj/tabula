@@ -134,6 +134,9 @@ fn runtime_root_exposes_only_the_final_native_surface() {
             && runtime_lib.contains("pub use engine::{ProveInput, ProveResult, VerifiedResult};")
             && runtime_lib.contains(
                 "pub use verifier::{PreparedVerifier, PreparedVerifierBuilder, VerifierState, prepare_verifier};"
+            )
+            && runtime_lib.contains(
+                "pub use prover::{PreparedProver, PreparedProverBuilder, prepare_prover};"
             ),
         "runtime root must re-export the canonical native runtime and verifier types"
     );
@@ -159,6 +162,7 @@ fn live_runtime_sources_are_legacy_free() {
         "crates/runtime/src/semantics.rs",
         "crates/runtime/src/engine.rs",
         "crates/runtime/src/verifier.rs",
+        "crates/runtime/src/prover.rs",
         "crates/runtime/src/state_runtime.rs",
         "crates/runtime/src/proof_summary.rs",
         "crates/runtime/src/bootstrap/mod.rs",
@@ -291,7 +295,7 @@ fn runtime_prove_and_verify_route_through_backend_facade() {
         .next()
         .unwrap_or(engine.as_str());
     assert!(
-        engine_prod.contains("BackendProver::new(&self.machine)")
+        engine_prod.contains("BackendProver::new(machine)")
             && engine_prod.contains(".prove_envelope("),
         "runtime prove path must go through BackendProver::prove_envelope"
     );
