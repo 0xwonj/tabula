@@ -256,11 +256,15 @@ fn native_proof_path_stays_bridge_free() {
 #[test]
 fn verifier_path_is_single_sourced_in_verifier_module() {
     let verifier_source = read_workspace_file("crates/runtime/src/verifier.rs");
+    // SP-4 S4.2: VerifierCore was inlined into PreparedVerifier::verify and deleted.
     assert!(
-        verifier_source.contains("struct VerifierCore")
-            && verifier_source.contains("pub struct PreparedVerifierBuilder")
+        verifier_source.contains("pub struct PreparedVerifierBuilder")
             && verifier_source.contains("pub struct PreparedVerifier"),
         "runtime verifier module must own the canonical verification path"
+    );
+    assert!(
+        !verifier_source.contains("struct VerifierCore"),
+        "VerifierCore must remain deleted — verification logic lives directly in PreparedVerifier::verify"
     );
     assert!(
         !verifier_source.contains("crate::engine::"),
@@ -324,8 +328,7 @@ fn runtime_prove_and_verify_route_through_backend_facade() {
 
     let verifier = read_workspace_file("crates/runtime/src/verifier.rs");
     assert!(
-        verifier.contains("BackendVerifier::new(self.machine)")
-            && verifier.contains(".verify_proof("),
+        verifier.contains("BackendVerifier::new(") && verifier.contains(".verify_proof("),
         "runtime verifier path must go through BackendVerifier::verify_proof"
     );
     for forbidden in [

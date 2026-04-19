@@ -37,16 +37,6 @@ pub struct VerifierState {
     pub machine: TabulaMachine,
 }
 
-impl VerifierState {
-    fn verifier_core(&self) -> VerifierCore<'_> {
-        VerifierCore {
-            context: &self.context,
-            relation_policy: self.relation_policy,
-            machine: &self.machine,
-        }
-    }
-}
-
 /// Verifier built once per registered native program.
 ///
 /// Cheap to share via Arc; [`PreparedVerifier::verify`] takes
@@ -96,13 +86,48 @@ impl PreparedVerifier {
         proof: &TabulaProof,
         expected_public_statement: &PublicStatement,
     ) -> Result<BoundStatement, RuntimeError> {
-        self.prepared
-            .verifier_core()
-            .verify_public_statement(proof, expected_public_statement)?;
-        Ok(BoundStatement::new(
+        let bound = BoundStatement::new(
             self.prepared.context.clone(),
             expected_public_statement.clone(),
-        ))
+        );
+        let expected_binding_digest =
+            bound
+                .binding_digest()
+                .map_err(|error| RuntimeError::StatementBuild {
+                    detail: error.to_string(),
+                })?;
+        if proof.binding_digest != expected_binding_digest {
+            return Err(RuntimeError::ValidationFailed {
+                detail: "proof binding digest does not match the artifact-bound public statement"
+                    .to_string(),
+            });
+        }
+        verify_proved_public_statement_digests(
+            proof,
+            &self.prepared.machine,
+            expected_public_statement,
+        )?;
+        match relation_table_root_from_proof(proof, &self.prepared.machine)? {
+            Some(root) if self.prepared.relation_policy.requires_artifact_root() => {
+                if root != self.prepared.context.static_table_root {
+                    return Err(RuntimeError::ValidationFailed {
+                        detail: "relation table chip root does not match the verifier artifact"
+                            .to_string(),
+                    });
+                }
+            }
+            None if self.prepared.relation_policy.requires_artifact_root() => {
+                return Err(RuntimeError::ValidationFailed {
+                    detail: "relation table chip opening is missing from the execution proof"
+                        .to_string(),
+                });
+            }
+            _ => {}
+        }
+        BackendVerifier::new(&self.prepared.machine)
+            .verify_proof(proof)
+            .map_err(RuntimeError::Verification)?;
+        Ok(bound)
     }
 }
 
@@ -322,60 +347,6 @@ fn verify_proved_public_statement_digests(
     }
 
     Ok(())
-}
-
-/// Shared statement-first verification path used by both `PreparedVerifier` and `TabulaRuntime`.
-#[derive(Clone, Copy)]
-struct VerifierCore<'a> {
-    context: &'a ArtifactContext,
-    relation_policy: RelationPolicy,
-    machine: &'a TabulaMachine,
-}
-
-impl VerifierCore<'_> {
-    fn bound_statement(&self, public_statement: &PublicStatement) -> BoundStatement {
-        BoundStatement::new(self.context.clone(), public_statement.clone())
-    }
-
-    fn verify_public_statement(
-        &self,
-        proof: &TabulaProof,
-        expected_public_statement: &PublicStatement,
-    ) -> Result<(), RuntimeError> {
-        let expected_binding_digest = self
-            .bound_statement(expected_public_statement)
-            .binding_digest()
-            .map_err(|error| RuntimeError::StatementBuild {
-                detail: error.to_string(),
-            })?;
-        if proof.binding_digest != expected_binding_digest {
-            return Err(RuntimeError::ValidationFailed {
-                detail: "proof binding digest does not match the artifact-bound public statement"
-                    .to_string(),
-            });
-        }
-        verify_proved_public_statement_digests(proof, self.machine, expected_public_statement)?;
-        match relation_table_root_from_proof(proof, self.machine)? {
-            Some(root) if self.relation_policy.requires_artifact_root() => {
-                if root != self.context.static_table_root {
-                    return Err(RuntimeError::ValidationFailed {
-                        detail: "relation table chip root does not match the verifier artifact"
-                            .to_string(),
-                    });
-                }
-            }
-            None if self.relation_policy.requires_artifact_root() => {
-                return Err(RuntimeError::ValidationFailed {
-                    detail: "relation table chip opening is missing from the execution proof"
-                        .to_string(),
-                });
-            }
-            _ => {}
-        }
-        BackendVerifier::new(self.machine)
-            .verify_proof(proof)
-            .map_err(RuntimeError::Verification)
-    }
 }
 
 // Static guarantee that PreparedVerifier is cheap to share across threads.
