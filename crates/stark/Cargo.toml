@@ -20,6 +20,9 @@ rayon = { workspace = true }
 [dev-dependencies]
 tabula-core = { workspace = true }
 p3-challenger = { workspace = true }
+# SP-5 §9: trybuild compile-fail + compile-pass probes for ChipWitnessKit seal.
+# Version is pinned to avoid stderr format churn across Rust releases.
+trybuild = "=1.0.105"
 
 [lints]
 workspace = true
