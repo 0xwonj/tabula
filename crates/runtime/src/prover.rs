@@ -12,19 +12,18 @@ use tabula_compiler::RegisteredProgram;
 use tabula_contract::ProgramBinding;
 use tabula_core::Digest;
 use tabula_ext::root::RootBackendBundle;
-use tabula_machine::{TabulaMachine, TabulaStarkConfig};
+use tabula_machine::TabulaMachine;
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 use tabula_witness::stark::ChipKitRegistry;
 
 use crate::engine::{
     ProveInput, ProveResult, VerifiedResult, prepare_proof_request_on_prepared_state,
 };
+use crate::error::{ProveError, RuntimeError, VerifyError};
+use crate::options::PreparedOptions;
 use crate::prepared_state::{
     PreparedRuntimeState, build_chip_kit_registry, build_prepared_runtime,
 };
-use crate::error::{ProveError, RuntimeError, SetupError, VerifyError};
-use crate::host::HostEnvironment;
-use crate::options::PreparedOptions;
 use crate::verifier::VerifierState;
 
 /// Prepared prover handle for one registered native program.
@@ -46,22 +45,7 @@ pub struct PreparedProver {
     verifier_state: VerifierState,
 }
 
-/// Fluent builder for [`PreparedProver`].
-pub struct PreparedProverBuilder {
-    registered_program: RegisteredProgram,
-    host_environment: HostEnvironment,
-    machine_stark_config: TabulaStarkConfig,
-    root_backend_bundle: RootBackendBundle,
-}
-
 impl PreparedProver {
-    /// Create a builder for one registered native program.
-    pub fn builder(
-        registered_program: RegisteredProgram,
-    ) -> Result<PreparedProverBuilder, RuntimeError> {
-        PreparedProverBuilder::new(registered_program)
-    }
-
     /// Borrow the transcript-bound program binding.
     pub fn binding(&self) -> &ProgramBinding {
         &self.verifier_state.context.binding
@@ -135,79 +119,41 @@ impl PreparedProver {
     }
 }
 
-impl PreparedProverBuilder {
-    fn new(registered_program: RegisteredProgram) -> Result<Self, RuntimeError> {
-        registered_program
-            .validate_sealed_artifact()
-            .map_err(SetupError::CompilerValidation)?;
-        Ok(Self {
-            registered_program,
-            host_environment: HostEnvironment::standard()?,
-            machine_stark_config: tabula_machine::default_config(),
-            root_backend_bundle: RootBackendBundle::standard(),
-        })
-    }
-
-    /// Replace the host-owned runtime registries and scheme factories.
-    pub fn with_host_environment(mut self, host_environment: HostEnvironment) -> Self {
-        self.host_environment = host_environment;
-        self
-    }
-
-    /// Override the machine STARK configuration.
-    pub fn with_machine_stark_config(mut self, machine_stark_config: TabulaStarkConfig) -> Self {
-        self.machine_stark_config = machine_stark_config;
-        self
-    }
-
-    /// Override the root proof backend bundle.
-    pub fn with_root_backend_bundle(mut self, root_backend_bundle: RootBackendBundle) -> Self {
-        self.root_backend_bundle = root_backend_bundle;
-        self
-    }
-
-    /// Build the prepared prover.
-    pub fn build(self) -> Result<PreparedProver, RuntimeError> {
-        let prepared = build_prepared_runtime(
-            &self.registered_program,
-            &self.host_environment,
-            &self.machine_stark_config,
-            self.root_backend_bundle,
-        )?;
-        let kit_registry = build_chip_kit_registry(&prepared.runtime_program);
-        let verifier_state = VerifierState {
-            context: prepared.runtime_program.artifact_context.clone(),
-            relation_policy: prepared.runtime_program.relation_policy,
-            machine: prepared.machine,
-        };
-        Ok(PreparedProver {
-            runtime_program: prepared.runtime_program,
-            root_backend_bundle: prepared.root_backend_bundle,
-            kit_registry,
-            verifier_state,
-        })
-    }
-}
-
 /// Build a [`PreparedProver`] from a shared registered program and an
 /// option bundle.
 ///
-/// This is the canonical way to construct a prover handle: it replaces
-/// the legacy [`PreparedProver::builder`] + per-knob `with_*` chain
-/// with a single options argument. The builder is still available but
-/// will be removed once the decomposition settles (SP-5 Task 10).
+/// This is the canonical way to construct a prover handle: the
+/// host-environment, machine-config, and root-backend knobs travel
+/// through [`PreparedOptions`] instead of a fluent builder chain.
 pub fn prepare_prover(
     registered: Arc<RegisteredProgram>,
     opts: &PreparedOptions,
 ) -> Result<PreparedProver, ProveError> {
     let program = Arc::try_unwrap(registered).unwrap_or_else(|shared| (*shared).clone());
-    PreparedProver::builder(program)
-        .map_err(route_to_prove)?
-        .with_host_environment(opts.host_environment().clone())
-        .with_machine_stark_config(opts.machine_stark_config().clone())
-        .with_root_backend_bundle(opts.root_backend().0.clone())
-        .build()
-        .map_err(route_to_prove)
+    program
+        .validate_sealed_artifact()
+        .map_err(|e| ProveError::WitnessGeneration {
+            detail: e.to_string(),
+        })?;
+    let prepared = build_prepared_runtime(
+        &program,
+        opts.host_environment(),
+        opts.machine_stark_config(),
+        opts.root_backend().0.clone(),
+    )
+    .map_err(route_to_prove)?;
+    let kit_registry = build_chip_kit_registry(&prepared.runtime_program);
+    let verifier_state = VerifierState {
+        context: prepared.runtime_program.artifact_context.clone(),
+        relation_policy: prepared.runtime_program.relation_policy,
+        machine: prepared.machine,
+    };
+    Ok(PreparedProver {
+        runtime_program: prepared.runtime_program,
+        root_backend_bundle: prepared.root_backend_bundle,
+        kit_registry,
+        verifier_state,
+    })
 }
 
 /// Narrow a [`RuntimeError`] to [`ProveError`] for the prover surface.
@@ -268,7 +214,7 @@ tx enroll(id: u64, tier: u64) {
 
     fn build_prover_and_input() -> (
         PreparedProver,
-        crate::engine::CommittedStateSnapshot,
+        crate::snapshot::CommittedStateSnapshot,
         ir::EntryBatch,
         ir::ContextInput,
         tabula_executor::ExecutionJournal,
@@ -278,15 +224,14 @@ tx enroll(id: u64, tier: u64) {
         let prover = prepare_prover(Arc::new(registered.clone()), &opts)
             .expect("build PreparedProver");
 
-        // Use a TabulaRuntime to run execute_batch; prover and runtime share the same
+        // Share the registered program with a PreparedExecutor to drive
+        // execute_batch; prover and executor both resolve from the same
         // registered program so their prepared states are equivalent.
-        let runtime = crate::engine::TabulaRuntime::builder(registered.clone())
-            .expect("builder")
-            .build()
-            .expect("build runtime");
+        let executor = crate::prepare_executor(Arc::new(registered.clone()), &opts)
+            .expect("build PreparedExecutor");
 
         // Prepopulate state so @ssmc column reads succeed during proving.
-        let snapshot = runtime
+        let snapshot = executor
             .materialize_logical_state([
                 (
                     ir::TableId(0),
@@ -303,20 +248,15 @@ tx enroll(id: u64, tier: u64) {
             ])
             .expect("build initial snapshot");
 
-        let entry_id = runtime
-            .execution_program()
-            .program()
-            .entries
-            .iter()
-            .find(|e| e.symbol == "enroll")
-            .map(|e| e.id)
+        let entry_id = executor
+            .entry_id_by_symbol("enroll")
             .expect("enroll entry");
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id,
             params: vec![u64_portable(0), u64_portable(1)],
         }]);
         let ctx = context_input([(ir::ContextFieldId(0), u64_portable(7))]);
-        let executed = runtime
+        let executed = executor
             .execute_batch(&snapshot, &batch, &ctx)
             .expect("execute batch");
         (prover, snapshot, batch, ctx, executed)

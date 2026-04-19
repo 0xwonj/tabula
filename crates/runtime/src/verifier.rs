@@ -12,15 +12,10 @@ use tabula_contract::{
     ArtifactContext, BoundStatement, ProgramBinding, PublicStatement, SealedRelationPolicy,
 };
 use tabula_core::Digest;
-#[cfg(feature = "prove")]
-use tabula_ext::root::RootBackendBundle;
-#[cfg(not(feature = "prove"))]
-use tabula_ext::root::{RootProofBackend, SmtRootProofBackend};
-use tabula_machine::{BackendVerifier, TabulaMachine, TabulaProof, TabulaStarkConfig};
+use tabula_machine::{BackendVerifier, TabulaMachine, TabulaProof};
 
 use crate::bootstrap::program::{build_registered_program_machine, resolve_sealed_artifact_setup};
-use crate::error::{RuntimeError, SetupError, VerifyError};
-use crate::host::HostEnvironment;
+use crate::error::{RuntimeError, VerifyError};
 use crate::options::PreparedOptions;
 
 /// Prepared verifier state derived from the sealed artifact and machine setup.
@@ -46,25 +41,7 @@ pub struct PreparedVerifier {
     prepared: VerifierState,
 }
 
-/// Fluent builder for [`PreparedVerifier`].
-pub struct PreparedVerifierBuilder {
-    sealed_artifact: Arc<SealedArtifact>,
-    host_environment: HostEnvironment,
-    machine_stark_config: TabulaStarkConfig,
-    #[cfg(feature = "prove")]
-    root_backend_bundle: RootBackendBundle,
-    #[cfg(not(feature = "prove"))]
-    root_proof_backend: Arc<dyn RootProofBackend>,
-}
-
 impl PreparedVerifier {
-    /// Create a builder for a sealed artifact.
-    pub fn builder(
-        sealed_artifact: Arc<SealedArtifact>,
-    ) -> Result<PreparedVerifierBuilder, RuntimeError> {
-        PreparedVerifierBuilder::new(sealed_artifact)
-    }
-
     /// Borrow the prepared verify-side state.
     pub fn state(&self) -> &VerifierState {
         &self.prepared
@@ -135,123 +112,61 @@ impl PreparedVerifier {
     }
 }
 
-impl PreparedVerifierBuilder {
-    fn new(sealed_artifact: Arc<SealedArtifact>) -> Result<Self, RuntimeError> {
-        sealed_artifact
-            .validate()
-            .map_err(|e| SetupError::Validation {
-                detail: format!("sealed artifact validation failed: {e}"),
-            })?;
-        Ok(Self {
-            sealed_artifact,
-            host_environment: HostEnvironment::standard()?,
-            machine_stark_config: tabula_machine::default_config(),
-            #[cfg(feature = "prove")]
-            root_backend_bundle: RootBackendBundle::standard(),
-            #[cfg(not(feature = "prove"))]
-            root_proof_backend: Arc::new(SmtRootProofBackend),
-        })
-    }
-
-    /// Replace the host-owned runtime registries and scheme factories.
-    pub fn with_host_environment(mut self, host_environment: HostEnvironment) -> Self {
-        self.host_environment = host_environment;
-        self
-    }
-
-    /// Override the machine STARK configuration.
-    pub fn with_machine_stark_config(mut self, machine_stark_config: TabulaStarkConfig) -> Self {
-        self.machine_stark_config = machine_stark_config;
-        self
-    }
-
-    /// Override the root proof backend bundle.
-    #[cfg(feature = "prove")]
-    pub fn with_root_backend_bundle(mut self, root_backend_bundle: RootBackendBundle) -> Self {
-        self.root_backend_bundle = root_backend_bundle;
-        self
-    }
-
-    /// Override the proof-side root backend.
-    #[cfg(not(feature = "prove"))]
-    pub fn with_root_proof_backend(
-        mut self,
-        root_proof_backend: impl RootProofBackend + 'static,
-    ) -> Self {
-        self.root_proof_backend = Arc::new(root_proof_backend);
-        self
-    }
-
-    /// Override the proof-side root backend using a shared backend object.
-    #[cfg(not(feature = "prove"))]
-    pub fn with_root_proof_backend_arc(
-        mut self,
-        root_proof_backend: Arc<dyn RootProofBackend>,
-    ) -> Self {
-        self.root_proof_backend = root_proof_backend;
-        self
-    }
-
-    /// Build the prepared verifier.
-    ///
-    /// Note: `validate_core_first_program` (capability-call rejection) is NOT
-    /// run on the verifier path. The check requires `ir::Program`, which the
-    /// verifier does not hold. The engine path (`build_prepared_runtime`)
-    /// continues to run it; the binding-digest check already gates non-matching
-    /// programs on the verifier side.
-    pub fn build(self) -> Result<PreparedVerifier, RuntimeError> {
-        #[cfg(feature = "prove")]
-        let proof_backend = self.root_backend_bundle.proof_backend();
-        #[cfg(not(feature = "prove"))]
-        let proof_backend = Arc::clone(&self.root_proof_backend);
-        #[cfg(feature = "prove")]
-        let accepted_root_binding_families =
-            self.root_backend_bundle.supported_root_binding_families();
-        #[cfg(not(feature = "prove"))]
-        let accepted_root_binding_families = proof_backend.supported_root_binding_families();
-        let program_setup = resolve_sealed_artifact_setup(
-            &self.sealed_artifact,
-            self.host_environment.schemes().factories(),
-            self.host_environment.runtime_registries().type_runtimes(),
-            self.host_environment
-                .runtime_registries()
-                .encoding_runtimes(),
-            accepted_root_binding_families,
-        )?;
-        let machine = build_registered_program_machine(
-            &program_setup,
-            &self.machine_stark_config,
-            proof_backend,
-        )?;
-        Ok(PreparedVerifier {
-            prepared: VerifierState {
-                context: program_setup.artifact_context,
-                relation_policy: program_setup.relation_policy,
-                machine,
-            },
-        })
-    }
-}
-
 /// Build a [`PreparedVerifier`] from a sealed artifact and an option
 /// bundle.
 ///
 /// The verifier path is IR-free: it takes `Arc<SealedArtifact>` and does
 /// not require a `RegisteredProgram`. The prover and executor paths stay
 /// on `Arc<RegisteredProgram>` because they execute IR.
+///
+/// Note: `validate_core_first_program` (capability-call rejection) is NOT
+/// run on the verifier path. The check requires `ir::Program`, which the
+/// verifier does not hold. The engine path (`build_prepared_runtime`)
+/// continues to run it; the binding-digest check already gates non-matching
+/// programs on the verifier side.
 pub fn prepare_verifier(
     sealed: Arc<SealedArtifact>,
     opts: &PreparedOptions,
 ) -> Result<PreparedVerifier, VerifyError> {
-    let builder = PreparedVerifier::builder(sealed)
-        .map_err(route_to_verify)?
-        .with_host_environment(opts.host_environment().clone())
-        .with_machine_stark_config(opts.machine_stark_config().clone());
+    sealed
+        .validate()
+        .map_err(|e| VerifyError::Validation {
+            detail: format!("sealed artifact validation failed: {e}"),
+        })?;
     #[cfg(feature = "prove")]
-    let builder = builder.with_root_backend_bundle(opts.root_backend().0.clone());
+    let root_backend_bundle = opts.root_backend().0.clone();
     #[cfg(not(feature = "prove"))]
-    let builder = builder.with_root_proof_backend_arc(Arc::clone(&opts.root_backend().0));
-    builder.build().map_err(route_to_verify)
+    let root_proof_backend = Arc::clone(&opts.root_backend().0);
+    #[cfg(feature = "prove")]
+    let proof_backend = root_backend_bundle.proof_backend();
+    #[cfg(not(feature = "prove"))]
+    let proof_backend = Arc::clone(&root_proof_backend);
+    #[cfg(feature = "prove")]
+    let accepted_root_binding_families = root_backend_bundle.supported_root_binding_families();
+    #[cfg(not(feature = "prove"))]
+    let accepted_root_binding_families = proof_backend.supported_root_binding_families();
+    let host_environment = opts.host_environment();
+    let program_setup = resolve_sealed_artifact_setup(
+        &sealed,
+        host_environment.schemes().factories(),
+        host_environment.runtime_registries().type_runtimes(),
+        host_environment.runtime_registries().encoding_runtimes(),
+        accepted_root_binding_families,
+    )
+    .map_err(route_to_verify)?;
+    let machine = build_registered_program_machine(
+        &program_setup,
+        opts.machine_stark_config(),
+        proof_backend,
+    )
+    .map_err(route_to_verify)?;
+    Ok(PreparedVerifier {
+        prepared: VerifierState {
+            context: program_setup.artifact_context,
+            relation_policy: program_setup.relation_policy,
+            machine,
+        },
+    })
 }
 
 pub(crate) fn relation_table_root_from_proof(

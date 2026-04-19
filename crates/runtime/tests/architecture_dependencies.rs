@@ -128,17 +128,16 @@ fn runtime_root_exposes_only_the_final_native_surface() {
         "runtime root must expose semantic helpers"
     );
     assert!(
-        runtime_lib.contains(
-            "pub use engine::{CommittedStateSnapshot, ExecutionReceipt, RuntimeBuilder, TabulaRuntime};"
-        ) && runtime_lib.contains("pub use tabula_contract::{BoundStatement, PublicStatement};")
+        runtime_lib.contains("pub use tabula_contract::{BoundStatement, PublicStatement};")
             && runtime_lib.contains("pub use engine::{ProveInput, ProveResult, VerifiedResult};")
             && runtime_lib.contains(
-                "pub use verifier::{PreparedVerifier, PreparedVerifierBuilder, VerifierState, prepare_verifier};"
+                "pub use verifier::{PreparedVerifier, VerifierState, prepare_verifier};"
             )
-            && runtime_lib.contains(
-                "pub use prover::{PreparedProver, PreparedProverBuilder, prepare_prover};"
-            ),
-        "runtime root must re-export the canonical native runtime and verifier types"
+            && runtime_lib
+                .contains("pub use prover::{PreparedProver, prepare_prover};")
+            && runtime_lib
+                .contains("pub use executor::{PreparedExecutor, prepare_executor};"),
+        "runtime root must re-export the canonical prepared-handle surface"
     );
     for forbidden in [
         leaked(&["pub mod ", "next;"]),
@@ -268,10 +267,17 @@ fn native_proof_path_stays_bridge_free() {
 fn verifier_path_is_single_sourced_in_verifier_module() {
     let verifier_source = read_workspace_file("crates/runtime/src/verifier.rs");
     // SP-4 S4.2: VerifierCore was inlined into PreparedVerifier::verify and deleted.
+    // SP-5 Task 10: PreparedVerifierBuilder was inlined into the `prepare_verifier`
+    // free function and deleted; the canonical verify surface is PreparedVerifier
+    // plus the `prepare_verifier` constructor.
     assert!(
-        verifier_source.contains("pub struct PreparedVerifierBuilder")
-            && verifier_source.contains("pub struct PreparedVerifier"),
+        verifier_source.contains("pub struct PreparedVerifier")
+            && verifier_source.contains("pub fn prepare_verifier("),
         "runtime verifier module must own the canonical verification path"
+    );
+    assert!(
+        !verifier_source.contains("pub struct PreparedVerifierBuilder"),
+        "PreparedVerifierBuilder must remain deleted — constructor lives in prepare_verifier"
     );
     assert!(
         !verifier_source.contains("struct VerifierCore"),

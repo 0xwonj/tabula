@@ -31,12 +31,12 @@
 //! # Feature gating
 //!
 //! - **No features** (default): shared semantic helpers and error types only.
-//! - **`verify`**: adds [`PreparedVerifier`], [`PreparedVerifierBuilder`],
+//! - **`verify`**: adds [`PreparedVerifier`],
 //!   the [`prepare_verifier`] free function, the public
 //!   [`VerifierState`] type for native proof verification, and the
 //!   [`PreparedExecutor`] / [`prepare_executor`] execute-only surface.
 //! - **`prove`**: adds [`TabulaRuntime`], [`RuntimeBuilder`],
-//!   [`PreparedProver`], [`PreparedProverBuilder`], the
+//!   [`PreparedProver`], the
 //!   [`prepare_prover`] free function, and the full native
 //!   witness → trace → prove pipeline. Implies `verify`.
 
@@ -95,8 +95,8 @@ pub use options::{PreparedOptions, RootBackend};
 #[cfg(feature = "prove")]
 pub use proof_summary::ProofSummary;
 #[cfg(feature = "prove")]
-pub use prover::{PreparedProver, PreparedProverBuilder, prepare_prover};
+pub use prover::{PreparedProver, prepare_prover};
 #[cfg(feature = "verify")]
 pub use tabula_contract::{BoundStatement, PublicStatement};
 #[cfg(feature = "verify")]
-pub use verifier::{PreparedVerifier, PreparedVerifierBuilder, VerifierState, prepare_verifier};
+pub use verifier::{PreparedVerifier, VerifierState, prepare_verifier};
