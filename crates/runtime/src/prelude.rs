@@ -36,8 +36,7 @@ use crate::proof_artifacts::{ContextPreludeArtifacts, PublicStatementSlotLayout}
 #[cfg(feature = "prove")]
 use crate::semantics as runtime_ir;
 
-#[doc(hidden)]
-pub fn decode_entry_batch_on_state(
+pub(crate) fn decode_entry_batch_on_state(
     state: &PreparedRuntimeState,
     batch: &ir::EntryBatch,
 ) -> Result<Vec<TxCall>, RuntimeError> {
@@ -111,8 +110,7 @@ pub(crate) fn decode_params_on_state(
         .collect()
 }
 
-#[doc(hidden)]
-pub fn decode_context_input_on_state(
+pub(crate) fn decode_context_input_on_state(
     state: &PreparedRuntimeState,
     context: &ir::ContextInput,
 ) -> Result<ContextValues, RuntimeError> {

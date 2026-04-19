@@ -49,13 +49,8 @@ pub(crate) struct ColumnProofSlot {
 /// `PreparedProver` (prove surface). Construction is feature-gated; the
 /// fields marked `#[cfg(feature = "prove")]` are carried only on the
 /// prove build.
-///
-/// Exposed as `pub` but `#[doc(hidden)]` so out-of-crate prove-surface
-/// tests in `crates/runtime/tests/` can thread it through low-level
-/// entry points. The type is not part of the stable public surface.
-#[doc(hidden)]
 #[derive(Clone)]
-pub struct PreparedRuntimeState {
+pub(crate) struct PreparedRuntimeState {
     pub(crate) semantic: runtime_ir::RuntimeProgram,
     pub(crate) state: ResolvedStateRuntime,
     #[cfg(feature = "prove")]

@@ -7,7 +7,9 @@ use std::collections::BTreeSet;
 
 use tabula_chips::execution::MAX_SLOTS;
 use tabula_commitment::PoseidonHasher;
-use tabula_contract::{BoundStatement, PublicStatement};
+#[cfg(all(test, feature = "prove"))]
+use tabula_contract::BoundStatement;
+use tabula_contract::PublicStatement;
 use tabula_core::{ColId, TableId};
 use tabula_executor as exec;
 use tabula_ext::backend::column::{ColumnProofContext, PreparedColumnDelta, PreparedColumnProof};
@@ -45,21 +47,10 @@ pub(crate) struct PreparedColumnArtifacts {
     input: PreparedColumnInput,
 }
 
-/// Prove-path intermediate artifacts: public statement, per-tier
-/// prepared inputs (execution + columns + root), and binding-digest
-/// inputs.
-///
-/// Exposed under `#[doc(hidden)]` to `crates/runtime/tests/` only; not
-/// part of the stable public surface.
-#[doc(hidden)]
-pub struct PreparedArtifacts {
-    /// Assembled public statement reflecting proved state.
-    pub public_statement: PublicStatement,
-    /// Prepared execution-tier input (witness store + records).
-    pub execution: PreparedTierInput,
-    /// Prepared per-column tier inputs.
+pub(crate) struct PreparedArtifacts {
+    pub(crate) public_statement: PublicStatement,
+    pub(crate) execution: PreparedTierInput,
     pub(crate) columns: Vec<PreparedColumnArtifacts>,
-    /// Prepared root-tier input.
     pub(crate) root: PreparedTierInput,
 }
 
@@ -140,8 +131,7 @@ pub(crate) fn context_public_statement_bindings(
     })
 }
 
-#[doc(hidden)]
-pub fn prepare_proof_artifacts(
+pub(crate) fn prepare_proof_artifacts(
     runtime_program: &PreparedRuntimeState,
     root_backend_bundle: &RootBackendBundle,
     kit_registry: &ChipKitRegistry,
@@ -665,13 +655,11 @@ fn prepare_column_slot(
 
 /// Prepare the machine input and public statement without running the prover.
 ///
-/// Exposed only for tests (in-crate and `crates/runtime/tests/`) that
-/// need to tamper with witness store contents before proving. Production
-/// code must use
+/// Exposed only for tests that need to tamper with witness store contents
+/// before proving. Production code must use
 /// [`crate::prover::prepare_proof_request_on_prepared_state`] instead.
-/// Not part of the stable public surface.
-#[doc(hidden)]
-pub fn prepare_proof_machine_input(
+#[cfg(all(test, feature = "prove"))]
+pub(crate) fn prepare_proof_machine_input(
     state: &PreparedRuntimeState,
     root_backend_bundle: &RootBackendBundle,
     kit_registry: &ChipKitRegistry,

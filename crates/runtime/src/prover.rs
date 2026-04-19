@@ -251,37 +251,6 @@ impl PreparedProver {
         self.verifier_state.machine()
     }
 
-    /// Borrow the prepared runtime state, including type/encoding
-    /// registries and column proof plans.
-    ///
-    /// Exposed to out-of-crate prove-surface tests in
-    /// `crates/runtime/tests/` so they can thread the prepared state
-    /// through low-level entry points like
-    /// [`crate::proof_artifacts::prepare_proof_artifacts`]. Not part of
-    /// the stable public surface.
-    #[doc(hidden)]
-    pub fn prepared_state(&self) -> &PreparedRuntimeState {
-        &self.runtime_program
-    }
-
-    /// Borrow the root proof-backend bundle.
-    ///
-    /// Exposed to out-of-crate prove-surface tests; see
-    /// [`Self::prepared_state`]. Not part of the stable public surface.
-    #[doc(hidden)]
-    pub fn root_backend_bundle(&self) -> &RootBackendBundle {
-        &self.root_backend_bundle
-    }
-
-    /// Borrow the chip-kit registry built once at handle construction.
-    ///
-    /// Exposed to out-of-crate prove-surface tests; see
-    /// [`Self::prepared_state`]. Not part of the stable public surface.
-    #[doc(hidden)]
-    pub fn kit_registry(&self) -> &ChipKitRegistry {
-        &self.kit_registry
-    }
-
     /// Installed type runtimes.
     pub fn type_runtimes(&self) -> &TypeRuntimeRegistry {
         &self.runtime_program.type_runtimes

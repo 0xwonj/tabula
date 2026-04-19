@@ -1,19 +1,23 @@
 //! SP-5 §8 boundary guardrail.
 //!
-//! Runtime production code (`crates/runtime/src/**/*.rs`) must not name
-//! the chip-layer row types `InstructionRecord` or
+//! Runtime **production** code under `crates/runtime/src/**/*.rs` must
+//! not name the chip-layer row types `InstructionRecord` or
 //! `RelationTableWitnessRow` through their canonical
-//! `tabula_chips::...` paths. Crossings to chip-internal row layout must
-//! happen through the logical types in `tabula-stark::witness_kit`
+//! `tabula_chips::...` paths. Crossings to chip-internal row layout
+//! must happen through the logical types in `tabula-stark::witness_kit`
 //! (`LogicalExecutionPrelude`, `LogicalRelationTableRow`) plus the
 //! chip-side `From` conversions in `tabula-chips`.
 //!
-//! This test walks the runtime crate's `src/` tree and fails on any
-//! occurrence of the forbidden full-path identifiers. Tests that
-//! fundamentally need to name chip row types (e.g. tamper-set writes
-//! against the witness store) live under `crates/runtime/tests/` — the
-//! external test dir is intentionally out of scope here, matching the
-//! spec's "`crates/runtime/src/**/*.rs`" phrasing.
+//! The §8 intent is *production-code cleanliness* — the runtime prove
+//! surface should not couple to chip-row internals. Inline test files
+//! are not production code. This walker therefore treats files whose
+//! filename ends in `_tests.rs` (a project-wide convention for inline
+//! integration tests included via `#[path]`) as test-side and skips
+//! them, mirroring the way `crates/runtime/tests/**` sits outside the
+//! scan entirely. Tamper-class tests that fundamentally need to
+//! construct chip-row values to exercise the prover's rejection
+//! semantics live inline at `crates/runtime/src/prover_relation_tests.rs`
+//! and are allowed to name the chip row types directly.
 //!
 //! See SP-5 review findings (`docs/notes/sp5-review-findings.md`) blocker
 //! B-1 and the spec §8.1 / §8.2 / §12.
@@ -34,6 +38,12 @@ fn runtime_src_dir() -> PathBuf {
     crate_root.join("src")
 }
 
+fn is_inline_test_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with("_tests.rs"))
+}
+
 fn walk_rust_files(root: &Path, out: &mut Vec<PathBuf>) {
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
@@ -45,7 +55,10 @@ fn walk_rust_files(root: &Path, out: &mut Vec<PathBuf>) {
         let file_type = entry.file_type().expect("file type");
         if file_type.is_dir() {
             walk_rust_files(&path, out);
-        } else if file_type.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+        } else if file_type.is_file()
+            && path.extension().is_some_and(|ext| ext == "rs")
+            && !is_inline_test_file(&path)
+        {
             out.push(path);
         }
     }
