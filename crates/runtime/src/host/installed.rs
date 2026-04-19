@@ -13,6 +13,7 @@ use super::default_backend_factories;
 pub(crate) type SchemeFactoryMap = BTreeMap<SchemeId, Arc<dyn ColumnBackendFactory>>;
 
 /// Installed column backend factories available to one host process.
+#[non_exhaustive]
 #[derive(Clone)]
 pub struct InstalledSchemes {
     factories: SchemeFactoryMap,

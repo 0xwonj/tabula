@@ -240,15 +240,15 @@ pub trait ExecutionReceiptExt {
 #[cfg(feature = "execute")]
 impl ExecutionReceiptExt for ExecutionReceipt {
     fn snapshot(&self) -> &CommittedStateSnapshot {
-        &self.inner.snapshot
+        self.inner.snapshot()
     }
 
     fn state_after_snapshot(&self) -> &CommittedStateSnapshot {
-        &self.inner.state_after
+        self.inner.state_after()
     }
 
     fn journal(&self) -> &ExecutionJournal {
-        &self.inner.journal
+        self.inner.journal()
     }
 }
 
@@ -322,13 +322,13 @@ pub fn prepare_verifier(
 /// Construct one SDK execution receipt from raw runtime-owned parts.
 #[cfg(feature = "execute")]
 pub fn execution_receipt_from_raw_parts(parts: RawExecutionReceiptParts) -> ExecutionReceipt {
-    let inner = tabula_runtime::ExecutionReceipt {
-        snapshot: parts.snapshot,
-        batch: parts.batch,
-        context: parts.context,
-        journal: parts.journal,
-        state_after: parts.state_after_snapshot,
-    };
+    let inner = tabula_runtime::ExecutionReceipt::new_from_parts(
+        parts.snapshot,
+        parts.batch,
+        parts.context,
+        parts.state_after_snapshot,
+        parts.journal,
+    );
     ExecutionReceipt::from_runtime(
         #[cfg(feature = "prove")]
         parts.program_digest,

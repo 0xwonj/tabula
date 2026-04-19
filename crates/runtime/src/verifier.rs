@@ -24,12 +24,39 @@ use crate::options::PreparedOptions;
 /// the prepared-once state without going through a builder.
 #[non_exhaustive]
 pub struct VerifierState {
+    context: ArtifactContext,
+    relation_policy: SealedRelationPolicy,
+    machine: TabulaMachine,
+}
+
+impl VerifierState {
+    /// Construct a verifier state from its three parts (crate-internal).
+    pub(crate) fn new(
+        context: ArtifactContext,
+        relation_policy: SealedRelationPolicy,
+        machine: TabulaMachine,
+    ) -> Self {
+        Self {
+            context,
+            relation_policy,
+            machine,
+        }
+    }
+
     /// Artifact-bound transcript context sealed at prepare time.
-    pub context: ArtifactContext,
+    pub fn context(&self) -> &ArtifactContext {
+        &self.context
+    }
+
     /// Relation-policy decision derived from program analysis.
-    pub relation_policy: SealedRelationPolicy,
+    pub fn relation_policy(&self) -> SealedRelationPolicy {
+        self.relation_policy
+    }
+
     /// STARK machine backing verification.
-    pub machine: TabulaMachine,
+    pub fn machine(&self) -> &TabulaMachine {
+        &self.machine
+    }
 }
 
 /// Verifier built once per registered native program.
@@ -166,11 +193,11 @@ pub fn prepare_verifier(
     )
     .map_err(route_to_verify)?;
     Ok(PreparedVerifier {
-        prepared: VerifierState {
-            context: program_setup.artifact_context,
-            relation_policy: program_setup.relation_policy,
+        prepared: VerifierState::new(
+            program_setup.artifact_context,
+            program_setup.relation_policy,
             machine,
-        },
+        ),
     })
 }
 

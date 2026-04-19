@@ -80,11 +80,13 @@ impl PreparedOptions {
 /// (witness preparer + proof backend). On verify-only builds, it wraps
 /// a shared proof-only backend.
 #[cfg(feature = "prove")]
+#[non_exhaustive]
 #[derive(Clone)]
 pub struct RootBackend(pub(crate) tabula_ext::root::RootBackendBundle);
 
 /// Root-backend selection used by prepared handles (verify-only build).
 #[cfg(all(feature = "verify", not(feature = "prove")))]
+#[non_exhaustive]
 #[derive(Clone)]
 pub struct RootBackend(pub(crate) Arc<dyn tabula_ext::root::RootProofBackend>);
 

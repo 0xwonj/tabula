@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use tabula_machine::TabulaProof;
 
 /// Summary of one machine chip contribution in a STARK proof.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChipSummary {
     /// Chip name.
@@ -13,6 +14,7 @@ pub struct ChipSummary {
 }
 
 /// Serializable summary of the chips contributing to one proof.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofSummary {
     /// Per-chip summaries.

@@ -20,18 +20,58 @@ use crate::snapshot::{CommittedStateSnapshot, LogicalStateCell};
 use crate::statement;
 
 /// Runtime-owned execution result including exact inputs and post-state.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct ExecutionReceipt {
+    snapshot: CommittedStateSnapshot,
+    batch: ir::EntryBatch,
+    context: ir::ContextInput,
+    state_after: CommittedStateSnapshot,
+    journal: exec::ExecutionJournal,
+}
+
+impl ExecutionReceipt {
+    /// Construct one execution receipt from its raw parts.
+    pub fn new_from_parts(
+        snapshot: CommittedStateSnapshot,
+        batch: ir::EntryBatch,
+        context: ir::ContextInput,
+        state_after: CommittedStateSnapshot,
+        journal: exec::ExecutionJournal,
+    ) -> Self {
+        Self {
+            snapshot,
+            batch,
+            context,
+            state_after,
+            journal,
+        }
+    }
+
     /// The committed pre-state used for execution.
-    pub snapshot: CommittedStateSnapshot,
+    pub fn snapshot(&self) -> &CommittedStateSnapshot {
+        &self.snapshot
+    }
+
     /// The exact portable entry batch that was executed.
-    pub batch: ir::EntryBatch,
+    pub fn batch(&self) -> &ir::EntryBatch {
+        &self.batch
+    }
+
     /// The exact portable context input used for execution.
-    pub context: ir::ContextInput,
+    pub fn context(&self) -> &ir::ContextInput {
+        &self.context
+    }
+
     /// The committed post-state after applying the journal's final writes.
-    pub state_after: CommittedStateSnapshot,
+    pub fn state_after(&self) -> &CommittedStateSnapshot {
+        &self.state_after
+    }
+
     /// The underlying native execution journal.
-    pub journal: exec::ExecutionJournal,
+    pub fn journal(&self) -> &exec::ExecutionJournal {
+        &self.journal
+    }
 }
 
 /// Materialize one logical keyed state input into a committed snapshot.
@@ -115,13 +155,13 @@ pub(crate) fn execute_batch_receipt(
 ) -> Result<ExecutionReceipt, RuntimeError> {
     let journal = execute_batch(state, snapshot, batch, context)?;
     let state_after = statement::materialize_post_state(snapshot, &journal, &state.type_runtimes)?;
-    Ok(ExecutionReceipt {
-        snapshot: snapshot.clone(),
-        batch: batch.clone(),
-        context: context.clone(),
+    Ok(ExecutionReceipt::new_from_parts(
+        snapshot.clone(),
+        batch.clone(),
+        context.clone(),
         state_after,
         journal,
-    })
+    ))
 }
 
 fn execute_batch_typed(

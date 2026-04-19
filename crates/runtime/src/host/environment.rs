@@ -10,6 +10,7 @@ use crate::error::RuntimeError;
 use super::{InstalledSchemes, RuntimeRegistries};
 
 /// Host-owned runtime registries and scheme backends consumed by runtime and verifier builders.
+#[non_exhaustive]
 #[derive(Clone)]
 pub struct HostEnvironment {
     runtime_registries: RuntimeRegistries,

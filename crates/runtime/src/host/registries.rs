@@ -7,6 +7,7 @@ use tabula_types::{EncodingRuntime, EncodingRuntimeRegistry, TypeRuntime, TypeRu
 use crate::error::{RuntimeError, SetupError};
 
 /// Host-owned runtime type and encoding implementations.
+#[non_exhaustive]
 #[derive(Clone)]
 pub struct RuntimeRegistries {
     type_runtimes: TypeRuntimeRegistry,

@@ -27,6 +27,7 @@ struct SnapshotCellRecord {
 }
 
 /// Proof-capable committed state input for the native runtime.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommittedStateSnapshot {
     cells: BTreeMap<CommittedCellKey, PortableValue>,

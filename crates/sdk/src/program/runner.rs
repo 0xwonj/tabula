@@ -110,28 +110,28 @@ impl ExecutionReceipt {
 
     /// The transaction batch that was executed.
     pub fn batch(&self) -> TransactionBatch {
-        TransactionBatch::from_raw(self.inner.batch.clone())
+        TransactionBatch::from_raw(self.inner.batch().clone())
     }
 
     /// The public context that was supplied to the batch.
     pub fn context(&self) -> Context {
-        Context::from_raw(self.inner.context.clone())
+        Context::from_raw(self.inner.context().clone())
     }
 
     /// Number of distinct state cells read during execution.
     pub fn read_count(&self) -> usize {
-        self.inner.journal.state_summary.read_set_old.len()
+        self.inner.journal().state_summary.read_set_old.len()
     }
 
     /// Number of distinct state cells written during execution.
     pub fn write_count(&self) -> usize {
-        self.inner.journal.state_summary.write_set_final.len()
+        self.inner.journal().state_summary.write_set_final.len()
     }
 
     /// Per-transaction outcome summaries in batch order.
     pub fn outcomes(&self) -> Vec<TxOutcomeSummary> {
         self.inner
-            .journal
+            .journal()
             .txs
             .iter()
             .map(|tx| match tx {
@@ -242,7 +242,7 @@ impl Runner {
         let receipt = runtime.execute_batch_receipt(&snapshot, batch.as_raw(), context.as_raw())?;
         let state_after = State::from_cells(
             runtime
-                .project_logical_state(&receipt.state_after)?
+                .project_logical_state(receipt.state_after())?
                 .into_iter()
                 .map(
                     |(table, key, field, value)| crate::types::LogicalStateCell {
@@ -321,12 +321,12 @@ impl Runner {
             .sdk()
             .prepare_prepared_prover(self.program.artifact())?;
         let result = prover
-            .prove(&tabula_runtime::ProveInput {
-                snapshot: &receipt.inner.snapshot,
-                batch: &receipt.inner.batch,
-                context: &receipt.inner.context,
-                executed: &receipt.inner.journal,
-            })
+            .prove(&tabula_runtime::ProveInput::new(
+                receipt.inner.snapshot(),
+                receipt.inner.batch(),
+                receipt.inner.context(),
+                receipt.inner.journal(),
+            ))
             .map_err(tabula_runtime::RuntimeError::from)
             .map_err(SdkError::from)?;
         Ok(Proof::from_prove_result(result))

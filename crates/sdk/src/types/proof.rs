@@ -18,11 +18,12 @@ pub struct Proof {
 impl Proof {
     #[cfg(feature = "prove")]
     pub(crate) fn from_prove_result(result: tabula_runtime::ProveResult) -> Self {
+        let (proof, envelope, public_statement, summary) = result.into_parts();
         Self {
-            proof: result.proof,
-            envelope: result.envelope,
-            public_statement: Some(result.public_statement),
-            summary: result.summary,
+            proof,
+            envelope,
+            public_statement: Some(public_statement),
+            summary,
         }
     }
 

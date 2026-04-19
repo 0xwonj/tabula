@@ -28,6 +28,7 @@ use tabula_types::{
 #[cfg(feature = "prove")]
 use tabula_witness::stark::schemes::ssmc::{PreparedSsmcProof, SsmcProofInput, prepare_ssmc_proof};
 /// SSMC commitment scheme factory.
+#[non_exhaustive]
 pub struct SsmcScheme<const W: usize>;
 
 /// Query kinds currently implemented for SSMC's ordered committed state.

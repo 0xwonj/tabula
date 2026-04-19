@@ -26,6 +26,7 @@ use tabula_witness::stark::schemes::smt::{PreparedSmtProof, SmtProofInput, prepa
 use tabula_ext::backend::column::{ColumnProofBackend, ColumnProofContext, PreparedColumnProof};
 
 /// SMT commitment scheme factory.
+#[non_exhaustive]
 pub struct SmtScheme<const W: usize>;
 
 #[derive(Clone)]

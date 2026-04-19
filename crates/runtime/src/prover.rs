@@ -29,6 +29,7 @@ use crate::snapshot::CommittedStateSnapshot;
 use crate::verifier::VerifierState;
 
 /// Inputs for native proving.
+#[non_exhaustive]
 pub struct ProveInput<'a> {
     /// Committed pre-state.
     pub snapshot: &'a CommittedStateSnapshot,
@@ -40,32 +41,105 @@ pub struct ProveInput<'a> {
     pub executed: &'a exec::ExecutionJournal,
 }
 
+impl<'a> ProveInput<'a> {
+    /// Construct one proving input from its four parts.
+    pub fn new(
+        snapshot: &'a CommittedStateSnapshot,
+        batch: &'a ir::EntryBatch,
+        context: &'a ir::ContextInput,
+        executed: &'a exec::ExecutionJournal,
+    ) -> Self {
+        Self {
+            snapshot,
+            batch,
+            context,
+            executed,
+        }
+    }
+}
+
 /// Result of native proof generation.
+#[non_exhaustive]
 pub struct ProveResult {
-    /// Generated STARK proof (decoded form).
-    pub proof: TabulaProof,
-    /// Wire-format envelope around the encoded proof bytes, produced by the
-    /// machine backend primitive.
-    pub envelope: ProofEnvelope,
+    proof: TabulaProof,
+    envelope: ProofEnvelope,
+    public_statement: PublicStatement,
+    summary: ProofSummary,
+}
+
+impl ProveResult {
+    /// The generated STARK proof (decoded form).
+    pub fn proof(&self) -> &TabulaProof {
+        &self.proof
+    }
+
+    /// Wire-format envelope around the encoded proof bytes.
+    pub fn envelope(&self) -> &ProofEnvelope {
+        &self.envelope
+    }
+
     /// The artifact-bound public statement that accompanies `proof`.
-    pub public_statement: PublicStatement,
+    pub fn public_statement(&self) -> &PublicStatement {
+        &self.public_statement
+    }
+
     /// Human-readable machine summary.
-    pub summary: ProofSummary,
+    pub fn summary(&self) -> &ProofSummary {
+        &self.summary
+    }
+
+    /// Consume and unpack all four result parts.
+    pub fn into_parts(self) -> (TabulaProof, ProofEnvelope, PublicStatement, ProofSummary) {
+        (self.proof, self.envelope, self.public_statement, self.summary)
+    }
 }
 
 /// Result of prove + verify.
+#[non_exhaustive]
 pub struct VerifiedResult {
-    /// Generated STARK proof (decoded form).
-    pub proof: TabulaProof,
-    /// Wire-format envelope around the encoded proof bytes, produced by the
-    /// machine backend primitive.
-    pub envelope: ProofEnvelope,
+    proof: TabulaProof,
+    envelope: ProofEnvelope,
+    public_statement: PublicStatement,
+    verified: bool,
+    summary: ProofSummary,
+}
+
+impl VerifiedResult {
+    /// The generated STARK proof (decoded form).
+    pub fn proof(&self) -> &TabulaProof {
+        &self.proof
+    }
+
+    /// Wire-format envelope around the encoded proof bytes.
+    pub fn envelope(&self) -> &ProofEnvelope {
+        &self.envelope
+    }
+
     /// The artifact-bound public statement that accompanies `proof`.
-    pub public_statement: PublicStatement,
+    pub fn public_statement(&self) -> &PublicStatement {
+        &self.public_statement
+    }
+
     /// Whether verification passed.
-    pub verified: bool,
+    pub fn verified(&self) -> bool {
+        self.verified
+    }
+
     /// Human-readable machine summary.
-    pub summary: ProofSummary,
+    pub fn summary(&self) -> &ProofSummary {
+        &self.summary
+    }
+
+    /// Consume and unpack all result parts.
+    pub fn into_parts(self) -> (TabulaProof, ProofEnvelope, PublicStatement, bool, ProofSummary) {
+        (
+            self.proof,
+            self.envelope,
+            self.public_statement,
+            self.verified,
+            self.summary,
+        )
+    }
 }
 
 /// Shared prove pipeline entry point used by [`PreparedProver`].
@@ -151,17 +225,17 @@ pub struct PreparedProver {
 impl PreparedProver {
     /// Borrow the transcript-bound program binding.
     pub fn binding(&self) -> &ProgramBinding {
-        &self.verifier_state.context.binding
+        &self.verifier_state.context().binding
     }
 
     /// Borrow the transcript-bound static relation-table root.
     pub fn static_table_root(&self) -> Digest {
-        self.verifier_state.context.static_table_root
+        self.verifier_state.context().static_table_root
     }
 
     /// The STARK machine backing this prover.
     pub fn machine(&self) -> &TabulaMachine {
-        &self.verifier_state.machine
+        self.verifier_state.machine()
     }
 
     /// Installed type runtimes.
@@ -191,7 +265,7 @@ impl PreparedProver {
             &self.runtime_program,
             &self.root_backend_bundle,
             &self.kit_registry,
-            &self.verifier_state.machine,
+            self.verifier_state.machine(),
             input,
         )
         .map_err(route_to_prove)
@@ -246,11 +320,11 @@ pub fn prepare_prover(
     )
     .map_err(route_to_prove)?;
     let kit_registry = build_chip_kit_registry(&prepared.runtime_program);
-    let verifier_state = VerifierState {
-        context: prepared.runtime_program.artifact_context.clone(),
-        relation_policy: prepared.runtime_program.relation_policy,
-        machine: prepared.machine,
-    };
+    let verifier_state = VerifierState::new(
+        prepared.runtime_program.artifact_context.clone(),
+        prepared.runtime_program.relation_policy,
+        prepared.machine,
+    );
     Ok(PreparedProver {
         runtime_program: prepared.runtime_program,
         root_backend_bundle: prepared.root_backend_bundle,

@@ -145,21 +145,16 @@ fn tx_batch_proves_and_verifies_static_relations_with_control() {
     let verified = prover
         .prove_and_verify(
             &verifier,
-            &tabula_runtime::ProveInput {
-                snapshot: &snapshot,
-                batch: &batch,
-                context: &ctx,
-                executed: &executed,
-            },
+            &tabula_runtime::ProveInput::new(&snapshot, &batch, &ctx, &executed),
         )
         .expect("prove and verify relation batch");
 
-    assert!(verified.verified);
+    assert!(verified.verified());
     assert_ne!(
-        verified.public_statement.public_context_digest.to_bytes(),
+        verified.public_statement().public_context_digest.to_bytes(),
         [0u8; 32]
     );
-    assert_ne!(verified.public_statement.event_digest.to_bytes(), [0u8; 32]);
+    assert_ne!(verified.public_statement().event_digest.to_bytes(), [0u8; 32]);
 }
 
 #[test]
@@ -202,16 +197,11 @@ fn range_and_set_relations_normalize_and_prove() {
     let proved = prover
         .prove_and_verify(
             &verifier,
-            &tabula_runtime::ProveInput {
-                snapshot: &snapshot,
-                batch: &batch,
-                context: &ctx,
-                executed: &executed,
-            },
+            &tabula_runtime::ProveInput::new(&snapshot, &batch, &ctx, &executed),
         )
         .expect("prove normalized relations");
 
-    assert_ne!(proved.public_statement.event_digest.to_bytes(), [0u8; 32]);
-    assert_ne!(proved.public_statement.old_root.to_bytes(), [0u8; 32]);
-    assert_ne!(proved.public_statement.new_root.to_bytes(), [0u8; 32]);
+    assert_ne!(proved.public_statement().event_digest.to_bytes(), [0u8; 32]);
+    assert_ne!(proved.public_statement().old_root.to_bytes(), [0u8; 32]);
+    assert_ne!(proved.public_statement().new_root.to_bytes(), [0u8; 32]);
 }
