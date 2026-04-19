@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-#[cfg(any(feature = "execute", feature = "verify"))]
+#[cfg(any(feature = "execute", feature = "verify", feature = "prove"))]
 use std::sync::Mutex;
 
 #[cfg(feature = "compile")]
@@ -24,6 +24,8 @@ pub(crate) struct SdkInner {
     pub(crate) runtime_cache: Mutex<BTreeMap<String, Arc<tabula_runtime::TabulaRuntime>>>,
     #[cfg(feature = "verify")]
     pub(crate) verifier_cache: Mutex<BTreeMap<String, Arc<tabula_runtime::PreparedVerifier>>>,
+    #[cfg(feature = "prove")]
+    pub(crate) prover_cache: Mutex<BTreeMap<String, Arc<tabula_runtime::PreparedProver>>>,
 }
 
 impl Sdk {
@@ -46,6 +48,8 @@ impl Sdk {
                 runtime_cache: Mutex::new(BTreeMap::new()),
                 #[cfg(feature = "verify")]
                 verifier_cache: Mutex::new(BTreeMap::new()),
+                #[cfg(feature = "prove")]
+                prover_cache: Mutex::new(BTreeMap::new()),
             }),
         }
     }
@@ -182,6 +186,53 @@ impl Sdk {
         builder.build().map_err(SdkError::from)
     }
 
+    #[cfg(feature = "prove")]
+    /// Prepare the cached native prover for one artifact.
+    pub(crate) fn prepare_prepared_prover(
+        &self,
+        artifact: &Artifact,
+    ) -> Result<Arc<tabula_runtime::PreparedProver>, SdkError> {
+        let key = self.cache_key("prover", artifact);
+        let cache = self
+            .inner
+            .prover_cache
+            .lock()
+            .map_err(|_| SdkError::Synchronization {
+                detail: "sdk prover cache mutex poisoned".to_string(),
+            })?;
+        if let Some(prover) = cache.get(&key) {
+            return Ok(Arc::clone(prover));
+        }
+        drop(cache);
+
+        let built = Arc::new(self.build_prover(artifact)?);
+        let mut cache = self
+            .inner
+            .prover_cache
+            .lock()
+            .map_err(|_| SdkError::Synchronization {
+                detail: "sdk prover cache mutex poisoned".to_string(),
+            })?;
+        if let Some(prover) = cache.get(&key) {
+            return Ok(Arc::clone(prover));
+        }
+        cache.insert(key, Arc::clone(&built));
+        Ok(built)
+    }
+
+    #[cfg(feature = "prove")]
+    fn build_prover(
+        &self,
+        artifact: &Artifact,
+    ) -> Result<tabula_runtime::PreparedProver, SdkError> {
+        let builder = tabula_runtime::PreparedProver::builder(artifact.registered().clone())
+            .map_err(SdkError::from)?
+            .with_host_environment(self.inner.environment.inner.host_environment.clone())
+            .with_machine_stark_config(self.inner.environment.inner.machine_stark_config.clone())
+            .with_root_backend_bundle(self.inner.environment.inner.root_backend_bundle.clone());
+        builder.build().map_err(SdkError::from)
+    }
+
     fn cache_key(&self, mode: &str, artifact: &Artifact) -> String {
         format!(
             "{}:{}:{}",
@@ -313,6 +364,48 @@ tx touch(id: u64) {
         assert!(Arc::ptr_eq(&first, &second));
         let cache = sdk.inner.verifier_cache.lock().expect("verifier cache");
         assert_eq!(cache.len(), 1);
+    }
+
+    #[cfg(all(feature = "compile", feature = "prove"))]
+    #[test]
+    fn prepare_prover_reuses_cached_instance() {
+        let sdk = Sdk::standard().expect("build standard sdk");
+        let artifact = compile_simple_artifact(&sdk);
+
+        let first = sdk
+            .prepare_prepared_prover(&artifact)
+            .expect("build prover");
+        let second = sdk
+            .prepare_prepared_prover(&artifact)
+            .expect("reuse prover");
+
+        assert!(Arc::ptr_eq(&first, &second));
+        let cache = sdk.inner.prover_cache.lock().expect("prover cache");
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[cfg(all(feature = "compile", feature = "prove"))]
+    #[test]
+    fn prepare_prover_build_failure_does_not_poison_cache() {
+        let sdk = sdk_with_empty_runtime_host();
+        let artifact = compile_simple_artifact(&sdk);
+
+        let Err(first) = sdk.prepare_prepared_prover(&artifact) else {
+            panic!("prover build must fail without host environment");
+        };
+        let Err(second) = sdk.prepare_prepared_prover(&artifact) else {
+            panic!("repeated prover build failure must stay recoverable");
+        };
+
+        assert!(matches!(
+            first,
+            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+        ));
+        assert!(matches!(
+            second,
+            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+        ));
+        assert!(sdk.inner.prover_cache.lock().is_ok());
     }
 
     #[cfg(all(feature = "compile", feature = "verify", feature = "execute"))]

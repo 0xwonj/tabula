@@ -318,8 +318,11 @@ impl Runner {
         if receipt.program_digest != self.program.artifact().digest() {
             return Err(SdkError::ExecutionProgramMismatch);
         }
-        let runtime = self.runtime()?;
-        let result = runtime.prove(&tabula_runtime::ProveInput {
+        let prover = self
+            .program
+            .sdk()
+            .prepare_prepared_prover(self.program.artifact())?;
+        let result = prover.prove(&tabula_runtime::ProveInput {
             snapshot: &receipt.inner.snapshot,
             batch: &receipt.inner.batch,
             context: &receipt.inner.context,

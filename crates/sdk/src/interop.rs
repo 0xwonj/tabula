@@ -29,6 +29,10 @@ pub use tabula_ext::scheme::ColumnBackendFactoryBundle;
 use tabula_machine::TabulaStarkConfig;
 #[cfg(feature = "execute")]
 pub use tabula_runtime::TabulaRuntime;
+#[cfg(feature = "prove")]
+pub use tabula_runtime::{PreparedProver, PreparedProverBuilder};
+#[cfg(feature = "verify")]
+pub use tabula_runtime::{PreparedVerifier, PreparedVerifierBuilder, VerifierState};
 #[cfg(feature = "execute")]
 pub use tabula_types::{
     RelationEffect, RelationEffectKind, StateEffectKind, StatePropertyEffect, TypedEventEffect,
@@ -295,6 +299,15 @@ pub fn prepare_runtime(
     artifact: &Artifact,
 ) -> Result<Arc<tabula_runtime::TabulaRuntime>, SdkError> {
     sdk.prepare_runtime(artifact)
+}
+
+/// Prepare the cached native prover for one artifact.
+#[cfg(feature = "prove")]
+pub fn prepare_prover(
+    sdk: &Sdk,
+    artifact: &Artifact,
+) -> Result<Arc<tabula_runtime::PreparedProver>, SdkError> {
+    sdk.prepare_prepared_prover(artifact)
 }
 
 /// Construct one SDK execution receipt from raw runtime-owned parts.
