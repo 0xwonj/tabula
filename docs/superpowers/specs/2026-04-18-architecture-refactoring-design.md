@@ -7,7 +7,7 @@
 
 This document is the **umbrella spec** for a multi-sub-project
 refactoring of the Tabula workspace. Individual sub-projects (SP-1
-through SP-6) get their own design docs and plans when execution
+through SP-8) get their own design docs and plans when execution
 starts; this umbrella captures the final target and the ordering.
 
 The refactoring is **not** harness-driven. The evaluation harness
@@ -86,9 +86,15 @@ code. The refactoring closes those gaps.
   canonical-bytes codecs.
 - Exposes `public_statement_from_record(artifact, record) ->
   PublicStatement` as stable public API.
-- Dependencies: `tabula-core` only, with a possible allowance for
-  `tabula-commitment` if commitment is reclassified as a shared
-  foundation (open decision in SP-1).
+- Dependencies: `tabula-core` plus `tabula-commitment`.
+  `tabula-commitment` is reclassified as **Shared Meaning** rather
+  than Proof Backend (decision taken during SP-4 review; formalized
+  by SP-6's `docs/design/architecture.md` amendment). No code move —
+  the fix is conceptual: commitment carries cryptographic substance
+  shared across non-backend crates (contract, sdk, cli already use it),
+  and fracturing its native-primitive portion into `tabula-core`
+  would pour crypto into the "imports-nothing" foundation and
+  accelerate drift as new commitment schemes land.
 - No dependency on `tabula-stark`, `tabula-ir`, or any other
   backend/authoring crate.
 
@@ -107,19 +113,34 @@ code. The refactoring closes those gaps.
 - Dev-dependencies pruned: no `tabula-lang` or `tabula-executor`
   in tests.
 
-### 2.3 `tabula-runtime` — statement binding + symmetric prepared handles
+### 2.3 `tabula-runtime` — statement binding + three symmetric prepared handles
+
+Runtime exposes three prepare-once / drive-many handles with matching
+shape:
 
 - `PreparedProver` / `prepare_prover(Arc<SealedArtifact>) ->
-  Result<PreparedProver, PrepareError>`.
+  Result<PreparedProver, PrepareError>`. (SP-4 landed.)
 - `PreparedVerifier` / `prepare_verifier(Arc<SealedArtifact>)`
-  (renamed from the current `Verifier`).
-- `VerifierState` (or equivalent) is a named public type (currently
-  private inside `verifier.rs`).
-- `engine.rs` is decomposed into role-specific modules: `prover.rs`,
-  `verifier/` (already exists, extended), `execution.rs`,
+  (SP-4 landed, renamed from the current `Verifier`).
+- `PreparedExecutor` / `prepare_executor(Arc<SealedArtifact>)` —
+  new in SP-5. Replaces the residual `TabulaRuntime` execute-only
+  facade. Owns batch execution, query execution, and logical-state
+  projection. Symmetric `Send + Sync`.
+- `VerifierState` (or equivalent) is a named public type and marked
+  `#[non_exhaustive]` to avoid pre-1.0 breaking-change footguns.
+- `engine.rs` is decomposed into role-specific modules: `prover.rs`
+  (extant), `verifier/` (extant), `executor.rs`, `execution.rs`,
   `snapshot.rs`, `statement_materialization.rs`, `state_binding.rs`.
 - Internal borsh codec relocated (to contract if proof-visible, to
   a documented runtime-internal module if not).
+- Error surface is narrowed per handle: `VerifyError`, `ProveError`,
+  `ExecuteError` as dedicated types with `From` into a top-level
+  `RuntimeError` for callers that span multiple handles.
+- "Runtime pre-stuff" for runtime-sourced chip rows (context,
+  tx-batch, event, relation-table) is exposed as a typed API
+  (e.g., `install_relation_table_rows(...)`) rather than opaque
+  pushes into the `KitScratch`. `tabula-chips::*Row` names do not
+  appear in `tabula-runtime/src/**` — enforced by guardrail test.
 
 ### 2.4 `tabula-executor` — unchanged in role, verified pure
 
@@ -130,20 +151,25 @@ code. The refactoring closes those gaps.
 
 ### 2.5 `tabula-witness` + `tabula-chips` — chip-agnostic protocol
 
-- New trait — working name `ChipWitnessKit`, home TBD in SP-3
-  (candidates: `tabula-ext` or a new `tabula-witness-core`) —
-  describes how a chip contributes to a witness store from
-  execution-derived lowering output.
+- `ChipWitnessKit` trait lives in `tabula-stark::witness_kit` (SP-3
+  landed). It describes how a chip contributes to a witness store
+  from execution-derived lowering output.
+- **Sealed trait** — only workspace-internal crates may implement
+  `ChipWitnessKit` (locked decision, applied in SP-5). Third-party
+  chip authoring is deferred; today's implementers are blessed chips
+  in `tabula-chips`. The seal uses the standard "private supertrait
+  in a private module" pattern; no proc-macro.
 - `tabula-witness` produces chip-agnostic `LoweringOutput`; concrete
-  row construction migrates to each chip's `WitnessKit` impl.
+  row construction lives inside each chip's `ChipWitnessKit` impl
+  (SP-3 landed).
 - `tabula-machine` builder drives a kit registry, calling each
   chip's `populate` before trace generation.
 - `tabula-witness` no longer directly constructs
   `InstructionRecord`, `RelationTableWitnessRow`, etc.
 - `tabula-witness → tabula-executor` dep either removed (preferred)
   or justified via a shared type migration to a lower layer.
-- This decouples witness from chip composition and cleanly formalizes
-  the extension authoring seam.
+- This decouples witness from chip composition and formalizes the
+  extension authoring seam as a closed-but-typed interface.
 
 ### 2.6 `tabula-sdk` — thin application facade
 
@@ -201,8 +227,10 @@ that enforces these rules against `Cargo.toml` dep lists.
 
 ## 4. Sub-Project Decomposition
 
-Six sub-projects in strict order. Each has its own design doc +
-ultraplan + implementation session.
+Eight sub-projects. SP-1 through SP-4 are landed; the remaining four
+execute in the order described in §5 (SP-5 and SP-8 may run in
+parallel). Each has its own design doc + ultraplan + implementation
+session.
 
 ### SP-1 — Contract wire-type consolidation (foundation)
 
@@ -324,55 +352,203 @@ formal.
   point through the runtime.
 - CLI and SDK call sites use the new handles.
 
-### SP-5 — Runtime engine decomposition
+### SP-5 — Runtime decomposition + executor symmetry
 
-**Goal:** `engine.rs` is split into role-focused modules.
+**Goal:** Finish the runtime prepared-handle story begun in SP-4.
+Promote the residual `TabulaRuntime` into a third symmetric handle
+(`PreparedExecutor`), decompose `engine.rs` into single-responsibility
+modules, narrow the error surface per handle, formalize the "runtime
+pre-stuff" pattern as a typed API, seal `ChipWitnessKit`, and mark
+public prepared-handle types `#[non_exhaustive]`.
 
 **Scope:**
-- Extract modules from `engine.rs`: `prover/`, `execution/`,
-  `snapshot/`, `statement_materialization.rs`, `state_binding.rs`.
-- Relocate internal `SnapshotCellRecord` borsh codec to its
-  canonical home (contract or a documented runtime-internal
-  module).
-- Remove or shrink the `TabulaRuntime` facade per SP-4's outcome.
+- **TabulaRuntime → PreparedExecutor** (locked decision). Promote the
+  execute-only facade into a third prepare-once / drive-many handle
+  symmetric with `PreparedProver` / `PreparedVerifier`. Public surface:
+  `prepare_executor(Arc<SealedArtifact>) -> Result<PreparedExecutor,
+  ExecuteError>`. `Send + Sync`. `TabulaRuntime` / `RuntimeBuilder`
+  symbols removed; CLI + SDK migrated.
+- Decompose `engine.rs` into role-focused modules: `executor.rs`,
+  `execution.rs`, `snapshot.rs`, `statement_materialization.rs`,
+  `state_binding.rs`, `prepared_state.rs`, `prelude.rs`, `pre_stuff.rs`.
+  Existing `prover.rs` and `verifier/` retained.
+- Relocate internal `SnapshotCellRecord` borsh codec to its canonical
+  home (contract if proof-visible, a documented runtime-internal
+  module otherwise). Record the disposition rationale inline.
+- Narrow errors per handle: introduce `ProveError`, `VerifyError`,
+  `ExecuteError` plus a shared `SetupCommon`. `RuntimeError` survives
+  as a `#[non_exhaustive]` umbrella with `From` conversions for each.
+- Typed "runtime pre-stuff" API. Introduce a `PreStuffInstaller`
+  seam (or equivalent) with methods like `install_relation_table_rows`
+  that accept chip-agnostic logical-row types owned by
+  `tabula-stark::witness_kit`. Concrete `tabula_chips::*Row` identifiers
+  do not appear in `crates/runtime/src/**`.
+- **Seal `ChipWitnessKit`** (locked decision). Apply the standard
+  private-supertrait seal in `tabula-stark::witness_kit`. Add a
+  trybuild compile-fail probe for external impls.
+- Mark `VerifierState` and its sibling public prepared-handle types
+  `#[non_exhaustive]` to avoid pre-1.0 breaking-change footguns.
+- Guardrail test: `tabula_chips::*Row` identifier names absent from
+  `crates/runtime/src/**`.
+- Guardrail test: `PreparedProver`, `PreparedVerifier`, `PreparedExecutor`
+  are all `Send + Sync + 'static` (compile-time assertion).
 
 **Completion criteria:**
-- No single file in `crates/runtime/src/` exceeds ~800 LOC.
-- Each runtime submodule has a single, documentable
-  responsibility.
+- `crates/runtime/src/engine.rs` no longer exists; no single file
+  under `crates/runtime/src/` exceeds ~800 LOC.
+- Three symmetric prepared handles publicly available, all
+  `Send + Sync`, built by matching `prepare_*` free functions.
+- `TabulaRuntime` / `RuntimeBuilder` removed from the public API;
+  CLI, SDK, examples migrated.
+- `ProveError` / `VerifyError` / `ExecuteError` are the per-handle
+  error types; `RuntimeError` is a `#[non_exhaustive]` umbrella.
+- `ChipWitnessKit` sealed; external impl fails to compile.
+- Byte-identity on `examples/basic` and `examples/membership` proofs
+  across the SP-4 → SP-5 transition (pure refactor).
 
-### SP-6 — SDK thinning, global-state removal, docs polish
+### SP-6 — SDK thinning, architecture.md amendment, docs polish
 
 **Goal:** Public surface layer is thin and coherent; workspace docs
-reflect post-refactor reality.
+reflect post-refactor reality, including the conceptual relocation of
+`tabula-commitment` to Shared Meaning.
 
 **Scope:**
-- Remove `NEXT_ENVIRONMENT_FINGERPRINT: AtomicU64`; replace with
-  deterministic fingerprint.
+- Remove `NEXT_ENVIRONMENT_FINGERPRINT: AtomicU64`; replace with a
+  deterministic fingerprint derived from explicit inputs.
 - Remove or restructure SDK's `Mutex<BTreeMap<...>>` caches per
-  SP-4's prepared-handle design.
+  SP-4's prepared-handle design (callers hold `Arc<PreparedVerifier>`
+  or `Arc<PreparedExecutor>` directly where possible).
 - Resolve SDK wrapper types (`sdk::Proof`, `sdk::ExecutionReceipt`,
   `sdk::State`): keep with clear value-add docs, or drop.
 - Resolve `CommittedStateSnapshot` interop exposure.
 - Verify `tabula-cli` is still an adapter with no new semantics.
 - Add `README.md` to `tabula-types`, `tabula-profile`, `tabula-ir`.
 - Update all crate READMEs to match post-refactor boundaries.
-- Reconcile `docs/notes/evaluation-{stage-interfaces,harness,
-  stage-support}.md` with the final public API; remove any
-  pre-refactor ambiguities.
-- Optionally add a `tools/check-layer-boundaries` CI script
-  enforcing §3 invariants.
+- **`docs/design/architecture.md` amendment**: relocate
+  `tabula-commitment` from "Proof Backend" to "Shared Meaning" (or a
+  "Shared Cryptographic Foundation" sub-tier) to reflect that
+  non-backend crates already depend on it. No code move; the diagram
+  and dependency-direction text update to match landed reality.
+- **9 → 15 bus doc drift**: reconcile any lingering "9 bus" references
+  in design notes and crate docs against the current 15-bus machine
+  topology.
+- Optionally add a `tools/check-layer-boundaries` CI script enforcing
+  §3 invariants.
+- Guardrail test: all three prepared handles (`PreparedProver`,
+  `PreparedVerifier`, `PreparedExecutor`) and their inner
+  `VerifierState` / equivalent carry `Send + Sync` (compile-time
+  assertion; may subsume the SP-5 version if not yet ergonomic).
 
 **Completion criteria:**
 - `grep -rn 'static NEXT_ENVIRONMENT_FINGERPRINT' crates/` returns
   nothing.
 - Every crate under `crates/` has a `README.md`.
-- The evaluation-harness note, when re-read alongside current code,
-  has no symbol-ownership mismatches.
+- `docs/design/architecture.md` places `tabula-commitment` in the
+  Shared Meaning tier; the layer diagram and §Dependency Direction
+  reflect the change.
+- No "9 bus" stale references remain in design docs or crate docs.
+- Send+Sync guardrail test is green on the published prepared-handle
+  types.
 
----
+### SP-7 — Feature matrix unification
 
-## 5. Ordering Rationale
+**Goal:** Workspace feature flags form a single coherent, monotone
+axis that matches the post-refactor layer boundaries. New
+contributors and EuroSys artifact reviewers can predict
+`cargo build --features …` behavior from a one-page table, not from
+reading seven `Cargo.toml`s.
+
+**Motivation:**
+- Axes are mixed: function (`compile`/`execute`/`verify`/`prove`),
+  role (`authoring`/`runtime`/`backend` in `tabula-ext`), and
+  implementation (`stark`, `test-utils`) are entangled across crates.
+- Monotonicity is uneven: `runtime` has clean `prove ⊃ verify`, but
+  `ext`'s five-level chain (`backend ⊃ prove ⊃ verify ⊃ runtime ⊃
+  authoring`) is hard to reason about, and `sdk::advanced` is an
+  orphan axis.
+- Workspace-level comment in root `Cargo.toml` still advertises a
+  three-flag world (`default`/`stark`/`test-utils`) that no longer
+  matches reality.
+- Reproducibility risk for the EuroSys 2027 artifact: if the feature
+  graph is inconsistent, the artifact-evaluation `cargo build`
+  incantations become accidentally fragile.
+
+**Scope:**
+- Map the current feature graph across all crates; identify the true
+  set of end-user configurations worth supporting.
+- Unify on a single primary axis (function ladder:
+  `compile ⊂ execute ⊂ verify ⊂ prove`).
+- Demote implementation-choice axes to a separate namespace
+  (`impl-stark`, `impl-mock`) so users can reason about them
+  orthogonally.
+- Reconcile `tabula-ext`'s role-based axis with the function axis
+  (collapse, rename, or keep with explicit justification).
+- Replace the root `Cargo.toml` comment with a canonical
+  `docs/design/feature-matrix.md` that lists every supported
+  configuration and what it links in.
+- Optionally: CI job that builds each documented configuration to
+  prevent silent breakage.
+- Guardrail test: a feature-flag monotonicity check that, for every
+  pair on the primary axis, asserts the superset relation programmatically
+  (not just documentarily).
+
+**Completion criteria:**
+- Every feature flag in the workspace appears in
+  `docs/design/feature-matrix.md` with a one-line purpose.
+- No crate exposes a feature not referenced by the matrix doc.
+- `cargo build --features <X>` for every documented configuration
+  succeeds from a clean build.
+- At least one monotone primary axis: for every pair of features on
+  it, one is a superset of the other — enforced by a test, not
+  just documentation.
+
+### SP-8 — NF completeness + `--nf-elision` compiler mode
+
+**Goal:** Close two entangled gaps: (1) `tabula-ir::validate` does not
+yet fully catch Normal-Form violations, and (2) the runtime has no
+mode for skipping the RAM-consistency fragment of the proof in trusted
+NF contexts. Together these pin down the compiler → sealed-artifact →
+verifier contract around NF.
+
+**Motivation:**
+- Even today, handwritten or externally-sourced IR can violate NF-1/2/3/4
+  without the validator catching it, shifting the implicit "NF holds"
+  guarantee off the compiler and onto programmer discipline.
+- An NF-elision mode is repeatedly useful for experiments and for
+  higher-throughput batching when the IR source is trusted. It is not
+  a simple flag — it changes the codegen variant, the sealed-artifact
+  metadata, and the verifier binding calculation. Wiring it as a
+  one-shot SP prevents the mode from accreting ad-hoc across the
+  stack.
+
+**Scope:**
+- **NF-1/2/3/4 + True SSA validation** tightening in
+  `tabula-ir::validate`. Exhaustive test matrix per rule; validator
+  rejects every documented violation.
+- `--nf-elision` compiler flag. A codegen variant that suppresses the
+  RAM-consistency proof subsystem where NF holds.
+- Sealed-artifact metadata records the NF mode (present / elided)
+  under the compiler-sealed `metadata_hash` so the verifier sees the
+  mode via artifact binding, not a side channel.
+- Verifier binding logic is mode-aware: the binding digest and
+  `PreparedVerifier::verify` path differ for the elided mode, matching
+  the proof shape the prover emitted.
+- Documentation: a short `docs/design/nf-modes.md` describing the two
+  modes, their sealed-artifact encoding, and their trust surface.
+- Guardrail test: round-trip every example under both modes;
+  cross-mode proofs must fail verification (wrong mode caught by
+  the binding, not by silent success).
+
+**Completion criteria:**
+- Every NF rule has at least one positive and one negative test in
+  `tabula-ir::validate`.
+- `tabula-compiler` accepts `--nf-elision`; produced sealed artifact
+  carries the mode tag under `metadata_hash`.
+- `PreparedVerifier::verify` honors the mode tag and rejects
+  cross-mode proofs.
+- `examples/basic` and `examples/membership` run in both modes end to
+  end; cross-mode proof → cross-mode verifier is a verification
+  failure, not a silent accept.
 
 The sequence is not arbitrary:
 
@@ -388,15 +564,29 @@ The sequence is not arbitrary:
    construction uses `public_statement_from_record` (SP-1) and
    composes with `BackendProver` (SP-2) via the chip-agnostic
    witness (SP-3).
-5. **SP-5 fifth** because engine decomposition is easiest once the
-   new prepared handles (SP-4) are in place — the decomposition
-   follows the new module contracts rather than creating them.
-6. **SP-6 last** because SDK + docs consume everything above;
-   inverting this order would force redundant SDK edits.
+5. **SP-5 and SP-8 run in parallel** once SP-4 has landed. They are
+   independent:
+   - SP-5 touches only `tabula-runtime` (decomposition, executor
+     symmetry, error narrowing, pre-stuff API) and the
+     `ChipWitnessKit` seal in `tabula-stark`.
+   - SP-8 touches `tabula-ir` (validate tightening), `tabula-compiler`
+     (codegen variant + sealed-artifact metadata), and the verifier
+     binding path inside `tabula-runtime::verifier`.
+   The only shared surface is the verifier module; coordinate there
+   but do not serialize the SPs.
+6. **SP-6 after SP-5 and SP-8** because SDK + docs consume everything
+   above. SP-6 also carries the `docs/design/architecture.md`
+   amendment (commitment tier) and the 9→15 bus doc drift — both
+   cleanest to write once SP-5's runtime shape has landed.
+7. **SP-7 last** because feature flags cross-cut every crate the
+   earlier SPs restructure. Unifying the matrix before those
+   boundaries settle would lock in a shape that SP-1…SP-6/SP-8 then
+   invalidate. Done last, it reconciles the final layer reality
+   into one coherent user-facing surface.
 
-Parallelism is minimal at the SP level. Within a single SP, multiple
-mechanical tasks (e.g., every chip implementing `ChipWitnessKit`)
-can be parallelized via subagent dispatch.
+Within a single SP, multiple mechanical tasks (e.g., every chip
+implementing `ChipWitnessKit`, every NF rule getting its positive /
+negative test pair) can be parallelized via subagent dispatch.
 
 ---
 
@@ -421,18 +611,46 @@ can be parallelized via subagent dispatch.
 
 ## 7. Open Decisions (to be settled in their SP)
 
-- **SP-1**: Does `tabula-contract` retain its dep on
-  `tabula-commitment`, or does commitment's native-primitive
-  portion migrate to `tabula-core`?
+**Resolved (logged for traceability):**
+
+- **SP-1** *(resolved)*: `tabula-contract` keeps its dep on
+  `tabula-commitment`; commitment is reclassified as Shared Meaning
+  rather than moving primitives into `tabula-core`. Architecture.md
+  amendment lives in SP-6.
+- **SP-3** *(resolved)*: `ChipWitnessKit` lives in
+  `tabula-stark::witness_kit` (not `tabula-ext` or a new crate).
+- **SP-4** *(resolved)*: `TabulaRuntime` is **promoted** to a third
+  symmetric handle `PreparedExecutor` rather than removed; landed in
+  SP-5.
+- **SP-5** *(resolved ahead of execution)*: `ChipWitnessKit` is
+  **sealed**. Third-party chip authoring is deferred; workspace
+  chips remain the only implementers.
+- **tabula-ext split** *(resolved)*: `tabula-ext` is **not** split.
+  Empirical dep graph (runtime and sdk are the only importers;
+  backend crates do not import ext) shows the crate already sits
+  cleanly above the backend boundary.
+
+**Still open (to be settled in the named SP):**
+
 - **SP-1**: Does `contract → ir` get removed, or does the shared
   type live elsewhere?
 - **SP-2**: Exact final shape of `PreparedMachineInput` and
   `TabulaProof` after public_statement removal.
-- **SP-3**: Final name and shape of `ChipWitnessKit`; whether it
-  lives in `tabula-ext` or a new `tabula-witness-core` crate.
-- **SP-4**: Does `TabulaRuntime` survive as a facade, or is it
-  removed entirely?
+- **SP-5**: Final disposition of `SnapshotCellRecord` borsh codec
+  (tabula-contract vs. documented runtime-internal module).
 - **SP-6**: Do SDK wrapper types (`sdk::Proof` etc.) survive?
+- **SP-7**: Does `tabula-ext`'s `authoring`/`runtime`/`backend`
+  vocabulary collapse into the function axis, or survive with
+  explicit justification?
+- **SP-7**: Does `sdk::advanced` become a first-class flag or get
+  renamed to reflect what it actually gates?
+- **SP-7**: Does CI gain a feature-matrix build job, or is the
+  matrix doc alone sufficient guard?
+- **SP-8**: Exact on-disk encoding of the NF mode tag under
+  `metadata_hash`.
+- **SP-8**: Whether the elided-mode proof shape requires a new
+  `ProofEnvelope` variant or reuses the existing envelope with a
+  mode-gated interpretation.
 
 Each open decision is logged in its SP's design doc with the
 selected resolution.
