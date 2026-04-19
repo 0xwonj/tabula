@@ -39,7 +39,7 @@ impl ChipWitnessKit for RelationTableKit {
         ctx: &mut KitFinalizeContext<'_>,
         store: &mut WitnessStore,
     ) -> Result<(), KitError> {
-        let rows: Vec<RelationTableWitnessRow> = ctx.take_scratch(Self::CHIP_ID)?;
+        let rows: Vec<RelationTableWitnessRow> = ctx.take_scratch_required(Self::CHIP_ID)?;
         store.put(RELATION_TABLE_WITNESS_LABEL, rows);
         Ok(())
     }

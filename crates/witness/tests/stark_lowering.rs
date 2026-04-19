@@ -224,6 +224,9 @@ fn lowers_an_empty_tx_entry_and_builds_execution_store() {
             })
             .collect(),
     );
+    PublicContextTranscriptKit::insert_items(&mut merged.kit_scratch, Vec::new());
+    TxBatchTranscriptKit::insert_items(&mut merged.kit_scratch, Vec::new());
+    EventTranscriptKit::insert_items(&mut merged.kit_scratch, Vec::new());
     let mut registry = ChipKitRegistry::new();
     registry.register(Box::new(IrHashKit));
     registry.register(Box::new(RelationTranscriptKit));

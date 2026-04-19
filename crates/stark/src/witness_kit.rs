@@ -52,16 +52,37 @@ impl<'a> KitFinalizeContext<'a> {
 
     /// Remove the entry under `chip_id` and downcast to `T`.
     ///
-    /// Returns `T::default()` when no entry is present — kits that are
-    /// registered but whose backends never emitted a row still need a
-    /// well-formed (possibly empty) row buffer to publish under their
-    /// witness-store label.
+    /// Returns `T::default()` when no entry is present. Suitable for
+    /// *inline-push* kits: opcode handlers may run zero times in a tx,
+    /// leaving no scratchpad entry, and publishing an empty row buffer
+    /// is the correct behavior.
     pub fn take_scratch<T>(&mut self, chip_id: ChipId) -> Result<T, KitError>
     where
         T: Any + Default + Send,
     {
         match self.scratch.remove(&chip_id) {
             None => Ok(T::default()),
+            Some(boxed) => boxed
+                .downcast::<T>()
+                .map(|b| *b)
+                .map_err(|_| KitError::DowncastFailed(chip_id)),
+        }
+    }
+
+    /// Remove the entry under `chip_id` and downcast to `T`, erroring
+    /// with [`KitError::MissingScratch`] if absent.
+    ///
+    /// Suitable for *runtime-pre-stuff* kits: the runtime is expected
+    /// to install the row buffer before `prepare_execution_store`
+    /// runs, so a missing entry signals a wiring bug (the buffer
+    /// wasn't pre-stuffed) that should surface loudly rather than
+    /// silently publish an empty buffer.
+    pub fn take_scratch_required<T>(&mut self, chip_id: ChipId) -> Result<T, KitError>
+    where
+        T: Any + Send,
+    {
+        match self.scratch.remove(&chip_id) {
+            None => Err(KitError::MissingScratch(chip_id)),
             Some(boxed) => boxed
                 .downcast::<T>()
                 .map(|b| *b)
@@ -132,6 +153,16 @@ mod tests {
         let v: Vec<u32> = ctx.take_scratch(TEST_CHIP).expect("present -> value");
         assert_eq!(v, vec![1, 2, 3]);
         assert!(scratch.get(&TEST_CHIP).is_none(), "entry consumed");
+    }
+
+    #[test]
+    fn take_scratch_required_errors_when_absent() {
+        let mut scratch = KitScratch::new();
+        let mut ctx = KitFinalizeContext::new(&mut scratch);
+        let err = ctx
+            .take_scratch_required::<Vec<u32>>(TEST_CHIP)
+            .expect_err("absent -> MissingScratch");
+        assert!(matches!(err, KitError::MissingScratch(c) if c == TEST_CHIP));
     }
 
     #[test]

@@ -359,7 +359,7 @@ impl tabula_stark::witness_kit::ChipWitnessKit for PublicContextTranscriptKit {
         ctx: &mut tabula_stark::witness_kit::KitFinalizeContext<'_>,
         store: &mut tabula_stark::trace::WitnessStore,
     ) -> Result<(), tabula_stark::witness_kit::KitError> {
-        let items: Vec<[KoalaBear; 8]> = ctx.take_scratch(Self::CHIP_ID)?;
+        let items: Vec<[KoalaBear; 8]> = ctx.take_scratch_required(Self::CHIP_ID)?;
         store.put(PUBLIC_CONTEXT_TRANSCRIPT_WITNESS_LABEL, items);
         Ok(())
     }
