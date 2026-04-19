@@ -1,5 +1,8 @@
 //! Regression guard: narrowed runtime errors must widen only into RuntimeError,
 //! never into each other (spec §7.1).
+//!
+//! SP-5 §12: the trybuild probe below enforces this at the type-system level
+//! via a compile-fail fixture.
 
 #[cfg(feature = "prove")]
 use tabula_runtime::ProveError;
@@ -19,13 +22,18 @@ const _: fn() = || {
     takes_runtime_error::<ExecuteError>();
 };
 
-// Negative: no direct From between narrowed errors. We can't assert
-// "no impl" at compile time, but this test exists as a grep target +
-// documentation. If a future change adds `impl From<SetupError> for
-// ProveError`, the spec violation should be caught in code review +
-// §13 audit, not by this test — Rust's trait system can't express
-// negative "no impl exists" assertions cleanly.
 #[test]
 fn narrowed_errors_do_not_convert_to_each_other_at_compile_time() {
     // Intentionally empty. See module-level comment.
+}
+
+// Negative: compile-fail probe asserts that a cross-narrow `From<ProveError>`
+// for `VerifyError` does not exist. The trybuild fixture in
+// `tests/ui/error_conversions/` is gated on `prove` + `verify` because both
+// error types are feature-gated.
+#[cfg(all(feature = "prove", feature = "verify"))]
+#[test]
+fn no_from_between_narrowed_error_families() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/ui/error_conversions/no_from_prove_to_verify.rs");
 }

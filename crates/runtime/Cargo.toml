@@ -58,6 +58,9 @@ borsh = { workspace = true }
 tabula-core = { workspace = true, features = ["test-utils"] }
 tabula-testing = { workspace = true }
 serde_json = { workspace = true }
+# SP-5 §12: trybuild compile-fail probes for the no-cross-narrow-From invariant.
+# Version is pinned to avoid stderr format churn across Rust releases.
+trybuild = "=1.0.105"
 
 [lints]
 workspace = true

@@ -1,0 +1,7 @@
+error[E0277]: the trait bound `VerifyError: From<ProveError>` is not satisfied
+  --> tests/ui/error_conversions/no_from_prove_to_verify.rs:10:8
+   |
+10 |     _e.into()
+   |        ^^^^ the trait `From<ProveError>` is not implemented for `VerifyError`
+   |
+   = note: required for `ProveError` to implement `Into<VerifyError>`
