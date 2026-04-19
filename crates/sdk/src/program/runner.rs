@@ -320,13 +320,12 @@ impl Runner {
             .program
             .sdk()
             .prepare_prepared_prover(self.program.artifact())?;
-        let result = prover
-            .prove(&tabula_runtime::ProveInput::new(
-                receipt.inner.snapshot(),
-                receipt.inner.batch(),
-                receipt.inner.context(),
-                receipt.inner.journal(),
-            ))?;
+        let result = prover.prove(&tabula_runtime::ProveInput::new(
+            receipt.inner.snapshot(),
+            receipt.inner.batch(),
+            receipt.inner.context(),
+            receipt.inner.journal(),
+        ))?;
         Ok(Proof::from_prove_result(result))
     }
 
@@ -349,9 +348,7 @@ impl Runner {
     }
 
     fn runtime(&self) -> Result<std::sync::Arc<tabula_runtime::PreparedExecutor>, SdkError> {
-        self.program
-            .sdk()
-            .prepare_executor(self.program.artifact())
+        self.program.sdk().prepare_executor(self.program.artifact())
     }
 }
 

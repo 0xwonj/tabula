@@ -154,7 +154,10 @@ fn tx_batch_proves_and_verifies_static_relations_with_control() {
         verified.public_statement().public_context_digest.to_bytes(),
         [0u8; 32]
     );
-    assert_ne!(verified.public_statement().event_digest.to_bytes(), [0u8; 32]);
+    assert_ne!(
+        verified.public_statement().event_digest.to_bytes(),
+        [0u8; 32]
+    );
 }
 
 #[test]

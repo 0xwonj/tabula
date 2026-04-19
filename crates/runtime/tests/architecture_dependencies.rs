@@ -130,13 +130,10 @@ fn runtime_root_exposes_only_the_final_native_surface() {
     assert!(
         runtime_lib.contains("pub use tabula_contract::{BoundStatement, PublicStatement};")
             && runtime_lib.contains("pub use prover::{ProveInput, ProveResult, VerifiedResult};")
-            && runtime_lib.contains(
-                "pub use verifier::{PreparedVerifier, VerifierState, prepare_verifier};"
-            )
             && runtime_lib
-                .contains("pub use prover::{PreparedProver, prepare_prover};")
-            && runtime_lib
-                .contains("pub use executor::{PreparedExecutor, prepare_executor};"),
+                .contains("pub use verifier::{PreparedVerifier, VerifierState, prepare_verifier};")
+            && runtime_lib.contains("pub use prover::{PreparedProver, prepare_prover};")
+            && runtime_lib.contains("pub use executor::{PreparedExecutor, prepare_executor};"),
         "runtime root must re-export the canonical prepared-handle surface"
     );
     for forbidden in [
@@ -212,7 +209,9 @@ fn native_proof_path_stays_bridge_free() {
     // SP-5 Task 10: engine.rs was deleted; proving orchestration lives in
     // prover.rs. The guardrails below pin the production prover surface.
     assert!(
-        !workspace_root().join("crates/runtime/src/engine.rs").exists(),
+        !workspace_root()
+            .join("crates/runtime/src/engine.rs")
+            .exists(),
         "engine.rs must remain deleted — prove pipeline lives in prover.rs"
     );
     assert_source_omits(

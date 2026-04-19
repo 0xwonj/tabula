@@ -90,7 +90,12 @@ impl ProveResult {
 
     /// Consume and unpack all four result parts.
     pub fn into_parts(self) -> (TabulaProof, ProofEnvelope, PublicStatement, ProofSummary) {
-        (self.proof, self.envelope, self.public_statement, self.summary)
+        (
+            self.proof,
+            self.envelope,
+            self.public_statement,
+            self.summary,
+        )
     }
 }
 
@@ -131,7 +136,15 @@ impl VerifiedResult {
     }
 
     /// Consume and unpack all result parts.
-    pub fn into_parts(self) -> (TabulaProof, ProofEnvelope, PublicStatement, bool, ProofSummary) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        TabulaProof,
+        ProofEnvelope,
+        PublicStatement,
+        bool,
+        ProofSummary,
+    ) {
         (
             self.proof,
             self.envelope,
@@ -402,8 +415,8 @@ tx enroll(id: u64, tier: u64) {
     ) {
         let registered = register_program_from_source(simple_source());
         let opts = PreparedOptions::try_standard().expect("standard prepared options");
-        let prover = prepare_prover(Arc::new(registered.clone()), &opts)
-            .expect("build PreparedProver");
+        let prover =
+            prepare_prover(Arc::new(registered.clone()), &opts).expect("build PreparedProver");
 
         // Share the registered program with a PreparedExecutor to drive
         // execute_batch; prover and executor both resolve from the same
@@ -429,9 +442,7 @@ tx enroll(id: u64, tier: u64) {
             ])
             .expect("build initial snapshot");
 
-        let entry_id = executor
-            .entry_id_by_symbol("enroll")
-            .expect("enroll entry");
+        let entry_id = executor.entry_id_by_symbol("enroll").expect("enroll entry");
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id,
             params: vec![u64_portable(0), u64_portable(1)],

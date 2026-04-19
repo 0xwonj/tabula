@@ -34,7 +34,9 @@ fn minimal_sealed() -> SealedArtifact {
 #[test]
 fn canonical_bytes_starts_with_magic_prefix() {
     let sealed = minimal_sealed();
-    let bytes = sealed.canonical_bytes().expect("canonical_bytes must succeed");
+    let bytes = sealed
+        .canonical_bytes()
+        .expect("canonical_bytes must succeed");
     assert!(
         bytes.starts_with(b"tabula.contract.sealed_artifact.v1"),
         "canonical_bytes must start with the versioned magic prefix; got: {:?}",
@@ -98,8 +100,7 @@ fn validate_accepts_freshly_registered_artifact() {
 #[test]
 fn validate_rejects_unsupported_schema_version() {
     // Mutate schema_version via JSON round-trip since the field is pub(crate).
-    let mut value =
-        serde_json::to_value(minimal_sealed()).expect("serialize");
+    let mut value = serde_json::to_value(minimal_sealed()).expect("serialize");
     value["schema_version"] = serde_json::json!(u32::MAX);
     let sealed: SealedArtifact =
         serde_json::from_value(value).expect("deserialize with bad schema version");
@@ -113,7 +114,8 @@ fn validate_rejects_unsupported_schema_version() {
         "expected UnsupportedSchemaVersion, got: {err}"
     );
     assert!(
-        err.to_string().contains("unsupported sealed artifact schema version"),
+        err.to_string()
+            .contains("unsupported sealed artifact schema version"),
         "error message must mention the schema version; got: {err}"
     );
 }

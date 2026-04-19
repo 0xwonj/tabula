@@ -7,14 +7,14 @@ use sha2::Digest as _;
 use tabula_core::{ProgramExecutionContract, ProgramId};
 use tabula_profile::ProfileCatalog;
 
-use crate::{
-    ContractMetadataEnvelope, ProgramBinding, SealedRelationPolicy, StaticTableArtifact,
-    TupleEncodingDefaults,
-};
 use crate::versions::{
     CONTRACT_SCHEMA_VERSION, STATEMENT_SCHEMA_VERSION, VERIFIER_PROFILE_VERSION,
     validate_contract_schema_version, validate_statement_schema_version,
     validate_verifier_profile_version,
+};
+use crate::{
+    ContractMetadataEnvelope, ProgramBinding, SealedRelationPolicy, StaticTableArtifact,
+    TupleEncodingDefaults,
 };
 
 /// Schema version for the sealed artifact wire format.
@@ -152,7 +152,10 @@ impl SealedArtifact {
 
     /// Canonical SHA-256 digest of the sealed artifact as lowercase hex.
     pub fn canonical_digest(&self) -> Result<String, SealedArtifactError> {
-        Ok(format!("{:x}", sha2::Sha256::digest(self.canonical_bytes()?)))
+        Ok(format!(
+            "{:x}",
+            sha2::Sha256::digest(self.canonical_bytes()?)
+        ))
     }
 
     /// Fail closed unless the sealed artifact is self-consistent at the
@@ -177,12 +180,12 @@ impl SealedArtifact {
         // Tuple encoding canonicality: re-build from entries and verify
         // the result matches the stored defaults (catches unsorted or
         // duplicate entries).
-        let canonical_tuple_defaults =
-            TupleEncodingDefaults::new(self.tuple_encoding_defaults.entries.clone()).map_err(
-                |error| SealedArtifactError::TupleEncodingNotCanonical {
-                    detail: error.to_string(),
-                },
-            )?;
+        let canonical_tuple_defaults = TupleEncodingDefaults::new(
+            self.tuple_encoding_defaults.entries.clone(),
+        )
+        .map_err(|error| SealedArtifactError::TupleEncodingNotCanonical {
+            detail: error.to_string(),
+        })?;
         if canonical_tuple_defaults != self.tuple_encoding_defaults {
             return Err(SealedArtifactError::TupleEncodingNotCanonical {
                 detail: "tuple encoding defaults diverge from canonical ordering".to_string(),
@@ -205,10 +208,11 @@ impl SealedArtifact {
 
         // Metadata envelope schema version compatibility (sealed-only
         // subset — semantic hash equality requires IR and is deferred).
-        validate_contract_schema_version(self.metadata_envelope.contract_schema_version)
-            .map_err(|e| SealedArtifactError::ContractMetadataMismatch {
+        validate_contract_schema_version(self.metadata_envelope.contract_schema_version).map_err(
+            |e| SealedArtifactError::ContractMetadataMismatch {
                 detail: e.to_string(),
-            })?;
+            },
+        )?;
         validate_statement_schema_version(self.metadata_envelope.statement_schema_version)
             .map_err(|e| SealedArtifactError::ContractMetadataMismatch {
                 detail: e.to_string(),

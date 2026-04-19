@@ -65,26 +65,20 @@ pub mod semantics;
 #[cfg(feature = "verify")]
 mod snapshot;
 #[cfg(feature = "verify")]
-mod statement;
-#[cfg(feature = "verify")]
 mod state_runtime;
+#[cfg(feature = "verify")]
+mod statement;
 #[cfg(feature = "verify")]
 mod verifier;
 
-pub use error::{RuntimeError, RuntimeResult, SetupError};
 #[cfg(feature = "prove")]
 pub use error::ProveError;
 #[cfg(feature = "verify")]
 pub use error::{ExecuteError, VerifyError};
+pub use error::{RuntimeError, RuntimeResult, SetupError};
 
 #[cfg(feature = "verify")]
-pub use tabula_contract::SealedRelationPolicy;
-#[cfg(feature = "verify")]
 pub use execution::ExecutionReceipt;
-#[cfg(feature = "verify")]
-pub use snapshot::CommittedStateSnapshot;
-#[cfg(feature = "prove")]
-pub use prover::{ProveInput, ProveResult, VerifiedResult};
 #[cfg(feature = "verify")]
 pub use executor::{PreparedExecutor, prepare_executor};
 #[cfg(feature = "verify")]
@@ -95,6 +89,12 @@ pub use options::{PreparedOptions, RootBackend};
 pub use proof_summary::ProofSummary;
 #[cfg(feature = "prove")]
 pub use prover::{PreparedProver, prepare_prover};
+#[cfg(feature = "prove")]
+pub use prover::{ProveInput, ProveResult, VerifiedResult};
+#[cfg(feature = "verify")]
+pub use snapshot::CommittedStateSnapshot;
+#[cfg(feature = "verify")]
+pub use tabula_contract::SealedRelationPolicy;
 #[cfg(feature = "verify")]
 pub use tabula_contract::{BoundStatement, PublicStatement};
 #[cfg(feature = "verify")]

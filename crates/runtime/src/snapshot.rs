@@ -17,8 +17,7 @@ use tabula_witness::CommittedEntry;
 use crate::error::{RuntimeError, SetupError};
 use crate::state_runtime::ResolvedStateRuntime;
 
-pub(crate) type LogicalStateCell =
-    (ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue);
+pub(crate) type LogicalStateCell = (ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue);
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize)]
 struct SnapshotCellRecord {
@@ -78,7 +77,8 @@ impl CommittedStateSnapshot {
                         "duplicate committed cell {}.{} key {} in external snapshot payload",
                         cell_key.table.0, cell_key.col.0, cell_key.key
                     ),
-                }.into());
+                }
+                .into());
             }
             snapshot.insert_materialized(cell_key, value);
         }
@@ -101,11 +101,12 @@ impl CommittedStateSnapshot {
             .map_err(|error| SetupError::Validation {
                 detail: error.to_string(),
             })?;
-        let table_key_codec = state_runtime.key_codec(table.into()).map_err(|error| {
-            SetupError::Validation {
-                detail: error.to_string(),
-            }
-        })?;
+        let table_key_codec =
+            state_runtime
+                .key_codec(table.into())
+                .map_err(|error| SetupError::Validation {
+                    detail: error.to_string(),
+                })?;
         let typed_key = key
             .iter()
             .map(|value| type_runtimes.decode_portable(value))
@@ -113,11 +114,12 @@ impl CommittedStateSnapshot {
             .map_err(|error| SetupError::Validation {
                 detail: error.to_string(),
             })?;
-        let committed_key = table_key_codec.encode_tuple(&typed_key).map_err(|error| {
-            SetupError::Validation {
-                detail: error.to_string(),
-            }
-        })?;
+        let committed_key =
+            table_key_codec
+                .encode_tuple(&typed_key)
+                .map_err(|error| SetupError::Validation {
+                    detail: error.to_string(),
+                })?;
         if value.type_id() != field_schema.ty {
             return Err(SetupError::Validation {
                 detail: format!(
@@ -128,7 +130,8 @@ impl CommittedStateSnapshot {
                     value.type_id().0,
                     field_schema.ty.0,
                 ),
-            }.into());
+            }
+            .into());
         }
         let cell_key = CommittedCellKey {
             table: table.into(),
@@ -141,7 +144,8 @@ impl CommittedStateSnapshot {
                     "duplicate logical state cell {}.{} key {} in external state payload",
                     cell_key.table.0, cell_key.col.0, cell_key.key
                 ),
-            }.into());
+            }
+            .into());
         }
         self.cells.insert(cell_key, value);
         Ok(())
@@ -185,36 +189,41 @@ impl CommittedStateSnapshot {
                         value.type_id().0,
                         column.ty.0,
                     ),
-                }.into());
+                }
+                .into());
             }
-            let table_key_codec = state_runtime.key_codec(key.table).map_err(|error| {
-                SetupError::Validation {
-                    detail: error.to_string(),
-                }
-            })?;
-            let decoded = table_key_codec.decode_key(&key.key).map_err(|error| {
-                SetupError::Validation {
-                    detail: error.to_string(),
-                }
-            })?;
-            let reencoded = table_key_codec.encode_tuple(&decoded).map_err(|error| {
-                SetupError::Validation {
-                    detail: error.to_string(),
-                }
-            })?;
+            let table_key_codec =
+                state_runtime
+                    .key_codec(key.table)
+                    .map_err(|error| SetupError::Validation {
+                        detail: error.to_string(),
+                    })?;
+            let decoded =
+                table_key_codec
+                    .decode_key(&key.key)
+                    .map_err(|error| SetupError::Validation {
+                        detail: error.to_string(),
+                    })?;
+            let reencoded =
+                table_key_codec
+                    .encode_tuple(&decoded)
+                    .map_err(|error| SetupError::Validation {
+                        detail: error.to_string(),
+                    })?;
             if reencoded != key.key {
                 return Err(SetupError::Validation {
                     detail: format!(
                         "committed cell {}.{} key {} is not canonical",
                         key.table.0, key.col.0, key.key
                     ),
-                }.into());
-            }
-            type_runtimes.decode_portable(value).map_err(|error| {
-                SetupError::Validation {
-                    detail: error.to_string(),
                 }
-            })?;
+                .into());
+            }
+            type_runtimes
+                .decode_portable(value)
+                .map_err(|error| SetupError::Validation {
+                    detail: error.to_string(),
+                })?;
         }
         Ok(())
     }

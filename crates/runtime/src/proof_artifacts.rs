@@ -56,7 +56,10 @@ pub(crate) struct PreparedArtifacts {
 }
 
 impl PreparedArtifacts {
-    pub(crate) fn into_prepared_machine_input(self, binding_digest: [u8; 32]) -> PreparedMachineInput {
+    pub(crate) fn into_prepared_machine_input(
+        self,
+        binding_digest: [u8; 32],
+    ) -> PreparedMachineInput {
         PreparedMachineInput {
             execution: self.execution,
             columns: self
@@ -223,7 +226,11 @@ pub(crate) fn prepare_proof_artifacts(
     let statement_slot_layout =
         build_public_statement_slot_layout(&canonical_context_ids, max_param_count)?;
     let (context_slots, context_records, public_context_transcript_items) =
-        crate::prelude::build_context_prelude(runtime_program, &context_bindings, &statement_slot_layout)?;
+        crate::prelude::build_context_prelude(
+            runtime_program,
+            &context_bindings,
+            &statement_slot_layout,
+        )?;
 
     let (event_item_bases_by_tx, proof_events) = crate::prelude::build_event_item_bases(executed);
     let event_transcript_items = runtime_ir::canonical_event_log_payload(

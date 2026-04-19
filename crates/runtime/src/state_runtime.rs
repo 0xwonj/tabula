@@ -80,7 +80,8 @@ impl ResolvedStateRuntime {
                         "duplicate table-key codec registration for table {}",
                         table.id.0
                     ),
-                }.into());
+                }
+                .into());
             }
         }
 
@@ -155,12 +156,12 @@ impl ResolvedStateRuntime {
         table: TableId,
         col: ColId,
     ) -> Result<&StateColumnContract, RuntimeError> {
-        let resolved_table =
-            self.tables
-                .get(&table)
-                .ok_or_else(|| SetupError::Validation {
-                    detail: format!("unknown state table {}", table.0),
-                })?;
+        let resolved_table = self
+            .tables
+            .get(&table)
+            .ok_or_else(|| SetupError::Validation {
+                detail: format!("unknown state table {}", table.0),
+            })?;
         let resolved_column =
             resolved_table
                 .columns
@@ -351,7 +352,8 @@ fn materialize_column_backend(
                 "no canonical backend factory registered for scheme id {}",
                 scheme_id.0,
             ),
-        }.into());
+        }
+        .into());
     };
     let backend = factory
         .materialize_backend(ColumnBackendSetup {
@@ -369,7 +371,8 @@ fn materialize_column_backend(
                 "materialized backend for scheme {} reported verifier contract scheme {}",
                 resolved.scheme_profile.scheme_family_id.0, backend.verifier_contract.scheme_id.0
             ),
-        }.into());
+        }
+        .into());
     }
     if backend.verifier_contract.proof_layout_family != resolved.proof_layout_family() {
         return Err(SetupError::Validation {
@@ -378,13 +381,15 @@ fn materialize_column_backend(
                 resolved.proof_layout_family().0,
                 backend.verifier_contract.proof_layout_family.0,
             ),
-        }.into());
+        }
+        .into());
     }
     if backend.verifier_contract.verifier_digest_format != resolved.verifier_digest_format() {
         return Err(SetupError::Validation {
             detail: "materialized backend verifier digest format does not match scheme profile"
                 .to_string(),
-        }.into());
+        }
+        .into());
     }
     if backend.root_binding_contract.root_binding_family != resolved.root_binding_family() {
         return Err(SetupError::Validation {
@@ -393,13 +398,15 @@ fn materialize_column_backend(
                 resolved.root_binding_family().0,
                 backend.root_binding_contract.root_binding_family.0,
             ),
-        }.into());
+        }
+        .into());
     }
     if backend.root_binding_contract.column_profile_hash != resolved.column_profile.profile_hash {
         return Err(SetupError::Validation {
             detail: "materialized backend root binding contract does not match column profile hash"
                 .to_string(),
-        }.into());
+        }
+        .into());
     }
     if !materializer
         .accepted_root_binding_families
@@ -412,7 +419,8 @@ fn materialize_column_backend(
                 backend.table_id.0,
                 backend.col_id.0,
             ),
-        }.into());
+        }
+        .into());
     }
     if backend.table_id != table.id || backend.col_id != column.id {
         return Err(SetupError::Validation {
@@ -420,7 +428,8 @@ fn materialize_column_backend(
                 "materialized backend slot mismatch: expected {}.{} but got {}.{}",
                 table.id.0, column.id.0, backend.table_id.0, backend.col_id.0
             ),
-        }.into());
+        }
+        .into());
     }
     if backend.required_property_query_kinds != column.required_property_queries {
         return Err(SetupError::Validation {
@@ -428,7 +437,8 @@ fn materialize_column_backend(
                 "materialized backend property-query set mismatch for {}.{}",
                 table.id.0, column.id.0,
             ),
-        }.into());
+        }
+        .into());
     }
     Ok(backend)
 }

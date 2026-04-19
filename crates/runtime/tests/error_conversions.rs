@@ -1,11 +1,11 @@
 //! Regression guard: narrowed runtime errors must widen only into RuntimeError,
 //! never into each other (spec §7.1).
 
-use tabula_runtime::{RuntimeError, SetupError};
 #[cfg(feature = "prove")]
 use tabula_runtime::ProveError;
 #[cfg(feature = "verify")]
 use tabula_runtime::{ExecuteError, VerifyError};
+use tabula_runtime::{RuntimeError, SetupError};
 
 // Positive: each narrow error widens into RuntimeError.
 const _: fn() = || {

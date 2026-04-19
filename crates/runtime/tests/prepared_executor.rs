@@ -137,7 +137,11 @@ fn execute_query_returns_expected_value() {
         .execute_query(&snapshot, entry_id, &[u64_portable(42)], &ctx)
         .expect("execute_query");
 
-    assert_eq!(result.returns.len(), 1, "tier_of must return exactly one value");
+    assert_eq!(
+        result.returns.len(),
+        1,
+        "tier_of must return exactly one value"
+    );
     assert_eq!(
         result.returns[0].payload(),
         &2u64.to_le_bytes()[..],

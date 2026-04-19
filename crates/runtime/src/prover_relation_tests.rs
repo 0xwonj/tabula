@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
+use std::collections::{BTreeMap, BTreeSet};
 use tabula_chips::event_transcript::EVENT_TRANSCRIPT_WITNESS_LABEL;
 use tabula_chips::execution::EXECUTION_STANDARD_VALUE_WIDTH;
 use tabula_chips::execution::trace::{InstructionRecord, Opcode};
@@ -23,6 +24,7 @@ use tabula_chips::relation_table::{RELATION_TABLE_WITNESS_LABEL, RelationTableWi
 use tabula_chips::relation_transcript::{
     RELATION_TRANSCRIPT_WITNESS_LABEL, RelationTranscriptCall,
 };
+use tabula_commitment::PoseidonHasher;
 use tabula_contract::format::typed_tuple::{TypedTupleRole, compute_typed_tuple_digest};
 use tabula_core::{EncodingProfileId, PortableValue, TypeId};
 use tabula_ext::root::{
@@ -40,13 +42,10 @@ use tabula_testing::exec::{
     tx_batch,
 };
 use tabula_types::{
-    ArithmeticOp, EncodingRuntime, TypeRuntime, TypedValue, bool_portable, u64_portable,
-    u64_typed,
+    ArithmeticOp, EncodingRuntime, TypeRuntime, TypedValue, bool_portable, u64_portable, u64_typed,
 };
 use tabula_witness::stark::{LowerSuccessfulTxInput, lower_successful_tx};
 use tabula_witness::{RelationClaim, RelationClaimKind, prepare_relation_proof};
-use std::collections::{BTreeMap, BTreeSet};
-use tabula_commitment::PoseidonHasher;
 
 const TEST_EXTRA_TYPE_ID: TypeId = TypeId(90_001);
 const TEST_EXTRA_ENCODING_ID: EncodingProfileId = EncodingProfileId(90_001);
@@ -207,8 +206,7 @@ fn guarded_context(caller: u64) -> ir::ContextInput {
 
 fn relation_snapshot(registered: &RegisteredProgram) -> CommittedStateSnapshot {
     let opts = crate::PreparedOptions::try_standard().expect("standard options");
-    let executor =
-        prepare_executor(Arc::new(registered.clone()), &opts).expect("build executor");
+    let executor = prepare_executor(Arc::new(registered.clone()), &opts).expect("build executor");
     executor
         .materialize_logical_state([
             (
@@ -232,8 +230,7 @@ fn executor_and_prover_for_source(
 ) -> (RegisteredProgram, PreparedExecutor, crate::PreparedProver) {
     let registered = register_program_from_source(source);
     let opts = crate::PreparedOptions::try_standard().expect("standard options");
-    let executor = prepare_executor(Arc::new(registered.clone()), &opts)
-        .expect("build executor");
+    let executor = prepare_executor(Arc::new(registered.clone()), &opts).expect("build executor");
     let prover =
         crate::prepare_prover(Arc::new(registered.clone()), &opts).expect("build prepared prover");
     (registered, executor, prover)
@@ -502,10 +499,7 @@ impl EncodingRuntime for ExtraEncodingRuntime {
         ))
     }
 
-    fn encode_transcript_atoms(
-        &self,
-        value: &TypedValue,
-    ) -> Result<Vec<KoalaBear>, TabulaError> {
+    fn encode_transcript_atoms(&self, value: &TypedValue) -> Result<Vec<KoalaBear>, TabulaError> {
         self.encode_field_elements(value)
     }
 
@@ -571,11 +565,9 @@ fn lowering_rejects_duplicate_relation_effect_origins() {
 
     let state = &*executor.state;
     let typed_context =
-        crate::prelude::decode_context_input_on_state(state, &context)
-            .expect("typed context");
+        crate::prelude::decode_context_input_on_state(state, &context).expect("typed context");
     let typed_txs =
-        crate::prelude::decode_entry_batch_on_state(state, &batch)
-            .expect("typed batch");
+        crate::prelude::decode_entry_batch_on_state(state, &batch).expect("typed batch");
     let entry = state
         .semantic
         .execution()
@@ -670,13 +662,14 @@ fn tampering_relation_table_rows_breaks_proving() {
         .execute_batch(&snapshot, &batch, &context)
         .expect("execute batch");
 
-    let (mut machine_input, _public_statement) = crate::proof_artifacts::prepare_proof_machine_input(
-        &prover.runtime_program,
-        &prover.root_backend_bundle,
-        &prover.kit_registry,
-        &prove_input(&snapshot, &batch, &context, &executed),
-    )
-    .expect("prepare proof request");
+    let (mut machine_input, _public_statement) =
+        crate::proof_artifacts::prepare_proof_machine_input(
+            &prover.runtime_program,
+            &prover.root_backend_bundle,
+            &prover.kit_registry,
+            &prove_input(&snapshot, &batch, &context, &executed),
+        )
+        .expect("prepare proof request");
 
     let mut rows = machine_input
         .execution
@@ -716,13 +709,14 @@ fn tampering_execution_bound_relation_outputs_breaks_proving() {
         .execute_batch(&snapshot, &batch, &context)
         .expect("execute batch");
 
-    let (mut machine_input, _public_statement) = crate::proof_artifacts::prepare_proof_machine_input(
-        &prover.runtime_program,
-        &prover.root_backend_bundle,
-        &prover.kit_registry,
-        &prove_input(&snapshot, &batch, &context, &executed),
-    )
-    .expect("prepare proof request");
+    let (mut machine_input, _public_statement) =
+        crate::proof_artifacts::prepare_proof_machine_input(
+            &prover.runtime_program,
+            &prover.root_backend_bundle,
+            &prover.kit_registry,
+            &prove_input(&snapshot, &batch, &context, &executed),
+        )
+        .expect("prepare proof request");
 
     let mut records = machine_input
         .execution
@@ -762,13 +756,14 @@ fn tampering_relation_effect_identity_breaks_proving() {
         .execute_batch(&snapshot, &batch, &context)
         .expect("execute batch");
 
-    let (mut machine_input, _public_statement) = crate::proof_artifacts::prepare_proof_machine_input(
-        &prover.runtime_program,
-        &prover.root_backend_bundle,
-        &prover.kit_registry,
-        &prove_input(&snapshot, &batch, &context, &executed),
-    )
-    .expect("prepare proof request");
+    let (mut machine_input, _public_statement) =
+        crate::proof_artifacts::prepare_proof_machine_input(
+            &prover.runtime_program,
+            &prover.root_backend_bundle,
+            &prover.kit_registry,
+            &prove_input(&snapshot, &batch, &context, &executed),
+        )
+        .expect("prepare proof request");
 
     let mut calls = machine_input
         .execution
@@ -1059,8 +1054,7 @@ fn bundled_root_authority_rejects_unsupported_binding_families() {
 fn event_transcript_witness_matches_execution_event_rows() {
     let registered = register_program_from_source(event_debug_source());
     let opts = crate::PreparedOptions::try_standard().expect("standard options");
-    let executor = prepare_executor(Arc::new(registered.clone()), &opts)
-        .expect("build executor");
+    let executor = prepare_executor(Arc::new(registered.clone()), &opts).expect("build executor");
     let prover = crate::prepare_prover(Arc::new(registered), &opts).expect("build prover");
     let snapshot = executor.empty_state_snapshot();
     let register = executor
@@ -1076,11 +1070,9 @@ fn event_transcript_witness_matches_execution_event_rows() {
         .expect("execute event batch");
     let state = &*executor.state;
     let typed_context =
-        crate::prelude::decode_context_input_on_state(state, &context)
-            .expect("decode context");
+        crate::prelude::decode_context_input_on_state(state, &context).expect("decode context");
     let typed_txs =
-        crate::prelude::decode_entry_batch_on_state(state, &batch)
-            .expect("decode batch");
+        crate::prelude::decode_entry_batch_on_state(state, &batch).expect("decode batch");
 
     let prepared = crate::proof_artifacts::prepare_proof_artifacts(
         &prover.runtime_program,

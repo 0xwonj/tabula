@@ -550,7 +550,10 @@ fn tx_batch_proves_and_verifies_mixed_surface() {
         verified.public_statement().public_context_digest.to_bytes(),
         [0u8; 32]
     );
-    assert_ne!(verified.public_statement().event_digest.to_bytes(), [0u8; 32]);
+    assert_ne!(
+        verified.public_statement().event_digest.to_bytes(),
+        [0u8; 32]
+    );
     assert_ne!(verified.proof().binding_digest, [0u8; 32]);
 }
 
@@ -601,12 +604,18 @@ fn binding_digest_changes_with_batch_context_and_binding() {
         )
         .expect("prove c");
 
-    assert_ne!(prove_a.proof().binding_digest, prove_b.proof().binding_digest);
+    assert_ne!(
+        prove_a.proof().binding_digest,
+        prove_b.proof().binding_digest
+    );
     assert_ne!(
         prove_a.public_statement().event_digest,
         prove_b.public_statement().event_digest
     );
-    assert_ne!(prove_a.proof().binding_digest, prove_c.proof().binding_digest);
+    assert_ne!(
+        prove_a.proof().binding_digest,
+        prove_c.proof().binding_digest
+    );
     assert_ne!(
         prove_a.public_statement().public_context_digest,
         prove_c.public_statement().public_context_digest

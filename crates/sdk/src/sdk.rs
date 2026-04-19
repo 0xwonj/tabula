@@ -109,13 +109,13 @@ impl Sdk {
         drop(cache);
 
         let built = Arc::new(self.build_executor(artifact)?);
-        let mut cache = self
-            .inner
-            .executor_cache
-            .lock()
-            .map_err(|_| SdkError::Synchronization {
-                detail: "sdk executor cache mutex poisoned".to_string(),
-            })?;
+        let mut cache =
+            self.inner
+                .executor_cache
+                .lock()
+                .map_err(|_| SdkError::Synchronization {
+                    detail: "sdk executor cache mutex poisoned".to_string(),
+                })?;
         if let Some(executor) = cache.get(&key) {
             return Ok(Arc::clone(executor));
         }

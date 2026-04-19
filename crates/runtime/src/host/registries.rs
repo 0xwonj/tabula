@@ -44,14 +44,12 @@ impl RuntimeRegistries {
         &mut self,
         runtime: Arc<dyn TypeRuntime>,
     ) -> Result<(), RuntimeError> {
-        self.type_runtimes
-            .register(runtime)
-            .map_err(|err| {
-                SetupError::Validation {
-                    detail: err.to_string(),
-                }
-                .into()
-            })
+        self.type_runtimes.register(runtime).map_err(|err| {
+            SetupError::Validation {
+                detail: err.to_string(),
+            }
+            .into()
+        })
     }
 
     /// Register one custom runtime encoding implementation.
@@ -59,14 +57,12 @@ impl RuntimeRegistries {
         &mut self,
         runtime: Arc<dyn EncodingRuntime>,
     ) -> Result<(), RuntimeError> {
-        self.encoding_runtimes
-            .register(runtime)
-            .map_err(|err| {
-                SetupError::Validation {
-                    detail: err.to_string(),
-                }
-                .into()
-            })
+        self.encoding_runtimes.register(runtime).map_err(|err| {
+            SetupError::Validation {
+                detail: err.to_string(),
+            }
+            .into()
+        })
     }
 
     /// Consume and register one runtime type implementation.

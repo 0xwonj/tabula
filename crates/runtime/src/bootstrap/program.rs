@@ -123,7 +123,6 @@ pub(crate) fn build_registered_program_machine(
         .map_err(|e| SetupError::MachineSetup(e).into())
 }
 
-
 pub(crate) fn validate_core_first_program(program: &ir::Program) -> Result<(), RuntimeError> {
     for entry in &program.entries {
         for (op_index, op) in entry.body.ops.iter().enumerate() {

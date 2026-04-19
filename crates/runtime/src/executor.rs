@@ -22,9 +22,7 @@ use tabula_ir as ir;
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 
 use crate::error::{ExecuteError, RuntimeError, SetupError};
-use crate::execution::{
-    self, ExecutionReceipt,
-};
+use crate::execution::{self, ExecutionReceipt};
 use crate::host::HostEnvironment;
 use crate::options::PreparedOptions;
 use crate::prepared_state::{PreparedRuntimeState, build_prepared_runtime};

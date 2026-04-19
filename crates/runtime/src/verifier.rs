@@ -160,11 +160,9 @@ pub fn prepare_verifier(
     sealed: Arc<SealedArtifact>,
     opts: &PreparedOptions,
 ) -> Result<PreparedVerifier, VerifyError> {
-    sealed
-        .validate()
-        .map_err(|e| VerifyError::Validation {
-            detail: format!("sealed artifact validation failed: {e}"),
-        })?;
+    sealed.validate().map_err(|e| VerifyError::Validation {
+        detail: format!("sealed artifact validation failed: {e}"),
+    })?;
     #[cfg(feature = "prove")]
     let root_backend_bundle = opts.root_backend().0.clone();
     #[cfg(not(feature = "prove"))]
@@ -244,15 +242,13 @@ fn execution_chip_digest_from_proof(
         .into());
     }
     let public_values: [p3_koala_bear::KoalaBear; 8] =
-        values
-            .try_into()
-            .map_err(|_| VerifyError::Validation {
-                detail: format!(
-                    "{label} chip exposed {} public values after metadata validation; expected {}",
-                    values.len(),
-                    digest_arity
-                ),
-            })?;
+        values.try_into().map_err(|_| VerifyError::Validation {
+            detail: format!(
+                "{label} chip exposed {} public values after metadata validation; expected {}",
+                values.len(),
+                digest_arity
+            ),
+        })?;
     Ok(Some(NativeDigest(public_values).to_bytes()))
 }
 

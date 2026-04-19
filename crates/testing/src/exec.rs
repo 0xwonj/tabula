@@ -1,5 +1,6 @@
 //! Shared execution helpers built on canonical public seams.
 
+use std::sync::Arc;
 use tabula_compiler::SourceCapabilityDescriptor;
 use tabula_compiler::{
     CompiledProgram, CompilerCatalogs, RegisteredProgram, compile_and_register_program_source,
@@ -8,7 +9,6 @@ use tabula_compiler::{
 use tabula_core::PortableValue;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BYTES32_ID, TYPE_U64_ID};
-use std::sync::Arc;
 
 use tabula_runtime::{CommittedStateSnapshot, PreparedOptions, prepare_executor};
 

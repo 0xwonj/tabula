@@ -7,10 +7,10 @@ use tabula_ir as ir;
 use tabula_types::TypeRuntimeRegistry;
 
 #[cfg(feature = "prove")]
-use crate::prepared_state::PreparedRuntimeState;
+use crate::error::VerifyError;
 use crate::error::{ExecuteError, RuntimeError};
 #[cfg(feature = "prove")]
-use crate::error::VerifyError;
+use crate::prepared_state::PreparedRuntimeState;
 use crate::semantics as runtime_ir;
 use crate::snapshot::CommittedStateSnapshot;
 #[cfg(feature = "prove")]

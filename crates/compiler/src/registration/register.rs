@@ -111,7 +111,12 @@ fn relation_policy_from_program(program: &ir::Program) -> SealedRelationPolicy {
         .entries
         .iter()
         .flat_map(|entry| entry.body.ops.iter())
-        .any(|op| matches!(op, ir::Op::AssertRelation { .. } | ir::Op::EvalRelation { .. }));
+        .any(|op| {
+            matches!(
+                op,
+                ir::Op::AssertRelation { .. } | ir::Op::EvalRelation { .. }
+            )
+        });
     if uses_relations {
         SealedRelationPolicy::RequireArtifactRoot
     } else {

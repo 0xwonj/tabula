@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use tabula_ext::backend::prelude::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use tabula_commitment::NativeDigest;
 use tabula_contract::PublicStatement;
@@ -16,6 +15,7 @@ use tabula_contract::format::typed_tuple::TupleEncodingDefaults;
 use tabula_core::error::TabulaError;
 use tabula_core::{Digest, PortableValue};
 use tabula_executor as exec;
+use tabula_ext::backend::prelude::PrimeCharacteristicRing;
 use tabula_ir as ir;
 use tabula_types::{
     ContextValues, EncodingRuntimeRegistry, RelationEffect, StatePropertyEffect,

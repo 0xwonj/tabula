@@ -2,6 +2,7 @@
 
 use std::cmp::Ordering;
 
+use std::sync::Arc;
 use tabula_compiler::{
     CompilerCatalogs, compile_and_register_program_source, compile_program_source_with_catalogs,
 };
@@ -11,7 +12,6 @@ use tabula_core::{ColId, CommittedCellKey, CommittedKey, CommittedPropertyQuery,
 use tabula_executor as exec;
 use tabula_ir::{ContextInput, EntryBatch, EntryCall};
 use tabula_profile::TYPE_U64_ID;
-use std::sync::Arc;
 
 use tabula_runtime::{PreparedOptions, prepare_executor, semantics::RuntimeProgram};
 use tabula_types::{
