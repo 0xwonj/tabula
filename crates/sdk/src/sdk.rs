@@ -325,11 +325,15 @@ tx touch(id: u64) {
 
         assert!(matches!(
             first,
-            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+            SdkError::Runtime(
+                RuntimeError::Setup(_) | RuntimeError::Verify(_) | RuntimeError::Execute(_)
+            )
         ));
         assert!(matches!(
             second,
-            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+            SdkError::Runtime(
+                RuntimeError::Setup(_) | RuntimeError::Verify(_) | RuntimeError::Execute(_)
+            )
         ));
         assert!(sdk.inner.runtime_cache.lock().is_ok());
     }
@@ -404,11 +408,15 @@ tx touch(id: u64) {
 
         assert!(matches!(
             first,
-            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+            SdkError::Runtime(
+                RuntimeError::Setup(_) | RuntimeError::Verify(_) | RuntimeError::Execute(_)
+            )
         ));
         assert!(matches!(
             second,
-            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+            SdkError::Runtime(
+                RuntimeError::Setup(_) | RuntimeError::Verify(_) | RuntimeError::Execute(_)
+            )
         ));
         assert!(sdk.inner.prover_cache.lock().is_ok());
     }
@@ -428,11 +436,15 @@ tx touch(id: u64) {
 
         assert!(matches!(
             first,
-            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+            SdkError::Runtime(
+                RuntimeError::Setup(_) | RuntimeError::Verify(_) | RuntimeError::Execute(_)
+            )
         ));
         assert!(matches!(
             second,
-            SdkError::Runtime(RuntimeError::ValidationFailed { .. })
+            SdkError::Runtime(
+                RuntimeError::Setup(_) | RuntimeError::Verify(_) | RuntimeError::Execute(_)
+            )
         ));
         assert!(sdk.inner.verifier_cache.lock().is_ok());
     }

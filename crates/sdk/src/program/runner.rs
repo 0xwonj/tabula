@@ -289,10 +289,8 @@ impl Runner {
             .iter()
             .map(|value| runtime.type_runtimes().encode_typed(value))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|source| {
-                SdkError::Runtime(tabula_runtime::RuntimeError::ValidationFailed {
-                    detail: source.to_string(),
-                })
+            .map_err(|source| SdkError::ValueEncoding {
+                detail: source.to_string(),
             })?;
         Ok(QueryResult::new(returns))
     }
