@@ -9,10 +9,42 @@
 //!   [`KitScratch`] entry and writes them into the execution
 //!   [`WitnessStore`].
 //!
-//! Opcode handlers in `tabula-witness` push rows into the kit through
-//! kit-typed helpers the kit exposes on its own interface — the row
-//! type itself stays private to the chip crate. See SP-3 design spec
+//! See SP-3 design spec
 //! `docs/superpowers/specs/2026-04-19-sp3-witness-chip-kit-design.md`.
+//!
+//! ## Authoring modes
+//!
+//! A kit populates its scratchpad in one of two ways, selected by the
+//! chip author based on where the row data becomes available:
+//!
+//! - **inline-push.** Opcode handlers in `tabula-witness` call a
+//!   kit-typed helper during lowering (e.g.
+//!   `IrHashKit::push_from_inputs`). The kit owns the row type; the
+//!   caller only supplies raw inputs and receives any derived data it
+//!   needs. `finalize` drains via [`KitFinalizeContext::take_scratch`],
+//!   which yields `T::default()` when no opcode handler ran in a tx —
+//!   the correct behavior when zero calls is a valid state.
+//!   Adding a new inline-push chip requires no witness-crate edits
+//!   beyond calling the new helper from the relevant opcode handler,
+//!   and no runtime-crate edits.
+//!
+//! - **runtime-pre-stuff.** The runtime computes the full row buffer
+//!   at batch level and installs it via an `insert_*` helper on the
+//!   kit (e.g. `RelationTableKit::insert_rows`) before
+//!   `prepare_execution_store` runs. `finalize` drains via
+//!   [`KitFinalizeContext::take_scratch_required`], which errors with
+//!   [`KitError::MissingScratch`] on absence — a missing pre-stuff is
+//!   a wiring bug, not a routine empty-batch case.
+//!   Adding a new runtime-pre-stuff chip requires a runtime-crate
+//!   edit to call the kit's `insert_*` helper; the SP-3 goal
+//!   ("chip-agnostic witness") applies only to `tabula-witness`.
+//!
+//! Kits that need data only the runtime has (e.g. relation table rows
+//! derived from a `PreparedRelationProof` that must not leak into
+//! chips) use the runtime-pre-stuff pattern. Everything else uses
+//! inline-push.
+//!
+//! ## Trait home
 //!
 //! The trait lives in `tabula-stark` rather than `tabula-ext` (as the
 //! SP-3 design originally proposed) because `tabula-ext` sits above

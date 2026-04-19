@@ -38,8 +38,13 @@ After this sub-project:
   `(airs, dyn_chips, bus_consumers, witness_kit)` in one place.
 - Adding a hypothetical new chip touches `tabula-chips` (row + AIR +
   kit) and one line of builder registration in `tabula-machine` (or
-  an `ExecutionBackend` impl in `tabula-ext`). No edits under
-  `crates/witness/`.
+  an `ExecutionBackend` impl in `tabula-ext`). **No edits under
+  `crates/witness/`.** Chips whose row data originates in the runtime
+  (runtime-pre-stuff pattern — see the SP-3 "Landed" amendment) do
+  require a single `insert_*` call from `tabula-runtime`; that is an
+  expected property of the pattern, not a violation of the goal.
+  "Chip-agnostic" is a claim about `tabula-witness`, not about the
+  workspace as a whole.
 
 SP-3 is **not** byte-breaking. The on-disk `proof.bin` layout, the
 witness-store label set, and the per-chip row encodings are all
