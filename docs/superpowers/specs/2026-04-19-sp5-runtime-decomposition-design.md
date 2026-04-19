@@ -1,115 +1,97 @@
 # SP-5 — Runtime Decomposition + Executor Symmetry
 
-> Status: proposed design
-> Date: 2026-04-19
+> Status: proposed design (rewrite 2026-04-19)
 > Parent: [architecture refactoring umbrella](./2026-04-18-architecture-refactoring-design.md) §2.3, §2.5, §4 SP-5
-> Predecessors: SP-4 (runtime prepared handles) landed 2026-04-19; SP-1.5 (SealedArtifact introduction) is a hard prerequisite — see §1.5.
+> Predecessors: SP-4 landed (`334a1f7`); SP-1.5 landed (`48bb08a`)
 > Audience: SP-5 implementer + reviewers
 
 ## 1. Goal
 
 Finish the runtime prepared-handle story begun in SP-4. Promote the
 residual `TabulaRuntime` facade into a third symmetric handle
-(`PreparedExecutor`), decompose the 3,150-LOC `engine.rs` into
+(`PreparedExecutor`), decompose the 3,139-LOC `engine.rs` into
 role-focused modules, narrow the error surface per handle, formalize
-the "runtime pre-stuff" pattern as a typed API, seal `ChipWitnessKit`,
+the "runtime pre-stuff" seam as a typed API, seal `ChipWitnessKit`,
 and mark public prepared-handle types `#[non_exhaustive]`.
 
-## 1.5 Prerequisite: SP-1.5 (SealedArtifact)
+SP-5 is a pure refactor: byte-identical proofs + public statements
+across the SP-4 → SP-5 transition.
 
-SP-5 inherits a structurally asymmetric signature set for the three
-prepared handles, landed by SP-1.5:
+## 2. Prerequisite state (already landed)
 
-- `prepare_prover(Arc<RegisteredProgram>) -> Result<PreparedProver, ProveError>`
-- `prepare_verifier(Arc<SealedArtifact>) -> Result<PreparedVerifier, VerifyError>`
-- `prepare_executor(Arc<RegisteredProgram>) -> Result<PreparedExecutor, ExecuteError>` (new in SP-5)
+Asymmetric prepared-handle signatures, locked by SP-1.5:
 
-The asymmetry reflects the layering: verifier is a pure binding / static
-artifact check (IR-free, once `relation_policy` and `uses_ir_hash` are
-sealed at compile time — SP-1.5's contribution), while prover and
-executor must lower or execute `ir::ValidatedProgram`. Forcing a
-symmetric `Arc<SealedArtifact>` for all three would require either a
-`contract → ir` dep (violates umbrella §3) or `SealedArtifact` carrying
-`ValidatedProgram` (weakens the name).
+```rust
+fn prepare_prover(Arc<RegisteredProgram>, …) -> Result<PreparedProver, _>;
+fn prepare_verifier(Arc<SealedArtifact>,   …) -> Result<PreparedVerifier, _>;
+fn prepare_executor(Arc<RegisteredProgram>, …) -> Result<PreparedExecutor, _>;   // new in SP-5
+```
 
-SP-5 does **not** introduce `SealedArtifact`, the verifier-signature
-flip, or the `RelationPolicy` relocation — those are SP-1.5. SP-5
-builds on the post-SP-1.5 state.
+Verifier is IR-free once `relation_policy` and `uses_ir_hash` are
+sealed at registration. Prover and executor must execute IR. Forcing
+symmetric `Arc<SealedArtifact>` would require either a `contract → ir`
+dep (forbidden by umbrella §3) or `SealedArtifact` carrying
+`ValidatedProgram` (weakens the name). The asymmetry is structural.
 
-## 2. Locked decisions (carried from umbrella + SP-4 directional review)
+## 3. Feature matrix (authoritative)
 
-- **TabulaRuntime → PreparedExecutor promotion.** The execute surface
-  becomes a third prepare-once / drive-many handle symmetric with
-  `PreparedProver` and `PreparedVerifier`. Not deleted — promoted.
-- **ChipWitnessKit sealed.** Only workspace-internal crates may
-  implement; third-party chip authoring is deferred. The seal is a
-  convention + trybuild compile-fail probe, not a type-level
-  unforgeability proof — see §9 for the cargo-topology reason.
+From `crates/runtime/Cargo.toml`:
 
-## 3. Scope
+- `default = []` — nothing compiles; present only so `cargo build`
+  succeeds as a topology check.
+- `verify` — adds `tabula-machine`, `tabula-chips`, `tabula-stark`.
+  Baseline practical feature. Enables `PreparedVerifier`,
+  `PreparedExecutor`, and the shared setup path.
+- `prove` — adds `tabula-witness`, `rayon`, and STARK proving inputs.
+  Implies `verify`. Enables `PreparedProver`.
 
-### 3.1 In-scope
+Error types are feature-gated to match the surface that compiles at
+each level (§7).
 
-1. `PreparedExecutor` + `prepare_executor` symmetric with the other
-   two handles. `TabulaRuntime` / `RuntimeBuilder` removed.
-2. `engine.rs` decomposition into role-focused modules
-   (§5 lays out the concrete layout).
+## 4. Scope
+
+### 4.1 In scope
+
+1. `PreparedExecutor` + `prepare_executor`. `TabulaRuntime` and
+   `RuntimeBuilder` removed (not deprecated — clean break per
+   `.claude/CLAUDE.md`).
+2. `engine.rs` decomposed into role-focused modules (§6).
 3. Narrowed per-handle errors: `ProveError`, `VerifyError`,
-   `ExecuteError`. `RuntimeError` survives as a `#[non_exhaustive]`
-   umbrella with transparent `From` impls for composing callers.
-4. Typed runtime pre-stuff API. Chip-specific row type names
-   (`InstructionRecord`, `RelationTableWitnessRow`, ...) absent from
-   `crates/runtime/src/**`. Replaced by logical-row types owned in
-   `tabula-stark::witness_kit` and installed through a typed seam.
-5. `ChipWitnessKit` sealed via private-supertrait pattern in
-   `tabula-stark`. Trybuild compile-fail probe for external impls.
-6. `VerifierState` and public prepared-handle builder/option types
-   marked `#[non_exhaustive]`.
-7. `SnapshotCellRecord` borsh codec relocated to its canonical home
-   (see §6 for the disposition call).
-8. Three guardrail tests: no-chip-row-in-runtime, all three handles
-   `Send + Sync + 'static`, `From<ProveError|VerifyError|ExecuteError>
-   for RuntimeError`.
+   `ExecuteError`, `SetupError`. `RuntimeError` is the
+   `#[non_exhaustive]` umbrella with `#[from]` from each narrowed
+   type (§7).
+4. **Single API entry point per handle**: `prepare_*(artifact, &opts)`
+   free functions. **Per-handle builders removed.** `PreparedOptions`
+   is the knob surface with `::standard()` + `.with_*()` chaining
+   (§5).
+5. Typed pre-stuff API: chip-specific row identifiers
+   (`InstructionRecord`, `RelationTableWitnessRow`, …) absent from
+   `crates/runtime/src/**`. Replaced by logical row types owned in
+   `tabula-stark::witness_kit` and installed through
+   `PreStuffInstaller` (§8).
+6. `ChipWitnessKit` sealed via convention seal + trybuild compile-fail
+   and compile-pass probes (§9).
+7. `VerifierState`, `PreparedOptions`, and all prepared-handle public
+   types marked `#[non_exhaustive]`.
+8. `SnapshotCellRecord` codec disposition resolved (§10).
+9. Byte-identity gate reintroduced as a shell script (§11).
+10. Guardrail tests (§12).
 
-### 3.2 Out of scope (belongs to other SPs)
+### 4.2 Out of scope
 
 - SDK thinning, `NEXT_ENVIRONMENT_FINGERPRINT` removal → SP-6.
 - `tabula-types` / `tabula-profile` / `tabula-ir` READMEs → SP-6.
-- `docs/design/architecture.md` commitment-tier amendment → SP-6.
 - 9 → 15 bus doc drift → SP-6.
-- Feature matrix unification → SP-7.
+- Feature matrix unification across the workspace → SP-7.
 - NF-1/2/3/4 validation + `--nf-elision` → SP-8.
-- `SealedArtifact` introduction and verifier-signature flip → SP-1.5
-  (prerequisite; see §1.5).
 
-## 4. Improvements beyond the umbrella (proposed here, not yet locked)
+## 5. API shape
 
-The umbrella is a strategic document and occasionally under-specifies
-tactics. One refinement surfaces naturally once you read SP-4's landed
-code. I propose adopting it in SP-5; it is not a hard requirement to
-close the SP.
-
-(An earlier draft also proposed a shared `PreparedRuntimeCore` held
-behind `Arc` so callers building all three handles for the same
-program would amortize preparation. Retracted on YAGNI review: no
-current caller builds all three for the same program, and the
-4-symbol public surface would exist only for a hypothetical future
-optimization. Per `.claude/CLAUDE.md` clean-break posture, it can land
-as its own SP if a real caller needs it.)
-
-### 4.2 Consolidated `PreparedOptions`
-
-**Observation.** SP-4 has three knobs duplicated across builders:
-`with_host_environment`, `with_machine_stark_config`,
-`with_root_backend_bundle` (+ `with_root_proof_backend[_arc]` on the
-verify-only build). Each new handle (executor here) would add its
-own clone. Adding a knob means editing N builders.
-
-**Proposal.** One `PreparedOptions` struct; each `prepare_*` function
-takes `&PreparedOptions`. Handle-specific builders become optional
-sugar.
+### 5.1 Single entry point
 
 ```rust
+// crates/runtime/src/options.rs
+
 #[non_exhaustive]
 pub struct PreparedOptions {
     pub host_environment: HostEnvironment,
@@ -121,155 +103,183 @@ pub struct PreparedOptions {
 }
 
 impl PreparedOptions {
-    pub fn standard() -> Result<Self, SetupError> { ... }
-    pub fn with_host_environment(self, ...) -> Self { ... }
-    // ... other with_*
-}
+    /// Infallible default shape. Errors that used to come out of
+    /// `HostEnvironment::standard()` are re-exposed via dedicated
+    /// constructors; `standard()` itself does not fail.
+    pub fn standard() -> Self { … }
 
-pub fn prepare_prover(
-    registered_program: Arc<RegisteredProgram>,
-    opts: &PreparedOptions,
-) -> Result<PreparedProver, ProveError> { ... }
-
-pub fn prepare_verifier(
-    sealed_artifact: Arc<SealedArtifact>,
-    opts: &PreparedOptions,
-) -> Result<PreparedVerifier, VerifyError> { ... }
-
-pub fn prepare_executor(
-    registered_program: Arc<RegisteredProgram>,
-    opts: &PreparedOptions,
-) -> Result<PreparedExecutor, ExecuteError> { ... }
-
-// Sugar for the common case:
-pub fn prepare_prover_standard(
-    registered_program: Arc<RegisteredProgram>,
-) -> Result<PreparedProver, ProveError> {
-    prepare_prover(registered_program, &PreparedOptions::standard()?)
+    pub fn with_host_environment(mut self, env: HostEnvironment) -> Self { … }
+    pub fn with_machine_stark_config(mut self, cfg: TabulaStarkConfig) -> Self { … }
+    #[cfg(feature = "prove")]
+    pub fn with_root_backend_bundle(mut self, bundle: RootBackendBundle) -> Self { … }
+    #[cfg(not(feature = "prove"))]
+    pub fn with_root_proof_backend(mut self, backend: Arc<dyn RootProofBackend>) -> Self { … }
 }
 ```
-
-**Benefits.** One place to add a knob. Options value can be cheaply
-reused across `prepare_{prover,verifier,executor}` even though the
-three handles take different artifact types (per §1.5 structural
-asymmetry).
-
-**Risks.** SDK and CLI call sites need a migration. The migration is
-mechanical and small — SP-4 already landed with per-handle builders,
-so the existing call sites are a good proxy for how many edits.
-
-**Default position.** Adopt §4.2 in SP-5.
-
-### 4.3 Explicit non-goals for this design
-
-- Dropping `PreparedProverBuilder` / `PreparedVerifierBuilder`. The
-  fluent builder style is a nice DX; we keep it as thin sugar over
-  `prepare_*(reg, opts.with_*(…))`.
-- `TabulaRuntime` façade deprecation path. No deprecation path —
-  `.claude/CLAUDE.md` says clean breaks; remove the symbol.
-- Cross-process proof caching. Out of scope; would belong to SDK.
-
-## 5. Target module layout (`crates/runtime/src/`)
-
-```text
-lib.rs                          # re-exports only
-error.rs                        # RuntimeError umbrella + narrowed errors
-options.rs                      # PreparedOptions (§4.2)
-prover.rs                       # PreparedProver + prepare_prover (+ builder sugar)
-verifier/
-  mod.rs                        # PreparedVerifier + prepare_verifier (Arc<SealedArtifact>)
-  state.rs                      # VerifierState (public, #[non_exhaustive])
-  check.rs                      # verify-path helpers
-executor.rs                     # PreparedExecutor + prepare_executor (new)
-execution.rs                    # batch exec / query exec / receipt
-snapshot.rs                     # CommittedStateSnapshot + borsh codec (disposition in §6)
-statement_materialization.rs    # PublicStatement construction helpers
-state_binding.rs                # post-state materialization, binding-digest wiring
-prelude.rs                      # ContextPreludeSlot / ParamPreludeSlot + loaders
-pre_stuff.rs                    # PreStuffInstaller typed API
-bootstrap/                      # (extant)
-host.rs                         # (extant — HostEnvironment etc.)
-proof_summary.rs                # (extant)
-semantics.rs                    # (extant)
-state_runtime.rs                # (extant; post-SP-1.5 has from_sealed_artifact + from_registered_program)
-```
-
-**Hard budget:** no file exceeds 800 LOC. If one does, split further
-before calling SP-5 done. Target mean is around 300–400 LOC per file.
-
-**Deliberate deviation from umbrella §2.3.** Umbrella lists
-`executor.rs`, `execution.rs`, `snapshot.rs`, `statement_materialization.rs`,
-`state_binding.rs` as the new modules. I add three more:
-`options.rs` (§4.2 consolidated options), `pre_stuff.rs` (typed install
-API), and `prelude.rs` (the context/param slot loaders). All three are
-natural seams once the file is read top to bottom.
-
-## 6. `SnapshotCellRecord` borsh codec disposition
-
-**Call sites to inspect before deciding:**
-
-```bash
-grep -rn "SnapshotCellRecord\|snapshot_cell_record" crates/
-```
-
-**Decision rule.** If the bytes cross a proof-visible boundary
-(embedded in `ProofEnvelope` or `PublicStatement`), move the codec to
-`tabula-contract`. Otherwise keep it in `runtime::snapshot` with a
-rationale comment at the definition.
-
-**Tentative call.** I expect this to be runtime-internal — snapshots
-are an execute-time convenience for round-tripping state between
-`CommittedStateSnapshot` and canonical bytes, not a proof-visible
-artifact. If the grep confirms this, keep it in `runtime::snapshot`
-with:
 
 ```rust
-// Runtime-internal on-disk/in-memory codec for SnapshotCellRecord.
-// Never crosses the proof-visible wire boundary; therefore not a
-// tabula-contract concern. See SP-5 design §6 + umbrella §2.3.
+#[cfg(feature = "prove")]
+pub fn prepare_prover(
+    registered: Arc<RegisteredProgram>,
+    opts: &PreparedOptions,
+) -> Result<PreparedProver, ProveError>;
+
+#[cfg(feature = "verify")]
+pub fn prepare_verifier(
+    sealed: Arc<SealedArtifact>,
+    opts: &PreparedOptions,
+) -> Result<PreparedVerifier, VerifyError>;
+
+#[cfg(feature = "verify")]
+pub fn prepare_executor(
+    registered: Arc<RegisteredProgram>,
+    opts: &PreparedOptions,
+) -> Result<PreparedExecutor, ExecuteError>;
 ```
 
-If the grep surprises us, we move to `tabula-contract` and revise.
+No `PreparedProverBuilder` / `PreparedVerifierBuilder` types. The
+builder surface SP-4 introduced is dropped — DX equivalent is
+`PreparedOptions::standard().with_*()` chained into the free
+function.
+
+Rationale: three constructor shapes (free fn + builder + options
+chain) is API sprawl. One shape that scales to three handles is
+simpler and matches clean-break posture.
+
+### 5.2 Handle shape
+
+Every handle exposes `&self` operations. Per-call mutable state
+(scratch buffers, column artifacts, execution journals) lives on
+the stack for the duration of one call. Same handle + same input
+→ byte-identical output. All three are `Send + Sync + 'static`.
+
+```rust
+impl PreparedProver {
+    pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, ProveError>;
+    pub fn prove_and_verify(
+        &self,
+        verifier: &PreparedVerifier,
+        input: &ProveInput<'_>,
+    ) -> Result<VerifiedResult, ProveError>;
+    // + accessors (binding, machine, etc.)
+}
+
+impl PreparedVerifier {
+    pub fn verify(
+        &self,
+        proof: &TabulaProof,
+        expected: &PublicStatement,
+    ) -> Result<BoundStatement, VerifyError>;
+    // + accessors
+}
+
+impl PreparedExecutor {
+    pub fn execute_batch(
+        &self,
+        snapshot: &CommittedStateSnapshot,
+        batch: &ir::EntryBatch,
+        context: &ir::ContextInput,
+    ) -> Result<ExecutionJournal, ExecuteError>;
+    pub fn execute_query(&self, …) -> Result<…, ExecuteError>;
+    pub fn materialize_logical_state(&self, …) -> Result<CommittedStateSnapshot, ExecuteError>;
+    // + accessors
+}
+```
+
+### 5.3 `validate_core_first_program` placement
+
+The "reject capability calls outside the native proving subset" check
+requires `ir::Program`, so it runs in `prepare_executor` and
+`prepare_prover` at handle-build time (not per call).
+`prepare_verifier` skips it — binding-digest check at verify time
+gates mismatched programs.
+
+## 6. Target module layout (`crates/runtime/src/`)
+
+```text
+lib.rs               re-exports only
+error.rs             RuntimeError umbrella + narrowed errors (§7)
+options.rs           PreparedOptions (§5.1)
+prover.rs            PreparedProver + prepare_prover
+verifier.rs          PreparedVerifier + prepare_verifier
+executor.rs          PreparedExecutor + prepare_executor (new)
+execution.rs         execute_batch impl + query exec + ExecutionJournal, ExecutionReceipt
+snapshot.rs          CommittedStateSnapshot + SnapshotCellRecord + borsh codec
+statement.rs         PublicStatement materialization helpers
+binding.rs           post-state binding-digest wiring
+prelude.rs           ContextPreludeSlot / ParamPreludeSlot loaders
+pre_stuff.rs         PreStuffInstaller typed API (cfg prove)
+semantics.rs         (extant — not touched by SP-5 beyond re-export hygiene)
+state_runtime.rs     (extant; already has from_sealed_artifact + from_registered_program)
+proof_summary.rs     (extant)
+host/                (extant)
+bootstrap/           (extant — keep as-is; resolve_*_setup + machine builder shared by all handles)
+```
+
+**Hard budget:** no file under `src/**` exceeds 800 LOC. Target mean
+300–500. If a file approaches 800 during execution, split further
+before calling SP-5 done.
+
+**`semantics.rs` note:** `semantics.rs` is ~51 KB today and sits
+outside SP-5's refactor. It is left intact; its only SP-5 obligation
+is updating type paths when other modules change. If `semantics.rs`
+exceeds 800 LOC (it does — ~1,800 lines after comments), that is
+**pre-existing tech debt** tracked separately; splitting it is not
+SP-5's job.
 
 ## 7. Error narrowing
 
 ### 7.1 Shape
 
 ```rust
-// error.rs
+// crates/runtime/src/error.rs
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum RuntimeError {
-    #[error(transparent)] Prove(#[from] ProveError),
-    #[error(transparent)] Verify(#[from] VerifyError),
-    #[error(transparent)] Execute(#[from] ExecuteError),
     #[error(transparent)] Setup(#[from] SetupError),
+    #[cfg(feature = "prove")]
+    #[error(transparent)] Prove(#[from] ProveError),
+    #[cfg(feature = "verify")]
+    #[error(transparent)] Verify(#[from] VerifyError),
+    #[cfg(feature = "verify")]
+    #[error(transparent)] Execute(#[from] ExecuteError),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum SetupError {
+    #[error("validation: {detail}")]          Validation { detail: String },
+    #[cfg(feature = "verify")]
+    #[error("machine setup: {0}")]            MachineSetup(#[source] tabula_machine::SetupError),
+    #[error("compiler validation: {0}")]      CompilerValidation(#[source] tabula_compiler::CompilerError),
+    #[error("extension setup: {0}")]          Extension(#[source] tabula_ext::ExtError),
 }
 
 #[cfg(feature = "prove")]
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ProveError {
     #[error("witness generation: {detail}")]  WitnessGeneration { detail: String },
     #[error("trace build: {0}")]              TraceBuild(#[source] tabula_core::error::TabulaError),
     #[error("commitment state: {detail}")]    CommitmentState { detail: String },
     #[error("proving: {0}")]                  Proving(#[source] tabula_machine::ProveError),
-    #[error(transparent)]                     Execute(#[from] ExecuteError),  // prove implies execute
+    #[error(transparent)]                     Execute(#[from] ExecuteError),   // prove subsumes execute
     #[error(transparent)]                     Setup(#[from] SetupError),
 }
 
 #[cfg(feature = "verify")]
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum VerifyError {
     #[error("verification: {0}")]             Verification(#[source] tabula_machine::VerificationError),
     #[error("statement build: {detail}")]     StatementBuild { detail: String },
+    #[error("validation: {detail}")]          Validation { detail: String },
     #[error(transparent)]                     Setup(#[from] SetupError),
 }
 
 #[cfg(feature = "verify")]
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ExecuteError {
     #[error("execution failed: {source}")]
@@ -278,94 +288,101 @@ pub enum ExecuteError {
         instruction_index: Option<usize>,
         tx_index: Option<u32>,
     },
-    #[error(transparent)]                     Setup(#[from] SetupError),
-}
-
-#[cfg(feature = "verify")]
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum SetupError {
     #[error("validation: {detail}")]          Validation { detail: String },
-    #[error("machine setup: {0}")]            MachineSetup(#[source] tabula_machine::SetupError),
-    #[error("compiler validation: {0}")]      CompilerValidation(#[source] tabula_compiler::CompilerError),
-    #[error("extension setup: {0}")]          Extension(#[source] tabula_ext::ExtError),
+    #[error(transparent)]                     Setup(#[from] SetupError),
 }
 ```
 
-### 7.2 Notes
+### 7.2 Feature-gate rationale
 
-- `SetupError` is the shared preparation-time error. It flows
-  naturally into each handle's error via `#[from]`, which keeps the
-  call sites ergonomic (`?` works everywhere).
-- `ProveError::Execute(#[from] ExecuteError)` captures the truth that
-  proving subsumes executing. The other direction does not hold;
-  execute does not surface `ProveError`.
-- Narrower than the umbrella bullet suggested — I drop `SetupCommon`
-  as a name (plain `SetupError` reads better) and fold
-  `tabula_ext::ExtError` into `SetupError::Extension` rather than
-  spreading ad-hoc conversions.
+`SetupError` is **not** `verify`-gated: `SetupError::Validation` and
+`SetupError::CompilerValidation` apply to any runtime-level preparation
+step that might run without proof backends (artifact validation, host
+registration). `MachineSetup` is the only `verify`-gated variant
+inside `SetupError`.
 
-### 7.3 Migration of the existing `RuntimeError` variants
+`ExecuteError`, `VerifyError`, and `PreparedExecutor` are `verify`-gated
+because they depend on `tabula-machine` chips for transcript
+construction. Pure-execution-without-any-machine-types is not a
+supported build shape today.
 
-| Old variant                     | New home                                 |
-|---------------------------------|------------------------------------------|
-| `Execution { ... }`             | `ExecuteError::Execution`                |
-| `ValidationFailed { detail }`   | `SetupError::Validation`                 |
-| `CompilerValidation(e)`         | `SetupError::CompilerValidation`         |
-| `MachineSetup(e)`               | `SetupError::MachineSetup`               |
-| `CommitmentState { detail }`    | `ProveError::CommitmentState`            |
-| `WitnessGeneration { detail }`  | `ProveError::WitnessGeneration`          |
-| `TraceBuild(e)`                 | `ProveError::TraceBuild`                 |
-| `StatementBuild { detail }`     | `VerifyError::StatementBuild`            |
-| `Proving(e)`                    | `ProveError::Proving`                    |
-| `Verification(e)`               | `VerifyError::Verification`              |
+### 7.3 Migration table (SP-4 `RuntimeError` → SP-5)
 
-`RuntimeError::from_extension_setup` / `from_extension_proof` are
-deleted; the routing is now via `SetupError::Extension` plus
-per-handle `#[from] SetupError`.
+| Old variant (`RuntimeError::`) | New home                         |
+|--------------------------------|----------------------------------|
+| `Execution { … }`              | `ExecuteError::Execution`        |
+| `ValidationFailed { detail }`  | split: `SetupError::Validation` or `VerifyError::Validation` or `ExecuteError::Validation` depending on call site |
+| `CompilerValidation(e)`        | `SetupError::CompilerValidation` |
+| `MachineSetup(e)`              | `SetupError::MachineSetup`       |
+| `CommitmentState { detail }`   | `ProveError::CommitmentState`    |
+| `WitnessGeneration { detail }` | `ProveError::WitnessGeneration`  |
+| `TraceBuild(e)`                | `ProveError::TraceBuild`         |
+| `StatementBuild { detail }`    | `VerifyError::StatementBuild`    |
+| `Proving(e)`                   | `ProveError::Proving`            |
+| `Verification(e)`              | `VerifyError::Verification`      |
 
-## 8. Typed pre-stuff API
+`RuntimeError::from_extension_setup` / `from_extension_proof` helpers
+deleted; routing is via `SetupError::Extension` + per-handle `#[from]
+SetupError`.
+
+### 7.4 SDK migration impact
+
+Six SDK call sites match on `RuntimeError::ValidationFailed`:
+
+- `crates/sdk/src/program/runner.rs:293`
+- `crates/sdk/src/sdk.rs:328, 332, 407, 411, 431, 435`
+
+Each becomes a match on
+`RuntimeError::Verify(VerifyError::Validation { .. })` or the analogous
+`Setup`/`Execute` variant, depending on the operation that produced
+the error. The migration is mechanical; SDK pattern-match audit is
+part of the SP-5 close-out checklist.
+
+## 8. Typed pre-stuff API (`cfg prove`)
 
 ### 8.1 The boundary
 
-Today:
+Today `engine.rs` constructs chip-internal row types directly:
 
 ```rust
-// engine.rs:1690 (current landed)
-|row| tabula_chips::relation_table::RelationTableWitnessRow { ... }
-
-// engine.rs:1272
-records.push(InstructionRecord { ... });
+|row| tabula_chips::relation_table::RelationTableWitnessRow { … }
+records.push(InstructionRecord { … });
 ```
 
-Target: these identifiers do not appear under `crates/runtime/src/**`.
+Post-SP-5, these identifiers **do not appear under
+`crates/runtime/src/**`**. Guardrail test enforces this (§12).
 
 ### 8.2 Logical row types (in `tabula-stark::witness_kit`)
 
 ```rust
-/// Chip-agnostic relation-table row from the runtime's view.
-/// The concrete RelationTableWitnessRow construction is performed
-/// inside the relation-table ChipWitnessKit's `install_rows`.
 #[non_exhaustive]
 pub struct LogicalRelationTableRow {
     pub label: RelationLabel,
     pub fields: Vec<TypedValue>,
-    // ... whatever the concrete row currently carries, minus chip wiring
+    // …
 }
 
-/// Chip-agnostic execution prelude record.
 #[non_exhaustive]
 pub struct LogicalExecutionPrelude {
     pub opcode: OpcodeTag,
     pub inputs: Vec<TypedValue>,
     pub outputs: Vec<TypedValue>,
-    // ...
+    // …
 }
 ```
 
-### 8.3 Installer seam (in `runtime::pre_stuff`)
+**Type sourcing.** `TypedValue` and `OpcodeTag` live in `tabula-core`
+(or `tabula-types`, verify on execution). `RelationLabel` lives in
+`tabula-contract`. `tabula-stark` already depends on core + contract;
+no new forbidden deps are introduced. **Under no circumstances does
+`tabula-stark` pick up a `tabula-ir` dep** — if a field needs IR,
+translate to a core/contract-level type at the runtime boundary.
+
+### 8.3 Installer
 
 ```rust
+// crates/runtime/src/pre_stuff.rs  (cfg prove)
+
 pub(crate) struct PreStuffInstaller<'a> {
     kits: &'a ChipKitRegistry,
 }
@@ -377,235 +394,242 @@ impl<'a> PreStuffInstaller<'a> {
         &self,
         scratch: &mut KitScratch,
         rows: impl IntoIterator<Item = LogicalRelationTableRow>,
-    ) -> Result<(), SetupError> {
-        self.kits.relation_table().install_rows(scratch, rows)
-            .map_err(|e| SetupError::Validation { detail: e.to_string() })
-    }
+    ) -> Result<(), ProveError> { … }
 
     pub fn install_execution_prelude(
         &self,
         scratch: &mut KitScratch,
         prelude: LogicalExecutionPrelude,
-    ) -> Result<(), SetupError> { ... }
+    ) -> Result<(), ProveError> { … }
 }
 ```
 
-Called by `PreparedProver::prove` through its own borrow of the kit
-registry held on the prover handle.
+Two methods, matching the two current chip-sourced row types. Adding
+a new chip adds a new method. The trait-based `InstallableRow`
+abstraction is deferred; two call sites is not enough to justify the
+indirection. Revisit if SP-5 follow-ups add a third chip.
 
-The relation-table and execution-lane `ChipWitnessKit` impls in
-`tabula-chips` gain `install_rows` / `install_prelude` methods that
-translate logical rows into their private `*WitnessRow` representations
-and push to `KitScratch`. Runtime calls only the logical seam.
-
-### 8.4 Guardrail
-
-```rust
-// crates/runtime/tests/no_chip_rows_in_runtime.rs
-const FORBIDDEN: &[&str] = &[
-    "RelationTableWitnessRow",
-    "InstructionRecord",
-    // extend as new runtime-sourced chip rows appear.
-];
-```
-
-Any file under `crates/runtime/src/**` that contains one of the
-forbidden patterns (excluding `// intentional: ...` escape-hatch
-comments) fails the test.
+Each blessed chip in `tabula-chips` gains `install_rows` /
+`install_prelude` on its `ChipWitnessKit` impl, translating logical
+rows into the chip's private `*WitnessRow` representation.
 
 ## 9. `ChipWitnessKit` sealing
 
 ### 9.1 Nature of the seal
 
-Chip `ChipWitnessKit` impls live in `tabula-chips`, a crate separate
-from `tabula-stark` where the trait is defined. A true type-level seal
-(private-supertrait pattern) requires the `Sealed` supertrait to live
-in a module that external crates cannot reach, but blessed chips in
-`tabula-chips` must reach it to write their impls. Those two
-constraints cannot both be satisfied simultaneously with Rust's
-visibility rules — any route that lets `tabula-chips` impl `Sealed`
-is also reachable to any other downstream crate, because cargo does
-not distinguish "blessed workspace member" from "arbitrary downstream
-consumer" at the type-system level.
+`ChipWitnessKit` impls live in `tabula-chips`, separate from the
+`tabula-stark` crate where the trait is defined. A true type-level
+seal (private-supertrait pattern) requires the `Sealed` supertrait to
+be unreachable from external crates; but blessed chips must reach it.
+Cargo does not distinguish "blessed workspace member" from
+"arbitrary downstream" at the type-system level, so the two constraints
+cannot both hold.
 
-The seal is therefore a **convention seal + trybuild compile-fail
-probe**, not a type-level unforgeability proof:
+The seal is therefore **convention + trybuild**:
 
-- `ChipWitnessKit` gains a `Sealed` supertrait in a `pub mod sealed`
-  module of `tabula-stark::witness_kit`. The module name signals
-  intent.
-- Blessed chips in `tabula-chips` write `impl ChipWitnessKit::sealed::Sealed
-  for InstructionKit {}` alongside their `impl ChipWitnessKit`.
-- A trybuild compile-fail probe pins the seal: CI fails if an
-  external-crate-like fixture omits the `Sealed` impl and compiles,
-  or if it trivially succeeds by accident.
+- `ChipWitnessKit: sealed::Sealed` with `pub mod sealed { pub trait Sealed {} }`
+  in `tabula-stark::witness_kit`. Module name signals intent.
+- Each blessed chip adds `impl …::sealed::Sealed for MyKit {}` next to
+  its existing `impl ChipWitnessKit`.
+- Two trybuild probes:
+  - **Compile-fail**: external-crate-like fixture without `Sealed`
+    impl must not compile. Error text pinned via `.stderr`.
+  - **Compile-pass companion**: same fixture with `Sealed` added must
+    compile. Guards against trivially-unreachable seals.
 
-The research-prototype scope accepts this. If third-party chip
-authoring becomes a goal later, the seal upgrades to a runtime
-registration check or a macro-mediated handshake — design discussion
-not in SP-5's scope.
+### 9.2 Scope note
 
-### 9.2 Pattern
+Third-party chip authoring is out of scope. If it becomes a goal,
+the seal upgrades to a runtime registration check or a macro-mediated
+handshake — separate design discussion.
 
-```rust
-// crates/stark/src/witness_kit.rs
+## 10. `SnapshotCellRecord` disposition
 
-pub mod sealed {
-    pub trait Sealed {}
-}
+Grep result:
 
-pub trait ChipWitnessKit: sealed::Sealed + Send + Sync {
-    // existing surface unchanged
-}
+```
+crates/runtime/src/engine.rs:73  struct SnapshotCellRecord { … }
+crates/runtime/src/engine.rs:275 SnapshotCellRecord { … }
 ```
 
-Each blessed chip in `tabula-chips` adds one line next to its existing
-`impl ChipWitnessKit`:
+`SnapshotCellRecord` is runtime-internal. It is not embedded in
+`ProofEnvelope` or `PublicStatement`; it serves only as the on-wire
+form that `materialize_logical_state` emits and `CommittedStateSnapshot`
+consumes. It stays in `runtime::snapshot` with a rationale comment:
 
 ```rust
-impl tabula_stark::witness_kit::sealed::Sealed for InstructionKit {}
-impl ChipWitnessKit for InstructionKit { ... }
+// Runtime-internal codec. Never crosses the proof-visible wire
+// boundary; therefore not a tabula-contract concern. See SP-5 §10.
 ```
 
-### 9.3 Trybuild probe
+## 11. Byte-identity gate
 
-```rust
-// crates/stark/tests/compile_fail/external_chip_witness_kit_impl.rs
-//
-// Compile-fail probe. Without the `Sealed` impl, this fixture must
-// not compile. The error text is pinned in the sibling .stderr file.
+SP-4's byte-identity script was retired in `334a1f7`. SP-5
+reintroduces one at `scripts/sp5_byte_identity.sh`:
 
-use tabula_stark::witness_kit::ChipWitnessKit;
-
-struct External;
-impl ChipWitnessKit for External {}
-
-fn main() {}
+```bash
+#!/usr/bin/env bash
+# Captures envelope + public-statement bytes on the current HEAD
+# and diffs against a captured baseline.
+set -euo pipefail
+for example in basic membership; do
+    cargo run --quiet -p tabula-cli --features prove -- prove "examples/$example"
+    sha256sum "target/proofs/$example/proof.bin" "target/proofs/$example/public_statement.json"
+done
 ```
 
-The probe's expected error is "the trait bound `External:
-tabula_stark::witness_kit::sealed::Sealed` is not satisfied". Pinned
-via trybuild.
+Sequence:
 
-A companion compile-pass probe (with the `Sealed` impl added)
-guarantees the seal is not trivially unreachable.
+1. Baseline capture on the SP-1.5 HEAD (`main`, commit `48bb08a`):
+   run script, save hashes.
+2. SP-5 work proceeds on `sp5-runtime-decomposition` branch.
+3. Close-out: rerun script on SP-5 HEAD; hashes must match.
+4. Any divergence is a bug — SP-5 is a pure refactor.
 
-## 10. Guardrails summary
+The script lives under `scripts/`, is kept after SP-5 as a
+regression probe for future refactors, and is documented in
+`crates/runtime/README.md`.
 
-| Guardrail                                        | Location                                          |
-|--------------------------------------------------|---------------------------------------------------|
-| No `tabula_chips::*Row` names in runtime         | `crates/runtime/tests/no_chip_rows_in_runtime.rs` |
-| All three handles `Send + Sync + 'static`        | `crates/runtime/tests/prepared_handle_bounds.rs`  |
-| `From<{Prove,Verify,Execute,Setup}Error>` → `RuntimeError` | `crates/runtime/tests/error_conversions.rs` |
-| External `impl ChipWitnessKit` fails             | `crates/stark/tests/sealing.rs` (trybuild)        |
-| `PreparedExecutor` / `prepare_executor` public   | `crates/runtime/tests/prepared_executor_symmetry.rs` |
+## 12. Guardrail tests
 
-Each guardrail lives in its own `tests/*.rs` so CI log output points
-at the exact invariant that broke.
+Each guardrail lives in its own file so CI output points directly at
+the violated invariant.
 
-## 11. Completion criteria
+| Guardrail                                          | File                                                  |
+|----------------------------------------------------|-------------------------------------------------------|
+| No `tabula_chips::*Row` in `runtime/src/**`        | `crates/runtime/tests/no_chip_rows_in_runtime.rs`     |
+| All 3 handles `Send + Sync + 'static`              | `crates/runtime/tests/prepared_handle_bounds.rs`      |
+| `From<{Prove,Verify,Execute,Setup}Error>` present  | `crates/runtime/tests/error_conversions.rs`           |
+| `PreparedExecutor` / `prepare_executor` public     | `crates/runtime/tests/prepared_executor_symmetry.rs`  |
+| External `impl ChipWitnessKit` fails, blessed ok   | `crates/stark/tests/sealing.rs` (trybuild)            |
 
-- `crates/runtime/src/engine.rs` does not exist.
-- No file under `crates/runtime/src/` exceeds 800 LOC. Mean ≤ 400.
-- Three symmetric prepared handles public: `PreparedProver`,
-  `PreparedVerifier`, `PreparedExecutor`. All `Send + Sync`. Built by
-  `prepare_*(reg, &opts)` free functions plus optional fluent
-  builders.
-- `PreparedOptions` exists and is consumed by all three `prepare_*`.
-- `TabulaRuntime` / `RuntimeBuilder` symbols removed from the public
-  API. CLI, SDK, examples, xtask migrated.
-- `RuntimeError` is the `#[non_exhaustive]` umbrella; narrowed errors
-  are the per-handle surface. All `From` impls compile; guardrail
-  test green.
-- Zero concrete `tabula_chips::*Row` identifiers in
-  `crates/runtime/src/**`. Guardrail test green.
-- `ChipWitnessKit` sealed; trybuild compile-fail probe green.
-- `VerifierState`, `PreparedOptions`, prepared-handle builder types
-  marked `#[non_exhaustive]`.
-- `SnapshotCellRecord` codec has a documented home with a rationale
-  comment.
-- `cargo test --workspace --all-features` green.
-  `cargo clippy --workspace --all-features --all-targets -- -D warnings` green.
-  `cargo build --workspace --no-default-features{,--features verify,--features prove}` green.
-- Byte-identity: `examples/basic` and `examples/membership` proof
-  bytes identical across SP-4 → SP-5 transition. SP-5 is a pure
-  refactor.
-- Dependency-direction invariants from umbrella §3 still hold.
-- `crates/runtime/README.md` updated to describe the three-handle
-  shape.
-- Umbrella doc marks SP-5 Landed; §7 Open Decisions updates (SP-5
-  codec disposition resolved; all other SP-5 resolutions confirmed).
-- advisor consultation pre-flight (before any code change) and
-  close-out (before declaring done).
+## 13. Concurrency and determinism
 
-## 12. Risks & mitigations
+All three handles are `Send + Sync + 'static`. `prove`, `verify`,
+`execute_*` all take `&self`. Per-call mutable state (`KitScratch`,
+column artifacts, execution journals, column workspaces) is
+stack-local. Safe for concurrent driving: multiple threads may call
+any combination of `prove` / `verify` / `execute_*` on the same
+handle. Determinism contract: same handle + same input produce
+byte-identical output. Existing `prove_twice_on_same_handle_is_byte_identical`
+test extends to `execute_twice_*` and `verify_twice_*`.
+
+## 14. Risks and mitigations
 
 | Risk | Mitigation |
 |------|------------|
-| Byte-identity drift during decomposition | Capture post-SP-1.5 baseline proof bytes first; `cmp` at the end; fail SP-5 if bytes differ. |
-| Error narrowing breaks downstream match arms | CLI / SDK are the only matchers; audit before declaring done. SDK migration is in-scope of SP-5 for the error types it already matches on. |
-| Convention seal for `ChipWitnessKit` slips (external impl lands without `Sealed`) | Trybuild compile-fail probe in CI catches regressions; a companion compile-pass probe catches trivially-unreachable seals. |
-| `PreparedOptions` adds one more knob layer | Migration is mechanical (SP-4 call sites are the proxy). Single consolidation is worth it long term; if it pushes back in practice, keep per-handle builders as the primary surface. |
-| Module count jumps from 8 to ~13 | Each module gets a one-sentence doc header stating its single responsibility; if you can't write that sentence without a compound, split further. |
+| Byte-identity drift during decomposition | Script baseline on SP-1.5 HEAD; hash-compare at close-out; any diff blocks merge. |
+| Dropping per-handle builders breaks DX expectations | `PreparedOptions::standard().with_*()` chaining covers the ergonomic case; single entry point is clearer long-term. |
+| Error narrowing breaks SDK match arms | Six call sites pre-enumerated in §7.4; mechanical rewrite. |
+| Convention seal slips (external impl compiles) | Trybuild compile-fail + compile-pass probes in CI. |
+| `semantics.rs` pre-existing size drags into SP-5 scope | Out of scope; not touched beyond type-path updates. Tracked separately. |
+| `PreStuffInstaller` method count grows as chips are added | Accept linear growth for now; revisit `InstallableRow` trait if a 3rd chip appears. |
 
-## 13. Open decisions (resolve before or during implementation)
+## 15. Open decisions
 
-- **§6 `SnapshotCellRecord` disposition.** Runtime-internal vs.
-  `tabula-contract`. Decide on inspection of call sites before
-  starting module-level moves (otherwise moves churn).
-- Error `SetupError` naming. Alternative: `RuntimeSetupError`. Pick
-  whichever doesn't collide with existing `tabula_machine::SetupError`
-  at the use site. Expect `SetupError` to be fine because callers
-  usually fully-qualify the machine one.
-- **§4.2 adoption gate.** Default position is to adopt. If the
-  migration pressure on SDK/CLI is materially disruptive mid-SP-5,
-  defer `PreparedOptions` to a follow-up and keep SP-4's per-handle
-  `with_*` builders.
+- **`TypedValue` / `OpcodeTag` exact crate**: likely `tabula-core` or
+  `tabula-types`. Verify on Task 13 (`tabula-stark` logical row
+  extraction); update this doc's §8.2 if choice diverges.
+- **`SetupError` naming collision with `tabula_machine::SetupError`**:
+  expect no collision at use sites (callers fully-qualify the machine
+  one); if it bites during implementation, rename to
+  `RuntimeSetupError`.
 
-## 14. Ordering of implementation tasks
+## 16. Ordering of implementation tasks
 
-Proposed task order (plan doc will turn these into bite-sized steps):
+Tasks land as separate commits. Byte-identity script runs after Tasks
+with proof-path changes.
 
-1. Byte-identity baseline capture for `examples/basic` + `membership`
-   on the post-SP-1.5 head.
-2. advisor pre-flight consultation.
-3. SP-5 design doc commit (this file) + branch.
-4. Extract `snapshot.rs`. Build + test.
-5. Extract `prelude.rs`. Build + test.
-6. Extract `statement_materialization.rs`. Build + test.
-7. Extract `state_binding.rs`. Build + test.
-8. Introduce `options.rs` (`PreparedOptions`) and migrate `prepare_prover`
-   / `prepare_verifier` to `prepare_*(artifact, &opts)` signatures.
-9. Extract `execution.rs` as free functions over the prepared-state
-   borrows needed (no shared core).
-10. Introduce `PreparedExecutor` + `prepare_executor(Arc<RegisteredProgram>,
-    &opts)`. Guardrail test.
-11. Delete `TabulaRuntime` / `RuntimeBuilder`. Migrate CLI, SDK,
-    examples, xtask. Full suite green.
-12. Narrow errors (`ProveError` / `VerifyError` / `ExecuteError` /
-    `SetupError`). Guardrail + caller migration.
-13. Introduce `LogicalRelationTableRow` / `LogicalExecutionPrelude`
-    in `tabula-stark`. Migrate runtime pre-stuff sites. Chip-row
-    guardrail test.
-14. Seal `ChipWitnessKit`. Convention seal + trybuild probes (compile-
-    fail + compile-pass companion). Each blessed chip adds its
-    `Sealed` impl line.
-15. `#[non_exhaustive]` sweep over `VerifierState`, `PreparedOptions`,
-    builder types.
-16. `SnapshotCellRecord` codec disposition (per §6).
-17. Final audit: wc -l, doc headers, module purpose sentences.
-18. Byte-identity gate: compare SP-5 vs post-SP-1.5 baselines.
-19. Update `crates/runtime/README.md` + umbrella (SP-5 Landed).
-20. advisor close-out consultation.
+0. **Baseline capture.** Write `scripts/sp5_byte_identity.sh`; capture
+   baseline hashes on SP-1.5 HEAD; save to
+   `docs/superpowers/specs/2026-04-19-sp5-byte-identity-baseline.txt`.
+1. **Extract `snapshot.rs`**: pull `CommittedStateSnapshot`,
+   `SnapshotCellRecord` + codec out of `engine.rs`. Build + `cargo
+   check`.
+2. **Extract `statement.rs`**: PublicStatement materialization.
+3. **Extract `binding.rs`**: post-state binding-digest wiring.
+4. **Extract `prelude.rs`**: context/param prelude slot loaders.
+5. **Extract `execution.rs`**: `execute_batch` + query + receipt
+   types. Free functions over `PreparedRuntimeState` borrows.
+6. **Introduce `options.rs` (`PreparedOptions`)**, migrate
+   `prepare_prover` / `prepare_verifier` to
+   `prepare_*(artifact, &opts)`. **Drop `PreparedProverBuilder` /
+   `PreparedVerifierBuilder`**. Migrate call sites (SDK, CLI, tests).
+   Run byte-identity script — must match baseline.
+7. **Introduce `PreparedExecutor` + `prepare_executor`.** Move
+   `TabulaRuntime::execute_batch` semantics into `PreparedExecutor`.
+   Guardrail test (symmetry).
+8. **Delete `TabulaRuntime` / `RuntimeBuilder`.** Migrate
+   `crates/compiler/tests/cutover.rs`, `crates/runtime/src/prover.rs`
+   test scaffolding, `crates/cli` receipt_bridge references (`interop`
+   one is a different symbol — verify).
+9. **Narrow errors.** Introduce `error.rs` with `RuntimeError`
+   umbrella + `SetupError` / `ProveError` / `VerifyError` /
+   `ExecuteError`. Migrate all 6 SDK call sites and any internal
+   callers. Guardrail test (`error_conversions.rs`).
+10. **Typed pre-stuff.** Introduce
+    `LogicalRelationTableRow` / `LogicalExecutionPrelude` in
+    `tabula-stark::witness_kit`. Migrate runtime pre-stuff sites.
+    Chip-row guardrail test.
+11. **Seal `ChipWitnessKit`.** Add `sealed::Sealed`; each blessed chip
+    adds one impl line. Trybuild compile-fail + compile-pass probes.
+12. **`#[non_exhaustive]` sweep** on `VerifierState`,
+    `PreparedOptions`, any remaining public prepared-handle types.
+13. **Final audit.** `wc -l` check (< 800 LOC per file); module doc
+    headers present; module purpose in one sentence each. Full
+    workspace `cargo build --no-default-features`,
+    `--features verify`, `--features prove`; `cargo test --workspace
+    --all-features`; clippy `-D warnings`.
+14. **Byte-identity close-out.** Rerun script; compare to baseline.
+    Any diff blocks the SP.
+15. Update `crates/runtime/README.md` for the three-handle shape.
+    Mark umbrella SP-5 Landed; close §7 Open Decisions.
 
-Tasks 4–7 are mechanical and can be serialized; tasks 8, 10, 12, 13,
-14 are the substantive ones and benefit from fresh-subagent dispatch.
-The plan doc will bite-size them further.
+Tasks 1–5 are mechanical extractions and can be serialized quickly.
+Task 6 (options + builder drop) and Task 9 (error narrowing) are
+the substantive surface changes. Task 7 (executor introduction) is
+the scope-completing step.
 
-## 15. References
+## 17. Completion criteria
 
-- Umbrella: [`docs/superpowers/specs/2026-04-18-architecture-refactoring-design.md`](./2026-04-18-architecture-refactoring-design.md)
+- `crates/runtime/src/engine.rs` does not exist.
+- No file under `crates/runtime/src/**` exceeds 800 LOC
+  (exception: `semantics.rs` — pre-existing, out of scope).
+- Three prepared handles public: `PreparedProver`, `PreparedVerifier`,
+  `PreparedExecutor`. All `Send + Sync + 'static`. Built by
+  `prepare_*(artifact, &opts)` free functions. No per-handle builder
+  types exported.
+- `PreparedOptions` exists and is consumed by all three `prepare_*`.
+- `TabulaRuntime` / `RuntimeBuilder` symbols removed. CLI, SDK,
+  examples, tests migrated.
+- `RuntimeError` is `#[non_exhaustive]` umbrella; narrowed errors
+  (`ProveError`, `VerifyError`, `ExecuteError`, `SetupError`) are the
+  per-handle surface; all `From` impls compile; guardrail test green.
+- Zero `tabula_chips::*Row` identifiers in `crates/runtime/src/**`
+  (guardrail test).
+- `ChipWitnessKit` sealed; trybuild compile-fail + compile-pass
+  probes green.
+- `VerifierState`, `PreparedOptions`, remaining prepared-handle types
+  marked `#[non_exhaustive]`.
+- `SnapshotCellRecord` stays in `runtime::snapshot` with documented
+  rationale.
+- `cargo build --workspace --no-default-features` green.
+- `cargo build --workspace --features verify` green.
+- `cargo build --workspace --features prove` green.
+- `cargo test --workspace --all-features` green.
+- `cargo clippy --workspace --all-features --all-targets -- -D warnings`
+  green.
+- `scripts/sp5_byte_identity.sh` produces hashes matching the
+  SP-1.5-HEAD baseline (`examples/basic`, `examples/membership`).
+- Dependency-direction invariants from umbrella §3 still hold.
+- `crates/runtime/README.md` updated.
+- Umbrella doc marks SP-5 Landed.
+
+## 18. References
+
+- Umbrella: [`2026-04-18-architecture-refactoring-design.md`](./2026-04-18-architecture-refactoring-design.md)
+- SP-1.5: [`2026-04-19-sp1.5-sealed-artifact-design.md`](./2026-04-19-sp1.5-sealed-artifact-design.md)
+- SP-4: [`2026-04-19-sp4-runtime-prepared-handles-design.md`](./2026-04-19-sp4-runtime-prepared-handles-design.md)
+- SP-3: [`2026-04-19-sp3-witness-chip-kit-design.md`](./2026-04-19-sp3-witness-chip-kit-design.md)
 - Canonical architecture: [`docs/design/architecture.md`](../../design/architecture.md)
-- SP-4 design: [`2026-04-19-sp4-runtime-prepared-handles-design.md`](./2026-04-19-sp4-runtime-prepared-handles-design.md)
-- SP-3 design (chip-kit): [`2026-04-19-sp3-witness-chip-kit-design.md`](./2026-04-19-sp3-witness-chip-kit-design.md)
-- `.claude/CLAUDE.md` (collaboration posture, clean-break policy)
+- Project posture: `.claude/CLAUDE.md`
