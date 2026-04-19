@@ -417,29 +417,127 @@ pub struct ExecutionReceipt {
     pub journal: exec::ExecutionJournal,
 }
 
+/// Per-column proof-backend slot carried through the prepared runtime state.
 #[cfg(feature = "prove")]
 #[derive(Clone)]
-struct ColumnProofSlot {
+pub(crate) struct ColumnProofSlot {
+    /// Table ID for this column slot.
     table: TableId,
+    /// Column ID for this column slot.
     col: ColId,
+    /// Proof backend for this column.
     proof_backend: Arc<dyn tabula_ext::backend::column::ColumnProofBackend>,
 }
 
+/// Prepared runtime state derived from a registered program.
+///
+/// Shared between `TabulaRuntime` (execute surface) and `PreparedProver`
+/// (prove surface). Construction is feature-gated; the fields marked
+/// `#[cfg(feature = "prove")]` are carried only on the prove build.
 #[derive(Clone)]
-struct RuntimeProgramState {
-    semantic: runtime_ir::RuntimeProgram,
-    state: ResolvedStateRuntime,
+pub(crate) struct PreparedRuntimeState {
+    pub(crate) semantic: runtime_ir::RuntimeProgram,
+    pub(crate) state: ResolvedStateRuntime,
     #[cfg(feature = "prove")]
-    column_slots: Vec<ColumnProofSlot>,
-    artifact_context: ArtifactContext,
-    relation_policy: RelationPolicy,
+    pub(crate) column_slots: Vec<ColumnProofSlot>,
+    pub(crate) artifact_context: ArtifactContext,
+    pub(crate) relation_policy: RelationPolicy,
     #[cfg(feature = "prove")]
-    uses_ir_hash: bool,
-    static_table_artifact: StaticTableArtifact,
+    pub(crate) uses_ir_hash: bool,
+    pub(crate) static_table_artifact: StaticTableArtifact,
     #[cfg(feature = "prove")]
-    tuple_encoding_defaults: TupleEncodingDefaults,
-    type_runtimes: TypeRuntimeRegistry,
-    encoding_runtimes: EncodingRuntimeRegistry,
+    pub(crate) tuple_encoding_defaults: TupleEncodingDefaults,
+    pub(crate) type_runtimes: TypeRuntimeRegistry,
+    pub(crate) encoding_runtimes: EncodingRuntimeRegistry,
+}
+
+/// Output of `build_prepared_runtime`: the prepared state plus machine and, on prove builds,
+/// the root-backend bundle.
+#[cfg(feature = "verify")]
+pub(crate) struct PreparedRuntimeBuild {
+    pub(crate) runtime_program: PreparedRuntimeState,
+    pub(crate) machine: TabulaMachine,
+    #[cfg(feature = "prove")]
+    pub(crate) root_backend_bundle: RootBackendBundle,
+}
+
+/// Shared factory that constructs the prepared runtime state consumed by both the execute
+/// and prove surfaces.
+#[cfg(feature = "verify")]
+pub(crate) fn build_prepared_runtime(
+    registered_program: &RegisteredProgram,
+    host_environment: &HostEnvironment,
+    machine_stark_config: &TabulaStarkConfig,
+    #[cfg(feature = "prove")] root_backend_bundle: RootBackendBundle,
+    #[cfg(not(feature = "prove"))] root_proof_backend: Arc<dyn RootProofBackend>,
+) -> Result<PreparedRuntimeBuild, RuntimeError> {
+    validate_core_first_program(registered_program.program())?;
+    let type_runtimes = host_environment
+        .runtime_registries()
+        .type_runtimes()
+        .clone();
+    let encoding_runtimes = host_environment
+        .runtime_registries()
+        .encoding_runtimes()
+        .clone();
+    #[cfg(feature = "prove")]
+    let proof_backend = root_backend_bundle.proof_backend();
+    #[cfg(not(feature = "prove"))]
+    let proof_backend = Arc::clone(&root_proof_backend);
+    #[cfg(feature = "prove")]
+    let accepted_root_binding_families = root_backend_bundle.supported_root_binding_families();
+    #[cfg(not(feature = "prove"))]
+    let accepted_root_binding_families = proof_backend.supported_root_binding_families();
+    let program_setup = resolve_program_setup(
+        registered_program,
+        host_environment.schemes().factories(),
+        &type_runtimes,
+        &encoding_runtimes,
+        accepted_root_binding_families,
+    )?;
+    #[cfg(feature = "prove")]
+    let column_slots = program_setup
+        .resolved_state
+        .backends()
+        .map(|backend| ColumnProofSlot {
+            table: backend.table_id,
+            col: backend.col_id,
+            proof_backend: Arc::clone(&backend.proof_backend),
+        })
+        .collect::<Vec<_>>();
+
+    let semantic = runtime_ir::RuntimeProgram::from_validated_program(
+        registered_program.validated_program().clone(),
+    )
+    .map_err(|error| RuntimeError::ValidationFailed {
+        detail: error.to_string(),
+    })?;
+
+    let machine =
+        build_registered_program_machine(&program_setup, machine_stark_config, proof_backend)?;
+
+    let runtime_program = PreparedRuntimeState {
+        semantic,
+        state: program_setup.resolved_state.clone(),
+        #[cfg(feature = "prove")]
+        column_slots,
+        artifact_context: program_setup.artifact_context,
+        relation_policy: program_setup.relation_policy,
+        #[cfg(feature = "prove")]
+        uses_ir_hash: program_setup.uses_ir_hash,
+        static_table_artifact: registered_program.static_table_artifact().clone(),
+        #[cfg(feature = "prove")]
+        tuple_encoding_defaults: registered_program.tuple_encoding_defaults().clone(),
+        type_runtimes,
+        encoding_runtimes,
+    };
+
+    Ok(PreparedRuntimeBuild {
+        runtime_program,
+        machine,
+        #[cfg(feature = "prove")]
+        root_backend_bundle,
+    })
 }
 
 /// Fluent builder for the native execution/proving runtime.
@@ -510,85 +608,27 @@ impl RuntimeBuilder {
 
     /// Build the native runtime.
     pub fn build(self) -> Result<TabulaRuntime, RuntimeError> {
-        validate_core_first_program(self.registered_program.program())?;
-        let type_runtimes = self
-            .host_environment
-            .runtime_registries()
-            .type_runtimes()
-            .clone();
-        let encoding_runtimes = self
-            .host_environment
-            .runtime_registries()
-            .encoding_runtimes()
-            .clone();
-        #[cfg(feature = "prove")]
-        let proof_backend = self.root_backend_bundle.proof_backend();
-        #[cfg(not(feature = "prove"))]
-        let proof_backend = Arc::clone(&self.root_proof_backend);
-        #[cfg(feature = "prove")]
-        let accepted_root_binding_families =
-            self.root_backend_bundle.supported_root_binding_families();
-        #[cfg(not(feature = "prove"))]
-        let accepted_root_binding_families = proof_backend.supported_root_binding_families();
-        let program_setup = resolve_program_setup(
+        let prepared = build_prepared_runtime(
             &self.registered_program,
-            self.host_environment.schemes().factories(),
-            &type_runtimes,
-            &encoding_runtimes,
-            accepted_root_binding_families,
-        )?;
-        #[cfg(feature = "prove")]
-        let column_slots = program_setup
-            .resolved_state
-            .backends()
-            .map(|backend| ColumnProofSlot {
-                table: backend.table_id,
-                col: backend.col_id,
-                proof_backend: Arc::clone(&backend.proof_backend),
-            })
-            .collect::<Vec<_>>();
-
-        let semantic = runtime_ir::RuntimeProgram::from_validated_program(
-            self.registered_program.validated_program().clone(),
-        )
-        .map_err(|error| RuntimeError::ValidationFailed {
-            detail: error.to_string(),
-        })?;
-
-        let machine = build_registered_program_machine(
-            &program_setup,
+            &self.host_environment,
             &self.machine_stark_config,
-            proof_backend,
+            #[cfg(feature = "prove")]
+            self.root_backend_bundle,
+            #[cfg(not(feature = "prove"))]
+            self.root_proof_backend,
         )?;
-
-        let runtime_program = RuntimeProgramState {
-            semantic,
-            state: program_setup.resolved_state.clone(),
-            #[cfg(feature = "prove")]
-            column_slots,
-            artifact_context: program_setup.artifact_context,
-            relation_policy: program_setup.relation_policy,
-            #[cfg(feature = "prove")]
-            uses_ir_hash: program_setup.uses_ir_hash,
-            static_table_artifact: self.registered_program.static_table_artifact().clone(),
-            #[cfg(feature = "prove")]
-            tuple_encoding_defaults: self.registered_program.tuple_encoding_defaults().clone(),
-            type_runtimes,
-            encoding_runtimes,
-        };
-
         Ok(TabulaRuntime {
-            runtime_program,
+            runtime_program: prepared.runtime_program,
             #[cfg(feature = "prove")]
-            root_backend_bundle: self.root_backend_bundle,
-            machine,
+            root_backend_bundle: prepared.root_backend_bundle,
+            machine: prepared.machine,
         })
     }
 }
 
 /// Native execution and proving runtime.
 pub struct TabulaRuntime {
-    runtime_program: RuntimeProgramState,
+    runtime_program: PreparedRuntimeState,
     #[cfg(feature = "prove")]
     root_backend_bundle: RootBackendBundle,
     machine: TabulaMachine,
@@ -1168,7 +1208,7 @@ fn build_public_statement_slot_layout(
 
 #[cfg(feature = "prove")]
 fn context_public_statement_bindings(
-    runtime_program: &RuntimeProgramState,
+    runtime_program: &PreparedRuntimeState,
     context: &ContextValues,
 ) -> Result<Vec<runtime_ir::PublicContextBinding>, RuntimeError> {
     runtime_ir::encode_public_context(
@@ -1183,7 +1223,7 @@ fn context_public_statement_bindings(
 
 #[cfg(feature = "prove")]
 fn build_context_prelude(
-    runtime_program: &RuntimeProgramState,
+    runtime_program: &PreparedRuntimeState,
     context_bindings: &[runtime_ir::PublicContextBinding],
     layout: &PublicStatementSlotLayout,
 ) -> Result<ContextPreludeArtifacts, RuntimeError> {
@@ -1256,7 +1296,7 @@ fn build_context_prelude(
 
 #[cfg(feature = "prove")]
 fn build_param_prelude(
-    runtime_program: &RuntimeProgramState,
+    runtime_program: &PreparedRuntimeState,
     layout: &PublicStatementSlotLayout,
     entry: &ir::Entry,
     call: &TxCall,
@@ -1345,7 +1385,7 @@ fn build_event_item_bases(
 
 #[cfg(feature = "prove")]
 fn prepare_proof_artifacts(
-    runtime_program: &RuntimeProgramState,
+    runtime_program: &PreparedRuntimeState,
     root_backend_bundle: &RootBackendBundle,
     snapshot: &CommittedStateSnapshot,
     txs: &[TxCall],
@@ -1724,7 +1764,7 @@ fn prepare_proof_artifacts(
 
 #[cfg(feature = "prove")]
 fn synthesize_missing_init_cells(
-    runtime_program: &RuntimeProgramState,
+    runtime_program: &PreparedRuntimeState,
     slot: &ColumnProofSlot,
     prepared: &mut PreparedColumnSlot,
 ) -> Result<(), RuntimeError> {
@@ -1790,7 +1830,7 @@ fn synthesize_missing_init_cells(
 
 #[cfg(feature = "prove")]
 fn prepare_column_slot(
-    runtime_program: &RuntimeProgramState,
+    runtime_program: &PreparedRuntimeState,
     slot: &ColumnProofSlot,
     prepared: PreparedColumnSlot,
 ) -> Result<(TableId, ColId, PreparedColumnProof), RuntimeError> {

@@ -49,7 +49,7 @@ impl VerifierState {
 
 /// Verifier built once per registered native program.
 ///
-/// Cheap to share via [`Arc`]; [`PreparedVerifier::verify`] takes
+/// Cheap to share via Arc; [`PreparedVerifier::verify`] takes
 /// `&self` so callers can drive it from multiple threads.
 pub struct PreparedVerifier {
     prepared: VerifierState,
