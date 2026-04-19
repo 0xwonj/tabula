@@ -108,8 +108,6 @@ pub struct LoweringOutput {
 pub struct TxLoweringOutput {
     /// Instruction records for all ops in the entry body.
     pub instruction_records: Vec<InstructionRecord>,
-    /// Static table rows accumulated while lowering this entry.
-    pub static_table_rows: Vec<StaticTableRow>,
     /// Relation claims for this tx.
     pub relation_claims: Vec<RelationClaim>,
 }
@@ -125,24 +123,16 @@ pub fn merge_lowering_outputs<'a>(
     kit_scratch: KitScratch,
 ) -> LoweringOutput {
     let mut instruction_records = Vec::new();
-    let mut static_rows: BTreeMap<(u32, u16, u64), StaticTableRow> = BTreeMap::new();
     let mut relation_claims = Vec::new();
 
     for output in outputs {
         instruction_records.extend(output.instruction_records.iter().cloned());
         relation_claims.extend(output.relation_claims.iter().cloned());
-        for row in &output.static_table_rows {
-            let key = (row.table_id, row.col_id, row.row_key);
-            static_rows
-                .entry(key)
-                .and_modify(|existing| existing.lookup_mult += row.lookup_mult)
-                .or_insert_with(|| row.clone());
-        }
     }
 
     LoweringOutput {
         instruction_records,
-        static_table_rows: static_rows.into_values().collect(),
+        static_table_rows: Vec::new(),
         relation_claims,
         kit_scratch,
     }
@@ -160,7 +150,6 @@ pub fn lower_successful_tx<const W: usize>(
     lowering.lower_entry()?;
     Ok(TxLoweringOutput {
         instruction_records: lowering.records,
-        static_table_rows: Vec::new(),
         relation_claims: lowering.relation_claims,
     })
 }

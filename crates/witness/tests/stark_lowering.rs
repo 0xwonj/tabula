@@ -205,7 +205,6 @@ fn lowers_an_empty_tx_entry_and_builds_execution_store() {
     .expect("lower tx");
 
     assert!(lowered.instruction_records.is_empty());
-    assert!(lowered.static_table_rows.is_empty());
     assert!(lowered.relation_claims.is_empty());
 
     let mut merged = merge_lowering_outputs([&lowered], kit_scratch);
