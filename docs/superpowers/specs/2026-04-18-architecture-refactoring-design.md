@@ -116,16 +116,25 @@ code. The refactoring closes those gaps.
 ### 2.3 `tabula-runtime` — statement binding + three symmetric prepared handles
 
 Runtime exposes three prepare-once / drive-many handles with matching
-shape:
+shape. The input-type asymmetry is structural, not accidental: the
+verifier is IR-free (a pure binding / static-artifact check), while
+prover and executor must lower or execute IR. `SealedArtifact` cannot
+carry `ir::ValidatedProgram` without forcing a `contract → ir` dep
+(violating §3), so the verifier alone consumes the pure sealed
+artifact and the execution-side handles consume the fuller
+`RegisteredProgram`:
 
-- `PreparedProver` / `prepare_prover(Arc<SealedArtifact>) ->
-  Result<PreparedProver, PrepareError>`. (SP-4 landed.)
-- `PreparedVerifier` / `prepare_verifier(Arc<SealedArtifact>)`
-  (SP-4 landed, renamed from the current `Verifier`).
-- `PreparedExecutor` / `prepare_executor(Arc<SealedArtifact>)` —
-  new in SP-5. Replaces the residual `TabulaRuntime` execute-only
-  facade. Owns batch execution, query execution, and logical-state
-  projection. Symmetric `Send + Sync`.
+- `PreparedProver` / `prepare_prover(Arc<RegisteredProgram>) ->
+  Result<PreparedProver, ProveError>`. (SP-4 landed against
+  `RegisteredProgram`; stays there.)
+- `PreparedVerifier` / `prepare_verifier(Arc<SealedArtifact>) ->
+  Result<PreparedVerifier, VerifyError>` (SP-4 landed against
+  `RegisteredProgram`; flipped to `SealedArtifact` in SP-1.5).
+- `PreparedExecutor` / `prepare_executor(Arc<RegisteredProgram>) ->
+  Result<PreparedExecutor, ExecuteError>` — new in SP-5. Replaces
+  the residual `TabulaRuntime` execute-only facade. Owns batch
+  execution, query execution, and logical-state projection. Symmetric
+  `Send + Sync`.
 - `VerifierState` (or equivalent) is a named public type and marked
   `#[non_exhaustive]` to avoid pre-1.0 breaking-change footguns.
 - `engine.rs` is decomposed into role-specific modules: `prover.rs`
@@ -227,10 +236,11 @@ that enforces these rules against `Cargo.toml` dep lists.
 
 ## 4. Sub-Project Decomposition
 
-Eight sub-projects. SP-1 through SP-4 are landed; the remaining four
-execute in the order described in §5 (SP-5 and SP-8 may run in
-parallel). Each has its own design doc + ultraplan + implementation
-session.
+Nine sub-projects. SP-1 through SP-4 are landed; SP-1.5 closes SP-1's
+structural gap (SealedArtifact introduction) and is a hard prerequisite
+for SP-5; the remaining five execute in the order described in §5
+(SP-5 and SP-8 may run in parallel). Each has its own design doc +
+ultraplan + implementation session.
 
 ### SP-1 — Contract wire-type consolidation (foundation)
 
@@ -351,6 +361,82 @@ formal.
   Result<BoundStatement, VerifyError>` is the single verify entry
   point through the runtime.
 - CLI and SDK call sites use the new handles.
+
+### SP-1.5 — SealedArtifact introduction (SP-1 continuation, SP-5 prerequisite)
+
+**Goal:** Introduce `tabula-contract::SealedArtifact` as the canonical
+"what the compiler sealed" type, flip `prepare_verifier` to
+`Arc<SealedArtifact>`, and lift the two IR-derived setup quantities
+(`RelationPolicy`, `uses_ir_hash`) into the sealing step so the verifier
+becomes IR-free. Closes the structural gap left open at the end of SP-1.
+
+**Motivation:**
+- Umbrella §2.1 names `SealedArtifact` as a contract-owned type; it does
+  not yet exist. The sealed fields currently live on
+  `tabula-compiler::RegisteredProgram`, commingled with
+  `ir::ValidatedProgram` and `capability_manifest`.
+- SP-5 rewrites the three builder surfaces and migrates all call sites
+  (CLI, SDK, examples, tests). If SP-5 proceeds against
+  `RegisteredProgram` for the verifier and `SealedArtifact` is
+  introduced later, the same surface is rewritten twice. Landing the
+  split before SP-5 avoids the duplicate migration and keeps SP-5's
+  byte-identity gate clean (pure module surgery, no wire-type reshuffle).
+- Making the verifier IR-free matches the dependency-direction rule that
+  verification is a pure binding check; it also simplifies SP-5's
+  verifier decomposition.
+
+**Scope:**
+- Introduce `pub struct SealedArtifact` in `tabula-contract` carrying the
+  contract-level tier of what `RegisteredProgram` holds today:
+  `artifact_schema_version`, `execution_contract`, `profile_catalog`,
+  `tuple_encoding_defaults`, `static_table_artifact`,
+  `metadata_envelope`, `binding`.
+- Add two seal-time-computed fields to `SealedArtifact`:
+  `relation_policy: SealedRelationPolicy` (enum `{ Disabled,
+  RequireArtifactRoot }`, relocated from `tabula-runtime::bootstrap`)
+  and `uses_ir_hash: bool`. The compiler computes both at
+  `registration::register` time by scanning IR ops, so verifier setup
+  never re-derives them.
+- Refactor `RegisteredProgram` in `tabula-compiler` to hold
+  `{ sealed: SealedArtifact, validated: ir::ValidatedProgram,
+  capability_manifest: Vec<CapabilityDescriptor> }` with accessors that
+  proxy to `sealed`.
+- Move contract-level validation (`validate_sealed_artifact`) into
+  `SealedArtifact::validate`; `RegisteredProgram::validate_sealed_artifact`
+  delegates.
+- Bump `RegisteredProgram`'s canonical schema from v1 to v2 to reflect
+  the new struct layout (no on-disk compat needed — research prototype,
+  clean break).
+- Flip `PreparedVerifier::builder` and `prepare_verifier` to
+  `Arc<SealedArtifact>`. Split `resolve_program_setup` into a
+  sealed-facing variant (verifier path, IR-free) and the existing
+  registered-facing variant (prover/executor paths). Refactor
+  `ResolvedStateRuntime::from_registered_program` to share an impl with
+  a new `from_sealed_artifact` constructor.
+- Migrate CLI, SDK, and testing helpers to pass `SealedArtifact` to
+  verifier construction sites. SDK `Artifact` gains a
+  `.sealed_artifact()` accessor; wraps `RegisteredProgram` unchanged.
+
+**Completion criteria:**
+- `tabula-contract::SealedArtifact` is the public verifier-facing artifact
+  type; `PreparedVerifier::builder(Arc<SealedArtifact>)` is the only
+  verifier construction entry point.
+- `grep -rn 'RegisteredProgram' crates/runtime/src/verifier.rs` returns
+  zero matches.
+- `prepare_prover` and future `prepare_executor` keep
+  `Arc<RegisteredProgram>` (structural asymmetry per §2.3).
+- `cargo tree -p tabula-contract` shows only the allowed deps
+  (`tabula-core`, `tabula-commitment`, and `tabula-profile` if the audit
+  permits — else `ProfileCatalog` handling is scoped to a non-contract
+  layer).
+- `RelationPolicy::from_program` and `program_uses_hash` are no longer
+  called in `tabula-runtime`; their equivalents live in the compiler
+  seal step.
+- `examples/basic` and `examples/membership` produce byte-identical
+  `ProofEnvelope` and `public_statement.json` pre- and post-SP-1.5.
+- New tests: `crates/contract/tests/sealed_artifact.rs` (round-trip +
+  validate matrix) and `crates/compiler/tests/sealed_artifact_seal.rs`
+  (seal-time correctness of `relation_policy` and `uses_ir_hash`).
 
 ### SP-5 — Runtime decomposition + executor symmetry
 
@@ -564,7 +650,14 @@ The sequence is not arbitrary:
    construction uses `public_statement_from_record` (SP-1) and
    composes with `BackendProver` (SP-2) via the chip-agnostic
    witness (SP-3).
-5. **SP-5 and SP-8 run in parallel** once SP-4 has landed. They are
+5. **SP-1.5 after SP-4** because it closes SP-1's contract-authority
+   gap (introducing `SealedArtifact`) and because it touches the
+   `prepare_verifier` signature that SP-4 just landed. Running it here
+   means SP-5 inherits the asymmetric signature shape (`Arc<SealedArtifact>`
+   for verifier, `Arc<RegisteredProgram>` for prover/executor) cleanly.
+   SP-5's byte-identity gate stays pure-module surgery — no wire-type
+   reshuffling mixed in.
+6. **SP-5 and SP-8 run in parallel** once SP-1.5 has landed. They are
    independent:
    - SP-5 touches only `tabula-runtime` (decomposition, executor
      symmetry, error narrowing, pre-stuff API) and the
@@ -574,11 +667,11 @@ The sequence is not arbitrary:
      binding path inside `tabula-runtime::verifier`.
    The only shared surface is the verifier module; coordinate there
    but do not serialize the SPs.
-6. **SP-6 after SP-5 and SP-8** because SDK + docs consume everything
+7. **SP-6 after SP-5 and SP-8** because SDK + docs consume everything
    above. SP-6 also carries the `docs/design/architecture.md`
    amendment (commitment tier) and the 9→15 bus doc drift — both
    cleanest to write once SP-5's runtime shape has landed.
-7. **SP-7 last** because feature flags cross-cut every crate the
+8. **SP-7 last** because feature flags cross-cut every crate the
    earlier SPs restructure. Unifying the matrix before those
    boundaries settle would lock in a shape that SP-1…SP-6/SP-8 then
    invalidate. Done last, it reconciles the final layer reality
@@ -625,6 +718,17 @@ negative test pair) can be parallelized via subagent dispatch.
 - **SP-5** *(resolved ahead of execution)*: `ChipWitnessKit` is
   **sealed**. Third-party chip authoring is deferred; workspace
   chips remain the only implementers.
+- **SealedArtifact introduction timing** *(resolved)*: introduced in
+  SP-1.5, **before** SP-5. Bundling it into SP-5 would muddy the
+  byte-identity gate; deferring it past SP-5 would force a second
+  migration of the same builder surfaces. SP-1.5 lives between SP-4
+  and SP-5 in §5's sequencing.
+- **§2.3 prepared-handle input asymmetry** *(resolved)*: verifier
+  takes `Arc<SealedArtifact>`; prover and executor take
+  `Arc<RegisteredProgram>`. Symmetric `Arc<SealedArtifact>` would
+  require `contract → ir` dep (violates §3) or `SealedArtifact`
+  carrying `ValidatedProgram` (weakens the name). The asymmetry
+  reflects the underlying layering.
 - **tabula-ext split** *(resolved)*: `tabula-ext` is **not** split.
   Empirical dep graph (runtime and sdk are the only importers;
   backend crates do not import ext) shows the crate already sits
