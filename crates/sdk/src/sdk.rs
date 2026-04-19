@@ -176,7 +176,7 @@ impl Sdk {
         &self,
         artifact: &Artifact,
     ) -> Result<tabula_runtime::PreparedVerifier, SdkError> {
-        let sealed = std::sync::Arc::new(artifact.registered().sealed().clone());
+        let sealed = Arc::new(artifact.sealed_artifact().clone());
         let builder = tabula_runtime::PreparedVerifier::builder(sealed)
             .map_err(SdkError::from)?
             .with_host_environment(self.inner.environment.inner.host_environment.clone())

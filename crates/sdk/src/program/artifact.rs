@@ -37,6 +37,11 @@ impl Artifact {
         &self.inner.registered
     }
 
+    /// Borrow the contract-layer sealed artifact.
+    pub fn sealed_artifact(&self) -> &tabula_contract::SealedArtifact {
+        self.inner.registered.sealed()
+    }
+
     /// SHA-256 hex digest of the canonical serialized artifact.
     pub fn digest(&self) -> &str {
         &self.inner.digest
