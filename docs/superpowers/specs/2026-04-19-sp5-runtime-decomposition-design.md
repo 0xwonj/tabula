@@ -850,7 +850,87 @@ the API-shape change with a safe wrappers-first migration. Task 9
   closed; follow-ups (semantics.rs split, infallible seed refactor)
   filed.
 
-## 18. References
+## 18. Landed (2026-04-20)
+
+SP-5 landed on branch `sp5-runtime-decomposition`. HEAD at close-out:
+`7865253` (Task 14). All 17 tasks below executed against §16's ordering.
+
+### Per-task commit log
+
+- **Task 0** — byte-identity baseline + feature-matrix script: `ebaa7be`
+  (+ `9d21247` gating fix).
+- **Task 1** — extract `snapshot.rs`: `c77d12f` (+ `6e7a55b` re-export TODO).
+- **Task 2** — narrowed errors + SDK Pass 1 widen: `2ffbf6f`, `ea077ef`,
+  + `0d474d3` (three §7 spec-gap fixes).
+- **Task 3** — extract `statement.rs`: `ca75af6`.
+- **Task 4** — extract `prelude.rs`: `c84eb6a`.
+- **Task 5** — extract `prepared_state.rs`: `e83722a`.
+- **Task 6** — extract `execution.rs`: `6dc1d8c`.
+- **Task 7** — extract `proof_artifacts.rs`: `fe88ee0`.
+- **Task 8** — `PreparedOptions` + free-fn wrappers + migrate call sites:
+  `664a6ef`.
+- **Task 9** — `PreparedExecutor` + `prepare_executor` + smoke test:
+  `ccae7a8`, `8a1f5c4`; pre-T10 narrow-return fix pass `033790e`.
+- **Task 10** — delete `TabulaRuntime` / builders / `engine.rs`: `afc370c`,
+  `5d730cb`, `fed2d40`, `da79c02`. (Task 11 from §16 — typed pre-stuff —
+  was absorbed here: the `TabulaRuntime` deletion completed the migration
+  without requiring a separate logical-row extraction in `tabula-stark`.
+  `tabula_chips::*Row` absence in `crates/runtime/src/**` is enforced by
+  the T11 guardrail landed as part of T10.)
+- **Task 12** — `ChipWitnessKit` sealed via `pub mod sealed` convention +
+  trybuild probes: `39cdb60`, `2d2bbf8`, `893516d`.
+- **Task 13** — `#[non_exhaustive]` + accessor-only sweep: `58fb3c1`.
+- **Task 14** — SDK Pass 2 match tightening + narrow `From` impls: `7865253`.
+- **Task 15** — final audit: no commit (audit-only; all 10 guardrails
+  reported CLEAN).
+- **Task 16** — byte-identity close-out: see below.
+- **Task 17** — this docs commit (SP-5 Landed + umbrella close + architecture
+  refresh).
+
+### Task 16 — Byte-identity verification (2026-04-20)
+
+Clean-state run of `scripts/sp5_byte_identity.sh` on HEAD `7865253`
+produced hashes matching
+`docs/superpowers/specs/2026-04-19-sp5-byte-identity-baseline.txt`
+under content comparison. The four proof-visible artifacts are
+byte-identical to the SP-1.5 baseline:
+
+- `basic/proof.bin` —
+  `d9fb9b62860e523e1b2b35af7410ec90cd6da272bb9d969cdb1b6265733e7b01`
+- `basic/public_statement.json` —
+  `c69cc408940971a7cd1258a1bc50a8e67ce8f73f42ca726ae7330a1487b397a2`
+- `membership/proof.bin` —
+  `d53282f443cc28b066a759138c44c4ee9d4c65a35068b74a0a7ed60acd1e7501`
+- `membership/public_statement.json` —
+  `73d7273883a7da8bf10495a1758654e26dee87aeb4eeee9f89dc6d8263f43492`
+
+A raw `diff` of current script stdout against the baseline shows line-order
+differences only (the baseline was captured pre-`sort`); `diff <(sort …)
+<(sort …)` is empty. Content byte-identity holds. (Nit to clean up later:
+either sort the baseline in place or have the script emit in sorted order
+to remove the ordering quirk — not done here to avoid touching a gate
+artifact at close-out.)
+
+### Verification gates (2026-04-20)
+
+- `cargo test --workspace --all-features` — green.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` —
+  green.
+- `scripts/sp5_byte_identity.sh` — matches baseline (content).
+
+### Deviations from §16
+
+- **Task 11** (separate typed pre-stuff extraction in `tabula-stark`) was
+  folded into Task 10. The guardrail invariant
+  (`tabula_chips::*Row` absent from `crates/runtime/src/**`) held at T10
+  close without introducing `LogicalRelationTableRow` /
+  `LogicalExecutionPrelude` logical-row types. Deferring those types
+  avoids adding API surface that has no current consumer; the boundary
+  is enforced by the guardrail test, not by the type split.
+- Task 15 produced no commit; its work was an audit whose findings
+  fed into the T16 gate and this Landed section.
+
+## 19. References
 
 - Umbrella: [`2026-04-18-architecture-refactoring-design.md`](./2026-04-18-architecture-refactoring-design.md)
 - SP-1.5: [`2026-04-19-sp1.5-sealed-artifact-design.md`](./2026-04-19-sp1.5-sealed-artifact-design.md)
