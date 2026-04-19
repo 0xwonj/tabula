@@ -1,5 +1,6 @@
 //! Execution-tier witness-store assembly for the current STARK backend.
 
+use tabula_chips::static_table::trace::StaticTableRow;
 use tabula_core::error::TabulaError;
 
 use tabula_stark::trace::{WitnessStore, witness_labels};
@@ -10,9 +11,12 @@ use super::lowering::LoweringOutput;
 
 /// Build the execution-tier witness store from lowered execution inputs.
 ///
-/// Core rows owned by `LoweringOutput` (instruction records, static
-/// table rows) are published directly. Every chip-specific label goes
-/// through the [`ChipWitnessKit`](tabula_stark::witness_kit::ChipWitnessKit)
+/// The instruction-record label is published directly from
+/// `LoweringOutput`. `STATIC_TABLE_ROWS` is published as an empty
+/// buffer until a future chip-kit takes ownership of static-table
+/// rows — execution-tier lowering has not populated that label since
+/// the SP-3 refactor. Every chip-specific label goes through the
+/// [`ChipWitnessKit`](tabula_stark::witness_kit::ChipWitnessKit)
 /// protocol: `registry` drives each registered kit's `finalize`, which
 /// drains its entry in `lowering.kit_scratch` and publishes rows under
 /// its canonical witness-store label.
@@ -33,7 +37,7 @@ pub fn prepare_execution_store(
     );
     store.put(
         witness_labels::STATIC_TABLE_ROWS,
-        lowering.static_table_rows.clone(),
+        Vec::<StaticTableRow>::new(),
     );
 
     let mut ctx = KitFinalizeContext::new(&mut lowering.kit_scratch);

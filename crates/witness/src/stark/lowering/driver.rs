@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use p3_koala_bear::KoalaBear;
 
 use tabula_chips::execution::trace::InstructionRecord;
-use tabula_chips::static_table::trace::StaticTableRow;
 use tabula_contract::format::typed_tuple::TupleEncodingDefaults;
 use tabula_core::error::TabulaError;
 use tabula_core::traits::Hasher;
@@ -91,8 +90,6 @@ pub struct ParamPreludeSlot {
 pub struct LoweringOutput {
     /// Instruction records for all opcodes across all successful txs.
     pub instruction_records: Vec<InstructionRecord>,
-    /// Static table rows accumulated from lookup-like operations.
-    pub static_table_rows: Vec<StaticTableRow>,
     /// Relation claims aggregated across all successful txs.
     pub relation_claims: Vec<RelationClaim>,
     /// Per-chip opaque scratchpad populated via the
@@ -132,7 +129,6 @@ pub fn merge_lowering_outputs<'a>(
 
     LoweringOutput {
         instruction_records,
-        static_table_rows: Vec::new(),
         relation_claims,
         kit_scratch,
     }
