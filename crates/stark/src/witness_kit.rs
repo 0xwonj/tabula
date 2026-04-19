@@ -132,14 +132,6 @@ pub enum KitError {
     /// The kit's scratchpad entry existed but was the wrong concrete type.
     #[error("kit scratchpad downcast failed for chip {0}")]
     DowncastFailed(ChipId),
-    /// Arbitrary kit-internal failure with a message.
-    #[error("kit finalize failed for chip {chip}: {message}")]
-    Internal {
-        /// Chip raising the error.
-        chip: ChipId,
-        /// Kit-supplied message describing the failure.
-        message: String,
-    },
 }
 
 /// The chip-authoring protocol for witness-tier row contribution.
