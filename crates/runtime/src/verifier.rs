@@ -378,21 +378,6 @@ impl VerifierCore<'_> {
     }
 }
 
-pub(crate) fn verify_public_statement_with_context(
-    context: &ArtifactContext,
-    relation_policy: RelationPolicy,
-    machine: &TabulaMachine,
-    proof: &TabulaProof,
-    expected_public_statement: &PublicStatement,
-) -> Result<(), RuntimeError> {
-    VerifierCore {
-        context,
-        relation_policy,
-        machine,
-    }
-    .verify_public_statement(proof, expected_public_statement)
-}
-
 // Static guarantee that PreparedVerifier is cheap to share across threads.
 // The SDK's cache and any future concurrent driver relies on this.
 const _: fn() = || {

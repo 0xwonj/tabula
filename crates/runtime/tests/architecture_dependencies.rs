@@ -221,6 +221,9 @@ fn native_proof_path_stays_bridge_free() {
     assert_source_omits(
         "crates/runtime/src/engine.rs",
         &[
+            // VerifierCore was deleted in SP-4 S4 after the duplicate verify
+            // path through TabulaRuntime was removed. This assertion remains
+            // as a guard against accidental reintroduction in engine.rs.
             "struct VerifierCore",
             "pub struct PreparedVerifierBuilder",
             "pub struct PreparedVerifier {",
@@ -228,6 +231,16 @@ fn native_proof_path_stays_bridge_free() {
             "fn materialize_registered_state_runtime(",
             "fn program_uses_hash(",
             "fn program_uses_relations(",
+        ],
+    );
+    // SP-4 S4.1: prove surface removed from TabulaRuntime; callers migrated to PreparedProver/PreparedVerifier.
+    assert_source_omits(
+        "crates/runtime/src/engine.rs",
+        &[
+            "fn prove(&self, input: &ProveInput",
+            "pub fn prove_and_verify(",
+            "pub fn execute_and_prove(",
+            "pub fn verify_public_statement(",
         ],
     );
     assert_source_omits(

@@ -65,7 +65,6 @@ use crate::host::HostEnvironment;
 use crate::proof_summary::ProofSummary;
 use crate::semantics as runtime_ir;
 use crate::state_runtime::ResolvedStateRuntime;
-use crate::verifier::verify_public_statement_with_context;
 
 type LogicalStateCell = (ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue);
 
@@ -822,26 +821,18 @@ impl RuntimeBuilder {
             #[cfg(not(feature = "prove"))]
             self.root_proof_backend,
         )?;
-        #[cfg(feature = "prove")]
-        let kit_registry = build_chip_kit_registry(&prepared.runtime_program);
         Ok(TabulaRuntime {
             runtime_program: prepared.runtime_program,
-            #[cfg(feature = "prove")]
-            root_backend_bundle: prepared.root_backend_bundle,
-            #[cfg(feature = "prove")]
-            kit_registry,
             machine: prepared.machine,
         })
     }
 }
 
 /// Native execution and proving runtime.
+///
+/// Execute-only facade. Proving is exposed through [`crate::PreparedProver`].
 pub struct TabulaRuntime {
     runtime_program: PreparedRuntimeState,
-    #[cfg(feature = "prove")]
-    root_backend_bundle: RootBackendBundle,
-    #[cfg(feature = "prove")]
-    kit_registry: ChipKitRegistry,
     machine: TabulaMachine,
 }
 
@@ -1053,72 +1044,6 @@ impl TabulaRuntime {
             instruction_index: Some(error.op_index),
             tx_index: None,
         })
-    }
-
-    /// Generate a proof for one already-executed tx batch.
-    ///
-    /// Retained for S3 call-site migration; prefer [`crate::PreparedProver::prove`].
-    /// Delegates to the shared prepared-state code path so byte-identity
-    /// stays honest through SP-4 S2/S3.
-    #[cfg(feature = "prove")]
-    pub fn prove(&self, input: &ProveInput<'_>) -> Result<ProveResult, RuntimeError> {
-        prepare_proof_request_on_prepared_state(
-            &self.runtime_program,
-            &self.root_backend_bundle,
-            &self.kit_registry,
-            &self.machine,
-            input,
-        )
-    }
-
-    /// Verify a native proof against an externally supplied expected public statement.
-    pub fn verify_public_statement(
-        &self,
-        proof: &TabulaProof,
-        expected_public_statement: &PublicStatement,
-    ) -> Result<(), RuntimeError> {
-        verify_public_statement_with_context(
-            &self.artifact_context(),
-            self.runtime_program.relation_policy,
-            &self.machine,
-            proof,
-            expected_public_statement,
-        )
-    }
-
-    /// Generate and verify a proof in one call.
-    #[cfg(feature = "prove")]
-    pub fn prove_and_verify(&self, input: &ProveInput<'_>) -> Result<VerifiedResult, RuntimeError> {
-        let prove_result = self.prove(input)?;
-        self.verify_public_statement(&prove_result.proof, &prove_result.public_statement)?;
-        Ok(VerifiedResult {
-            proof: prove_result.proof,
-            envelope: prove_result.envelope,
-            public_statement: prove_result.public_statement,
-            verified: true,
-            summary: prove_result.summary,
-        })
-    }
-
-    /// Execute, prove, and verify one tx batch in one call.
-    #[cfg(feature = "prove")]
-    pub fn execute_and_prove(
-        &self,
-        snapshot: &CommittedStateSnapshot,
-        batch: &ir::EntryBatch,
-        context: &ir::ContextInput,
-    ) -> Result<VerifiedResult, RuntimeError> {
-        let executed = self.execute_batch(snapshot, batch, context)?;
-        self.prove_and_verify(&ProveInput {
-            snapshot,
-            batch,
-            context,
-            executed: &executed,
-        })
-    }
-
-    fn artifact_context(&self) -> ArtifactContext {
-        self.runtime_program.artifact_context.clone()
     }
 
     fn decode_entry_batch(&self, batch: &ir::EntryBatch) -> Result<Vec<TxCall>, RuntimeError> {
@@ -1953,7 +1878,7 @@ fn prepare_column_slot(
 ///
 /// Exposed only for tests that need to tamper with witness store contents
 /// before proving. Production code must use [`prepare_proof_request_on_prepared_state`]
-/// or [`TabulaRuntime::prove`] instead.
+/// or [`prepare_proof_request_on_prepared_state`] instead.
 #[cfg(all(test, feature = "prove"))]
 fn prepare_proof_machine_input(
     state: &PreparedRuntimeState,
@@ -2223,13 +2148,19 @@ tx scan(id: u64) {
             .expect("build relation snapshot")
     }
 
-    fn runtime_for_source(source: &str) -> (RegisteredProgram, TabulaRuntime) {
+    fn runtime_for_source(
+        source: &str,
+    ) -> (RegisteredProgram, TabulaRuntime, crate::PreparedProver) {
         let registered = register_program_from_source(source);
         let runtime = TabulaRuntime::builder(registered.clone())
             .expect("create runtime builder")
             .build()
             .expect("build runtime");
-        (registered, runtime)
+        let prover = crate::PreparedProver::builder(registered.clone())
+            .expect("create prover builder")
+            .build()
+            .expect("build prepared prover");
+        (registered, runtime, prover)
     }
 
     #[derive(Debug)]
@@ -2272,7 +2203,7 @@ tx scan(id: u64) {
 
     #[test]
     fn committed_snapshot_decode_rejects_duplicate_cells() {
-        let (_registered, runtime) = runtime_for_source(relation_source());
+        let (_registered, runtime, _prover) = runtime_for_source(relation_source());
         let error = runtime
             .decode_committed_snapshot([
                 (
@@ -2300,7 +2231,7 @@ tx scan(id: u64) {
 
     #[test]
     fn logical_state_materialization_rejects_duplicate_cells() {
-        let (_registered, runtime) = runtime_for_source(relation_source());
+        let (_registered, runtime, _prover) = runtime_for_source(relation_source());
         let error = runtime
             .materialize_logical_state([
                 (
@@ -2513,7 +2444,7 @@ tx scan(id: u64) {
 
     #[test]
     fn relation_table_rows_reject_claims_missing_from_manifest() {
-        let (registered, runtime) = runtime_for_source(relation_source());
+        let (registered, runtime, _prover) = runtime_for_source(relation_source());
         let error = prepare_relation_proof(
             runtime.execution_program().program(),
             registered.static_table_artifact(),
@@ -2541,7 +2472,7 @@ tx scan(id: u64) {
 
     #[test]
     fn lowering_rejects_duplicate_relation_effect_origins() {
-        let (_registered, runtime) = runtime_for_source(relation_source());
+        let (_registered, runtime, _prover) = runtime_for_source(relation_source());
         let enroll = entry_id(&runtime, "enroll");
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id: enroll,
@@ -2613,7 +2544,7 @@ tx scan(id: u64) {
 
     #[test]
     fn untaken_relation_branches_emit_no_relation_claims_or_positive_lookup_counts() {
-        let (registered, runtime) = runtime_for_source(guarded_relation_source());
+        let (registered, runtime, prover) = runtime_for_source(guarded_relation_source());
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id: entry_id(&runtime, "maybe_promote"),
             params: vec![bool_portable(false), u64_portable(0), u64_portable(2)],
@@ -2625,9 +2556,9 @@ tx scan(id: u64) {
             .expect("execute guarded batch");
 
         let (machine_input, _public_statement) = prepare_proof_machine_input(
-            &runtime.runtime_program,
-            &runtime.root_backend_bundle,
-            &runtime.kit_registry,
+            &prover.runtime_program,
+            &prover.root_backend_bundle,
+            &prover.kit_registry,
             &prove_input(&snapshot, &batch, &context, &executed),
         )
         .expect("prepare proof request");
@@ -2652,7 +2583,7 @@ tx scan(id: u64) {
 
     #[test]
     fn tampering_relation_table_rows_breaks_proving() {
-        let (registered, runtime) = runtime_for_source(relation_source());
+        let (registered, runtime, prover) = runtime_for_source(relation_source());
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id: entry_id(&runtime, "enroll"),
             params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
@@ -2664,9 +2595,9 @@ tx scan(id: u64) {
             .expect("execute batch");
 
         let (mut machine_input, _public_statement) = prepare_proof_machine_input(
-            &runtime.runtime_program,
-            &runtime.root_backend_bundle,
-            &runtime.kit_registry,
+            &prover.runtime_program,
+            &prover.root_backend_bundle,
+            &prover.kit_registry,
             &prove_input(&snapshot, &batch, &context, &executed),
         )
         .expect("prepare proof request");
@@ -2698,7 +2629,7 @@ tx scan(id: u64) {
 
     #[test]
     fn tampering_execution_bound_relation_outputs_breaks_proving() {
-        let (registered, runtime) = runtime_for_source(relation_source());
+        let (registered, runtime, prover) = runtime_for_source(relation_source());
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id: entry_id(&runtime, "enroll"),
             params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
@@ -2710,9 +2641,9 @@ tx scan(id: u64) {
             .expect("execute batch");
 
         let (mut machine_input, _public_statement) = prepare_proof_machine_input(
-            &runtime.runtime_program,
-            &runtime.root_backend_bundle,
-            &runtime.kit_registry,
+            &prover.runtime_program,
+            &prover.root_backend_bundle,
+            &prover.kit_registry,
             &prove_input(&snapshot, &batch, &context, &executed),
         )
         .expect("prepare proof request");
@@ -2744,7 +2675,7 @@ tx scan(id: u64) {
 
     #[test]
     fn tampering_relation_effect_identity_breaks_proving() {
-        let (registered, runtime) = runtime_for_source(relation_source());
+        let (registered, runtime, prover) = runtime_for_source(relation_source());
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id: entry_id(&runtime, "enroll"),
             params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
@@ -2756,9 +2687,9 @@ tx scan(id: u64) {
             .expect("execute batch");
 
         let (mut machine_input, _public_statement) = prepare_proof_machine_input(
-            &runtime.runtime_program,
-            &runtime.root_backend_bundle,
-            &runtime.kit_registry,
+            &prover.runtime_program,
+            &prover.root_backend_bundle,
+            &prover.kit_registry,
             &prove_input(&snapshot, &batch, &context, &executed),
         )
         .expect("prepare proof request");
@@ -2789,7 +2720,7 @@ tx scan(id: u64) {
 
     #[test]
     fn relation_table_rows_use_empty_output_digest_for_enum_relations() {
-        let (registered, runtime) = runtime_for_source(relation_source());
+        let (registered, runtime, _prover) = runtime_for_source(relation_source());
         let empty_digest = compute_typed_tuple_digest(TypedTupleRole::RelationOutput, &[])
             .expect("empty tuple digest");
         let allowed_rows = registered
@@ -2834,7 +2765,11 @@ tx scan(id: u64) {
 
     #[test]
     fn relation_proof_root_matches_registered_artifact_and_chip_public_values() {
-        let (registered, runtime) = runtime_for_source(relation_source());
+        let (registered, runtime, prover) = runtime_for_source(relation_source());
+        let verifier = PreparedVerifier::builder(registered.clone())
+            .expect("create verifier builder")
+            .build()
+            .expect("build verifier");
         let batch = tx_batch(vec![ir::EntryCall {
             entry_id: entry_id(&runtime, "enroll"),
             params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
@@ -2844,14 +2779,22 @@ tx scan(id: u64) {
         let executed = runtime
             .execute_batch(&snapshot, &batch, &context)
             .expect("execute batch");
-        let proved = runtime
-            .execute_and_prove(&snapshot, &batch, &context)
+        let proved = prover
+            .prove_and_verify(
+                &verifier,
+                &ProveInput {
+                    snapshot: &snapshot,
+                    batch: &batch,
+                    context: &context,
+                    executed: &executed,
+                },
+            )
             .expect("prove relation batch");
-        let chip_root = relation_table_root_from_proof(&proved.proof, &runtime.machine)
+        let chip_root = relation_table_root_from_proof(&proved.proof, prover.machine())
             .expect("extract relation chip root");
 
         assert_eq!(
-            runtime.runtime_program.static_table_artifact.root,
+            prover.runtime_program.static_table_artifact.root,
             registered.static_table_artifact().root
         );
         assert_eq!(
@@ -2862,9 +2805,9 @@ tx scan(id: u64) {
         assert_eq!(
             runtime_ir::compute_applied_tx_digest(
                 &batch,
-                runtime.type_runtimes(),
-                runtime.encoding_runtimes(),
-                &runtime.runtime_program.tuple_encoding_defaults,
+                prover.type_runtimes(),
+                prover.encoding_runtimes(),
+                &prover.runtime_program.tuple_encoding_defaults,
             )
             .expect("batch digest"),
             proved.public_statement.applied_tx_digest.to_bytes()
@@ -2877,8 +2820,8 @@ tx scan(id: u64) {
     }
 
     #[test]
-    fn relation_chip_public_values_truncation_fails_runtime_verification() {
-        let (registered, runtime) = runtime_for_source(relation_source());
+    fn relation_chip_public_values_truncation_fails_verification() {
+        let (registered, runtime, prover) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
         let verifier = PreparedVerifier::builder(registered)
             .expect("create verifier builder")
@@ -2889,8 +2832,16 @@ tx scan(id: u64) {
             params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
         }]);
         let context = relation_context(7, 11);
-        let mut proved = runtime
-            .execute_and_prove(&snapshot, &batch, &context)
+        let executed = runtime
+            .execute_batch(&snapshot, &batch, &context)
+            .expect("execute batch");
+        let mut proved = prover
+            .prove(&ProveInput {
+                snapshot: &snapshot,
+                batch: &batch,
+                context: &context,
+                executed: &executed,
+            })
             .expect("prove relation batch");
         let relation_opening = proved
             .proof
@@ -2900,16 +2851,6 @@ tx scan(id: u64) {
             .find(|opening| opening.chip_id == RELATION_TABLE_CHIP_ID)
             .expect("relation chip opening");
         relation_opening.public_values.pop();
-
-        let runtime_err = runtime
-            .verify_public_statement(&proved.proof, &proved.public_statement)
-            .expect_err("truncated relation chip public values must fail runtime verification");
-        assert!(
-            runtime_err
-                .to_string()
-                .contains("machine metadata requires 8"),
-            "unexpected runtime error: {runtime_err}"
-        );
 
         let verifier_err = verifier
             .verify(&proved.proof, &proved.public_statement)
@@ -2923,8 +2864,8 @@ tx scan(id: u64) {
     }
 
     #[test]
-    fn relation_chip_public_values_append_fails_runtime_verification() {
-        let (registered, runtime) = runtime_for_source(relation_source());
+    fn relation_chip_public_values_append_fails_verification() {
+        let (registered, runtime, prover) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
         let verifier = PreparedVerifier::builder(registered)
             .expect("create verifier builder")
@@ -2935,8 +2876,16 @@ tx scan(id: u64) {
             params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
         }]);
         let context = relation_context(7, 11);
-        let mut proved = runtime
-            .execute_and_prove(&snapshot, &batch, &context)
+        let executed = runtime
+            .execute_batch(&snapshot, &batch, &context)
+            .expect("execute batch");
+        let mut proved = prover
+            .prove(&ProveInput {
+                snapshot: &snapshot,
+                batch: &batch,
+                context: &context,
+                executed: &executed,
+            })
             .expect("prove relation batch");
         let relation_opening = proved
             .proof
@@ -2946,16 +2895,6 @@ tx scan(id: u64) {
             .find(|opening| opening.chip_id == RELATION_TABLE_CHIP_ID)
             .expect("relation chip opening");
         relation_opening.public_values.push(KoalaBear::ZERO);
-
-        let runtime_err = runtime
-            .verify_public_statement(&proved.proof, &proved.public_statement)
-            .expect_err("extended relation chip public values must fail runtime verification");
-        assert!(
-            runtime_err
-                .to_string()
-                .contains("machine metadata requires 8"),
-            "unexpected runtime error: {runtime_err}"
-        );
 
         let verifier_err = verifier
             .verify(&proved.proof, &proved.public_statement)
@@ -2969,8 +2908,8 @@ tx scan(id: u64) {
     }
 
     #[test]
-    fn missing_relation_chip_opening_still_fails_runtime_verification() {
-        let (registered, runtime) = runtime_for_source(relation_source());
+    fn missing_relation_chip_opening_still_fails_verification() {
+        let (registered, runtime, prover) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
         let verifier = PreparedVerifier::builder(registered)
             .expect("create verifier builder")
@@ -2981,24 +2920,22 @@ tx scan(id: u64) {
             params: vec![bool_portable(true), u64_portable(0), u64_portable(2)],
         }]);
         let context = relation_context(7, 11);
-        let mut proved = runtime
-            .execute_and_prove(&snapshot, &batch, &context)
+        let executed = runtime
+            .execute_batch(&snapshot, &batch, &context)
+            .expect("execute batch");
+        let mut proved = prover
+            .prove(&ProveInput {
+                snapshot: &snapshot,
+                batch: &batch,
+                context: &context,
+                executed: &executed,
+            })
             .expect("prove relation batch");
         proved
             .proof
             .execution
             .chip_openings
             .retain(|opening| opening.chip_id != RELATION_TABLE_CHIP_ID);
-
-        let runtime_err = runtime
-            .verify_public_statement(&proved.proof, &proved.public_statement)
-            .expect_err("missing relation chip opening must fail runtime verification");
-        assert!(
-            runtime_err
-                .to_string()
-                .contains("relation table chip opening is missing"),
-            "unexpected runtime error: {runtime_err}"
-        );
 
         let verifier_err = verifier
             .verify(&proved.proof, &proved.public_statement)
@@ -3042,10 +2979,14 @@ tx scan(id: u64) {
     #[test]
     fn event_transcript_witness_matches_execution_event_rows() {
         let registered = register_program_from_source(event_debug_source());
-        let runtime = TabulaRuntime::builder(registered)
+        let runtime = TabulaRuntime::builder(registered.clone())
             .expect("create runtime builder")
             .build()
             .expect("build runtime");
+        let prover = crate::PreparedProver::builder(registered)
+            .expect("create prover builder")
+            .build()
+            .expect("build prover");
         let snapshot = runtime.empty_state_snapshot();
         let register = runtime
             .execution_program()
@@ -3069,9 +3010,9 @@ tx scan(id: u64) {
         let typed_txs = runtime.decode_entry_batch(&batch).expect("decode batch");
 
         let prepared = prepare_proof_artifacts(
-            &runtime.runtime_program,
-            &runtime.root_backend_bundle,
-            &runtime.kit_registry,
+            &prover.runtime_program,
+            &prover.root_backend_bundle,
+            &prover.kit_registry,
             &snapshot,
             &typed_txs,
             &typed_context,
@@ -3169,6 +3110,11 @@ tx scan(id: u64) {
             .with_host_environment(host_environment.clone())
             .build()
             .expect("build runtime with extra host runtimes");
+        let prover = crate::PreparedProver::builder(registered.clone())
+            .expect("create prover builder")
+            .with_host_environment(host_environment.clone())
+            .build()
+            .expect("build prover with extra host runtimes");
         let verifier = PreparedVerifier::builder(registered.clone())
             .expect("create verifier builder")
             .with_host_environment(host_environment)
@@ -3181,12 +3127,20 @@ tx scan(id: u64) {
         }]);
         let context = relation_context(7, 11);
         let snapshot = relation_snapshot(&registered);
-        let proved = runtime
-            .execute_and_prove(&snapshot, &batch, &context)
+        let executed = runtime
+            .execute_batch(&snapshot, &batch, &context)
+            .expect("execute relation batch under custom host environment");
+        let proved = prover
+            .prove(&ProveInput {
+                snapshot: &snapshot,
+                batch: &batch,
+                context: &context,
+                executed: &executed,
+            })
             .expect("prove relation batch under custom host environment");
 
         assert_eq!(
-            runtime.runtime_program.static_table_artifact.root,
+            prover.runtime_program.static_table_artifact.root,
             registered.static_table_artifact().root
         );
         verifier

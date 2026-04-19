@@ -5,7 +5,7 @@ use tabula_ir as ir;
 use tabula_testing::exec::{
     context_input, logical_state_snapshot, register_program_from_source, tx_batch,
 };
-use tabula_testing::runtime::build_runtime;
+use tabula_testing::runtime::{build_prover, build_runtime, build_verifier};
 use tabula_types::{bool_portable, u64_portable, u64_typed};
 
 fn relation_source() -> &'static str {
@@ -120,7 +120,9 @@ fn query_executes_relations_but_remains_execution_only() {
 fn tx_batch_proves_and_verifies_static_relations_with_control() {
     let registered = register_program_from_source(relation_source());
     let snapshot = seeded_snapshot(&registered);
-    let runtime = build_runtime(registered);
+    let runtime = build_runtime(registered.clone());
+    let prover = build_prover(registered.clone());
+    let verifier = build_verifier(registered);
     let enroll = entry_id(&runtime, "enroll");
     let batch = tx_batch(vec![
         ir::EntryCall {
@@ -144,13 +146,16 @@ fn tx_batch_proves_and_verifies_static_relations_with_control() {
     assert_eq!(txs[1].relation_effects.len(), 4);
     assert_eq!(txs[1].state_effects.len(), 1);
 
-    let verified = runtime
-        .prove_and_verify(&tabula_runtime::ProveInput {
-            snapshot: &snapshot,
-            batch: &batch,
-            context: &ctx,
-            executed: &executed,
-        })
+    let verified = prover
+        .prove_and_verify(
+            &verifier,
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &batch,
+                context: &ctx,
+                executed: &executed,
+            },
+        )
         .expect("prove and verify relation batch");
 
     assert!(verified.verified);
@@ -185,7 +190,9 @@ fn range_and_set_relations_normalize_and_prove() {
     ));
 
     let snapshot = seeded_snapshot(&registered);
-    let runtime = build_runtime(registered);
+    let runtime = build_runtime(registered.clone());
+    let prover = build_prover(registered.clone());
+    let verifier = build_verifier(registered);
     let enroll = entry_id(&runtime, "enroll");
     let batch = tx_batch(vec![ir::EntryCall {
         entry_id: enroll,
@@ -193,8 +200,19 @@ fn range_and_set_relations_normalize_and_prove() {
     }]);
     let ctx = context(7, 12);
 
-    let proved = runtime
-        .execute_and_prove(&snapshot, &batch, &ctx)
+    let executed = runtime
+        .execute_batch(&snapshot, &batch, &ctx)
+        .expect("execute normalized relations");
+    let proved = prover
+        .prove_and_verify(
+            &verifier,
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &batch,
+                context: &ctx,
+                executed: &executed,
+            },
+        )
         .expect("prove normalized relations");
 
     assert_ne!(proved.public_statement.event_digest.to_bytes(), [0u8; 32]);

@@ -10,7 +10,7 @@ use tabula_machine::VerificationError;
 use tabula_testing::exec::{
     context_input, logical_state_snapshot, register_program_from_source, tx_batch,
 };
-use tabula_testing::runtime::build_runtime;
+use tabula_testing::runtime::{build_prover, build_runtime, build_verifier};
 use tabula_types::{bool_portable, i64_portable, u64_portable, u64_typed};
 
 fn proving_source() -> &'static str {
@@ -323,12 +323,14 @@ fn update_entry_id(runtime: &tabula_runtime::TabulaRuntime) -> tabula_ir::EntryI
 }
 
 fn prove_native_batch() -> (
-    tabula_runtime::TabulaRuntime,
+    tabula_runtime::PreparedVerifier,
     tabula_runtime::VerifiedResult,
 ) {
     let registered = register_program_from_source(proving_source());
     let snapshot = seeded_snapshot(&registered);
-    let runtime = build_runtime(registered);
+    let runtime = build_runtime(registered.clone());
+    let prover = build_prover(registered.clone());
+    let verifier = build_verifier(registered);
     let register = register_entry_id(&runtime);
     let batch = tx_batch(vec![
         ir::EntryCall {
@@ -341,10 +343,21 @@ fn prove_native_batch() -> (
         },
     ]);
     let context = context(7, 99);
-    let proved = runtime
-        .execute_and_prove(&snapshot, &batch, &context)
+    let executed = runtime
+        .execute_batch(&snapshot, &batch, &context)
+        .expect("execute native batch");
+    let proved = prover
+        .prove_and_verify(
+            &verifier,
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &batch,
+                context: &context,
+                executed: &executed,
+            },
+        )
         .expect("prove native batch");
-    (runtime, proved)
+    (verifier, proved)
 }
 
 #[test]
@@ -381,7 +394,9 @@ fn query_executes_but_remains_execution_only() {
 fn unary_bool_key_batch_executes_projects_and_proves() {
     let registered = register_program_from_source(bool_key_proving_source());
     let snapshot = bool_key_seeded_snapshot(&registered);
-    let runtime = build_runtime(registered);
+    let runtime = build_runtime(registered.clone());
+    let prover = build_prover(registered.clone());
+    let verifier = build_verifier(registered);
     let update = update_entry_id(&runtime);
     let batch = tx_batch(vec![
         ir::EntryCall {
@@ -434,13 +449,16 @@ fn unary_bool_key_batch_executes_projects_and_proves() {
         );
     }
 
-    let verified = runtime
-        .prove_and_verify(&tabula_runtime::ProveInput {
-            snapshot: &snapshot,
-            batch: &batch,
-            context: &ctx,
-            executed: &receipt.journal,
-        })
+    let verified = prover
+        .prove_and_verify(
+            &verifier,
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &batch,
+                context: &ctx,
+                executed: &receipt.journal,
+            },
+        )
         .expect("prove and verify bool-key batch");
 
     assert!(verified.verified);
@@ -452,7 +470,9 @@ fn unary_bool_key_batch_executes_projects_and_proves() {
 fn unary_i64_key_batch_executes_projects_and_proves() {
     let registered = register_program_from_source(i64_key_proving_source());
     let snapshot = i64_key_seeded_snapshot(&registered);
-    let runtime = build_runtime(registered);
+    let runtime = build_runtime(registered.clone());
+    let prover = build_prover(registered.clone());
+    let verifier = build_verifier(registered);
     let update = update_entry_id(&runtime);
     let batch = tx_batch(vec![
         ir::EntryCall {
@@ -505,13 +525,16 @@ fn unary_i64_key_batch_executes_projects_and_proves() {
         );
     }
 
-    let verified = runtime
-        .prove_and_verify(&tabula_runtime::ProveInput {
-            snapshot: &snapshot,
-            batch: &batch,
-            context: &ctx,
-            executed: &receipt.journal,
-        })
+    let verified = prover
+        .prove_and_verify(
+            &verifier,
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &batch,
+                context: &ctx,
+                executed: &receipt.journal,
+            },
+        )
         .expect("prove and verify i64-key batch");
 
     assert!(verified.verified);
@@ -523,7 +546,9 @@ fn unary_i64_key_batch_executes_projects_and_proves() {
 fn tx_batch_proves_and_verifies_mixed_surface() {
     let registered = register_program_from_source(proving_source());
     let snapshot = seeded_snapshot(&registered);
-    let runtime = build_runtime(registered);
+    let runtime = build_runtime(registered.clone());
+    let prover = build_prover(registered.clone());
+    let verifier = build_verifier(registered);
     let register = register_entry_id(&runtime);
     let txs = tx_batch(vec![
         ir::EntryCall {
@@ -547,13 +572,16 @@ fn tx_batch_proves_and_verifies_mixed_surface() {
     assert!(txs_out[1].event_effects.is_empty());
     assert!(!txs_out[1].state_effects.is_empty());
 
-    let verified = runtime
-        .prove_and_verify(&tabula_runtime::ProveInput {
-            snapshot: &snapshot,
-            batch: &txs,
-            context: &context,
-            executed: &executed,
-        })
+    let verified = prover
+        .prove_and_verify(
+            &verifier,
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &txs,
+                context: &context,
+                executed: &executed,
+            },
+        )
         .expect("prove and verify");
 
     assert!(verified.verified);
@@ -569,7 +597,9 @@ fn tx_batch_proves_and_verifies_mixed_surface() {
 fn binding_digest_changes_with_batch_context_and_binding() {
     let registered = register_program_from_source(proving_source());
     let snapshot = seeded_snapshot(&registered);
-    let runtime = build_runtime(registered);
+    let runtime = build_runtime(registered.clone());
+    let prover = build_prover(registered.clone());
+    let verifier = build_verifier(registered);
     let register = register_entry_id(&runtime);
     let txs_a = tx_batch(vec![ir::EntryCall {
         entry_id: register,
@@ -582,14 +612,47 @@ fn binding_digest_changes_with_batch_context_and_binding() {
     let context_a = context(7, 99);
     let context_b = context(8, 99);
 
-    let prove_a = runtime
-        .execute_and_prove(&snapshot, &txs_a, &context_a)
+    let exec_a = runtime
+        .execute_batch(&snapshot, &txs_a, &context_a)
+        .expect("exec a");
+    let prove_a = prover
+        .prove_and_verify(
+            &verifier,
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &txs_a,
+                context: &context_a,
+                executed: &exec_a,
+            },
+        )
         .expect("prove a");
-    let prove_b = runtime
-        .execute_and_prove(&snapshot, &txs_b, &context_a)
+    let exec_b = runtime
+        .execute_batch(&snapshot, &txs_b, &context_a)
+        .expect("exec b");
+    let prove_b = prover
+        .prove_and_verify(
+            &verifier,
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &txs_b,
+                context: &context_a,
+                executed: &exec_b,
+            },
+        )
         .expect("prove b");
-    let prove_c = runtime
-        .execute_and_prove(&snapshot, &txs_a, &context_b)
+    let exec_c = runtime
+        .execute_batch(&snapshot, &txs_a, &context_b)
+        .expect("exec c");
+    let prove_c = prover
+        .prove_and_verify(
+            &verifier,
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &txs_a,
+                context: &context_b,
+                executed: &exec_c,
+            },
+        )
         .expect("prove c");
 
     assert_ne!(prove_a.proof.binding_digest, prove_b.proof.binding_digest);
@@ -605,14 +668,27 @@ fn binding_digest_changes_with_batch_context_and_binding() {
 
     let alt_registered = register_program_from_source(proving_source_alt_scheme());
     let alt_snapshot = seeded_snapshot(&alt_registered);
-    let alt_runtime = build_runtime(alt_registered);
+    let alt_runtime = build_runtime(alt_registered.clone());
+    let alt_prover = build_prover(alt_registered.clone());
+    let alt_verifier = build_verifier(alt_registered);
     let alt_register = register_entry_id(&alt_runtime);
     let alt_txs = tx_batch(vec![ir::EntryCall {
         entry_id: alt_register,
         params: vec![bool_portable(false), u64_portable(1)],
     }]);
-    let alt_proved = alt_runtime
-        .execute_and_prove(&alt_snapshot, &alt_txs, &context_a)
+    let alt_exec = alt_runtime
+        .execute_batch(&alt_snapshot, &alt_txs, &context_a)
+        .expect("exec alt");
+    let alt_proved = alt_prover
+        .prove_and_verify(
+            &alt_verifier,
+            &tabula_runtime::ProveInput {
+                snapshot: &alt_snapshot,
+                batch: &alt_txs,
+                context: &context_a,
+                executed: &alt_exec,
+            },
+        )
         .expect("prove alt");
 
     assert_ne!(
@@ -623,11 +699,11 @@ fn binding_digest_changes_with_batch_context_and_binding() {
 
 #[test]
 fn verifier_rejects_missing_column_proof_manifest_entry() {
-    let (runtime, mut proved) = prove_native_batch();
+    let (verifier, mut proved) = prove_native_batch();
     proved.proof.columns.pop();
 
-    let err = runtime
-        .verify_public_statement(&proved.proof, &proved.public_statement)
+    let err = verifier
+        .verify(&proved.proof, &proved.public_statement)
         .expect_err("missing column proof must fail verification");
     assert!(matches!(
         err,
@@ -640,11 +716,11 @@ fn verifier_rejects_missing_column_proof_manifest_entry() {
 
 #[test]
 fn verifier_rejects_permuted_column_proof_manifest_order() {
-    let (runtime, mut proved) = prove_native_batch();
+    let (verifier, mut proved) = prove_native_batch();
     proved.proof.columns.swap(0, 1);
 
-    let err = runtime
-        .verify_public_statement(&proved.proof, &proved.public_statement)
+    let err = verifier
+        .verify(&proved.proof, &proved.public_statement)
         .expect_err("permuted column proof order must fail verification");
     assert!(matches!(
         err,
@@ -657,11 +733,11 @@ fn verifier_rejects_permuted_column_proof_manifest_order() {
 
 #[test]
 fn verifier_rejects_duplicate_column_proof_manifest_entry() {
-    let (runtime, mut proved) = prove_native_batch();
+    let (verifier, mut proved) = prove_native_batch();
     proved.proof.columns[1].key = proved.proof.columns[0].key;
 
-    let err = runtime
-        .verify_public_statement(&proved.proof, &proved.public_statement)
+    let err = verifier
+        .verify(&proved.proof, &proved.public_statement)
         .expect_err("duplicate column proof manifest entry must fail verification");
     assert!(matches!(
         err,
@@ -674,12 +750,12 @@ fn verifier_rejects_duplicate_column_proof_manifest_entry() {
 
 #[test]
 fn verifier_rejects_wrong_public_context_digest() {
-    let (runtime, proved) = prove_native_batch();
+    let (verifier, proved) = prove_native_batch();
     let mut wrong_statement = proved.public_statement.clone();
     wrong_statement.public_context_digest.0[0] += KoalaBear::ONE;
 
-    let err = runtime
-        .verify_public_statement(&proved.proof, &wrong_statement)
+    let err = verifier
+        .verify(&proved.proof, &wrong_statement)
         .expect_err("wrong public-context digest must fail verification");
     assert!(
         err.to_string()
@@ -690,12 +766,12 @@ fn verifier_rejects_wrong_public_context_digest() {
 
 #[test]
 fn verifier_rejects_wrong_applied_tx_digest() {
-    let (runtime, proved) = prove_native_batch();
+    let (verifier, proved) = prove_native_batch();
     let mut wrong_statement = proved.public_statement.clone();
     wrong_statement.applied_tx_digest.0[0] += KoalaBear::ONE;
 
-    let err = runtime
-        .verify_public_statement(&proved.proof, &wrong_statement)
+    let err = verifier
+        .verify(&proved.proof, &wrong_statement)
         .expect_err("wrong applied tx digest must fail verification");
     assert!(
         err.to_string()
@@ -706,12 +782,12 @@ fn verifier_rejects_wrong_applied_tx_digest() {
 
 #[test]
 fn verifier_rejects_wrong_event_digest() {
-    let (runtime, proved) = prove_native_batch();
+    let (verifier, proved) = prove_native_batch();
     let mut wrong_statement = proved.public_statement.clone();
     wrong_statement.event_digest.0[0] += KoalaBear::ONE;
 
-    let err = runtime
-        .verify_public_statement(&proved.proof, &wrong_statement)
+    let err = verifier
+        .verify(&proved.proof, &wrong_statement)
         .expect_err("wrong event digest must fail verification");
     assert!(
         err.to_string()
@@ -722,7 +798,7 @@ fn verifier_rejects_wrong_event_digest() {
 
 #[test]
 fn verifier_rejects_mutated_public_context_chip_digest() {
-    let (runtime, mut proved) = prove_native_batch();
+    let (verifier, mut proved) = prove_native_batch();
     let opening = proved
         .proof
         .execution
@@ -732,8 +808,8 @@ fn verifier_rejects_mutated_public_context_chip_digest() {
         .expect("public-context transcript chip opening");
     opening.public_values[0] += KoalaBear::ONE;
 
-    let err = runtime
-        .verify_public_statement(&proved.proof, &proved.public_statement)
+    let err = verifier
+        .verify(&proved.proof, &proved.public_statement)
         .expect_err("mutated public-context chip digest must fail verification");
     assert!(
         err.to_string().contains(
@@ -745,7 +821,7 @@ fn verifier_rejects_mutated_public_context_chip_digest() {
 
 #[test]
 fn verifier_rejects_mutated_event_chip_digest() {
-    let (runtime, mut proved) = prove_native_batch();
+    let (verifier, mut proved) = prove_native_batch();
     let opening = proved
         .proof
         .execution
@@ -755,8 +831,8 @@ fn verifier_rejects_mutated_event_chip_digest() {
         .expect("event transcript chip opening");
     opening.public_values[0] += KoalaBear::ONE;
 
-    let err = runtime
-        .verify_public_statement(&proved.proof, &proved.public_statement)
+    let err = verifier
+        .verify(&proved.proof, &proved.public_statement)
         .expect_err("mutated event chip digest must fail verification");
     assert!(
         err.to_string()

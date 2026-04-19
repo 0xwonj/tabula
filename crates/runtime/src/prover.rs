@@ -31,11 +31,11 @@ use crate::verifier::VerifierState;
 /// must produce byte-identical output.
 pub struct PreparedProver {
     /// Prove-specific prepared state (semantic, state runtime, etc.).
-    runtime_program: PreparedRuntimeState,
+    pub(crate) runtime_program: PreparedRuntimeState,
     /// Root proof-backend bundle shared across prove calls.
-    root_backend_bundle: RootBackendBundle,
+    pub(crate) root_backend_bundle: RootBackendBundle,
     /// Chip-kit registry built once at handle construction time.
-    kit_registry: ChipKitRegistry,
+    pub(crate) kit_registry: ChipKitRegistry,
     /// Verify-side state: context, relation policy, and STARK machine.
     verifier_state: VerifierState,
 }
