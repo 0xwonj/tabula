@@ -552,3 +552,27 @@ SP-3 landed on `refactor/witness-chip-kit` in five commits: `dc2690e`
 
 Byte-identical proofs on `basic` and `membership` end-to-end flows
 held at every stage (S2, S3.1, S3.2, S3.3).
+
+**SP-4 boundary left by SP-3.** SP-3 splits what can be prepared
+once from what must be re-assembled per batch:
+
+- *Prepared-once, SP-4-hoistable.* Backend selection,
+  `ChipKitRegistry` construction, and AIR wiring. The registry
+  builds from each configured `ExecutionBackend`'s `witness_kits()`
+  and does not depend on batch inputs, so it can move onto a
+  `PreparedProver` handle without witness-crate changes.
+- *Still eager per-batch.* `KitScratch` allocation, runtime
+  pre-stuff of relation-table and transcript rows, and
+  `prepare_execution_store` itself. These depend on the batch's
+  execution trace and relation-proof output and cannot be
+  preallocated. SP-4's `PreparedProver` must therefore surface the
+  prepared registry/backends but still thread a fresh `KitScratch`
+  per prove call.
+
+**Follow-ups landed (2026-04-19).** Four cleanup commits on top of
+S4: registry dup-check (chip-id + label), multi-line-aware
+`sp3_witness_chip_import_guardrail`, removal of the permanently
+empty `LoweringOutput::static_table_rows` field (execution store
+now publishes an empty `STATIC_TABLE_ROWS` buffer directly until a
+static-table kit takes ownership), and removal of the unused
+`KitError::Internal` variant.
