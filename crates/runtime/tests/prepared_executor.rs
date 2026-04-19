@@ -47,26 +47,10 @@ fn build_executor() -> PreparedExecutor {
     prepare_executor(Arc::new(registered), &opts).expect("prepare executor")
 }
 
-fn entry_id_by_symbol(symbol: &str) -> ir::EntryId {
-    // The executor handle intentionally does not expose semantic program
-    // accessors yet; look up entry ids through a matching TabulaRuntime.
-    // Entry ids are stable per compiled program, so any handle over the
-    // same source resolves to the same id.
-    let registered = register_program_from_source(sample_source());
-    let runtime = tabula_runtime::TabulaRuntime::builder(registered)
-        .expect("runtime builder")
-        .build()
-        .expect("build runtime");
-    runtime
-        .execution_program()
-        .program()
-        .entries
-        .iter()
-        .find(|entry| entry.symbol == symbol)
-        .map_or_else(
-            || panic!("entry '{symbol}' missing from compiled program"),
-            |entry| entry.id,
-        )
+fn entry_id_by_symbol(executor: &PreparedExecutor, symbol: &str) -> ir::EntryId {
+    executor
+        .entry_id_by_symbol(symbol)
+        .unwrap_or_else(|| panic!("entry '{symbol}' missing from compiled program"))
 }
 
 #[test]
@@ -89,7 +73,7 @@ fn execute_batch_twice_is_deterministic() {
         ])
         .expect("materialize initial snapshot");
 
-    let entry_id = entry_id_by_symbol("enroll");
+    let entry_id = entry_id_by_symbol(&executor, "enroll");
     let batch = tx_batch(vec![ir::EntryCall {
         entry_id,
         params: vec![u64_portable(0), u64_portable(1)],
@@ -147,7 +131,7 @@ fn execute_query_returns_expected_value() {
         )])
         .expect("materialize snapshot with tier=2");
 
-    let entry_id = entry_id_by_symbol("tier_of");
+    let entry_id = entry_id_by_symbol(&executor, "tier_of");
     let ctx = context_input([(ir::ContextFieldId(0), u64_portable(7))]);
     let result = executor
         .execute_query(&snapshot, entry_id, &[u64_portable(42)], &ctx)

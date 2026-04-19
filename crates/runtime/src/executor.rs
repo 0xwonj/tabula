@@ -51,6 +51,22 @@ impl PreparedExecutor {
         &self.state.type_runtimes
     }
 
+    /// Look up an entry id by source symbol.
+    ///
+    /// Returns `None` if no entry in this program has a matching symbol.
+    /// Entry ids are stable per compiled program — two executors over the
+    /// same registered program always resolve a given symbol to the same id.
+    pub fn entry_id_by_symbol(&self, symbol: &str) -> Option<ir::EntryId> {
+        self.state
+            .semantic
+            .execution()
+            .program()
+            .entries
+            .iter()
+            .find(|entry| entry.symbol == symbol)
+            .map(|entry| entry.id)
+    }
+
     /// Borrow the installed encoding runtimes.
     pub fn encoding_runtimes(&self) -> &EncodingRuntimeRegistry {
         &self.state.encoding_runtimes
