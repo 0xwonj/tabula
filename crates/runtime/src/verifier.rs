@@ -124,6 +124,11 @@ impl PreparedVerifier {
 /// verifier does not hold. The engine path (`build_prepared_runtime`)
 /// continues to run it; the binding-digest check already gates non-matching
 /// programs on the verifier side.
+// The by-value Arc mirrors `prepare_prover` and `prepare_executor` so the
+// three prepare-* constructors keep a consistent ownership shape. Clippy
+// flags it as needless because the body only borrows, but changing the
+// signature would desync the public API across handles.
+#[allow(clippy::needless_pass_by_value)]
 pub fn prepare_verifier(
     sealed: Arc<SealedArtifact>,
     opts: &PreparedOptions,

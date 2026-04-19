@@ -649,13 +649,13 @@ fn prepare_column_slot(
 ///
 /// Exposed only for tests that need to tamper with witness store contents
 /// before proving. Production code must use
-/// [`crate::engine::prepare_proof_request_on_prepared_state`] instead.
+/// [`crate::prover::prepare_proof_request_on_prepared_state`] instead.
 #[cfg(all(test, feature = "prove"))]
 pub(crate) fn prepare_proof_machine_input(
     state: &PreparedRuntimeState,
     root_backend_bundle: &RootBackendBundle,
     kit_registry: &ChipKitRegistry,
-    input: &crate::engine::ProveInput<'_>,
+    input: &crate::prover::ProveInput<'_>,
 ) -> Result<(PreparedMachineInput, PublicStatement), RuntimeError> {
     let typed_context = crate::prelude::decode_context_input_on_state(state, input.context)?;
     let typed_txs = crate::prelude::decode_entry_batch_on_state(state, input.batch)?;

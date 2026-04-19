@@ -13,31 +13,33 @@ The current path is explicitly split into:
 
 - `tabula_runtime::semantics` for semantic execution-journal reduction and
   public-statement materialization
-- crate-root `tabula_runtime::{PreparedVerifier, PreparedProver, TabulaRuntime,
-  CommittedStateSnapshot, PublicStatement, BoundStatement, ...}` for
-  prepared handles and execute-only orchestration
+- crate-root `tabula_runtime::{PreparedVerifier, PreparedProver,
+  PreparedExecutor, CommittedStateSnapshot, PublicStatement,
+  BoundStatement, ...}` for prepared handles and orchestration
 
 ## Public API Surface
 
-The main surfaces are:
+The main surfaces are three prepared handles, each built through a free
+function that takes an `Arc` of the relevant sealed/registered input and
+a `&PreparedOptions`:
 
-- **`PreparedVerifier`** (verify-feature) — constructed via `prepare_verifier(registered)`
-  or `PreparedVerifierBuilder`. Verify-only handle. `Send + Sync`.
-  - `verify(&self, proof, expected) -> Result<BoundStatement, RuntimeError>`
+- **`PreparedVerifier`** (verify-feature) — constructed via
+  `prepare_verifier(sealed, opts)`. Verify-only handle. `Send + Sync`.
+  - `verify(&self, proof, expected) -> Result<BoundStatement, VerifyError>`
 
 - **`PreparedProver`** (prove-feature, implies verify) — constructed via
-  `prepare_prover(registered)` or `PreparedProverBuilder`. Prove-only handle.
-  `Send + Sync`. Fresh `KitScratch` per call.
-  - `prove(&self, input) -> Result<ProveResult, RuntimeError>`
+  `prepare_prover(registered, opts)`. Prove-only handle. `Send + Sync`.
+  Fresh `KitScratch` per call.
+  - `prove(&self, input) -> Result<ProveResult, ProveError>`
 
-- **`TabulaRuntime`** (verify-feature) — execute-only facade. Built via
-  `RuntimeBuilder`. Supports the execute surface only:
+- **`PreparedExecutor`** (verify-feature) — constructed via
+  `prepare_executor(registered, opts)`. Execute-only handle. `Send + Sync`.
   - `execute_batch*`, `execute_query`, `materialize_logical_state`,
-    `decode_committed_snapshot`, `project_logical_state`, `empty_state_snapshot`
+    `decode_committed_snapshot`, `project_logical_state`,
+    `empty_state_snapshot`, `entry_id_by_symbol`
 
-The design is "prepare once, drive many": both prepared handles are cheap to
-share via `Arc` and support concurrent use. `TabulaRuntime` survives as the
-execute surface; its final disposition is owned by SP-5.
+The design is "prepare once, drive many": all three handles are cheap to
+share via `Arc` and support concurrent use.
 
 ## Role
 
@@ -87,9 +89,9 @@ policy-and-orchestration layer above execution and backend proving.
   program expectations to proof verification belong here, not in the machine
   layer.
 - The secure verification surface is statement-first:
-  `verify_public_statement(proof, expected_public_statement)`. The machine
-  proof does **not** carry a `PublicStatement`; the caller must thread the
-  expected statement separately.
+  `PreparedVerifier::verify(&self, proof, expected_public_statement)`.
+  The machine proof does **not** carry a `PublicStatement`; the caller
+  must thread the expected statement separately.
 - `PublicStatement` is the proved object.
 - `BoundStatement` is the verifier-side outer binding over artifact
   invariants plus the proved public statement.

@@ -45,9 +45,10 @@ pub(crate) struct ColumnProofSlot {
 
 /// Prepared runtime state derived from a registered program.
 ///
-/// Shared between `TabulaRuntime` (execute surface) and `PreparedProver`
-/// (prove surface). Construction is feature-gated; the fields marked
-/// `#[cfg(feature = "prove")]` are carried only on the prove build.
+/// Shared between `PreparedExecutor` (execute surface) and
+/// `PreparedProver` (prove surface). Construction is feature-gated; the
+/// fields marked `#[cfg(feature = "prove")]` are carried only on the
+/// prove build.
 #[derive(Clone)]
 pub(crate) struct PreparedRuntimeState {
     pub(crate) semantic: runtime_ir::RuntimeProgram,
@@ -77,9 +78,9 @@ pub(crate) struct PreparedRuntimeBuild {
 
 /// Build the [`ChipKitRegistry`] derived from a prepared runtime state.
 ///
-/// This runs once at handle-build time (shared between `TabulaRuntime`
-/// and `PreparedProver`). Per-prove work must still allocate a fresh
-/// `KitScratch` — see SP-4 §2.5 on the SP-3 boundary.
+/// This runs once at handle-build time on the prove surface. Per-prove
+/// work must still allocate a fresh `KitScratch` — see SP-4 §2.5 on the
+/// SP-3 boundary.
 #[cfg(feature = "prove")]
 pub(crate) fn build_chip_kit_registry(state: &PreparedRuntimeState) -> ChipKitRegistry {
     let mut kit_registry = ChipKitRegistry::new();

@@ -7,7 +7,7 @@
 //! pipeline.
 //!
 //! The four `decode_*_on_state` helpers are un-gated inside the module
-//! because they are reused by the verify-surface `TabulaRuntime` to
+//! because they are reused by the verify-surface (`PreparedExecutor`) to
 //! validate query and execution entry calls. The three `build_*_prelude`
 //! helpers are prove-only and carry their own `#[cfg(feature = "prove")]`
 //! gate along with their imports.

@@ -129,7 +129,7 @@ fn runtime_root_exposes_only_the_final_native_surface() {
     );
     assert!(
         runtime_lib.contains("pub use tabula_contract::{BoundStatement, PublicStatement};")
-            && runtime_lib.contains("pub use engine::{ProveInput, ProveResult, VerifiedResult};")
+            && runtime_lib.contains("pub use prover::{ProveInput, ProveResult, VerifiedResult};")
             && runtime_lib.contains(
                 "pub use verifier::{PreparedVerifier, VerifierState, prepare_verifier};"
             )
@@ -159,7 +159,8 @@ fn live_runtime_sources_are_legacy_free() {
         "crates/runtime/src/lib.rs",
         "crates/runtime/src/error.rs",
         "crates/runtime/src/semantics.rs",
-        "crates/runtime/src/engine.rs",
+        "crates/runtime/src/execution.rs",
+        "crates/runtime/src/executor.rs",
         "crates/runtime/src/verifier.rs",
         "crates/runtime/src/prover.rs",
         "crates/runtime/src/state_runtime.rs",
@@ -208,8 +209,14 @@ fn runtime_state_bootstrap_uses_sealed_column_contracts_directly() {
 
 #[test]
 fn native_proof_path_stays_bridge_free() {
+    // SP-5 Task 10: engine.rs was deleted; proving orchestration lives in
+    // prover.rs. The guardrails below pin the production prover surface.
+    assert!(
+        !workspace_root().join("crates/runtime/src/engine.rs").exists(),
+        "engine.rs must remain deleted — prove pipeline lives in prover.rs"
+    );
     assert_source_omits(
-        "crates/runtime/src/engine.rs",
+        "crates/runtime/src/prover.rs",
         &[
             leaked(&["tabula_", "artifact", "::"]),
             leaked(&["tabula_compiler::", "Sealed", "Program"]),
@@ -217,15 +224,17 @@ fn native_proof_path_stays_bridge_free() {
             leaked(&["legacy", "::"]),
         ],
     );
-    assert_source_omits(
-        "crates/runtime/src/engine.rs",
+    // Proving orchestration must not reintroduce legacy VerifierCore /
+    // builder types or any IR-rescanning helpers.
+    assert_source_prefix_omits(
+        "crates/runtime/src/prover.rs",
+        "#[cfg(all(test, feature = \"prove\"))]",
         &[
-            // VerifierCore was deleted in SP-4 S4 after the duplicate verify
-            // path through TabulaRuntime was removed. This assertion remains
-            // as a guard against accidental reintroduction in engine.rs.
             "struct VerifierCore",
             "pub struct PreparedVerifierBuilder",
-            "pub struct PreparedVerifier {",
+            "pub struct PreparedProverBuilder",
+            "pub struct TabulaRuntime",
+            "pub struct RuntimeBuilder",
             "fn validate_core_first_program(",
             "fn materialize_registered_state_runtime(",
             "fn program_uses_hash(",
@@ -241,16 +250,6 @@ fn native_proof_path_stays_bridge_free() {
             "fn relation_policy_from_program(",
             "fn program_uses_hash(",
             "fn program_uses_relations(",
-        ],
-    );
-    // SP-4 S4.1: prove surface removed from TabulaRuntime; callers migrated to PreparedProver/PreparedVerifier.
-    assert_source_omits(
-        "crates/runtime/src/engine.rs",
-        &[
-            "fn prove(&self, input: &ProveInput",
-            "pub fn prove_and_verify(",
-            "pub fn execute_and_prove(",
-            "pub fn verify_public_statement(",
         ],
     );
     assert_source_omits(
@@ -285,7 +284,7 @@ fn verifier_path_is_single_sourced_in_verifier_module() {
     );
     assert!(
         !verifier_source.contains("crate::engine::"),
-        "runtime verifier module must not depend on proving orchestration in engine.rs"
+        "runtime verifier module must not depend on deleted engine.rs orchestration"
     );
 }
 
@@ -299,7 +298,7 @@ fn runtime_relation_proof_prep_stays_witness_owned() {
     // still lives in witness — that is what the rest of this guardrail
     // continues to protect.
     assert_source_prefix_omits(
-        "crates/runtime/src/engine.rs",
+        "crates/runtime/src/prover.rs",
         "#[cfg(all(test, feature = \"prove\"))]",
         &[
             "RelationTranscriptCall",
@@ -317,20 +316,20 @@ fn runtime_relation_proof_prep_stays_witness_owned() {
 /// Scope is intentionally limited to `crates/runtime/src/{engine,verifier}.rs`
 /// because the runtime is the only workspace crate that may construct a
 /// `TabulaMachine` and drive it directly. `tabula-sdk` reaches the backend
-/// exclusively through `tabula_runtime::TabulaRuntime::prove` and through
+/// exclusively through `PreparedProver::prove` and through
 /// `PreparedVerifier` — it does not depend on `tabula-machine` except for re-exported
 /// envelope types. If that changes (e.g. SDK gains a direct `TabulaMachine`
 /// handle), extend `facade_routing_paths` below to cover `crates/sdk/src/**`.
 #[test]
 fn runtime_prove_and_verify_route_through_backend_facade() {
-    let engine = read_workspace_file("crates/runtime/src/engine.rs");
-    let engine_prod = engine
+    let prover = read_workspace_file("crates/runtime/src/prover.rs");
+    let prover_prod = prover
         .split("#[cfg(all(test, feature = \"prove\"))]")
         .next()
-        .unwrap_or(engine.as_str());
+        .unwrap_or(prover.as_str());
     assert!(
-        engine_prod.contains("BackendProver::new(machine)")
-            && engine_prod.contains(".prove_envelope("),
+        prover_prod.contains("BackendProver::new(machine)")
+            && prover_prod.contains(".prove_envelope("),
         "runtime prove path must go through BackendProver::prove_envelope"
     );
     for forbidden in [
@@ -338,8 +337,8 @@ fn runtime_prove_and_verify_route_through_backend_facade() {
         leaked(&["self.machine.", "verify("]),
     ] {
         assert!(
-            !engine_prod.contains(forbidden),
-            "runtime engine production path must not call '{forbidden}' directly — route through the BackendProver/BackendVerifier facade"
+            !prover_prod.contains(forbidden),
+            "runtime prover production path must not call '{forbidden}' directly — route through the BackendProver/BackendVerifier facade"
         );
     }
 

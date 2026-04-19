@@ -35,15 +35,12 @@
 //!   the [`prepare_verifier`] free function, the public
 //!   [`VerifierState`] type for native proof verification, and the
 //!   [`PreparedExecutor`] / [`prepare_executor`] execute-only surface.
-//! - **`prove`**: adds [`TabulaRuntime`], [`RuntimeBuilder`],
-//!   [`PreparedProver`], the
-//!   [`prepare_prover`] free function, and the full native
-//!   witness → trace → prove pipeline. Implies `verify`.
+//! - **`prove`**: adds [`PreparedProver`], the [`prepare_prover`] free
+//!   function, and the full native witness → trace → prove pipeline.
+//!   Implies `verify`.
 
 #[cfg(feature = "verify")]
 mod bootstrap;
-#[cfg(feature = "verify")]
-mod engine;
 mod error;
 #[cfg(feature = "verify")]
 mod execution;
@@ -83,9 +80,11 @@ pub use error::{ExecuteError, VerifyError};
 #[cfg(feature = "verify")]
 pub use tabula_contract::SealedRelationPolicy;
 #[cfg(feature = "verify")]
-pub use engine::{CommittedStateSnapshot, ExecutionReceipt, RuntimeBuilder, TabulaRuntime};
+pub use execution::ExecutionReceipt;
+#[cfg(feature = "verify")]
+pub use snapshot::CommittedStateSnapshot;
 #[cfg(feature = "prove")]
-pub use engine::{ProveInput, ProveResult, VerifiedResult};
+pub use prover::{ProveInput, ProveResult, VerifiedResult};
 #[cfg(feature = "verify")]
 pub use executor::{PreparedExecutor, prepare_executor};
 #[cfg(feature = "verify")]

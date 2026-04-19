@@ -1,9 +1,9 @@
 //! Batch execution and query dispatch over prepared runtime state.
 //!
 //! Hosts the free-function execute/query surface and [`ExecutionReceipt`].
-//! [`crate::engine::TabulaRuntime`] methods are thin wrappers that forward
-//! into these functions; [`crate::PreparedProver`] also calls into this
-//! module directly.
+//! [`crate::PreparedExecutor`] methods are thin wrappers that forward into
+//! these functions; [`crate::PreparedProver`] also calls into this module
+//! directly.
 
 #![cfg(feature = "verify")]
 

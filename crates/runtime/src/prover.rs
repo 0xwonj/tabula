@@ -9,22 +9,125 @@
 use std::sync::Arc;
 
 use tabula_compiler::RegisteredProgram;
-use tabula_contract::ProgramBinding;
+use tabula_contract::{BoundStatement, ProgramBinding, ProofEnvelope, PublicStatement};
 use tabula_core::Digest;
+use tabula_executor as exec;
 use tabula_ext::root::RootBackendBundle;
-use tabula_machine::TabulaMachine;
+use tabula_ir as ir;
+use tabula_machine::{BackendProver, TabulaMachine, TabulaProof};
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 use tabula_witness::stark::ChipKitRegistry;
 
-use crate::engine::{
-    ProveInput, ProveResult, VerifiedResult, prepare_proof_request_on_prepared_state,
-};
 use crate::error::{ProveError, RuntimeError, VerifyError};
 use crate::options::PreparedOptions;
 use crate::prepared_state::{
     PreparedRuntimeState, build_chip_kit_registry, build_prepared_runtime,
 };
+use crate::proof_summary::ProofSummary;
+use crate::semantics as runtime_ir;
+use crate::snapshot::CommittedStateSnapshot;
 use crate::verifier::VerifierState;
+
+/// Inputs for native proving.
+pub struct ProveInput<'a> {
+    /// Committed pre-state.
+    pub snapshot: &'a CommittedStateSnapshot,
+    /// Applied transactions.
+    pub batch: &'a ir::EntryBatch,
+    /// Public context values.
+    pub context: &'a ir::ContextInput,
+    /// Execution journal returned by execution.
+    pub executed: &'a exec::ExecutionJournal,
+}
+
+/// Result of native proof generation.
+pub struct ProveResult {
+    /// Generated STARK proof (decoded form).
+    pub proof: TabulaProof,
+    /// Wire-format envelope around the encoded proof bytes, produced by the
+    /// machine backend primitive.
+    pub envelope: ProofEnvelope,
+    /// The artifact-bound public statement that accompanies `proof`.
+    pub public_statement: PublicStatement,
+    /// Human-readable machine summary.
+    pub summary: ProofSummary,
+}
+
+/// Result of prove + verify.
+pub struct VerifiedResult {
+    /// Generated STARK proof (decoded form).
+    pub proof: TabulaProof,
+    /// Wire-format envelope around the encoded proof bytes, produced by the
+    /// machine backend primitive.
+    pub envelope: ProofEnvelope,
+    /// The artifact-bound public statement that accompanies `proof`.
+    pub public_statement: PublicStatement,
+    /// Whether verification passed.
+    pub verified: bool,
+    /// Human-readable machine summary.
+    pub summary: ProofSummary,
+}
+
+/// Shared prove pipeline entry point used by [`PreparedProver`].
+///
+/// Prepares the machine input and public statement for one already-executed tx batch.
+/// All per-batch mutable state (KitScratch, column artifacts) lives in locals inside
+/// this call — calling it twice with the same input produces byte-identical output.
+pub(crate) fn prepare_proof_request_on_prepared_state(
+    state: &PreparedRuntimeState,
+    root_backend_bundle: &RootBackendBundle,
+    kit_registry: &ChipKitRegistry,
+    machine: &TabulaMachine,
+    input: &ProveInput<'_>,
+) -> Result<ProveResult, RuntimeError> {
+    let typed_context = crate::prelude::decode_context_input_on_state(state, input.context)?;
+    let typed_txs = crate::prelude::decode_entry_batch_on_state(state, input.batch)?;
+    let applied_tx_digest = runtime_ir::compute_applied_tx_digest(
+        input.batch,
+        &state.type_runtimes,
+        &state.encoding_runtimes,
+        &state.tuple_encoding_defaults,
+    )
+    .map_err(|error| VerifyError::StatementBuild {
+        detail: error.to_string(),
+    })?;
+    let proof_artifacts = crate::proof_artifacts::prepare_proof_artifacts(
+        state,
+        root_backend_bundle,
+        kit_registry,
+        input.snapshot,
+        &typed_txs,
+        &typed_context,
+        input.executed,
+    )?;
+    let public_statement = crate::statement::materialize_public_statement_on_state(
+        state,
+        &typed_context,
+        runtime_ir::PublicStatementMaterialization {
+            applied_tx_digest,
+            old_state_root: proof_artifacts.public_statement.old_root.to_bytes(),
+            new_state_root: proof_artifacts.public_statement.new_root.to_bytes(),
+        },
+        input.executed,
+    )?;
+    let binding_digest =
+        BoundStatement::new(state.artifact_context.clone(), public_statement.clone())
+            .binding_digest()
+            .map_err(|error| VerifyError::StatementBuild {
+                detail: error.to_string(),
+            })?;
+    let machine_input = proof_artifacts.into_prepared_machine_input(binding_digest);
+    let (proof, envelope) = BackendProver::new(machine)
+        .prove_envelope(machine_input)
+        .map_err(ProveError::Proving)?;
+    let summary = ProofSummary::from_proof(&proof);
+    Ok(ProveResult {
+        proof,
+        envelope,
+        public_statement,
+        summary,
+    })
+}
 
 /// Prepared prover handle for one registered native program.
 ///
@@ -178,6 +281,10 @@ const _: fn() = || {
     fn assert_send_sync_static<T: Send + Sync + 'static>() {}
     assert_send_sync_static::<PreparedProver>();
 };
+
+#[cfg(all(test, feature = "prove"))]
+#[path = "prover_relation_tests.rs"]
+mod relation_proof_tests;
 
 #[cfg(test)]
 mod tests {
