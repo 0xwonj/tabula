@@ -428,147 +428,209 @@ fn crate_readmes_under(rel: &str) -> Vec<PathBuf> {
 /// - shared helpers: `EntrySource`,
 /// - the concrete kit type set (witness ops files import the kit, never
 ///   the row type).
-#[test]
-fn sp3_witness_chip_import_guardrail() {
-    /// Subtrees skipped by the guardrail. These tiers intentionally
-    /// stay chip-aware per SP-3 §9 non-goals. Expanding this list
-    /// requires explicit justification.
-    const DEFERRED_TIER_PREFIXES: &[&str] = &[
-        "crates/witness/src/stark/memory",
-        "crates/witness/src/stark/roots",
-        "crates/witness/src/stark/schemes",
-    ];
+/// Subtrees skipped by the guardrail. These tiers intentionally
+/// stay chip-aware per SP-3 §9 non-goals. Expanding this list
+/// requires explicit justification.
+const SP3_DEFERRED_TIER_PREFIXES: &[&str] = &[
+    "crates/witness/src/stark/memory",
+    "crates/witness/src/stark/roots",
+    "crates/witness/src/stark/schemes",
+];
 
-    /// Concrete set of kit types witness ops files may name. Replaces
-    /// the looser `ends_with("Kit")` rule so a hypothetical chip row
-    /// type named `FooKit` would still be rejected.
-    const ALLOWED_KITS: &[&str] = &[
-        "IrHashKit",
-        "RelationTranscriptKit",
-        "RelationTableKit",
-        "PublicContextTranscriptKit",
-        "TxBatchTranscriptKit",
-        "EventTranscriptKit",
-    ];
+/// Concrete set of kit types witness ops files may name. Replaces
+/// the looser `ends_with("Kit")` rule so a hypothetical chip row
+/// type named `FooKit` would still be rejected.
+const SP3_ALLOWED_KITS: &[&str] = &[
+    "IrHashKit",
+    "RelationTranscriptKit",
+    "RelationTableKit",
+    "PublicContextTranscriptKit",
+    "TxBatchTranscriptKit",
+    "EventTranscriptKit",
+];
 
-    fn last_segment(path: &str) -> &str {
-        path.rsplit("::").next().unwrap_or(path)
-    }
+fn sp3_last_segment(path: &str) -> &str {
+    path.rsplit("::").next().unwrap_or(path)
+}
 
-    fn allowed(tail: &str) -> bool {
-        matches!(
-            tail,
-            "Opcode"
-                | "CmpOp"
-                | "MAX_SLOTS"
-                | "EXECUTION_STANDARD_VALUE_WIDTH"
-                | "native_key_payload_prefix3"
-                | "poseidon2_permutation"
-                | "InstructionRecord"
-                | "StaticTableRow"
-                | "EntrySource"
-        ) || tail.ends_with("_WITNESS_LABEL")
-            || ALLOWED_KITS.contains(&tail)
-    }
+fn sp3_allowed(tail: &str) -> bool {
+    matches!(
+        tail,
+        "Opcode"
+            | "CmpOp"
+            | "MAX_SLOTS"
+            | "EXECUTION_STANDARD_VALUE_WIDTH"
+            | "native_key_payload_prefix3"
+            | "poseidon2_permutation"
+            | "InstructionRecord"
+            | "StaticTableRow"
+            | "EntrySource"
+    ) || tail.ends_with("_WITNESS_LABEL")
+        || SP3_ALLOWED_KITS.contains(&tail)
+}
 
-    fn scan_use_line(line: &str, path: &Path, forbidden: &mut Vec<(PathBuf, String)>) {
-        let trimmed = line.trim_start();
-        let Some(rest) = trimmed.strip_prefix("use tabula_chips::") else {
-            return;
-        };
-        let body = rest.trim_end_matches(';').trim();
-        if let Some(open) = body.find('{') {
-            let prefix = &body[..open];
-            let close = body.rfind('}').unwrap_or(body.len());
-            let group = &body[open + 1..close];
-            for item in group.split(',') {
-                let item = item.trim();
-                if item.is_empty() {
-                    continue;
-                }
-                let head = item.split(" as ").next().unwrap_or(item).trim();
-                let tail = last_segment(head);
-                if !allowed(tail) {
-                    forbidden.push((
-                        path.to_path_buf(),
-                        format!("tabula_chips::{prefix}{head}"),
-                    ));
-                }
-            }
-        } else {
-            let head = body.split(" as ").next().unwrap_or(body).trim();
-            let tail = last_segment(head);
-            if !allowed(tail) {
-                forbidden.push((path.to_path_buf(), format!("tabula_chips::{head}")));
-            }
-        }
-    }
-
-    /// Also look for `tabula_chips::…::Ident` occurrences outside a
-    /// `use` line — i.e. inline fully-qualified references and
-    /// re-exports from other crates that pass a forbidden tail through.
-    fn scan_inline_fqn(line: &str, path: &Path, forbidden: &mut Vec<(PathBuf, String)>) {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("use tabula_chips::") || trimmed.starts_with("//") {
-            return;
-        }
-        let mut rest = line;
-        while let Some(at) = rest.find("tabula_chips::") {
-            rest = &rest[at + "tabula_chips::".len()..];
-            // Read the Rust path that follows: segments of [A-Za-z0-9_]
-            // joined by `::`. Stop at the first non-matching char.
-            let mut end = 0;
-            let bytes = rest.as_bytes();
-            let mut i = 0;
-            while i < bytes.len() {
-                let c = bytes[i];
-                let ident = c.is_ascii_alphanumeric() || c == b'_';
-                let sep = i + 1 < bytes.len()
-                    && c == b':'
-                    && bytes[i + 1] == b':'
-                    && i > 0
-                    && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
-                if ident {
-                    end = i + 1;
-                    i += 1;
-                } else if sep {
-                    end = i + 2;
-                    i += 2;
-                } else {
-                    break;
-                }
-            }
-            if end == 0 {
+fn sp3_scan_use_stmt(stmt: &str, path: &Path, forbidden: &mut Vec<(PathBuf, String)>) {
+    // `stmt` is a single logical `use tabula_chips::...;` statement,
+    // newlines already collapsed to spaces by the caller.
+    let Some(rest) = stmt.trim_start().strip_prefix("use tabula_chips::") else {
+        return;
+    };
+    let body = rest.trim_end_matches(';').trim();
+    if let Some(open) = body.find('{') {
+        let prefix = &body[..open];
+        let close = body.rfind('}').unwrap_or(body.len());
+        let group = &body[open + 1..close];
+        for item in group.split(',') {
+            let item = item.trim();
+            if item.is_empty() {
                 continue;
             }
-            let path_seg = &rest[..end];
-            let tail = last_segment(path_seg);
-            if !allowed(tail) {
+            let head = item.split(" as ").next().unwrap_or(item).trim();
+            let tail = sp3_last_segment(head);
+            if !sp3_allowed(tail) {
                 forbidden.push((
                     path.to_path_buf(),
-                    format!("tabula_chips::{path_seg} (inline FQN)"),
+                    format!("tabula_chips::{prefix}{head}"),
                 ));
             }
-            rest = &rest[end..];
+        }
+    } else {
+        let head = body.split(" as ").next().unwrap_or(body).trim();
+        let tail = sp3_last_segment(head);
+        if !sp3_allowed(tail) {
+            forbidden.push((path.to_path_buf(), format!("tabula_chips::{head}")));
         }
     }
+}
 
+/// Also look for `tabula_chips::…::Ident` occurrences outside a
+/// `use` statement — inline fully-qualified references and
+/// re-exports from other crates that pass a forbidden tail through.
+fn sp3_scan_inline_fqn(line: &str, path: &Path, forbidden: &mut Vec<(PathBuf, String)>) {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("//") {
+        return;
+    }
+    let mut rest = line;
+    while let Some(at) = rest.find("tabula_chips::") {
+        rest = &rest[at + "tabula_chips::".len()..];
+        // Read the Rust path that follows: segments of [A-Za-z0-9_]
+        // joined by `::`. Stop at the first non-matching char.
+        let mut end = 0;
+        let bytes = rest.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let c = bytes[i];
+            let ident = c.is_ascii_alphanumeric() || c == b'_';
+            let sep = i + 1 < bytes.len()
+                && c == b':'
+                && bytes[i + 1] == b':'
+                && i > 0
+                && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+            if ident {
+                end = i + 1;
+                i += 1;
+            } else if sep {
+                end = i + 2;
+                i += 2;
+            } else {
+                break;
+            }
+        }
+        if end == 0 {
+            continue;
+        }
+        let path_seg = &rest[..end];
+        let tail = sp3_last_segment(path_seg);
+        if !sp3_allowed(tail) {
+            forbidden.push((
+                path.to_path_buf(),
+                format!("tabula_chips::{path_seg} (inline FQN)"),
+            ));
+        }
+        rest = &rest[end..];
+    }
+}
+
+/// Scan one source string for forbidden `tabula_chips::…` references.
+///
+/// Multi-line grouped `use` statements are folded into a single
+/// logical statement before scanning so a form like
+/// `use tabula_chips::{\n    ir_hash::IrHashCall,\n};` is covered.
+/// Inline FQN references are scanned line-by-line, but lines that
+/// belong to the body of a `use tabula_chips::` statement are
+/// excluded so their continuation fragments are not double-flagged.
+fn sp3_collect_chip_refs(source: &str, path: &Path, forbidden: &mut Vec<(PathBuf, String)>) {
+    let mut buffer: Option<String> = None;
+    let mut in_use_block = false;
+    for line in source.lines() {
+        if let Some(buf) = buffer.as_mut() {
+            buf.push(' ');
+            buf.push_str(line.trim());
+            if line.contains(';') {
+                sp3_scan_use_stmt(buf, path, forbidden);
+                buffer = None;
+                in_use_block = false;
+            }
+            continue;
+        }
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("use tabula_chips::") {
+            if line.contains(';') {
+                sp3_scan_use_stmt(line, path, forbidden);
+            } else {
+                buffer = Some(trimmed.to_string());
+                in_use_block = true;
+            }
+            continue;
+        }
+        if !in_use_block {
+            sp3_scan_inline_fqn(line, path, forbidden);
+        }
+    }
+}
+
+#[test]
+fn sp3_guardrail_detects_multiline_grouped_chip_imports() {
+    // Synthetic source containing a multi-line grouped `use` with a
+    // forbidden tail. The per-line scanner the guardrail started with
+    // would pass this through; the folded scanner must flag it.
+    let src = "use tabula_chips::{\n    ir_hash::IrHashCall,\n};\n";
+    let mut forbidden = Vec::new();
+    sp3_collect_chip_refs(src, Path::new("synthetic.rs"), &mut forbidden);
+    assert!(
+        !forbidden.is_empty(),
+        "multi-line grouped chip import must be flagged",
+    );
+}
+
+#[test]
+fn sp3_guardrail_accepts_multiline_allowed_imports() {
+    // Multi-line grouped imports for allowed kits must NOT be flagged.
+    let src = "use tabula_chips::{\n    ir_hash::IrHashKit,\n    relation_table::RelationTableKit,\n};\n";
+    let mut forbidden = Vec::new();
+    sp3_collect_chip_refs(src, Path::new("synthetic.rs"), &mut forbidden);
+    assert!(
+        forbidden.is_empty(),
+        "allowed kits in a multi-line group must pass: {forbidden:?}",
+    );
+}
+
+#[test]
+fn sp3_witness_chip_import_guardrail() {
     let sources = rust_sources_under("crates/witness/src");
     let mut forbidden: Vec<(PathBuf, String)> = Vec::new();
 
     for path in sources {
         let path_str = path.to_string_lossy();
-        if DEFERRED_TIER_PREFIXES
+        if SP3_DEFERRED_TIER_PREFIXES
             .iter()
             .any(|prefix| path_str.contains(prefix))
         {
             continue;
         }
         let source = fs::read_to_string(&path).expect("read witness source");
-        for line in source.lines() {
-            scan_use_line(line, &path, &mut forbidden);
-            scan_inline_fqn(line, &path, &mut forbidden);
-        }
+        sp3_collect_chip_refs(&source, &path, &mut forbidden);
     }
 
     assert!(
