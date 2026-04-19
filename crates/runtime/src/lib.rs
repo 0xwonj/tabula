@@ -45,6 +45,8 @@ mod bootstrap;
 mod engine;
 mod error;
 #[cfg(feature = "verify")]
+mod execution;
+#[cfg(feature = "verify")]
 mod host;
 #[cfg(feature = "verify")]
 mod prelude;
