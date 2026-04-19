@@ -362,9 +362,7 @@ fn materialize_column_backend(
             encoding_runtime,
             key_codec,
         })
-        .map_err(|error| SetupError::Validation {
-            detail: error.to_string(),
-        })?;
+        .map_err(SetupError::Extension)?;
     if backend.verifier_contract.scheme_id != resolved.scheme_profile.scheme_family_id {
         return Err(SetupError::Validation {
             detail: format!(

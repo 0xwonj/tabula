@@ -18,7 +18,7 @@ use crate::engine::{
     PreparedRuntimeState, ProveInput, ProveResult, VerifiedResult, build_chip_kit_registry,
     build_prepared_runtime, prepare_proof_request_on_prepared_state,
 };
-use crate::error::{RuntimeError, SetupError};
+use crate::error::{ProveError, RuntimeError, SetupError, VerifyError};
 use crate::host::HostEnvironment;
 use crate::verifier::VerifierState;
 
@@ -110,7 +110,14 @@ impl PreparedProver {
         input: &ProveInput<'_>,
     ) -> Result<VerifiedResult, RuntimeError> {
         let prove_result = self.prove(input)?;
-        verifier.verify(&prove_result.proof, &prove_result.public_statement)?;
+        verifier
+            .verify(&prove_result.proof, &prove_result.public_statement)
+            .map_err(|e| match e {
+                RuntimeError::Verify(VerifyError::Verification(source)) => {
+                    RuntimeError::Prove(ProveError::PostVerify(source))
+                }
+                other => other,
+            })?;
         Ok(VerifiedResult {
             proof: prove_result.proof,
             envelope: prove_result.envelope,

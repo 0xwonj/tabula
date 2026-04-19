@@ -79,6 +79,9 @@ pub enum ProveError {
     /// STARK proving failed.
     #[error("proving: {0}")]
     Proving(#[source] tabula_machine::ProveError),
+    /// Post-prove verification failed (observed by `prove_and_verify`).
+    #[error("verification (post-prove): {0}")]
+    PostVerify(#[source] tabula_machine::VerificationError),
 }
 
 /// Errors observed during verification and public statement assembly.
