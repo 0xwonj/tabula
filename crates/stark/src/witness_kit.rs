@@ -134,8 +134,26 @@ pub enum KitError {
     DowncastFailed(ChipId),
 }
 
+/// Convention-seal module for [`ChipWitnessKit`].
+///
+/// Third-party chip authoring is not a goal; this seal makes a new
+/// `impl ChipWitnessKit` require an explicit `impl sealed::Sealed`
+/// line that stands out in review and CI. A true private-supertrait
+/// seal is not achievable because blessed chip impls live in a
+/// separate crate (`tabula-chips`), so the module is intentionally
+/// `pub`. See SP-5 §9 design rationale.
+pub mod sealed {
+    /// Marker supertrait required by [`super::ChipWitnessKit`].
+    ///
+    /// Implement this for a type (alongside `impl ChipWitnessKit`)
+    /// only when the type is a blessed workspace chip. The
+    /// requirement that this impl must appear in a non-`tabula-stark`
+    /// crate makes any new chip visible as a distinct line in review.
+    pub trait Sealed {}
+}
+
 /// The chip-authoring protocol for witness-tier row contribution.
-pub trait ChipWitnessKit: Send + Sync {
+pub trait ChipWitnessKit: sealed::Sealed + Send + Sync {
     /// Stable identifier this kit populates rows for. Must match the
     /// `ChipId` of the AIR its owning execution backend registers.
     fn chip_id(&self) -> ChipId;

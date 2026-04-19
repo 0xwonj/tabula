@@ -347,6 +347,8 @@ impl TxBatchTranscriptKit {
     }
 }
 
+impl tabula_stark::witness_kit::sealed::Sealed for TxBatchTranscriptKit {}
+
 impl tabula_stark::witness_kit::ChipWitnessKit for TxBatchTranscriptKit {
     fn chip_id(&self) -> ChipId {
         Self::CHIP_ID

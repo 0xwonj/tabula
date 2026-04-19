@@ -2,7 +2,7 @@
 
 use tabula_stark::chips::ChipId;
 use tabula_stark::trace::WitnessStore;
-use tabula_stark::witness_kit::{ChipWitnessKit, KitError, KitFinalizeContext, KitScratch};
+use tabula_stark::witness_kit::{ChipWitnessKit, KitError, KitFinalizeContext, KitScratch, sealed};
 
 use super::{RELATION_TABLE_CHIP_ID, RELATION_TABLE_WITNESS_LABEL, RelationTableWitnessRow};
 
@@ -24,6 +24,8 @@ impl RelationTableKit {
         scratch.insert(Self::CHIP_ID, Box::new(rows));
     }
 }
+
+impl sealed::Sealed for RelationTableKit {}
 
 impl ChipWitnessKit for RelationTableKit {
     fn chip_id(&self) -> ChipId {

@@ -347,6 +347,8 @@ impl EventTranscriptKit {
     }
 }
 
+impl tabula_stark::witness_kit::sealed::Sealed for EventTranscriptKit {}
+
 impl tabula_stark::witness_kit::ChipWitnessKit for EventTranscriptKit {
     fn chip_id(&self) -> ChipId {
         Self::CHIP_ID

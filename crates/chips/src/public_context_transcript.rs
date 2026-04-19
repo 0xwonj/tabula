@@ -345,6 +345,8 @@ impl PublicContextTranscriptKit {
     }
 }
 
+impl tabula_stark::witness_kit::sealed::Sealed for PublicContextTranscriptKit {}
+
 impl tabula_stark::witness_kit::ChipWitnessKit for PublicContextTranscriptKit {
     fn chip_id(&self) -> ChipId {
         Self::CHIP_ID

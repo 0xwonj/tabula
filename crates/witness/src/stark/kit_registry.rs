@@ -82,7 +82,7 @@ mod tests {
     use super::*;
     use tabula_stark::chips::ChipId;
     use tabula_stark::trace::WitnessStore;
-    use tabula_stark::witness_kit::{KitError, KitFinalizeContext};
+    use tabula_stark::witness_kit::{KitError, KitFinalizeContext, sealed};
 
     const CHIP_A: ChipId = ChipId(9001);
     const CHIP_B: ChipId = ChipId(9002);
@@ -91,6 +91,8 @@ mod tests {
         id: ChipId,
         label: &'static str,
     }
+
+    impl sealed::Sealed for StubKit {}
 
     impl ChipWitnessKit for StubKit {
         fn chip_id(&self) -> ChipId {

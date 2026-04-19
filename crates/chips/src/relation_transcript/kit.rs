@@ -8,7 +8,7 @@ use tabula_contract::format::typed_tuple::{
 use tabula_core::error::TabulaError;
 use tabula_stark::chips::ChipId;
 use tabula_stark::trace::WitnessStore;
-use tabula_stark::witness_kit::{ChipWitnessKit, KitError, KitFinalizeContext, KitScratch};
+use tabula_stark::witness_kit::{ChipWitnessKit, KitError, KitFinalizeContext, KitScratch, sealed};
 use tabula_types::{EncodingRuntimeRegistry, TypedValue};
 
 use super::{
@@ -81,6 +81,8 @@ impl RelationTranscriptKit {
         Ok(projection)
     }
 }
+
+impl sealed::Sealed for RelationTranscriptKit {}
 
 impl ChipWitnessKit for RelationTranscriptKit {
     fn chip_id(&self) -> ChipId {

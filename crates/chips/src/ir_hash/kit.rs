@@ -4,7 +4,7 @@ use tabula_core::PortableValue;
 use tabula_core::error::TabulaError;
 use tabula_stark::chips::ChipId;
 use tabula_stark::trace::WitnessStore;
-use tabula_stark::witness_kit::{ChipWitnessKit, KitError, KitFinalizeContext, KitScratch};
+use tabula_stark::witness_kit::{ChipWitnessKit, KitError, KitFinalizeContext, KitScratch, sealed};
 
 use super::{IR_HASH_CHIP_ID, IR_HASH_WITNESS_LABEL, IrHashCall};
 
@@ -46,6 +46,8 @@ impl IrHashKit {
         Ok(digest)
     }
 }
+
+impl sealed::Sealed for IrHashKit {}
 
 impl ChipWitnessKit for IrHashKit {
     fn chip_id(&self) -> ChipId {
