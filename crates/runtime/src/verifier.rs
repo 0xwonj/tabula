@@ -19,7 +19,7 @@ use tabula_ext::root::{RootProofBackend, SmtRootProofBackend};
 use tabula_machine::{BackendVerifier, TabulaMachine, TabulaProof, TabulaStarkConfig};
 
 use crate::bootstrap::program::{build_registered_program_machine, resolve_sealed_artifact_setup};
-use crate::error::RuntimeError;
+use crate::error::{RuntimeError, SetupError, VerifyError};
 use crate::host::HostEnvironment;
 
 /// Prepared verifier state derived from the sealed artifact and machine setup.
@@ -91,14 +91,15 @@ impl PreparedVerifier {
         let expected_binding_digest =
             bound
                 .binding_digest()
-                .map_err(|error| RuntimeError::StatementBuild {
+                .map_err(|error| VerifyError::StatementBuild {
                     detail: error.to_string(),
                 })?;
         if proof.binding_digest != expected_binding_digest {
-            return Err(RuntimeError::ValidationFailed {
+            return Err(VerifyError::Validation {
                 detail: "proof binding digest does not match the artifact-bound public statement"
                     .to_string(),
-            });
+            }
+            .into());
         }
         verify_proved_public_statement_digests(
             proof,
@@ -108,23 +109,25 @@ impl PreparedVerifier {
         match relation_table_root_from_proof(proof, &self.prepared.machine)? {
             Some(root) if self.prepared.relation_policy.requires_artifact_root() => {
                 if root != self.prepared.context.static_table_root {
-                    return Err(RuntimeError::ValidationFailed {
+                    return Err(VerifyError::Validation {
                         detail: "relation table chip root does not match the verifier artifact"
                             .to_string(),
-                    });
+                    }
+                    .into());
                 }
             }
             None if self.prepared.relation_policy.requires_artifact_root() => {
-                return Err(RuntimeError::ValidationFailed {
+                return Err(VerifyError::Validation {
                     detail: "relation table chip opening is missing from the execution proof"
                         .to_string(),
-                });
+                }
+                .into());
             }
             _ => {}
         }
         BackendVerifier::new(&self.prepared.machine)
             .verify_proof(proof)
-            .map_err(RuntimeError::Verification)?;
+            .map_err(VerifyError::Verification)?;
         Ok(bound)
     }
 }
@@ -133,7 +136,7 @@ impl PreparedVerifierBuilder {
     fn new(sealed_artifact: Arc<SealedArtifact>) -> Result<Self, RuntimeError> {
         sealed_artifact
             .validate()
-            .map_err(|e| RuntimeError::ValidationFailed {
+            .map_err(|e| SetupError::Validation {
                 detail: format!("sealed artifact validation failed: {e}"),
             })?;
         Ok(Self {
@@ -258,32 +261,34 @@ fn execution_chip_digest_from_proof(
     };
     let expected_arity = machine
         .execution_chip_public_value_arity(chip_id)
-        .ok_or_else(|| RuntimeError::ValidationFailed {
+        .ok_or_else(|| VerifyError::Validation {
             detail: format!(
                 "execution machine metadata is missing {label} chip {}",
                 chip_id.0
             ),
         })?;
     if values.len() != expected_arity {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(VerifyError::Validation {
             detail: format!(
                 "{label} chip exposed {0} public values; machine metadata requires {expected_arity}",
                 values.len()
             ),
-        });
+        }
+        .into());
     }
     let digest_arity = NativeDigest::ZERO.0.len();
     if expected_arity != digest_arity {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(VerifyError::Validation {
             detail: format!(
                 "{label} chip metadata declares {expected_arity} public values, but runtime digest checks require {digest_arity}"
             ),
-        });
+        }
+        .into());
     }
     let public_values: [p3_koala_bear::KoalaBear; 8] =
         values
             .try_into()
-            .map_err(|_| RuntimeError::ValidationFailed {
+            .map_err(|_| VerifyError::Validation {
                 detail: format!(
                     "{label} chip exposed {} public values after metadata validation; expected {}",
                     values.len(),
@@ -305,17 +310,19 @@ fn verify_proved_public_statement_digests(
         "public-context transcript",
     )?
     else {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(VerifyError::Validation {
             detail: "public-context transcript chip opening is missing from the execution proof"
                 .to_string(),
-        });
+        }
+        .into());
     };
     if public_context_digest != public_statement.public_context_digest.to_bytes() {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(VerifyError::Validation {
             detail:
                 "public-context transcript chip digest does not match the proved public statement"
                     .to_string(),
-        });
+        }
+        .into());
     }
 
     let Some(applied_tx_digest) = execution_chip_digest_from_proof(
@@ -325,16 +332,18 @@ fn verify_proved_public_statement_digests(
         "tx-batch transcript",
     )?
     else {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(VerifyError::Validation {
             detail: "tx-batch transcript chip opening is missing from the execution proof"
                 .to_string(),
-        });
+        }
+        .into());
     };
     if applied_tx_digest != public_statement.applied_tx_digest.to_bytes() {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(VerifyError::Validation {
             detail: "tx-batch transcript chip digest does not match the proved public statement"
                 .to_string(),
-        });
+        }
+        .into());
     }
 
     let Some(event_digest) = execution_chip_digest_from_proof(
@@ -344,15 +353,17 @@ fn verify_proved_public_statement_digests(
         "event transcript",
     )?
     else {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(VerifyError::Validation {
             detail: "event transcript chip opening is missing from the execution proof".to_string(),
-        });
+        }
+        .into());
     };
     if event_digest != public_statement.event_digest.to_bytes() {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(VerifyError::Validation {
             detail: "event transcript chip digest does not match the proved public statement"
                 .to_string(),
-        });
+        }
+        .into());
     }
 
     Ok(())

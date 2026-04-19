@@ -59,7 +59,11 @@ mod state_runtime;
 #[cfg(feature = "verify")]
 mod verifier;
 
-pub use error::{RuntimeError, RuntimeResult};
+pub use error::{RuntimeError, RuntimeResult, SetupError};
+#[cfg(feature = "prove")]
+pub use error::ProveError;
+#[cfg(feature = "verify")]
+pub use error::{ExecuteError, VerifyError};
 
 #[cfg(feature = "verify")]
 pub use tabula_contract::SealedRelationPolicy;

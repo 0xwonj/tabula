@@ -14,7 +14,7 @@ use tabula_types::{
     TableKeyCodec, TypeRuntimeRegistry, TypedCommittedPropertyQueryResult, TypedValue,
 };
 
-use crate::error::RuntimeError;
+use crate::error::{RuntimeError, SetupError};
 use crate::host::SchemeFactoryMap;
 
 #[derive(Clone)]
@@ -69,18 +69,18 @@ impl ResolvedStateRuntime {
         for table in &contract.state.tables {
             let codec = Arc::new(
                 TableKeyCodec::from_contract(table.id, &table.key, encoding_runtimes).map_err(
-                    |error| RuntimeError::ValidationFailed {
+                    |error| SetupError::Validation {
                         detail: error.to_string(),
                     },
                 )?,
             );
             if key_codecs.insert(table.id, codec).is_some() {
-                return Err(RuntimeError::ValidationFailed {
+                return Err(SetupError::Validation {
                     detail: format!(
                         "duplicate table-key codec registration for table {}",
                         table.id.0
                     ),
-                });
+                }.into());
             }
         }
 
@@ -88,7 +88,7 @@ impl ResolvedStateRuntime {
         for (table_index, table) in contract.state.tables.iter().enumerate() {
             let key_codec = key_codecs
                 .get(&table.id)
-                .ok_or_else(|| RuntimeError::ValidationFailed {
+                .ok_or_else(|| SetupError::Validation {
                     detail: format!(
                         "missing table-key codec implementation for table {}",
                         table.id.0
@@ -99,7 +99,7 @@ impl ResolvedStateRuntime {
             for (column_index, column) in table.columns.iter().enumerate() {
                 let resolved = profile_catalog
                     .resolve_column_profile(column.column_profile_id)
-                    .map_err(|error| RuntimeError::ValidationFailed {
+                    .map_err(|error| SetupError::Validation {
                         detail: error.to_string(),
                     })?;
                 let backend = materialize_column_backend(
@@ -137,16 +137,17 @@ impl ResolvedStateRuntime {
         let resolved = self
             .tables
             .get(&table)
-            .ok_or_else(|| RuntimeError::ValidationFailed {
+            .ok_or_else(|| SetupError::Validation {
                 detail: format!("unknown state table {}", table.0),
             })?;
         self.contract
             .state
             .tables
             .get(resolved.table_index)
-            .ok_or_else(|| RuntimeError::ValidationFailed {
+            .ok_or_else(|| SetupError::Validation {
                 detail: format!("missing resolved state table contract {}", table.0),
             })
+            .map_err(Into::into)
     }
 
     pub(crate) fn column_contract(
@@ -157,14 +158,14 @@ impl ResolvedStateRuntime {
         let resolved_table =
             self.tables
                 .get(&table)
-                .ok_or_else(|| RuntimeError::ValidationFailed {
+                .ok_or_else(|| SetupError::Validation {
                     detail: format!("unknown state table {}", table.0),
                 })?;
         let resolved_column =
             resolved_table
                 .columns
                 .get(&col)
-                .ok_or_else(|| RuntimeError::ValidationFailed {
+                .ok_or_else(|| SetupError::Validation {
                     detail: format!("unknown state column {}.{}", table.0, col.0),
                 })?;
         self.contract
@@ -172,12 +173,13 @@ impl ResolvedStateRuntime {
             .tables
             .get(resolved_table.table_index)
             .and_then(|table| table.columns.get(resolved_column.column_index))
-            .ok_or_else(|| RuntimeError::ValidationFailed {
+            .ok_or_else(|| SetupError::Validation {
                 detail: format!(
                     "missing resolved state column contract {}.{}",
                     table.0, col.0
                 ),
             })
+            .map_err(Into::into)
     }
 
     pub(crate) fn column_type(&self, table: TableId, col: ColId) -> Result<TypeId, RuntimeError> {
@@ -188,9 +190,10 @@ impl ResolvedStateRuntime {
         self.tables
             .get(&table)
             .map(|table| table.key_codec.as_ref())
-            .ok_or_else(|| RuntimeError::ValidationFailed {
+            .ok_or_else(|| SetupError::Validation {
                 detail: format!("unknown state table {}", table.0),
             })
+            .map_err(Into::into)
     }
 
     pub(crate) fn backend(
@@ -202,9 +205,10 @@ impl ResolvedStateRuntime {
             .get(&table)
             .and_then(|table| table.columns.get(&col))
             .map(|column| &column.backend)
-            .ok_or_else(|| RuntimeError::ValidationFailed {
+            .ok_or_else(|| SetupError::Validation {
                 detail: format!("unknown state backend {}.{}", table.0, col.0),
             })
+            .map_err(Into::into)
     }
 
     pub(crate) fn backends(&self) -> impl Iterator<Item = &MaterializedColumnBackend> + '_ {
@@ -330,24 +334,24 @@ fn materialize_column_backend(
     let type_runtime = materializer
         .type_runtimes
         .resolve(resolved.type_descriptor.type_id)
-        .map_err(|detail| RuntimeError::ValidationFailed {
+        .map_err(|detail| SetupError::Validation {
             detail: detail.to_string(),
         })?
         .clone();
     let encoding_runtime = materializer
         .encoding_runtimes
         .resolve(resolved.encoding_profile.encoding_profile_id)
-        .map_err(|detail| RuntimeError::ValidationFailed {
+        .map_err(|detail| SetupError::Validation {
             detail: detail.to_string(),
         })?
         .clone();
     let Some(factory) = materializer.backend_factories.get(&scheme_id) else {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(SetupError::Validation {
             detail: format!(
                 "no canonical backend factory registered for scheme id {}",
                 scheme_id.0,
             ),
-        });
+        }.into());
     };
     let backend = factory
         .materialize_backend(ColumnBackendSetup {
@@ -358,75 +362,75 @@ fn materialize_column_backend(
             encoding_runtime,
             key_codec,
         })
-        .map_err(|error| RuntimeError::ValidationFailed {
+        .map_err(|error| SetupError::Validation {
             detail: error.to_string(),
         })?;
     if backend.verifier_contract.scheme_id != resolved.scheme_profile.scheme_family_id {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(SetupError::Validation {
             detail: format!(
                 "materialized backend for scheme {} reported verifier contract scheme {}",
                 resolved.scheme_profile.scheme_family_id.0, backend.verifier_contract.scheme_id.0
             ),
-        });
+        }.into());
     }
     if backend.verifier_contract.proof_layout_family != resolved.proof_layout_family() {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(SetupError::Validation {
             detail: format!(
                 "materialized backend proof layout mismatch: profile={} backend={}",
                 resolved.proof_layout_family().0,
                 backend.verifier_contract.proof_layout_family.0,
             ),
-        });
+        }.into());
     }
     if backend.verifier_contract.verifier_digest_format != resolved.verifier_digest_format() {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(SetupError::Validation {
             detail: "materialized backend verifier digest format does not match scheme profile"
                 .to_string(),
-        });
+        }.into());
     }
     if backend.root_binding_contract.root_binding_family != resolved.root_binding_family() {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(SetupError::Validation {
             detail: format!(
                 "materialized backend root binding family mismatch: profile={} backend={}",
                 resolved.root_binding_family().0,
                 backend.root_binding_contract.root_binding_family.0,
             ),
-        });
+        }.into());
     }
     if backend.root_binding_contract.column_profile_hash != resolved.column_profile.profile_hash {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(SetupError::Validation {
             detail: "materialized backend root binding contract does not match column profile hash"
                 .to_string(),
-        });
+        }.into());
     }
     if !materializer
         .accepted_root_binding_families
         .contains(&backend.root_binding_contract.root_binding_family)
     {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(SetupError::Validation {
             detail: format!(
                 "bundled root authority does not support binding family {} for table {} col {}",
                 backend.root_binding_contract.root_binding_family.0,
                 backend.table_id.0,
                 backend.col_id.0,
             ),
-        });
+        }.into());
     }
     if backend.table_id != table.id || backend.col_id != column.id {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(SetupError::Validation {
             detail: format!(
                 "materialized backend slot mismatch: expected {}.{} but got {}.{}",
                 table.id.0, column.id.0, backend.table_id.0, backend.col_id.0
             ),
-        });
+        }.into());
     }
     if backend.required_property_query_kinds != column.required_property_queries {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(SetupError::Validation {
             detail: format!(
                 "materialized backend property-query set mismatch for {}.{}",
                 table.id.0, column.id.0,
             ),
-        });
+        }.into());
     }
     Ok(backend)
 }

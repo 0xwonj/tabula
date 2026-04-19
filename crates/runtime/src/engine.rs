@@ -17,10 +17,10 @@ use tabula_contract::BoundStatement;
 #[cfg(feature = "prove")]
 use tabula_contract::ProofEnvelope;
 #[cfg(feature = "prove")]
+use tabula_contract::PublicStatement;
+#[cfg(feature = "prove")]
 use tabula_contract::TupleEncodingDefaults;
 use tabula_contract::{ArtifactContext, ProgramBinding, SealedRelationPolicy, StaticTableArtifact};
-#[cfg(feature = "prove")]
-use tabula_contract::PublicStatement;
 #[cfg(feature = "prove")]
 use tabula_core::{ColId, TableId};
 use tabula_core::{Digest, PortableValue};
@@ -33,12 +33,12 @@ use tabula_ext::root::{RootBackendBundle, RootWitnessContext};
 use tabula_ext::root::{RootProofBackend, SmtRootProofBackend};
 use tabula_ir as ir;
 #[cfg(feature = "prove")]
+use tabula_machine::TabulaProof;
+#[cfg(feature = "prove")]
 use tabula_machine::{
     BackendProver, ColumnSlotKey, PreparedColumnInput, PreparedMachineInput, PreparedTierInput,
 };
 use tabula_machine::{TabulaMachine, TabulaStarkConfig};
-#[cfg(feature = "prove")]
-use tabula_machine::TabulaProof;
 #[cfg(feature = "prove")]
 use tabula_types::StateEffectKind;
 use tabula_types::{
@@ -59,7 +59,13 @@ use tabula_witness::{
 use crate::bootstrap::program::{
     build_registered_program_machine, resolve_program_setup, validate_core_first_program,
 };
-use crate::error::RuntimeError;
+#[cfg(feature = "verify")]
+use crate::error::ExecuteError;
+#[cfg(feature = "prove")]
+use crate::error::ProveError;
+#[cfg(feature = "verify")]
+use crate::error::VerifyError;
+use crate::error::{RuntimeError, SetupError};
 use crate::host::HostEnvironment;
 #[cfg(feature = "prove")]
 use crate::proof_summary::ProofSummary;
@@ -71,7 +77,6 @@ use crate::snapshot::LogicalStateCell;
 // `engine::` to keep that pin satisfied.
 pub use crate::snapshot::CommittedStateSnapshot;
 use crate::state_runtime::ResolvedStateRuntime;
-
 
 /// Inputs for native proving.
 #[cfg(feature = "prove")]
@@ -213,7 +218,7 @@ pub(crate) fn prepare_proof_request_on_prepared_state(
         &state.encoding_runtimes,
         &state.tuple_encoding_defaults,
     )
-    .map_err(|error| RuntimeError::StatementBuild {
+    .map_err(|error| VerifyError::StatementBuild {
         detail: error.to_string(),
     })?;
     let proof_artifacts = prepare_proof_artifacts(
@@ -238,13 +243,13 @@ pub(crate) fn prepare_proof_request_on_prepared_state(
     let binding_digest =
         BoundStatement::new(state.artifact_context.clone(), public_statement.clone())
             .binding_digest()
-            .map_err(|error| RuntimeError::StatementBuild {
+            .map_err(|error| VerifyError::StatementBuild {
                 detail: error.to_string(),
             })?;
     let machine_input = proof_artifacts.into_prepared_machine_input(binding_digest);
     let (proof, envelope) = BackendProver::new(machine)
         .prove_envelope(machine_input)
-        .map_err(RuntimeError::Proving)?;
+        .map_err(ProveError::Proving)?;
     let summary = crate::proof_summary::ProofSummary::from_proof(&proof);
     Ok(ProveResult {
         proof,
@@ -273,13 +278,14 @@ fn decode_entry_call_on_state(
         .semantic
         .execution()
         .entry_definition(call.entry_id)
-        .map_err(|error| RuntimeError::ValidationFailed {
+        .map_err(|error| VerifyError::Validation {
             detail: error.to_string(),
         })?;
     if entry.kind != ir::EntryKind::Tx {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(VerifyError::Validation {
             detail: format!("entry {} is not a tx entry", call.entry_id.0),
-        });
+        }
+        .into());
     }
     let params = decode_params_on_state(state, &entry.params, &call.params)?;
     Ok(TxCall {
@@ -294,32 +300,34 @@ fn decode_params_on_state(
     params: &[PortableValue],
 ) -> Result<Vec<TypedValue>, RuntimeError> {
     if expected.len() != params.len() {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(VerifyError::Validation {
             detail: format!(
                 "expected {} params but received {}",
                 expected.len(),
                 params.len()
             ),
-        });
+        }
+        .into());
     }
     expected
         .iter()
         .zip(params)
         .map(|(param, value)| {
             if value.type_id() != param.ty {
-                return Err(RuntimeError::ValidationFailed {
+                return Err(VerifyError::Validation {
                     detail: format!(
                         "param {} expects type {} but received {}",
                         param.symbol,
                         param.ty.0,
                         value.type_id().0
                     ),
-                });
+                }
+                .into());
             }
             state.type_runtimes.decode_portable(value).map_err(|error| {
-                RuntimeError::ValidationFailed {
+                RuntimeError::from(VerifyError::Validation {
                     detail: error.to_string(),
-                }
+                })
             })
         })
         .collect()
@@ -335,23 +343,24 @@ fn decode_context_input_on_state(
             .semantic
             .execution()
             .context_field(*field_id)
-            .map_err(|error| RuntimeError::ValidationFailed {
+            .map_err(|error| VerifyError::Validation {
                 detail: error.to_string(),
             })?;
         if value.type_id() != field.ty {
-            return Err(RuntimeError::ValidationFailed {
+            return Err(VerifyError::Validation {
                 detail: format!(
                     "context field {} expects type {} but received {}",
                     field.symbol,
                     field.ty.0,
                     value.type_id().0
                 ),
-            });
+            }
+            .into());
         }
         let decoded = state
             .type_runtimes
             .decode_portable(value)
-            .map_err(|error| RuntimeError::ValidationFailed {
+            .map_err(|error| VerifyError::Validation {
                 detail: error.to_string(),
             })?;
         typed.insert(*field_id, decoded);
@@ -375,8 +384,10 @@ fn materialize_public_statement_on_state(
         &state.encoding_runtimes,
         &state.tuple_encoding_defaults,
     )
-    .map_err(|error| RuntimeError::StatementBuild {
-        detail: error.to_string(),
+    .map_err(|error| {
+        RuntimeError::from(VerifyError::StatementBuild {
+            detail: error.to_string(),
+        })
     })
 }
 
@@ -428,7 +439,7 @@ pub(crate) fn build_prepared_runtime(
     let semantic = runtime_ir::RuntimeProgram::from_validated_program(
         registered_program.validated_program().clone(),
     )
-    .map_err(|error| RuntimeError::ValidationFailed {
+    .map_err(|error| SetupError::Validation {
         detail: error.to_string(),
     })?;
 
@@ -474,7 +485,7 @@ impl RuntimeBuilder {
     fn new(registered_program: RegisteredProgram) -> Result<Self, RuntimeError> {
         registered_program
             .validate_sealed_artifact()
-            .map_err(RuntimeError::CompilerValidation)?;
+            .map_err(SetupError::CompilerValidation)?;
         Ok(Self {
             registered_program,
             host_environment: HostEnvironment::standard()?,
@@ -642,13 +653,13 @@ impl TabulaRuntime {
                     .state
                     .key_codec(key.table)?
                     .decode_key(&key.key)
-                    .map_err(|error| RuntimeError::ValidationFailed {
+                    .map_err(|error| ExecuteError::Validation {
                         detail: error.to_string(),
                     })?
                     .into_iter()
                     .map(|value| {
                         self.type_runtimes().encode_typed(&value).map_err(|source| {
-                            RuntimeError::ValidationFailed {
+                            ExecuteError::Validation {
                                 detail: source.to_string(),
                             }
                         })
@@ -713,10 +724,12 @@ impl TabulaRuntime {
                 state_runtime: &self.runtime_program.state,
             },
         )
-        .map_err(|source| RuntimeError::Execution {
-            source,
-            instruction_index: None,
-            tx_index: None,
+        .map_err(|source| {
+            RuntimeError::from(ExecuteError::Execution {
+                source,
+                instruction_index: None,
+                tx_index: None,
+            })
         })
     }
 
@@ -754,10 +767,12 @@ impl TabulaRuntime {
                 state_runtime: &self.runtime_program.state,
             },
         )
-        .map_err(|error| RuntimeError::Execution {
-            source: error.error,
-            instruction_index: Some(error.op_index),
-            tx_index: None,
+        .map_err(|error| {
+            RuntimeError::from(ExecuteError::Execution {
+                source: error.error,
+                instruction_index: Some(error.op_index),
+                tx_index: None,
+            })
         })
     }
 
@@ -773,13 +788,14 @@ impl TabulaRuntime {
         let entry = self
             .execution_program()
             .entry_definition(entry_id)
-            .map_err(|error| RuntimeError::ValidationFailed {
+            .map_err(|error| ExecuteError::Validation {
                 detail: error.to_string(),
             })?;
         if entry.kind != ir::EntryKind::Query {
-            return Err(RuntimeError::ValidationFailed {
+            return Err(ExecuteError::Validation {
                 detail: format!("entry {} is not a query entry", entry_id.0),
-            });
+            }
+            .into());
         }
         self.decode_params(&entry.params, params)
     }
@@ -812,7 +828,7 @@ fn materialize_post_state(
         match &write.value {
             Some(value) => {
                 let portable = type_runtimes.encode_typed(value).map_err(|source| {
-                    RuntimeError::ValidationFailed {
+                    ExecuteError::Validation {
                         detail: source.to_string(),
                     }
                 })?;
@@ -887,15 +903,15 @@ fn build_public_statement_slot_layout(
     let reserved_slots = context_field_ids
         .len()
         .checked_add(max_param_count)
-        .ok_or_else(|| RuntimeError::ValidationFailed {
+        .ok_or_else(|| VerifyError::Validation {
             detail: "reserved public-statement slot count overflowed usize".to_string(),
         })?;
     if reserved_slots > MAX_SLOTS {
-        return Err(RuntimeError::ValidationFailed {
+        return Err(VerifyError::Validation {
             detail: format!(
                 "proof-visible public-statement prelude requires {reserved_slots} reserved slots, exceeding the machine ceiling of {MAX_SLOTS}"
             ),
-        });
+        }.into());
     }
     let aux_slot_limit = MAX_SLOTS - reserved_slots;
     let context_slots = context_field_ids
@@ -921,8 +937,10 @@ fn context_public_statement_bindings(
         context,
         &runtime_program.type_runtimes,
     )
-    .map_err(|error| RuntimeError::StatementBuild {
-        detail: error.to_string(),
+    .map_err(|error| {
+        RuntimeError::from(VerifyError::StatementBuild {
+            detail: error.to_string(),
+        })
     })
 }
 
@@ -934,7 +952,7 @@ fn build_context_prelude(
 ) -> Result<ContextPreludeArtifacts, RuntimeError> {
     let canonical_bindings =
         runtime_ir::canonical_public_context(context_bindings).map_err(|error| {
-            RuntimeError::StatementBuild {
+            VerifyError::StatementBuild {
                 detail: error.to_string(),
             }
         })?;
@@ -944,7 +962,7 @@ fn build_context_prelude(
         &runtime_program.encoding_runtimes,
         &runtime_program.tuple_encoding_defaults,
     )
-    .map_err(|error| RuntimeError::StatementBuild {
+    .map_err(|error| VerifyError::StatementBuild {
         detail: error.to_string(),
     })?
     .into_iter()
@@ -958,7 +976,7 @@ fn build_context_prelude(
             .context_slots
             .iter()
             .find_map(|(field_id, slot)| (*field_id == binding.field).then_some(*slot))
-            .ok_or_else(|| RuntimeError::ValidationFailed {
+            .ok_or_else(|| VerifyError::Validation {
                 detail: format!(
                     "missing reserved execution slot for context field {}",
                     binding.field.0
@@ -967,7 +985,7 @@ fn build_context_prelude(
         let typed = runtime_program
             .type_runtimes
             .decode_portable(&binding.value)
-            .map_err(|source| RuntimeError::StatementBuild {
+            .map_err(|source| VerifyError::StatementBuild {
                 detail: source.to_string(),
             })?;
         let encoded = runtime_ir::encode_public_statement_value(
@@ -975,7 +993,7 @@ fn build_context_prelude(
             &runtime_program.encoding_runtimes,
             &runtime_program.tuple_encoding_defaults,
         )
-        .map_err(|source| RuntimeError::StatementBuild {
+        .map_err(|source| VerifyError::StatementBuild {
             detail: source.to_string(),
         })?;
         slots.push(ContextPreludeSlot {
@@ -1021,20 +1039,22 @@ fn build_param_prelude(
     });
 
     for (param_index, param) in entry.params.iter().enumerate() {
-        let value = call.params.get(param_index).cloned().ok_or_else(|| {
-            RuntimeError::ValidationFailed {
-                detail: format!(
-                    "tx {tx_index} is missing parameter {} for entry {}",
-                    param.symbol, entry.symbol
-                ),
-            }
-        })?;
+        let value =
+            call.params
+                .get(param_index)
+                .cloned()
+                .ok_or_else(|| VerifyError::Validation {
+                    detail: format!(
+                        "tx {tx_index} is missing parameter {} for entry {}",
+                        param.symbol, entry.symbol
+                    ),
+                })?;
         let encoded = runtime_ir::encode_public_statement_value(
             &value,
             &runtime_program.encoding_runtimes,
             &runtime_program.tuple_encoding_defaults,
         )
-        .map_err(|source| RuntimeError::StatementBuild {
+        .map_err(|source| VerifyError::StatementBuild {
             detail: source.to_string(),
         })?;
         let slot = layout.param_slot_base + param_index;
@@ -1135,7 +1155,7 @@ fn prepare_proof_artifacts(
     for entry in &executed.state_summary.read_set_old {
         let slot = *column_index
             .get(&(entry.key.table, entry.key.col))
-            .ok_or_else(|| RuntimeError::ValidationFailed {
+            .ok_or_else(|| ProveError::WitnessGeneration {
                 detail: format!(
                     "read-set column ({}, {}) missing from the proof plan",
                     entry.key.table.0, entry.key.col.0
@@ -1146,7 +1166,7 @@ fn prepare_proof_artifacts(
             None => runtime_program
                 .type_runtimes
                 .zero_of(entry.type_id)
-                .map_err(|source| RuntimeError::WitnessGeneration {
+                .map_err(|source| ProveError::WitnessGeneration {
                     detail: source.to_string(),
                 })?,
         };
@@ -1159,7 +1179,7 @@ fn prepare_proof_artifacts(
     for entry in &executed.state_summary.write_set_final {
         let slot = *column_index
             .get(&(entry.key.table, entry.key.col))
-            .ok_or_else(|| RuntimeError::ValidationFailed {
+            .ok_or_else(|| ProveError::WitnessGeneration {
                 detail: format!(
                     "write-set column ({}, {}) missing from the proof plan",
                     entry.key.table.0, entry.key.col.0
@@ -1173,7 +1193,7 @@ fn prepare_proof_artifacts(
 
     let context_bindings = context_public_statement_bindings(runtime_program, context)?;
     let canonical_context_ids = runtime_ir::canonical_public_context(&context_bindings)
-        .map_err(|error| RuntimeError::StatementBuild {
+        .map_err(|error| VerifyError::StatementBuild {
             detail: error.to_string(),
         })?
         .into_iter()
@@ -1191,7 +1211,7 @@ fn prepare_proof_artifacts(
         &runtime_program.encoding_runtimes,
         &runtime_program.tuple_encoding_defaults,
     )
-    .map_err(|error| RuntimeError::StatementBuild {
+    .map_err(|error| VerifyError::StatementBuild {
         detail: error.to_string(),
     })?
     .into_iter()
@@ -1207,7 +1227,7 @@ fn prepare_proof_artifacts(
                     .iter()
                     .map(|value| runtime_program.type_runtimes.encode_typed(value))
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(|source| RuntimeError::StatementBuild {
+                    .map_err(|source| VerifyError::StatementBuild {
                         detail: source.to_string(),
                     })?;
                 Ok(ir::EntryCall {
@@ -1223,7 +1243,7 @@ fn prepare_proof_artifacts(
         &runtime_program.encoding_runtimes,
         &runtime_program.tuple_encoding_defaults,
     )
-    .map_err(|error| RuntimeError::StatementBuild {
+    .map_err(|error| VerifyError::StatementBuild {
         detail: error.to_string(),
     })?
     .into_iter()
@@ -1237,7 +1257,7 @@ fn prepare_proof_artifacts(
             .semantic
             .execution()
             .entry_definition(call.entry_id)
-            .map_err(|error| RuntimeError::ValidationFailed {
+            .map_err(|error| ProveError::WitnessGeneration {
                 detail: error.to_string(),
             })?;
         let (param_slots, records) = build_param_prelude(
@@ -1259,7 +1279,7 @@ fn prepare_proof_artifacts(
         for effect in &tx.state_effects {
             let slot = *column_index
                 .get(&(effect.key.table, effect.key.col))
-                .ok_or_else(|| RuntimeError::ValidationFailed {
+                .ok_or_else(|| ProveError::WitnessGeneration {
                     detail: format!(
                         "state effect column ({}, {}) missing from the proof plan",
                         effect.key.table.0, effect.key.col.0
@@ -1270,7 +1290,7 @@ fn prepare_proof_artifacts(
                 None => runtime_program
                     .type_runtimes
                     .zero_of(effect.type_id)
-                    .map_err(|source| RuntimeError::WitnessGeneration {
+                    .map_err(|source| ProveError::WitnessGeneration {
                         detail: source.to_string(),
                     })?,
             };
@@ -1290,7 +1310,7 @@ fn prepare_proof_artifacts(
         for effect in &tx.property_effects {
             let slot = *column_index
                 .get(&(effect.table.into(), effect.field.into()))
-                .ok_or_else(|| RuntimeError::ValidationFailed {
+                .ok_or_else(|| ProveError::WitnessGeneration {
                     detail: format!(
                         "property effect column ({}, {}) missing from the proof plan",
                         effect.table.0, effect.field.0
@@ -1304,24 +1324,25 @@ fn prepare_proof_artifacts(
 
         let call = txs
             .get(tx.tx_index as usize)
-            .ok_or_else(|| RuntimeError::ValidationFailed {
+            .ok_or_else(|| ProveError::WitnessGeneration {
                 detail: format!("missing tx call {} during witness lowering", tx.tx_index),
             })?;
         let entry = runtime_program
             .semantic
             .execution()
             .entry_definition(tx.entry_id)
-            .map_err(|error| RuntimeError::ValidationFailed {
+            .map_err(|error| ProveError::WitnessGeneration {
                 detail: error.to_string(),
             })?;
-        let (param_slots, _) = tx_prelude_by_index.get(&tx.tx_index).ok_or_else(|| {
-            RuntimeError::ValidationFailed {
-                detail: format!(
-                    "missing reserved parameter prelude for tx {} during witness lowering",
-                    tx.tx_index
-                ),
-            }
-        })?;
+        let (param_slots, _) =
+            tx_prelude_by_index
+                .get(&tx.tx_index)
+                .ok_or_else(|| ProveError::WitnessGeneration {
+                    detail: format!(
+                        "missing reserved parameter prelude for tx {} during witness lowering",
+                        tx.tx_index
+                    ),
+                })?;
         lowered_txs.insert(
             tx.tx_index,
             lower_successful_tx::<3>(
@@ -1350,7 +1371,7 @@ fn prepare_proof_artifacts(
                 },
                 &mut kit_scratch,
             )
-            .map_err(RuntimeError::TraceBuild)?,
+            .map_err(ProveError::TraceBuild)?,
         );
     }
 
@@ -1359,7 +1380,7 @@ fn prepare_proof_artifacts(
     for tx_index in 0..txs.len() {
         let (_, prelude_records) =
             tx_prelude_by_index.get(&(tx_index as u32)).ok_or_else(|| {
-                RuntimeError::ValidationFailed {
+                ProveError::WitnessGeneration {
                     detail: format!("missing tx prelude for tx {tx_index}"),
                 }
             })?;
@@ -1386,14 +1407,15 @@ fn prepare_proof_artifacts(
         &runtime_program.static_table_artifact,
         &lowered.relation_claims,
     )
-    .map_err(|source| RuntimeError::WitnessGeneration {
+    .map_err(|source| ProveError::WitnessGeneration {
         detail: source.to_string(),
     })?;
     if relation_proof.root() != runtime_program.static_table_artifact.root {
-        return Err(RuntimeError::WitnessGeneration {
+        return Err(ProveError::WitnessGeneration {
             detail: "prepared relation proof root diverged from the registered static table root"
                 .to_string(),
-        });
+        }
+        .into());
     }
 
     tabula_chips::relation_table::RelationTableKit::insert_rows(
@@ -1412,7 +1434,7 @@ fn prepare_proof_artifacts(
             .collect(),
     );
     let execution_store =
-        prepare_execution_store(&mut lowered, kit_registry).map_err(RuntimeError::TraceBuild)?;
+        prepare_execution_store(&mut lowered, kit_registry).map_err(ProveError::TraceBuild)?;
 
     let prepared_columns = runtime_program
         .column_slots
@@ -1431,15 +1453,20 @@ fn prepare_proof_artifacts(
     let witness_preparer = root_backend_bundle.witness_preparer();
     let prepared_root = witness_preparer
         .prepare_root_witness(RootWitnessContext::new(&root_bindings))
-        .map_err(RuntimeError::from_extension_proof)
-        .map_err(|error| match error {
-            RuntimeError::WitnessGeneration { detail } => RuntimeError::WitnessGeneration {
+        .map_err(|error| {
+            let detail = match error {
+                tabula_ext::ExtError::Validation { detail } => detail,
+                #[cfg(feature = "verify")]
+                tabula_ext::ExtError::Setup(source) => source.to_string(),
+                tabula_ext::ExtError::RuntimeHook(source)
+                | tabula_ext::ExtError::ProofPreparation(source) => source.to_string(),
+            };
+            ProveError::WitnessGeneration {
                 detail: format!(
                     "root witness preparer '{}': {detail}",
                     witness_preparer.name(),
                 ),
-            },
-            other => other,
+            }
         })?;
     let (public_statement, root_store) = prepared_root.into_parts();
 
@@ -1506,7 +1533,7 @@ fn synthesize_missing_init_cells(
                 runtime_program
                     .type_runtimes
                     .zero_of(field_ty)
-                    .map_err(|source| RuntimeError::WitnessGeneration {
+                    .map_err(|source| ProveError::WitnessGeneration {
                         detail: source.to_string(),
                     })?,
                 true,
@@ -1548,7 +1575,16 @@ fn prepare_column_slot(
             old_entries: prepared.old_entries,
             property_reads: prepared.property_reads,
         })
-        .map_err(RuntimeError::from_extension_proof)?;
+        .map_err(|error| {
+            let detail = match error {
+                tabula_ext::ExtError::Validation { detail } => detail,
+                #[cfg(feature = "verify")]
+                tabula_ext::ExtError::Setup(source) => source.to_string(),
+                tabula_ext::ExtError::RuntimeHook(source)
+                | tabula_ext::ExtError::ProofPreparation(source) => source.to_string(),
+            };
+            ProveError::WitnessGeneration { detail }
+        })?;
     match (
         &proof.root_binding,
         backend.root_binding_contract.receives_commitment,
@@ -1560,29 +1596,31 @@ fn prepare_column_slot(
                 || binding.column_profile_hash != backend.root_binding_contract.column_profile_hash
                 || binding.binding_digest != backend.root_binding_contract.binding_digest
             {
-                return Err(RuntimeError::ValidationFailed {
+                return Err(ProveError::WitnessGeneration {
                     detail: format!(
                         "prepared column proof ({}, {}) returned a root binding that does not match the sealed backend contract",
                         slot.table.0, slot.col.0,
                     ),
-                });
+                }.into());
             }
         }
         (None, true) => {
-            return Err(RuntimeError::ValidationFailed {
+            return Err(ProveError::WitnessGeneration {
                 detail: format!(
                     "prepared column proof ({}, {}) omitted a required root binding",
                     slot.table.0, slot.col.0,
                 ),
-            });
+            }
+            .into());
         }
         (Some(_), false) => {
-            return Err(RuntimeError::ValidationFailed {
+            return Err(ProveError::WitnessGeneration {
                 detail: format!(
                     "prepared column proof ({}, {}) returned an unexpected root binding",
                     slot.table.0, slot.col.0,
                 ),
-            });
+            }
+            .into());
         }
         (None, false) => {}
     }
@@ -1609,7 +1647,7 @@ fn prepare_proof_machine_input(
         &state.encoding_runtimes,
         &state.tuple_encoding_defaults,
     )
-    .map_err(|error| RuntimeError::StatementBuild {
+    .map_err(|error| VerifyError::StatementBuild {
         detail: error.to_string(),
     })?;
     let proof_artifacts = prepare_proof_artifacts(
@@ -1634,7 +1672,7 @@ fn prepare_proof_machine_input(
     let binding_digest =
         BoundStatement::new(state.artifact_context.clone(), public_statement.clone())
             .binding_digest()
-            .map_err(|error| RuntimeError::StatementBuild {
+            .map_err(|error| VerifyError::StatementBuild {
                 detail: error.to_string(),
             })?;
     let machine_input = proof_artifacts.into_prepared_machine_input(binding_digest);
@@ -1644,9 +1682,9 @@ fn prepare_proof_machine_input(
 #[cfg(all(test, feature = "prove"))]
 mod relation_proof_tests {
     use super::*;
-    use tabula_core::error::TabulaError;
     use crate::PreparedVerifier;
     use crate::verifier::relation_table_root_from_proof;
+    use tabula_core::error::TabulaError;
 
     use std::cmp::Ordering;
     use std::sync::Arc;

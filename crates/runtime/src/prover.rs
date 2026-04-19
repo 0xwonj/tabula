@@ -18,7 +18,7 @@ use crate::engine::{
     PreparedRuntimeState, ProveInput, ProveResult, VerifiedResult, build_chip_kit_registry,
     build_prepared_runtime, prepare_proof_request_on_prepared_state,
 };
-use crate::error::RuntimeError;
+use crate::error::{RuntimeError, SetupError};
 use crate::host::HostEnvironment;
 use crate::verifier::VerifierState;
 
@@ -125,7 +125,7 @@ impl PreparedProverBuilder {
     fn new(registered_program: RegisteredProgram) -> Result<Self, RuntimeError> {
         registered_program
             .validate_sealed_artifact()
-            .map_err(RuntimeError::CompilerValidation)?;
+            .map_err(SetupError::CompilerValidation)?;
         Ok(Self {
             registered_program,
             host_environment: HostEnvironment::standard()?,

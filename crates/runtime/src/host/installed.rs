@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tabula_core::SchemeId;
 use tabula_ext::scheme::{ColumnBackendFactory, ColumnBackendFactoryBundle};
 
-use crate::error::RuntimeError;
+use crate::error::{RuntimeError, SetupError};
 
 use super::default_backend_factories;
 
@@ -40,12 +40,13 @@ impl InstalledSchemes {
     ) -> Result<(), RuntimeError> {
         let scheme_id = factory.scheme_id();
         if self.factories.contains_key(&scheme_id) {
-            return Err(RuntimeError::ValidationFailed {
+            return Err(SetupError::Validation {
                 detail: format!(
                     "duplicate scheme backend registration for id {}",
                     scheme_id.0,
                 ),
-            });
+            }
+            .into());
         }
         self.factories.insert(scheme_id, factory);
         Ok(())

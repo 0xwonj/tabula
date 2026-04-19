@@ -16,7 +16,7 @@ use tabula_machine::{TabulaMachine, TabulaStarkConfig};
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 
 use crate::bootstrap::machine::{attach_execution_backend, build_machine_builder};
-use crate::error::RuntimeError;
+use crate::error::{RuntimeError, SetupError};
 use crate::host::SchemeFactoryMap;
 use crate::state_runtime::ResolvedStateRuntime;
 
@@ -118,7 +118,9 @@ pub(crate) fn build_registered_program_machine(
     for backend in execution_backends_for(shape.uses_ir_hash, shape.relation_policy) {
         machine_builder = attach_execution_backend(machine_builder, backend);
     }
-    machine_builder.build().map_err(RuntimeError::MachineSetup)
+    machine_builder
+        .build()
+        .map_err(|e| SetupError::MachineSetup(e).into())
 }
 
 
@@ -128,12 +130,13 @@ pub(crate) fn validate_core_first_program(program: &ir::Program) -> Result<(), R
             match op {
                 ir::Op::ReadStateProperty { .. } => {}
                 ir::Op::CallCapability { .. } => {
-                    return Err(RuntimeError::ValidationFailed {
+                    return Err(SetupError::Validation {
                         detail: format!(
                             "entry {} ('{}') op {} ({op:?}) is outside the current native proving subset: capability calls are intentionally fail-closed",
                             entry.id.0, entry.symbol, op_index,
                         ),
-                    });
+                    }
+                    .into());
                 }
                 _ => {}
             }

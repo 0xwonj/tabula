@@ -14,7 +14,7 @@ use tabula_types::TypeRuntimeRegistry;
 #[cfg(feature = "prove")]
 use tabula_witness::CommittedEntry;
 
-use crate::error::RuntimeError;
+use crate::error::{RuntimeError, SetupError};
 use crate::state_runtime::ResolvedStateRuntime;
 
 pub(crate) type LogicalStateCell =
@@ -72,12 +72,12 @@ impl CommittedStateSnapshot {
                 key: CommittedKey(key),
             };
             if snapshot.cells.contains_key(&cell_key) {
-                return Err(RuntimeError::ValidationFailed {
+                return Err(SetupError::Validation {
                     detail: format!(
                         "duplicate committed cell {}.{} key {} in external snapshot payload",
                         cell_key.table.0, cell_key.col.0, cell_key.key
                     ),
-                });
+                }.into());
             }
             snapshot.insert_materialized(cell_key, value);
         }
@@ -97,11 +97,11 @@ impl CommittedStateSnapshot {
     ) -> Result<(), RuntimeError> {
         let field_schema = state_runtime
             .column_contract(table.into(), field.into())
-            .map_err(|error| RuntimeError::ValidationFailed {
+            .map_err(|error| SetupError::Validation {
                 detail: error.to_string(),
             })?;
         let table_key_codec = state_runtime.key_codec(table.into()).map_err(|error| {
-            RuntimeError::ValidationFailed {
+            SetupError::Validation {
                 detail: error.to_string(),
             }
         })?;
@@ -109,16 +109,16 @@ impl CommittedStateSnapshot {
             .iter()
             .map(|value| type_runtimes.decode_portable(value))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| RuntimeError::ValidationFailed {
+            .map_err(|error| SetupError::Validation {
                 detail: error.to_string(),
             })?;
         let committed_key = table_key_codec.encode_tuple(&typed_key).map_err(|error| {
-            RuntimeError::ValidationFailed {
+            SetupError::Validation {
                 detail: error.to_string(),
             }
         })?;
         if value.type_id() != field_schema.ty {
-            return Err(RuntimeError::ValidationFailed {
+            return Err(SetupError::Validation {
                 detail: format!(
                     "state cell {}.{} key {} stores type {} but field expects {}",
                     table.0,
@@ -127,7 +127,7 @@ impl CommittedStateSnapshot {
                     value.type_id().0,
                     field_schema.ty.0,
                 ),
-            });
+            }.into());
         }
         let cell_key = CommittedCellKey {
             table: table.into(),
@@ -135,12 +135,12 @@ impl CommittedStateSnapshot {
             key: committed_key,
         };
         if self.cells.contains_key(&cell_key) {
-            return Err(RuntimeError::ValidationFailed {
+            return Err(SetupError::Validation {
                 detail: format!(
                     "duplicate logical state cell {}.{} key {} in external state payload",
                     cell_key.table.0, cell_key.col.0, cell_key.key
                 ),
-            });
+            }.into());
         }
         self.cells.insert(cell_key, value);
         Ok(())
@@ -171,11 +171,11 @@ impl CommittedStateSnapshot {
         for (key, value) in &self.cells {
             let column = state_runtime
                 .column_contract(key.table, key.col)
-                .map_err(|error| RuntimeError::ValidationFailed {
+                .map_err(|error| SetupError::Validation {
                     detail: error.to_string(),
                 })?;
             if value.type_id() != column.ty {
-                return Err(RuntimeError::ValidationFailed {
+                return Err(SetupError::Validation {
                     detail: format!(
                         "committed cell {}.{} key {} stores type {} but field expects {}",
                         key.table.0,
@@ -184,33 +184,33 @@ impl CommittedStateSnapshot {
                         value.type_id().0,
                         column.ty.0,
                     ),
-                });
+                }.into());
             }
             let table_key_codec = state_runtime.key_codec(key.table).map_err(|error| {
-                RuntimeError::ValidationFailed {
+                SetupError::Validation {
                     detail: error.to_string(),
                 }
             })?;
             let decoded = table_key_codec.decode_key(&key.key).map_err(|error| {
-                RuntimeError::ValidationFailed {
+                SetupError::Validation {
                     detail: error.to_string(),
                 }
             })?;
             let reencoded = table_key_codec.encode_tuple(&decoded).map_err(|error| {
-                RuntimeError::ValidationFailed {
+                SetupError::Validation {
                     detail: error.to_string(),
                 }
             })?;
             if reencoded != key.key {
-                return Err(RuntimeError::ValidationFailed {
+                return Err(SetupError::Validation {
                     detail: format!(
                         "committed cell {}.{} key {} is not canonical",
                         key.table.0, key.col.0, key.key
                     ),
-                });
+                }.into());
             }
             type_runtimes.decode_portable(value).map_err(|error| {
-                RuntimeError::ValidationFailed {
+                SetupError::Validation {
                     detail: error.to_string(),
                 }
             })?;
@@ -235,7 +235,7 @@ impl CommittedStateSnapshot {
             .collect::<Vec<_>>();
         let mut bytes = b"tabula.runtime.committed_state_snapshot.v1".to_vec();
         bytes.extend(
-            borsh::to_vec(&records).map_err(|error| RuntimeError::ValidationFailed {
+            borsh::to_vec(&records).map_err(|error| SetupError::Validation {
                 detail: format!("failed to encode state snapshot: {error}"),
             })?,
         );
@@ -266,11 +266,13 @@ impl CommittedStateSnapshot {
                         value: typed,
                         is_null: false,
                     })
-                    .map_err(|error| RuntimeError::ValidationFailed {
-                        detail: format!(
-                            "failed to decode committed cell ({}, {}, {}): {error}",
-                            key.table.0, key.col.0, key.key
-                        ),
+                    .map_err(|error| {
+                        RuntimeError::from(SetupError::Validation {
+                            detail: format!(
+                                "failed to decode committed cell ({}, {}, {}): {error}",
+                                key.table.0, key.col.0, key.key
+                            ),
+                        })
                     })
             })
             .collect()

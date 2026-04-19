@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tabula_types::{EncodingRuntime, EncodingRuntimeRegistry, TypeRuntime, TypeRuntimeRegistry};
 
-use crate::error::RuntimeError;
+use crate::error::{RuntimeError, SetupError};
 
 /// Host-owned runtime type and encoding implementations.
 #[derive(Clone)]
@@ -18,12 +18,12 @@ impl RuntimeRegistries {
     pub fn standard() -> Result<Self, RuntimeError> {
         Ok(Self {
             type_runtimes: TypeRuntimeRegistry::seeded().map_err(|error| {
-                RuntimeError::ValidationFailed {
+                SetupError::Validation {
                     detail: error.to_string(),
                 }
             })?,
             encoding_runtimes: EncodingRuntimeRegistry::seeded().map_err(|error| {
-                RuntimeError::ValidationFailed {
+                SetupError::Validation {
                     detail: error.to_string(),
                 }
             })?,
@@ -45,8 +45,11 @@ impl RuntimeRegistries {
     ) -> Result<(), RuntimeError> {
         self.type_runtimes
             .register(runtime)
-            .map_err(|err| RuntimeError::ValidationFailed {
-                detail: err.to_string(),
+            .map_err(|err| {
+                SetupError::Validation {
+                    detail: err.to_string(),
+                }
+                .into()
             })
     }
 
@@ -57,8 +60,11 @@ impl RuntimeRegistries {
     ) -> Result<(), RuntimeError> {
         self.encoding_runtimes
             .register(runtime)
-            .map_err(|err| RuntimeError::ValidationFailed {
-                detail: err.to_string(),
+            .map_err(|err| {
+                SetupError::Validation {
+                    detail: err.to_string(),
+                }
+                .into()
             })
     }
 
