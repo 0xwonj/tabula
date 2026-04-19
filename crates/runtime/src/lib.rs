@@ -48,6 +48,8 @@ mod error;
 mod host;
 #[cfg(feature = "verify")]
 mod prelude;
+#[cfg(feature = "verify")]
+mod prepared_state;
 #[cfg(feature = "prove")]
 mod proof_summary;
 #[cfg(feature = "prove")]

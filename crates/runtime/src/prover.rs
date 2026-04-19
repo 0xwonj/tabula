@@ -15,8 +15,10 @@ use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 use tabula_witness::stark::ChipKitRegistry;
 
 use crate::engine::{
-    PreparedRuntimeState, ProveInput, ProveResult, VerifiedResult, build_chip_kit_registry,
-    build_prepared_runtime, prepare_proof_request_on_prepared_state,
+    ProveInput, ProveResult, VerifiedResult, prepare_proof_request_on_prepared_state,
+};
+use crate::prepared_state::{
+    PreparedRuntimeState, build_chip_kit_registry, build_prepared_runtime,
 };
 use crate::error::{ProveError, RuntimeError, SetupError, VerifyError};
 use crate::host::HostEnvironment;

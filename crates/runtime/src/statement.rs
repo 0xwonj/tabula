@@ -7,7 +7,7 @@ use tabula_ir as ir;
 use tabula_types::TypeRuntimeRegistry;
 
 #[cfg(feature = "prove")]
-use crate::engine::PreparedRuntimeState;
+use crate::prepared_state::PreparedRuntimeState;
 use crate::error::{ExecuteError, RuntimeError};
 #[cfg(feature = "prove")]
 use crate::error::VerifyError;

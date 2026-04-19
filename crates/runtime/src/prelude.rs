@@ -18,7 +18,7 @@ use tabula_core::PortableValue;
 use tabula_ir as ir;
 use tabula_types::{ContextValues, TxCall, TypedValue};
 
-use crate::engine::PreparedRuntimeState;
+use crate::prepared_state::PreparedRuntimeState;
 use crate::error::{RuntimeError, VerifyError};
 
 #[cfg(feature = "prove")]
