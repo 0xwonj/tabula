@@ -47,8 +47,8 @@ The verifier model is layered:
   from the sealed artifact.
 - `VerifierState` is the runtime-internal prepared verifier state:
   artifact binding context plus relation policy plus machine verifier state.
-- `Verifier` is the runtime algorithm over `(prepared verifier state,
-  expected public statement, proof)`.
+- `PreparedVerifier::verify` is the verify-only surface: `verify(&self, proof,
+  expected_public_statement) -> Result<BoundStatement, RuntimeError>`.
 
 ## Architecture In One View
 
@@ -149,7 +149,18 @@ This layer decides what a program means for the rest of the stack to trust.
   binding, and preparation of backend-ready inputs
 
 Runtime is the bridge from sealed semantics to concrete execution and proving
-resources.
+resources. The runtime surface is structured around prepared handles with
+"prepare once, drive many" semantics:
+
+- `PreparedVerifier` — prepare-once verify-only handle constructed via
+  `prepare_verifier(registered_program)`. Shares prepared state (`VerifierState`)
+  with `PreparedProver`. `Send + Sync`.
+- `PreparedProver` — prepare-once prove-only handle constructed via
+  `prepare_prover(registered_program)`. Threadlocal `KitScratch` per
+  prove call. `Send + Sync`. (prove-feature only.)
+- `TabulaRuntime` — verify-feature execute-only facade for batch execution,
+  query execution, and logical-state projection. Final disposition deferred
+  to SP-5.
 
 ### Proof Backend
 
