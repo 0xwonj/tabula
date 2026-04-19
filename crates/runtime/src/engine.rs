@@ -2767,7 +2767,7 @@ tx scan(id: u64) {
     #[test]
     fn relation_proof_root_matches_registered_artifact_and_chip_public_values() {
         let (registered, runtime, prover) = runtime_for_source(relation_source());
-        let verifier = PreparedVerifier::builder(registered.clone())
+        let verifier = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
             .expect("create verifier builder")
             .build()
             .expect("build verifier");
@@ -2824,7 +2824,7 @@ tx scan(id: u64) {
     fn relation_chip_public_values_truncation_fails_verification() {
         let (registered, runtime, prover) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
-        let verifier = PreparedVerifier::builder(registered)
+        let verifier = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
             .expect("create verifier builder")
             .build()
             .expect("build verifier");
@@ -2868,7 +2868,7 @@ tx scan(id: u64) {
     fn relation_chip_public_values_append_fails_verification() {
         let (registered, runtime, prover) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
-        let verifier = PreparedVerifier::builder(registered)
+        let verifier = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
             .expect("create verifier builder")
             .build()
             .expect("build verifier");
@@ -2912,7 +2912,7 @@ tx scan(id: u64) {
     fn missing_relation_chip_opening_still_fails_verification() {
         let (registered, runtime, prover) = runtime_for_source(relation_source());
         let snapshot = relation_snapshot(&registered);
-        let verifier = PreparedVerifier::builder(registered)
+        let verifier = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
             .expect("create verifier builder")
             .build()
             .expect("build verifier");
@@ -2964,7 +2964,7 @@ tx scan(id: u64) {
             "unexpected runtime build error: {err}"
         );
 
-        let err = PreparedVerifier::builder(registered)
+        let err = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
             .expect("create verifier builder")
             .with_root_backend_bundle(RootBackendBundle::new(EmptyFamilyRootBackend))
             .build()
@@ -3059,6 +3059,9 @@ tx scan(id: u64) {
             .expect("demo hash capability descriptor");
         let registered = register_program_from_source_with_catalogs(capability_source(), &catalogs);
 
+        // Engine path (TabulaRuntime / prepare_executor) runs validate_core_first_program
+        // which rejects capability calls. The verifier path is IR-free and does not run
+        // this check — the binding-digest gate serves as the primary gating mechanism there.
         let err = TabulaRuntime::builder(registered.clone())
             .expect("create runtime builder")
             .build()
@@ -3072,21 +3075,6 @@ tx scan(id: u64) {
         assert!(
             rendered.contains("CallCapability"),
             "unexpected runtime build error: {rendered}"
-        );
-
-        let err = PreparedVerifier::builder(registered)
-            .expect("create verifier builder")
-            .build()
-            .err()
-            .expect("capability-backed verifier must be rejected before native proving");
-        let rendered = err.to_string();
-        assert!(
-            rendered.contains("outside the current native proving subset"),
-            "unexpected verifier build error: {rendered}"
-        );
-        assert!(
-            rendered.contains("CallCapability"),
-            "unexpected verifier build error: {rendered}"
         );
     }
 
@@ -3116,7 +3104,7 @@ tx scan(id: u64) {
             .with_host_environment(host_environment.clone())
             .build()
             .expect("build prover with extra host runtimes");
-        let verifier = PreparedVerifier::builder(registered.clone())
+        let verifier = PreparedVerifier::builder(std::sync::Arc::new(registered.sealed().clone()))
             .expect("create verifier builder")
             .with_host_environment(host_environment)
             .build()

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tabula_compiler::RegisteredProgram;
 use tabula_contract::ArtifactContext;
+use tabula_contract::SealedArtifact;
 use tabula_contract::SealedRelationPolicy;
 use tabula_core::RootProfileId;
 use tabula_ext::backend::ExecutionBackend;
@@ -29,15 +30,19 @@ pub(crate) struct ProgramSetup {
     pub(crate) uses_ir_hash: bool,
 }
 
-pub(crate) fn resolve_program_setup(
-    registered_program: &RegisteredProgram,
+/// Resolve the sealed-artifact-facing program setup.
+///
+/// This is the authoritative implementation; the registered-program variant
+/// below is a thin wrapper that delegates here via `registered.sealed()`.
+pub(crate) fn resolve_sealed_artifact_setup(
+    sealed: &SealedArtifact,
     backend_factories: &SchemeFactoryMap,
     type_runtimes: &TypeRuntimeRegistry,
     encoding_runtimes: &EncodingRuntimeRegistry,
     accepted_root_binding_families: &[RootProfileId],
 ) -> Result<ProgramSetup, RuntimeError> {
-    let resolved_state = materialize_registered_state_runtime(
-        registered_program,
+    let resolved_state = ResolvedStateRuntime::from_sealed_artifact(
+        sealed,
         backend_factories,
         type_runtimes,
         encoding_runtimes,
@@ -48,21 +53,36 @@ pub(crate) fn resolve_program_setup(
         .map(|backend| Arc::clone(&backend.proof_column))
         .collect();
     Ok(ProgramSetup {
-        artifact_context: artifact_context_from_registered_program(registered_program),
+        artifact_context: artifact_context_from_sealed(sealed),
         resolved_state,
         machine_columns,
-        relation_policy: registered_program.sealed().relation_policy(),
-        uses_ir_hash: registered_program.sealed().uses_ir_hash(),
+        relation_policy: sealed.relation_policy(),
+        uses_ir_hash: sealed.uses_ir_hash(),
     })
 }
 
-fn artifact_context_from_registered_program(
+/// Resolve program setup for a registered program by delegating to the sealed path.
+pub(crate) fn resolve_program_setup(
     registered_program: &RegisteredProgram,
-) -> ArtifactContext {
+    backend_factories: &SchemeFactoryMap,
+    type_runtimes: &TypeRuntimeRegistry,
+    encoding_runtimes: &EncodingRuntimeRegistry,
+    accepted_root_binding_families: &[RootProfileId],
+) -> Result<ProgramSetup, RuntimeError> {
+    resolve_sealed_artifact_setup(
+        registered_program.sealed(),
+        backend_factories,
+        type_runtimes,
+        encoding_runtimes,
+        accepted_root_binding_families,
+    )
+}
+
+fn artifact_context_from_sealed(sealed: &SealedArtifact) -> ArtifactContext {
     ArtifactContext::new(
-        registered_program.binding().clone(),
-        registered_program.program().program_id,
-        registered_program.static_table_artifact().root,
+        sealed.binding().clone(),
+        sealed.program_id(),
+        sealed.static_table_artifact().root,
     )
 }
 
@@ -101,21 +121,6 @@ pub(crate) fn build_registered_program_machine(
     machine_builder.build().map_err(RuntimeError::MachineSetup)
 }
 
-pub(crate) fn materialize_registered_state_runtime(
-    registered_program: &RegisteredProgram,
-    backend_factories: &SchemeFactoryMap,
-    type_runtimes: &TypeRuntimeRegistry,
-    encoding_runtimes: &EncodingRuntimeRegistry,
-    accepted_root_binding_families: &[RootProfileId],
-) -> Result<ResolvedStateRuntime, RuntimeError> {
-    ResolvedStateRuntime::from_registered_program(
-        registered_program,
-        backend_factories,
-        type_runtimes,
-        encoding_runtimes,
-        accepted_root_binding_families,
-    )
-}
 
 pub(crate) fn validate_core_first_program(program: &ir::Program) -> Result<(), RuntimeError> {
     for entry in &program.entries {

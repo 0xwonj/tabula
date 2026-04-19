@@ -92,6 +92,7 @@ fn register_compiled_program_with_context(
         binding,
         relation_policy,
         uses_ir_hash,
+        validated.as_program().program_id,
     );
 
     Ok(RegisteredProgram {

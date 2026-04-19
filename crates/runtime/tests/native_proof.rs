@@ -10,7 +10,7 @@ use tabula_machine::VerificationError;
 use tabula_testing::exec::{
     context_input, logical_state_snapshot, register_program_from_source, tx_batch,
 };
-use tabula_testing::runtime::{build_prover, build_runtime, build_verifier};
+use tabula_testing::runtime::{build_prover, build_runtime, build_verifier_from_registered};
 use tabula_types::{bool_portable, i64_portable, u64_portable, u64_typed};
 
 fn proving_source() -> &'static str {
@@ -330,7 +330,7 @@ fn prove_native_batch() -> (
     let snapshot = seeded_snapshot(&registered);
     let runtime = build_runtime(registered.clone());
     let prover = build_prover(registered.clone());
-    let verifier = build_verifier(registered);
+    let verifier = build_verifier_from_registered(&registered);
     let register = register_entry_id(&runtime);
     let batch = tx_batch(vec![
         ir::EntryCall {
@@ -396,7 +396,7 @@ fn unary_bool_key_batch_executes_projects_and_proves() {
     let snapshot = bool_key_seeded_snapshot(&registered);
     let runtime = build_runtime(registered.clone());
     let prover = build_prover(registered.clone());
-    let verifier = build_verifier(registered);
+    let verifier = build_verifier_from_registered(&registered);
     let update = update_entry_id(&runtime);
     let batch = tx_batch(vec![
         ir::EntryCall {
@@ -472,7 +472,7 @@ fn unary_i64_key_batch_executes_projects_and_proves() {
     let snapshot = i64_key_seeded_snapshot(&registered);
     let runtime = build_runtime(registered.clone());
     let prover = build_prover(registered.clone());
-    let verifier = build_verifier(registered);
+    let verifier = build_verifier_from_registered(&registered);
     let update = update_entry_id(&runtime);
     let batch = tx_batch(vec![
         ir::EntryCall {
@@ -548,7 +548,7 @@ fn tx_batch_proves_and_verifies_mixed_surface() {
     let snapshot = seeded_snapshot(&registered);
     let runtime = build_runtime(registered.clone());
     let prover = build_prover(registered.clone());
-    let verifier = build_verifier(registered);
+    let verifier = build_verifier_from_registered(&registered);
     let register = register_entry_id(&runtime);
     let txs = tx_batch(vec![
         ir::EntryCall {
@@ -599,7 +599,7 @@ fn binding_digest_changes_with_batch_context_and_binding() {
     let snapshot = seeded_snapshot(&registered);
     let runtime = build_runtime(registered.clone());
     let prover = build_prover(registered.clone());
-    let verifier = build_verifier(registered);
+    let verifier = build_verifier_from_registered(&registered);
     let register = register_entry_id(&runtime);
     let txs_a = tx_batch(vec![ir::EntryCall {
         entry_id: register,
@@ -670,7 +670,7 @@ fn binding_digest_changes_with_batch_context_and_binding() {
     let alt_snapshot = seeded_snapshot(&alt_registered);
     let alt_runtime = build_runtime(alt_registered.clone());
     let alt_prover = build_prover(alt_registered.clone());
-    let alt_verifier = build_verifier(alt_registered);
+    let alt_verifier = build_verifier_from_registered(&alt_registered);
     let alt_register = register_entry_id(&alt_runtime);
     let alt_txs = tx_batch(vec![ir::EntryCall {
         entry_id: alt_register,

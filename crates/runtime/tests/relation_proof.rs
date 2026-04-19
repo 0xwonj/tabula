@@ -5,7 +5,7 @@ use tabula_ir as ir;
 use tabula_testing::exec::{
     context_input, logical_state_snapshot, register_program_from_source, tx_batch,
 };
-use tabula_testing::runtime::{build_prover, build_runtime, build_verifier};
+use tabula_testing::runtime::{build_prover, build_runtime, build_verifier_from_registered};
 use tabula_types::{bool_portable, u64_portable, u64_typed};
 
 fn relation_source() -> &'static str {
@@ -122,7 +122,7 @@ fn tx_batch_proves_and_verifies_static_relations_with_control() {
     let snapshot = seeded_snapshot(&registered);
     let runtime = build_runtime(registered.clone());
     let prover = build_prover(registered.clone());
-    let verifier = build_verifier(registered);
+    let verifier = build_verifier_from_registered(&registered);
     let enroll = entry_id(&runtime, "enroll");
     let batch = tx_batch(vec![
         ir::EntryCall {
@@ -192,7 +192,7 @@ fn range_and_set_relations_normalize_and_prove() {
     let snapshot = seeded_snapshot(&registered);
     let runtime = build_runtime(registered.clone());
     let prover = build_prover(registered.clone());
-    let verifier = build_verifier(registered);
+    let verifier = build_verifier_from_registered(&registered);
     let enroll = entry_id(&runtime, "enroll");
     let batch = tx_batch(vec![ir::EntryCall {
         entry_id: enroll,

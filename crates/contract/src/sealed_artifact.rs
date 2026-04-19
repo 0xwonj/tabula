@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::Digest as _;
 
-use tabula_core::ProgramExecutionContract;
+use tabula_core::{ProgramExecutionContract, ProgramId};
 use tabula_profile::ProfileCatalog;
 
 use crate::{
@@ -23,9 +23,16 @@ pub const SEALED_ARTIFACT_SCHEMA_VERSION: u32 = 1;
 /// Contract-layer sealed artifact.
 ///
 /// Carries every field a verifier or runtime preparation step needs
-/// that does NOT require IR. Two seal-time-computed bits
-/// (`relation_policy`, `uses_ir_hash`) are stored here so the verifier
-/// does not need to rescan IR.
+/// that does NOT require IR. Three seal-time-computed bits
+/// (`program_id`, `relation_policy`, `uses_ir_hash`) are stored here
+/// so the verifier does not need to access IR at all.
+///
+/// `program_id` is a pure function of `ir::Program.program_id` (set at
+/// compilation time from the source fingerprint). It is stored here rather
+/// than on `ProgramExecutionContract` to avoid changing the borsh serialization
+/// of `ProgramExecutionContract`, which feeds `compute_profile_hash` and
+/// `compute_program_binding` — changing those would invalidate all existing
+/// binding digests.
 ///
 /// IR-requiring checks (semantic hash, static-table rebuild, binding
 /// recomputation) are intentionally deferred to
@@ -42,6 +49,12 @@ pub struct SealedArtifact {
     pub(crate) binding: ProgramBinding,
     pub(crate) relation_policy: SealedRelationPolicy,
     pub(crate) uses_ir_hash: bool,
+    /// Program identifier, sealed at registration time from `ir::Program.program_id`.
+    ///
+    /// Stored on `SealedArtifact` (not `ProgramExecutionContract`) so the
+    /// borsh serialization of `ProgramExecutionContract` — which feeds binding
+    /// hash computations — is not disturbed.
+    pub(crate) program_id: ProgramId,
 }
 
 impl SealedArtifact {
@@ -56,6 +69,7 @@ impl SealedArtifact {
         binding: ProgramBinding,
         relation_policy: SealedRelationPolicy,
         uses_ir_hash: bool,
+        program_id: ProgramId,
     ) -> Self {
         Self {
             schema_version: SEALED_ARTIFACT_SCHEMA_VERSION,
@@ -67,6 +81,7 @@ impl SealedArtifact {
             binding,
             relation_policy,
             uses_ir_hash,
+            program_id,
         }
     }
 
@@ -113,6 +128,11 @@ impl SealedArtifact {
     /// Whether the program uses the hash chip, sealed at registration time.
     pub fn uses_ir_hash(&self) -> bool {
         self.uses_ir_hash
+    }
+
+    /// Program identifier, sealed at registration time from `ir::Program.program_id`.
+    pub fn program_id(&self) -> ProgramId {
+        self.program_id
     }
 
     /// Canonical bytes for hashing or persistence.

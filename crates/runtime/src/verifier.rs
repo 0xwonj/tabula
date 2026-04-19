@@ -1,6 +1,5 @@
 //! Native proof verification surface and shared verification core.
 
-#[cfg(not(feature = "prove"))]
 use std::sync::Arc;
 
 use tabula_chips::event_transcript::EVENT_TRANSCRIPT_CHIP_ID;
@@ -8,7 +7,7 @@ use tabula_chips::public_context_transcript::PUBLIC_CONTEXT_TRANSCRIPT_CHIP_ID;
 use tabula_chips::relation_table::RELATION_TABLE_CHIP_ID;
 use tabula_chips::tx_batch_transcript::TX_BATCH_TRANSCRIPT_CHIP_ID;
 use tabula_commitment::NativeDigest;
-use tabula_compiler::RegisteredProgram;
+use tabula_contract::SealedArtifact;
 use tabula_contract::{
     ArtifactContext, BoundStatement, ProgramBinding, PublicStatement, SealedRelationPolicy,
 };
@@ -19,9 +18,7 @@ use tabula_ext::root::RootBackendBundle;
 use tabula_ext::root::{RootProofBackend, SmtRootProofBackend};
 use tabula_machine::{BackendVerifier, TabulaMachine, TabulaProof, TabulaStarkConfig};
 
-use crate::bootstrap::program::{
-    build_registered_program_machine, resolve_program_setup, validate_core_first_program,
-};
+use crate::bootstrap::program::{build_registered_program_machine, resolve_sealed_artifact_setup};
 use crate::error::RuntimeError;
 use crate::host::HostEnvironment;
 
@@ -48,7 +45,7 @@ pub struct PreparedVerifier {
 
 /// Fluent builder for [`PreparedVerifier`].
 pub struct PreparedVerifierBuilder {
-    registered_program: RegisteredProgram,
+    sealed_artifact: Arc<SealedArtifact>,
     host_environment: HostEnvironment,
     machine_stark_config: TabulaStarkConfig,
     #[cfg(feature = "prove")]
@@ -58,11 +55,11 @@ pub struct PreparedVerifierBuilder {
 }
 
 impl PreparedVerifier {
-    /// Create a builder for one registered native program.
+    /// Create a builder for a sealed artifact.
     pub fn builder(
-        registered_program: RegisteredProgram,
+        sealed_artifact: Arc<SealedArtifact>,
     ) -> Result<PreparedVerifierBuilder, RuntimeError> {
-        PreparedVerifierBuilder::new(registered_program)
+        PreparedVerifierBuilder::new(sealed_artifact)
     }
 
     /// Borrow the prepared verify-side state.
@@ -133,12 +130,14 @@ impl PreparedVerifier {
 }
 
 impl PreparedVerifierBuilder {
-    fn new(registered_program: RegisteredProgram) -> Result<Self, RuntimeError> {
-        registered_program
-            .validate_sealed_artifact()
-            .map_err(RuntimeError::CompilerValidation)?;
+    fn new(sealed_artifact: Arc<SealedArtifact>) -> Result<Self, RuntimeError> {
+        sealed_artifact
+            .validate()
+            .map_err(|e| RuntimeError::ValidationFailed {
+                detail: format!("sealed artifact validation failed: {e}"),
+            })?;
         Ok(Self {
-            registered_program,
+            sealed_artifact,
             host_environment: HostEnvironment::standard()?,
             machine_stark_config: tabula_machine::default_config(),
             #[cfg(feature = "prove")]
@@ -188,8 +187,13 @@ impl PreparedVerifierBuilder {
     }
 
     /// Build the prepared verifier.
+    ///
+    /// Note: `validate_core_first_program` (capability-call rejection) is NOT
+    /// run on the verifier path. The check requires `ir::Program`, which the
+    /// verifier does not hold. The engine path (`build_prepared_runtime`)
+    /// continues to run it; the binding-digest check already gates non-matching
+    /// programs on the verifier side.
     pub fn build(self) -> Result<PreparedVerifier, RuntimeError> {
-        validate_core_first_program(self.registered_program.program())?;
         #[cfg(feature = "prove")]
         let proof_backend = self.root_backend_bundle.proof_backend();
         #[cfg(not(feature = "prove"))]
@@ -199,8 +203,8 @@ impl PreparedVerifierBuilder {
             self.root_backend_bundle.supported_root_binding_families();
         #[cfg(not(feature = "prove"))]
         let accepted_root_binding_families = proof_backend.supported_root_binding_families();
-        let program_setup = resolve_program_setup(
-            &self.registered_program,
+        let program_setup = resolve_sealed_artifact_setup(
+            &self.sealed_artifact,
             self.host_environment.schemes().factories(),
             self.host_environment.runtime_registries().type_runtimes(),
             self.host_environment
@@ -223,13 +227,17 @@ impl PreparedVerifierBuilder {
     }
 }
 
-/// Convenience constructor: `prepare_verifier(reg)` is sugar over
-/// `PreparedVerifier::builder(reg)?.build()` using the standard host
+/// Convenience constructor: `prepare_verifier(sealed)` is sugar over
+/// `PreparedVerifier::builder(sealed)?.build()` using the standard host
 /// environment, machine config, and root backend.
+///
+/// The verifier path is IR-free: it takes `Arc<SealedArtifact>` and does
+/// not require a `RegisteredProgram`. The prover and executor paths stay
+/// on `Arc<RegisteredProgram>` because they execute IR.
 pub fn prepare_verifier(
-    registered_program: RegisteredProgram,
+    sealed_artifact: Arc<SealedArtifact>,
 ) -> Result<PreparedVerifier, RuntimeError> {
-    PreparedVerifier::builder(registered_program)?.build()
+    PreparedVerifier::builder(sealed_artifact)?.build()
 }
 
 pub(crate) fn relation_table_root_from_proof(

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use tabula_compiler::RegisteredProgram;
+use tabula_contract::SealedArtifact;
 use tabula_core::error::TabulaError;
 use tabula_core::{
     ColId, CommittedCellKey, CommittedKey, ProgramExecutionContract, RootProfileId,
@@ -45,15 +45,19 @@ struct ColumnBackendMaterializer<'a> {
 }
 
 impl ResolvedStateRuntime {
-    pub(crate) fn from_registered_program(
-        registered_program: &RegisteredProgram,
+    /// Build from a sealed artifact.
+    ///
+    /// This is the authoritative implementation; `from_registered_program`
+    /// delegates here via `registered.sealed()`.
+    pub(crate) fn from_sealed_artifact(
+        sealed: &SealedArtifact,
         backend_factories: &SchemeFactoryMap,
         type_runtimes: &TypeRuntimeRegistry,
         encoding_runtimes: &EncodingRuntimeRegistry,
         accepted_root_binding_families: &[RootProfileId],
     ) -> Result<Self, RuntimeError> {
-        let contract = Arc::new(registered_program.execution_contract().clone());
-        let profile_catalog = registered_program.profile_catalog();
+        let contract = Arc::new(sealed.execution_contract().clone());
+        let profile_catalog = sealed.profile_catalog();
         let materializer = ColumnBackendMaterializer {
             backend_factories,
             type_runtimes,

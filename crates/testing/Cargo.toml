@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 tabula-compiler = { workspace = true }
+tabula-contract = { workspace = true }
 tabula-core = { workspace = true, features = ["test-utils"] }
 tabula-ir = { workspace = true }
 tabula-profile = { workspace = true }
