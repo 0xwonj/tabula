@@ -82,6 +82,27 @@ pub enum SdkError {
     },
 }
 
+impl From<tabula_runtime::SetupError> for SdkError {
+    fn from(error: tabula_runtime::SetupError) -> Self {
+        SdkError::Runtime(tabula_runtime::RuntimeError::from(error))
+    }
+}
+
+#[cfg(feature = "prove")]
+impl From<tabula_runtime::ProveError> for SdkError {
+    fn from(error: tabula_runtime::ProveError) -> Self {
+        SdkError::Runtime(tabula_runtime::RuntimeError::from(error))
+    }
+}
+
+#[cfg(feature = "verify")]
+impl From<tabula_runtime::VerifyError> for SdkError {
+    fn from(error: tabula_runtime::VerifyError) -> Self {
+        SdkError::Runtime(tabula_runtime::RuntimeError::from(error))
+    }
+}
+
+#[cfg(feature = "verify")]
 impl From<tabula_runtime::ExecuteError> for SdkError {
     fn from(error: tabula_runtime::ExecuteError) -> Self {
         SdkError::Runtime(tabula_runtime::RuntimeError::from(error))

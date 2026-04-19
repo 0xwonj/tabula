@@ -326,9 +326,7 @@ impl Runner {
                 receipt.inner.batch(),
                 receipt.inner.context(),
                 receipt.inner.journal(),
-            ))
-            .map_err(tabula_runtime::RuntimeError::from)
-            .map_err(SdkError::from)?;
+            ))?;
         Ok(Proof::from_prove_result(result))
     }
 
