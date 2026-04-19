@@ -5,7 +5,7 @@ use tabula_ir as ir;
 use tabula_testing::exec::{
     context_input, logical_state_snapshot, register_program_from_source, tx_batch,
 };
-use tabula_testing::runtime::{build_prover, build_runtime, build_verifier_from_registered};
+use tabula_testing::runtime::{build_executor, build_prover, build_verifier_from_registered};
 use tabula_types::{bool_portable, u64_portable, u64_typed};
 
 fn relation_source() -> &'static str {
@@ -89,20 +89,16 @@ fn seeded_snapshot(
     )
 }
 
-fn entry_id(runtime: &tabula_runtime::TabulaRuntime, symbol: &str) -> tabula_ir::EntryId {
-    runtime
-        .execution_program()
-        .program()
-        .entries
-        .iter()
-        .find(|entry| entry.symbol == symbol)
-        .map_or_else(|| panic!("missing entry '{symbol}'"), |entry| entry.id)
+fn entry_id(executor: &tabula_runtime::PreparedExecutor, symbol: &str) -> tabula_ir::EntryId {
+    executor
+        .entry_id_by_symbol(symbol)
+        .unwrap_or_else(|| panic!("missing entry '{symbol}'"))
 }
 
 #[test]
 fn query_executes_relations_but_remains_execution_only() {
     let registered = register_program_from_source(relation_source());
-    let runtime = build_runtime(registered);
+    let runtime = build_executor(registered);
     let snapshot = runtime.empty_state_snapshot();
     let query = entry_id(&runtime, "quote");
 
@@ -120,7 +116,7 @@ fn query_executes_relations_but_remains_execution_only() {
 fn tx_batch_proves_and_verifies_static_relations_with_control() {
     let registered = register_program_from_source(relation_source());
     let snapshot = seeded_snapshot(&registered);
-    let runtime = build_runtime(registered.clone());
+    let runtime = build_executor(registered.clone());
     let prover = build_prover(registered.clone());
     let verifier = build_verifier_from_registered(&registered);
     let enroll = entry_id(&runtime, "enroll");
@@ -190,7 +186,7 @@ fn range_and_set_relations_normalize_and_prove() {
     ));
 
     let snapshot = seeded_snapshot(&registered);
-    let runtime = build_runtime(registered.clone());
+    let runtime = build_executor(registered.clone());
     let prover = build_prover(registered.clone());
     let verifier = build_verifier_from_registered(&registered);
     let enroll = entry_id(&runtime, "enroll");

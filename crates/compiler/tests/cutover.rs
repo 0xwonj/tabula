@@ -11,7 +11,9 @@ use tabula_core::{ColId, CommittedCellKey, CommittedKey, CommittedPropertyQuery,
 use tabula_executor as exec;
 use tabula_ir::{ContextInput, EntryBatch, EntryCall};
 use tabula_profile::TYPE_U64_ID;
-use tabula_runtime::{TabulaRuntime, semantics::RuntimeProgram};
+use std::sync::Arc;
+
+use tabula_runtime::{PreparedOptions, prepare_executor, semantics::RuntimeProgram};
 use tabula_types::{
     CommittedColumnEntry, ContextValues, NativeKeyPayload, StateRuntimeView, TxCall,
     TypeRuntimeRegistry, TypedCommittedPropertyQueryResult, TypedValue, encode_structural_u64,
@@ -186,10 +188,8 @@ tx set_balance(id: u64, amount: u64) {
         &CompilerCatalogs::standard().expect("standard catalogs"),
     )
     .expect("register");
-    let runtime = TabulaRuntime::builder(registered)
-        .expect("runtime builder")
-        .build()
-        .expect("runtime");
+    let opts = PreparedOptions::try_standard().expect("standard prepared options");
+    let runtime = prepare_executor(Arc::new(registered), &opts).expect("prepared executor");
     let snapshot = runtime.empty_state_snapshot();
     let runtime_batch = EntryBatch {
         calls: vec![EntryCall {

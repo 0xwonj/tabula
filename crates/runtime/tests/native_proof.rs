@@ -10,7 +10,7 @@ use tabula_machine::VerificationError;
 use tabula_testing::exec::{
     context_input, logical_state_snapshot, register_program_from_source, tx_batch,
 };
-use tabula_testing::runtime::{build_prover, build_runtime, build_verifier_from_registered};
+use tabula_testing::runtime::{build_executor, build_prover, build_verifier_from_registered};
 use tabula_types::{bool_portable, i64_portable, u64_portable, u64_typed};
 
 fn proving_source() -> &'static str {
@@ -289,37 +289,18 @@ fn i64_key_seeded_snapshot(
     )
 }
 
-fn register_entry_id(runtime: &tabula_runtime::TabulaRuntime) -> tabula_ir::EntryId {
-    runtime
-        .execution_program()
-        .program()
-        .entries
-        .iter()
-        .find(|entry| entry.symbol == "register")
-        .map(|entry| entry.id)
+fn register_entry_id(executor: &tabula_runtime::PreparedExecutor) -> tabula_ir::EntryId {
+    executor
+        .entry_id_by_symbol("register")
         .expect("register entry")
 }
 
-fn choose_entry_id(runtime: &tabula_runtime::TabulaRuntime) -> tabula_ir::EntryId {
-    runtime
-        .execution_program()
-        .program()
-        .entries
-        .iter()
-        .find(|entry| entry.symbol == "choose")
-        .map(|entry| entry.id)
-        .expect("choose entry")
+fn choose_entry_id(executor: &tabula_runtime::PreparedExecutor) -> tabula_ir::EntryId {
+    executor.entry_id_by_symbol("choose").expect("choose entry")
 }
 
-fn update_entry_id(runtime: &tabula_runtime::TabulaRuntime) -> tabula_ir::EntryId {
-    runtime
-        .execution_program()
-        .program()
-        .entries
-        .iter()
-        .find(|entry| entry.symbol == "update")
-        .map(|entry| entry.id)
-        .expect("update entry")
+fn update_entry_id(executor: &tabula_runtime::PreparedExecutor) -> tabula_ir::EntryId {
+    executor.entry_id_by_symbol("update").expect("update entry")
 }
 
 fn prove_native_batch() -> (
@@ -328,7 +309,7 @@ fn prove_native_batch() -> (
 ) {
     let registered = register_program_from_source(proving_source());
     let snapshot = seeded_snapshot(&registered);
-    let runtime = build_runtime(registered.clone());
+    let runtime = build_executor(registered.clone());
     let prover = build_prover(registered.clone());
     let verifier = build_verifier_from_registered(&registered);
     let register = register_entry_id(&runtime);
@@ -363,7 +344,7 @@ fn prove_native_batch() -> (
 #[test]
 fn query_executes_but_remains_execution_only() {
     let registered = register_program_from_source(proving_source());
-    let runtime = build_runtime(registered);
+    let runtime = build_executor(registered);
     let snapshot = runtime.empty_state_snapshot();
     let choose = choose_entry_id(&runtime);
 
@@ -394,7 +375,7 @@ fn query_executes_but_remains_execution_only() {
 fn unary_bool_key_batch_executes_projects_and_proves() {
     let registered = register_program_from_source(bool_key_proving_source());
     let snapshot = bool_key_seeded_snapshot(&registered);
-    let runtime = build_runtime(registered.clone());
+    let runtime = build_executor(registered.clone());
     let prover = build_prover(registered.clone());
     let verifier = build_verifier_from_registered(&registered);
     let update = update_entry_id(&runtime);
@@ -470,7 +451,7 @@ fn unary_bool_key_batch_executes_projects_and_proves() {
 fn unary_i64_key_batch_executes_projects_and_proves() {
     let registered = register_program_from_source(i64_key_proving_source());
     let snapshot = i64_key_seeded_snapshot(&registered);
-    let runtime = build_runtime(registered.clone());
+    let runtime = build_executor(registered.clone());
     let prover = build_prover(registered.clone());
     let verifier = build_verifier_from_registered(&registered);
     let update = update_entry_id(&runtime);
@@ -546,7 +527,7 @@ fn unary_i64_key_batch_executes_projects_and_proves() {
 fn tx_batch_proves_and_verifies_mixed_surface() {
     let registered = register_program_from_source(proving_source());
     let snapshot = seeded_snapshot(&registered);
-    let runtime = build_runtime(registered.clone());
+    let runtime = build_executor(registered.clone());
     let prover = build_prover(registered.clone());
     let verifier = build_verifier_from_registered(&registered);
     let register = register_entry_id(&runtime);
@@ -597,7 +578,7 @@ fn tx_batch_proves_and_verifies_mixed_surface() {
 fn binding_digest_changes_with_batch_context_and_binding() {
     let registered = register_program_from_source(proving_source());
     let snapshot = seeded_snapshot(&registered);
-    let runtime = build_runtime(registered.clone());
+    let runtime = build_executor(registered.clone());
     let prover = build_prover(registered.clone());
     let verifier = build_verifier_from_registered(&registered);
     let register = register_entry_id(&runtime);
@@ -668,7 +649,7 @@ fn binding_digest_changes_with_batch_context_and_binding() {
 
     let alt_registered = register_program_from_source(proving_source_alt_scheme());
     let alt_snapshot = seeded_snapshot(&alt_registered);
-    let alt_runtime = build_runtime(alt_registered.clone());
+    let alt_runtime = build_executor(alt_registered.clone());
     let alt_prover = build_prover(alt_registered.clone());
     let alt_verifier = build_verifier_from_registered(&alt_registered);
     let alt_register = register_entry_id(&alt_runtime);

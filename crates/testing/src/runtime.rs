@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use tabula_contract::SealedArtifact;
 use tabula_runtime::{
-    PreparedOptions, PreparedProver, PreparedVerifier, ProveResult, TabulaRuntime, VerifiedResult,
-    prepare_prover, prepare_verifier,
+    PreparedExecutor, PreparedOptions, PreparedProver, PreparedVerifier, ProveResult,
+    VerifiedResult, prepare_executor, prepare_prover, prepare_verifier,
 };
 
 use crate::exec::register_program_from_source;
@@ -16,17 +16,15 @@ pub type ProvedExecution = ProveResult;
 /// Shared name for prove-and-verify output.
 pub type VerifiedExecution = VerifiedResult;
 
-/// Build the runtime from one registered program.
-pub fn build_runtime(registered: tabula_compiler::RegisteredProgram) -> TabulaRuntime {
-    TabulaRuntime::builder(registered)
-        .expect("create runtime builder")
-        .build()
-        .expect("build runtime")
+/// Build a [`PreparedExecutor`] from one registered program.
+pub fn build_executor(registered: tabula_compiler::RegisteredProgram) -> PreparedExecutor {
+    let opts = PreparedOptions::try_standard().expect("standard prepared options");
+    prepare_executor(Arc::new(registered), &opts).expect("build prepared executor")
 }
 
-/// Build the runtime directly from rewritten source.
-pub fn runtime_from_source(source: &str) -> TabulaRuntime {
-    build_runtime(register_program_from_source(source))
+/// Build a [`PreparedExecutor`] directly from rewritten source.
+pub fn executor_from_source(source: &str) -> PreparedExecutor {
+    build_executor(register_program_from_source(source))
 }
 
 /// Build a [`PreparedProver`] from one registered program.

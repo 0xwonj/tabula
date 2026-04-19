@@ -8,7 +8,9 @@ use tabula_compiler::{
 use tabula_core::PortableValue;
 use tabula_ir as ir;
 use tabula_profile::{TYPE_BYTES32_ID, TYPE_U64_ID};
-use tabula_runtime::{CommittedStateSnapshot, TabulaRuntime};
+use std::sync::Arc;
+
+use tabula_runtime::{CommittedStateSnapshot, PreparedOptions, prepare_executor};
 
 pub fn compile_program_from_source(source: &str) -> CompiledProgram {
     compile_program_from_source_with_catalogs(source, &standard_catalogs())
@@ -36,11 +38,10 @@ pub fn logical_state_snapshot(
     registered_program: &RegisteredProgram,
     cells: &[(ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue)],
 ) -> CommittedStateSnapshot {
-    let runtime = TabulaRuntime::builder(registered_program.clone())
-        .expect("build runtime builder")
-        .build()
-        .expect("build runtime");
-    runtime
+    let opts = PreparedOptions::try_standard().expect("standard prepared options");
+    let executor = prepare_executor(Arc::new(registered_program.clone()), &opts)
+        .expect("build prepared executor");
+    executor
         .materialize_logical_state(
             cells
                 .iter()
