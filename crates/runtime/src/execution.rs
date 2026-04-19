@@ -82,7 +82,11 @@ pub(crate) fn materialize_logical_state<I>(
 where
     I: IntoIterator<Item = (ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue)>,
 {
-    CommittedStateSnapshot::from_cells(&state.state, &state.type_runtimes, cells)
+    Ok(CommittedStateSnapshot::from_cells(
+        &state.state,
+        &state.type_runtimes,
+        cells,
+    )?)
 }
 
 /// Decode and validate one committed snapshot payload against the sealed state contract.
@@ -96,7 +100,11 @@ pub(crate) fn decode_committed_snapshot<I>(
 where
     I: IntoIterator<Item = (ir::TableId, Vec<u8>, ir::FieldId, PortableValue)>,
 {
-    CommittedStateSnapshot::from_committed_cells(&state.state, &state.type_runtimes, cells)
+    Ok(CommittedStateSnapshot::from_committed_cells(
+        &state.state,
+        &state.type_runtimes,
+        cells,
+    )?)
 }
 
 /// Project one committed snapshot back into logical keyed cells.

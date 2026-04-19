@@ -80,8 +80,24 @@ pub enum ProveError {
     #[error("proving: {0}")]
     Proving(#[source] tabula_machine::ProveError),
     /// Post-prove verification failed (observed by `prove_and_verify`).
-    #[error("verification (post-prove): {0}")]
-    PostVerify(#[source] tabula_machine::VerificationError),
+    ///
+    /// Wraps the full [`VerifyError`] so every verify-side variant
+    /// (`Verification`, `StatementBuild`, `Validation`, `Setup`) surfaces
+    /// with its source chain preserved.
+    #[error("post-prove verify: {0}")]
+    PostVerify(#[source] VerifyError),
+    /// Setup-phase failure observed on the prover surface
+    /// (handle construction, pre-prove validation).
+    #[error("setup: {0}")]
+    Setup(#[source] SetupError),
+    /// Pre-prove verify-side failure observed on the prover surface
+    /// (statement build, verifier-side validation during proof preparation).
+    #[error("verify: {0}")]
+    Verify(#[source] VerifyError),
+    /// Execute-phase failure observed on the prover surface
+    /// (batch / query decode steps during proof preparation).
+    #[error("execute: {0}")]
+    Execute(#[source] ExecuteError),
 }
 
 /// Errors observed during verification and public statement assembly.
@@ -104,6 +120,10 @@ pub enum VerifyError {
         /// Description of the validation failure.
         detail: String,
     },
+    /// Setup-phase failure observed on the verifier surface
+    /// (sealed artifact resolution, machine build during handle construction).
+    #[error("setup: {0}")]
+    Setup(#[source] SetupError),
 }
 
 /// Errors observed during batch / query execution.
@@ -128,4 +148,8 @@ pub enum ExecuteError {
         /// Description of the validation failure.
         detail: String,
     },
+    /// Setup-phase failure observed on the executor surface
+    /// (handle construction, snapshot validation during batch dispatch).
+    #[error("setup: {0}")]
+    Setup(#[source] SetupError),
 }

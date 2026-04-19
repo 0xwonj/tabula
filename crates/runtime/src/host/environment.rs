@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tabula_ext::scheme::ColumnBackendFactoryBundle;
 use tabula_types::{EncodingRuntime, TypeRuntime};
 
-use crate::error::RuntimeError;
+use crate::error::SetupError;
 
 use super::{InstalledSchemes, RuntimeRegistries};
 
@@ -19,7 +19,7 @@ pub struct HostEnvironment {
 
 impl HostEnvironment {
     /// Seed the standard built-in host environment.
-    pub fn standard() -> Result<Self, RuntimeError> {
+    pub fn standard() -> Result<Self, SetupError> {
         Ok(Self {
             runtime_registries: RuntimeRegistries::standard()?,
             schemes: InstalledSchemes::standard(),
@@ -50,7 +50,7 @@ impl HostEnvironment {
     pub fn with_type_runtime(
         mut self,
         runtime: impl TypeRuntime + 'static,
-    ) -> Result<Self, RuntimeError> {
+    ) -> Result<Self, SetupError> {
         self.runtime_registries = self.runtime_registries.with_type_runtime(runtime)?;
         Ok(self)
     }
@@ -59,7 +59,7 @@ impl HostEnvironment {
     pub fn with_type_runtime_arc(
         mut self,
         runtime: Arc<dyn TypeRuntime>,
-    ) -> Result<Self, RuntimeError> {
+    ) -> Result<Self, SetupError> {
         self.runtime_registries = self.runtime_registries.with_type_runtime_arc(runtime)?;
         Ok(self)
     }
@@ -68,7 +68,7 @@ impl HostEnvironment {
     pub fn with_encoding_runtime(
         mut self,
         runtime: impl EncodingRuntime + 'static,
-    ) -> Result<Self, RuntimeError> {
+    ) -> Result<Self, SetupError> {
         self.runtime_registries = self.runtime_registries.with_encoding_runtime(runtime)?;
         Ok(self)
     }
@@ -77,7 +77,7 @@ impl HostEnvironment {
     pub fn with_encoding_runtime_arc(
         mut self,
         runtime: Arc<dyn EncodingRuntime>,
-    ) -> Result<Self, RuntimeError> {
+    ) -> Result<Self, SetupError> {
         self.runtime_registries = self.runtime_registries.with_encoding_runtime_arc(runtime)?;
         Ok(self)
     }
@@ -86,7 +86,7 @@ impl HostEnvironment {
     pub fn with_column_backend_bundle(
         mut self,
         bundle: ColumnBackendFactoryBundle,
-    ) -> Result<Self, RuntimeError> {
+    ) -> Result<Self, SetupError> {
         self.schemes = self.schemes.with_column_backend_bundle(bundle)?;
         Ok(self)
     }

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tabula_core::SchemeId;
 use tabula_ext::scheme::{ColumnBackendFactory, ColumnBackendFactoryBundle};
 
-use crate::error::{RuntimeError, SetupError};
+use crate::error::SetupError;
 
 use super::default_backend_factories;
 
@@ -38,7 +38,7 @@ impl InstalledSchemes {
     pub fn register_factory_arc(
         &mut self,
         factory: Arc<dyn ColumnBackendFactory>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), SetupError> {
         let scheme_id = factory.scheme_id();
         if self.factories.contains_key(&scheme_id) {
             return Err(SetupError::Validation {
@@ -46,8 +46,7 @@ impl InstalledSchemes {
                     "duplicate scheme backend registration for id {}",
                     scheme_id.0,
                 ),
-            }
-            .into());
+            });
         }
         self.factories.insert(scheme_id, factory);
         Ok(())
@@ -57,7 +56,7 @@ impl InstalledSchemes {
     pub fn with_column_backend_bundle(
         mut self,
         bundle: ColumnBackendFactoryBundle,
-    ) -> Result<Self, RuntimeError> {
+    ) -> Result<Self, SetupError> {
         self.register_factory_arc(bundle.into_factory())?;
         Ok(self)
     }

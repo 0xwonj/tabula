@@ -328,14 +328,19 @@ fn verify_proved_public_statement_digests(
 /// Internal helpers (`execution_chip_digest_from_proof`,
 /// `relation_table_root_from_proof`, `verify_proved_public_statement_digests`)
 /// and the builder chain return `RuntimeError` wrapping `VerifyError` or
-/// `SetupError`. All `Verify` variants map directly; setup and other phases
-/// observed on the verifier surface are pre-verification steps and map to
-/// `VerifyError::Validation` with a preserved detail string.
+/// `SetupError`. Setup failures ride through [`VerifyError::Setup`] with a
+/// typed `#[source]` chain; other cross-phase errors fall back to
+/// [`VerifyError::Validation`] with a forward-compat detail string.
 fn route_to_verify(error: RuntimeError) -> VerifyError {
     match error {
         RuntimeError::Verify(inner) => inner,
-        other => VerifyError::Validation {
-            detail: other.to_string(),
+        RuntimeError::Setup(inner) => VerifyError::Setup(inner),
+        #[cfg(feature = "prove")]
+        RuntimeError::Prove(inner) => VerifyError::Validation {
+            detail: format!("unexpected prove-phase error on verifier surface: {inner}"),
+        },
+        RuntimeError::Execute(inner) => VerifyError::Validation {
+            detail: format!("unexpected execute-phase error on verifier surface: {inner}"),
         },
     }
 }

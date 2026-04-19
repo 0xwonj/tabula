@@ -14,7 +14,7 @@ use tabula_types::TypeRuntimeRegistry;
 #[cfg(feature = "prove")]
 use tabula_witness::CommittedEntry;
 
-use crate::error::{RuntimeError, SetupError};
+use crate::error::SetupError;
 use crate::state_runtime::ResolvedStateRuntime;
 
 pub(crate) type LogicalStateCell = (ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue);
@@ -45,7 +45,7 @@ impl CommittedStateSnapshot {
         state_runtime: &ResolvedStateRuntime,
         type_runtimes: &TypeRuntimeRegistry,
         cells: I,
-    ) -> Result<Self, RuntimeError>
+    ) -> Result<Self, SetupError>
     where
         I: IntoIterator<Item = (ir::TableId, Vec<PortableValue>, ir::FieldId, PortableValue)>,
     {
@@ -60,7 +60,7 @@ impl CommittedStateSnapshot {
         state_runtime: &ResolvedStateRuntime,
         type_runtimes: &TypeRuntimeRegistry,
         cells: I,
-    ) -> Result<Self, RuntimeError>
+    ) -> Result<Self, SetupError>
     where
         I: IntoIterator<Item = (ir::TableId, Vec<u8>, ir::FieldId, PortableValue)>,
     {
@@ -77,8 +77,7 @@ impl CommittedStateSnapshot {
                         "duplicate committed cell {}.{} key {} in external snapshot payload",
                         cell_key.table.0, cell_key.col.0, cell_key.key
                     ),
-                }
-                .into());
+                });
             }
             snapshot.insert_materialized(cell_key, value);
         }
@@ -95,7 +94,7 @@ impl CommittedStateSnapshot {
         key: &[PortableValue],
         field: ir::FieldId,
         value: PortableValue,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), SetupError> {
         let field_schema = state_runtime
             .column_contract(table.into(), field.into())
             .map_err(|error| SetupError::Validation {
@@ -130,8 +129,7 @@ impl CommittedStateSnapshot {
                     value.type_id().0,
                     field_schema.ty.0,
                 ),
-            }
-            .into());
+            });
         }
         let cell_key = CommittedCellKey {
             table: table.into(),
@@ -144,8 +142,7 @@ impl CommittedStateSnapshot {
                     "duplicate logical state cell {}.{} key {} in external state payload",
                     cell_key.table.0, cell_key.col.0, cell_key.key
                 ),
-            }
-            .into());
+            });
         }
         self.cells.insert(cell_key, value);
         Ok(())
@@ -172,7 +169,7 @@ impl CommittedStateSnapshot {
         &self,
         state_runtime: &ResolvedStateRuntime,
         type_runtimes: &TypeRuntimeRegistry,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), SetupError> {
         for (key, value) in &self.cells {
             let column = state_runtime
                 .column_contract(key.table, key.col)
@@ -189,8 +186,7 @@ impl CommittedStateSnapshot {
                         value.type_id().0,
                         column.ty.0,
                     ),
-                }
-                .into());
+                });
             }
             let table_key_codec =
                 state_runtime
@@ -216,8 +212,7 @@ impl CommittedStateSnapshot {
                         "committed cell {}.{} key {} is not canonical",
                         key.table.0, key.col.0, key.key
                     ),
-                }
-                .into());
+                });
             }
             type_runtimes
                 .decode_portable(value)
@@ -234,7 +229,7 @@ impl CommittedStateSnapshot {
     }
 
     /// Serialize the snapshot canonically for transcript or external binding.
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RuntimeError> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, SetupError> {
         let records = self
             .cells
             .iter()
@@ -253,7 +248,7 @@ impl CommittedStateSnapshot {
     }
 
     /// Canonical digest of the committed state snapshot.
-    pub fn canonical_digest(&self) -> Result<Digest, RuntimeError> {
+    pub fn canonical_digest(&self) -> Result<Digest, SetupError> {
         let bytes = self.canonical_bytes()?;
         Ok(sha2::Sha256::digest(bytes).into())
     }
@@ -264,7 +259,7 @@ impl CommittedStateSnapshot {
         table: TableId,
         col: ColId,
         type_runtimes: &TypeRuntimeRegistry,
-    ) -> Result<Vec<CommittedColumnEntry>, RuntimeError> {
+    ) -> Result<Vec<CommittedColumnEntry>, SetupError> {
         self.cells
             .iter()
             .filter(|(key, _)| key.table == table && key.col == col)
@@ -276,13 +271,11 @@ impl CommittedStateSnapshot {
                         value: typed,
                         is_null: false,
                     })
-                    .map_err(|error| {
-                        RuntimeError::from(SetupError::Validation {
-                            detail: format!(
-                                "failed to decode committed cell ({}, {}, {}): {error}",
-                                key.table.0, key.col.0, key.key
-                            ),
-                        })
+                    .map_err(|error| SetupError::Validation {
+                        detail: format!(
+                            "failed to decode committed cell ({}, {}, {}): {error}",
+                            key.table.0, key.col.0, key.key
+                        ),
                     })
             })
             .collect()
@@ -294,7 +287,7 @@ impl CommittedStateSnapshot {
         table: TableId,
         col: ColId,
         type_runtimes: &TypeRuntimeRegistry,
-    ) -> Result<Vec<CommittedEntry>, RuntimeError> {
+    ) -> Result<Vec<CommittedEntry>, SetupError> {
         self.committed_column_entries(table, col, type_runtimes)?
             .into_iter()
             .map(|entry| {

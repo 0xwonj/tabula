@@ -21,7 +21,7 @@ use tabula_executor as exec;
 use tabula_ir as ir;
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 
-use crate::error::{ExecuteError, RuntimeError, SetupError};
+use crate::error::{ExecuteError, RuntimeError};
 use crate::execution::{self, ExecutionReceipt};
 use crate::host::HostEnvironment;
 use crate::options::PreparedOptions;
@@ -158,9 +158,7 @@ pub fn prepare_executor(
     let program = Arc::try_unwrap(registered).unwrap_or_else(|shared| (*shared).clone());
     program
         .validate_sealed_artifact()
-        .map_err(|e| ExecuteError::Validation {
-            detail: e.to_string(),
-        })?;
+        .map_err(|e| ExecuteError::Setup(crate::error::SetupError::CompilerValidation(e)))?;
     let host_environment: HostEnvironment = opts.host_environment().clone();
     let machine_stark_config = opts.machine_stark_config().clone();
     #[cfg(feature = "prove")]
@@ -177,9 +175,7 @@ pub fn prepare_executor(
         #[cfg(not(feature = "prove"))]
         root_backend,
     )
-    .map_err(|e| ExecuteError::Validation {
-        detail: e.to_string(),
-    })?;
+    .map_err(route_to_execute)?;
     // The executor does not need the machine or the root-backend bundle:
     // execution is zero-crypto. Drop them so the handle's footprint is
     // purely the prepared state.
@@ -191,20 +187,22 @@ pub fn prepare_executor(
 /// Narrow a [`RuntimeError`] to [`ExecuteError`] for the executor surface.
 ///
 /// The underlying execute/snapshot helpers in `execution.rs` and
-/// `snapshot.rs` currently widen to `RuntimeError` through
-/// `ExecuteError` (execution failures) and `SetupError::Validation`
-/// (snapshot construction failures). Both map to `ExecuteError` on the
-/// executor surface: an executor call that fails snapshot validation is
-/// an execute-side validation error from the caller's point of view.
+/// `snapshot.rs` widen to `RuntimeError` through either `ExecuteError`
+/// (execution failures) or `SetupError` (snapshot / handle construction).
+/// Both map to `ExecuteError` on the executor surface with a typed
+/// `#[source]` chain; verify and prove variants fall back through
+/// `ExecuteError::Validation` for forward compatibility.
 fn route_to_execute(error: RuntimeError) -> ExecuteError {
     match error {
         RuntimeError::Execute(inner) => inner,
-        RuntimeError::Setup(SetupError::Validation { detail }) => {
-            ExecuteError::Validation { detail }
-        }
-        other => unreachable!(
-            "execution helpers only produce Execute or Setup::Validation, got: {other:?}"
-        ),
+        RuntimeError::Setup(setup) => ExecuteError::Setup(setup),
+        #[cfg(feature = "prove")]
+        RuntimeError::Prove(inner) => ExecuteError::Validation {
+            detail: format!("unexpected prove-phase error on executor surface: {inner}"),
+        },
+        RuntimeError::Verify(inner) => ExecuteError::Validation {
+            detail: format!("unexpected verify-phase error on executor surface: {inner}"),
+        },
     }
 }
 

@@ -293,12 +293,7 @@ impl PreparedProver {
         let prove_result = self.prove(input)?;
         verifier
             .verify(&prove_result.proof, &prove_result.public_statement)
-            .map_err(|e| match e {
-                VerifyError::Verification(source) => ProveError::PostVerify(source),
-                other => ProveError::WitnessGeneration {
-                    detail: other.to_string(),
-                },
-            })?;
+            .map_err(ProveError::PostVerify)?;
         Ok(VerifiedResult {
             proof: prove_result.proof,
             envelope: prove_result.envelope,
@@ -322,9 +317,7 @@ pub fn prepare_prover(
     let program = Arc::try_unwrap(registered).unwrap_or_else(|shared| (*shared).clone());
     program
         .validate_sealed_artifact()
-        .map_err(|e| ProveError::WitnessGeneration {
-            detail: e.to_string(),
-        })?;
+        .map_err(|e| ProveError::Setup(crate::error::SetupError::CompilerValidation(e)))?;
     let prepared = build_prepared_runtime(
         &program,
         opts.host_environment(),
@@ -352,14 +345,14 @@ pub fn prepare_prover(
 /// `RuntimeError::Prove(_)`, `RuntimeError::Verify(_)` (statement-build
 /// during pre-prove decode), `RuntimeError::Execute(_)` (decode steps), and
 /// `RuntimeError::Setup(_)` (machine / validation failures on handle build).
-/// All non-`Prove` variants are pre-prove setup or decode steps; they map to
-/// `ProveError::WitnessGeneration` with a preserved detail string.
+/// Each narrowed phase now rides through a typed `#[source]` chain so
+/// `Display` composition is preserved without stringification.
 fn route_to_prove(error: RuntimeError) -> ProveError {
     match error {
         RuntimeError::Prove(inner) => inner,
-        other => ProveError::WitnessGeneration {
-            detail: other.to_string(),
-        },
+        RuntimeError::Setup(inner) => ProveError::Setup(inner),
+        RuntimeError::Verify(inner) => ProveError::Verify(inner),
+        RuntimeError::Execute(inner) => ProveError::Execute(inner),
     }
 }
 

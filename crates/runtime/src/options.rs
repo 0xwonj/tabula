@@ -27,14 +27,8 @@ impl PreparedOptions {
     /// Build the standard option bundle (standard host environment,
     /// default machine config, standard root backend).
     pub fn try_standard() -> Result<Self, SetupError> {
-        let host_environment = HostEnvironment::standard().map_err(|err| match err {
-            crate::error::RuntimeError::Setup(setup) => setup,
-            other => SetupError::Validation {
-                detail: format!("standard host environment setup failed: {other}"),
-            },
-        })?;
         Ok(Self {
-            host_environment,
+            host_environment: HostEnvironment::standard()?,
             machine_stark_config: tabula_machine::default_config(),
             root_backend: RootBackend::standard(),
         })
