@@ -23,6 +23,7 @@ tabula-types = { workspace = true }
 tabula-core = { workspace = true, features = ["test-utils"] }
 tabula-executor = { workspace = true }
 tabula-runtime = { workspace = true, features = ["prove"] }
+tabula-testing = { workspace = true }
 
 [lints]
 workspace = true

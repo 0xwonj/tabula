@@ -19,6 +19,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tabula-core = { workspace = true }
+tabula-testing = { workspace = true }
 
 [lints]
 workspace = true
