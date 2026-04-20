@@ -330,7 +330,12 @@ fn prove_native_batch() -> (
     let proved = prover
         .prove_and_verify(
             &verifier,
-            &tabula_runtime::ProveInput { snapshot: &snapshot, batch: &batch, context: &context, executed: &executed },
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &batch,
+                context: &context,
+                executed: &executed,
+            },
         )
         .expect("prove native batch");
     (verifier, proved)
@@ -551,7 +556,12 @@ fn tx_batch_proves_and_verifies_mixed_surface() {
     let verified = prover
         .prove_and_verify(
             &verifier,
-            &tabula_runtime::ProveInput { snapshot: &snapshot, batch: &txs, context: &context, executed: &executed },
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &txs,
+                context: &context,
+                executed: &executed,
+            },
         )
         .expect("prove and verify");
 
@@ -592,7 +602,12 @@ fn binding_digest_changes_with_batch_context_and_binding() {
     let prove_a = prover
         .prove_and_verify(
             &verifier,
-            &tabula_runtime::ProveInput { snapshot: &snapshot, batch: &txs_a, context: &context_a, executed: &exec_a },
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &txs_a,
+                context: &context_a,
+                executed: &exec_a,
+            },
         )
         .expect("prove a");
     let exec_b = runtime
@@ -601,7 +616,12 @@ fn binding_digest_changes_with_batch_context_and_binding() {
     let prove_b = prover
         .prove_and_verify(
             &verifier,
-            &tabula_runtime::ProveInput { snapshot: &snapshot, batch: &txs_b, context: &context_a, executed: &exec_b },
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &txs_b,
+                context: &context_a,
+                executed: &exec_b,
+            },
         )
         .expect("prove b");
     let exec_c = runtime
@@ -610,7 +630,12 @@ fn binding_digest_changes_with_batch_context_and_binding() {
     let prove_c = prover
         .prove_and_verify(
             &verifier,
-            &tabula_runtime::ProveInput { snapshot: &snapshot, batch: &txs_a, context: &context_b, executed: &exec_c },
+            &tabula_runtime::ProveInput {
+                snapshot: &snapshot,
+                batch: &txs_a,
+                context: &context_b,
+                executed: &exec_c,
+            },
         )
         .expect("prove c");
 
@@ -647,7 +672,12 @@ fn binding_digest_changes_with_batch_context_and_binding() {
     let alt_proved = alt_prover
         .prove_and_verify(
             &alt_verifier,
-            &tabula_runtime::ProveInput { snapshot: &alt_snapshot, batch: &alt_txs, context: &context_a, executed: &alt_exec },
+            &tabula_runtime::ProveInput {
+                snapshot: &alt_snapshot,
+                batch: &alt_txs,
+                context: &context_a,
+                executed: &alt_exec,
+            },
         )
         .expect("prove alt");
 

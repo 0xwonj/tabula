@@ -1,3 +1,5 @@
+//! SSMC (sorted-state Merkle commitment) scheme factory and column backend implementation.
+
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -27,6 +29,7 @@ use tabula_types::{
 };
 #[cfg(feature = "prove")]
 use tabula_witness::stark::schemes::ssmc::{PreparedSsmcProof, SsmcProofInput, prepare_ssmc_proof};
+
 /// SSMC commitment scheme factory.
 #[non_exhaustive]
 pub struct SsmcScheme<const W: usize>;

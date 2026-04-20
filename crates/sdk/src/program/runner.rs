@@ -316,10 +316,7 @@ impl Runner {
         if receipt.program_digest != self.program.artifact().digest() {
             return Err(SdkError::ExecutionProgramMismatch);
         }
-        let prover = self
-            .program
-            .sdk()
-            .prepare_prepared_prover(self.program.artifact())?;
+        let prover = self.program.sdk().prepare_prover(self.program.artifact())?;
         let outcome = prover.prove(&tabula_runtime::ProveInput {
             snapshot: receipt.inner.snapshot(),
             batch: receipt.inner.batch(),

@@ -1,3 +1,5 @@
+//! Machine builder construction from a STARK config and root proof backend.
+
 use std::sync::Arc;
 
 use tabula_ext::backend::ExecutionBackend;

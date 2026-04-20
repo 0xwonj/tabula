@@ -1,3 +1,5 @@
+//! Built-in column commitment scheme factories (SMT and SSMC).
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

@@ -4,13 +4,6 @@
 //! witness alignment, output-digest correctness for enum/map relations, and
 //! relation-chip opening validation.
 
-use super::{
-    enroll_batch, event_debug_source, executor_and_prover_for_source, relation_context,
-    relation_snapshot, relation_source,
-};
-use crate::verifier::relation_table_root_from_proof;
-use crate::{ProveInput, prepare_executor};
-
 use std::sync::Arc;
 
 use p3_field::PrimeCharacteristicRing;
@@ -20,10 +13,17 @@ use tabula_chips::execution::trace::{InstructionRecord, Opcode};
 use tabula_chips::relation_table::RELATION_TABLE_CHIP_ID;
 use tabula_contract::format::typed_tuple::{TypedTupleRole, compute_typed_tuple_digest};
 use tabula_ir as ir;
-use crate::semantics as runtime_ir;
 use tabula_stark::trace::witness_labels;
 use tabula_testing::exec::register_program_from_source;
 use tabula_types::{u64_portable, u64_typed};
+
+use super::{
+    enroll_batch, event_debug_source, executor_and_prover_for_source, relation_context,
+    relation_snapshot, relation_source,
+};
+use crate::semantics as runtime_ir;
+use crate::verifier::relation_table_root_from_proof;
+use crate::{ProveInput, prepare_executor};
 
 /// Extract event items from an instruction record slice, sorted by item index.
 fn extract_event_items(records: &[InstructionRecord]) -> Vec<(u32, [KoalaBear; 8])> {

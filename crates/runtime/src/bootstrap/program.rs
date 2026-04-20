@@ -1,3 +1,5 @@
+//! Registered-program and sealed-artifact setup for the verification and proving paths.
+
 use std::sync::Arc;
 
 use tabula_compiler::RegisteredProgram;

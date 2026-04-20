@@ -1,16 +1,17 @@
 //! Prove-path typed input decoders and context/param prelude slot
 //! loaders.
 //!
-//! These six helpers form a cohesive surface: they take the prepared
+//! These seven helpers form a cohesive surface: they take the prepared
 //! runtime state plus raw portable inputs (entry batches, context
 //! inputs) and lift them into the slot layouts consumed by the prove
 //! pipeline.
 //!
-//! The four `decode_*_on_state` helpers are un-gated inside the module
-//! because they are reused by the verify-surface (`PreparedExecutor`) to
-//! validate query and execution entry calls. The three `build_*_prelude`
-//! helpers are prove-only and carry their own `#[cfg(feature = "prove")]`
-//! gate along with their imports.
+//! The four `decode_*_on_state` helpers are available without feature
+//! gating inside the module because they are reused by the verify-surface
+//! (`PreparedExecutor`) to validate query and execution entry calls.
+//! The two `build_*_prelude` helpers and `build_event_item_bases` are
+//! prove-only and carry their own `#[cfg(feature = "prove")]` gate along
+//! with their imports.
 
 #![cfg(feature = "verify")]
 

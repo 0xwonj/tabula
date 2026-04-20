@@ -113,9 +113,7 @@ impl PreparedVerifier {
             expected_public_statement,
         )
         .map_err(route_to_verify)?;
-        match relation_table_root_from_proof(proof, &self.state.machine)
-            .map_err(route_to_verify)?
-        {
+        match relation_table_root_from_proof(proof, &self.state.machine).map_err(route_to_verify)? {
             Some(root) if self.state.relation_policy.requires_artifact_root() => {
                 if root != self.state.context.static_table_root {
                     return Err(VerifyError::Validation {
@@ -143,8 +141,8 @@ impl PreparedVerifier {
 /// bundle.
 ///
 /// The verifier path is IR-free: it takes `Arc<SealedArtifact>` and does
-/// not require a `RegisteredProgram`. The prover and executor paths stay
-/// on `Arc<RegisteredProgram>` because they execute IR.
+/// not require a [`tabula_compiler::RegisteredProgram`]. The prover and
+/// executor paths stay on `Arc<RegisteredProgram>` because they execute IR.
 ///
 /// Note: `validate_core_first_program` (capability-call rejection) is NOT
 /// run on the verifier path. The check requires `ir::Program`, which the

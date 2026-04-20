@@ -1,3 +1,5 @@
+//! State-runtime view construction and committed-state lookup for execution.
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

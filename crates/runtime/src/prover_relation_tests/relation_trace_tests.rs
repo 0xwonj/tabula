@@ -5,12 +5,12 @@
 //! override isolation.
 
 use super::{
-    capability_source, enroll_batch, entry_id_for, executor_and_prover_for_source,
-    guarded_context, guarded_relation_source, prepare_executor, prove_input, relation_context,
-    relation_snapshot, relation_source,
+    capability_source, enroll_batch, entry_id_for, executor_and_prover_for_source, guarded_context,
+    guarded_relation_source, prepare_executor, prove_input, relation_context, relation_snapshot,
+    relation_source,
 };
-use crate::host::HostEnvironment;
 use crate::ProveInput;
+use crate::host::HostEnvironment;
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
-use tabula_ir as ir;
 use tabula_chips::execution::EXECUTION_STANDARD_VALUE_WIDTH;
 use tabula_chips::relation_table::{RELATION_TABLE_WITNESS_LABEL, RelationTableWitnessRow};
 use tabula_chips::relation_transcript::RELATION_TRANSCRIPT_WITNESS_LABEL;
@@ -28,13 +27,16 @@ use tabula_core::{EncodingProfileId, PortableValue, TypeId};
 use tabula_ext::root::{
     RootBackend, RootBackendBundle, RootWitnessPreparer, SmtRootWitnessPreparer,
 };
+use tabula_ir as ir;
 use tabula_machine::{RootProofBackend, SmtRootProofBackend};
 use tabula_profile::{
     CanonicalNullEncoding, EncodingClass, EncodingProfile, FieldFamily, GenericIrFamily,
     HostValueFamily, NullSemantics, TranscriptSerialization, TypeCapabilities, TypeDescriptor,
     ZeroValueSpec,
 };
-use tabula_testing::exec::{register_program_from_source, register_program_from_source_with_catalogs};
+use tabula_testing::exec::{
+    register_program_from_source, register_program_from_source_with_catalogs,
+};
 use tabula_types::{ArithmeticOp, EncodingRuntime, TypeRuntime, TypedValue, u64_portable};
 use tabula_witness::stark::{LowerSuccessfulTxInput, lower_successful_tx};
 use tabula_witness::{RelationClaim, RelationClaimKind, prepare_relation_proof};
@@ -489,8 +491,7 @@ fn native_runtime_rejects_capability_calls_with_explicit_subset_error() {
             hash_family: None,
         })
         .expect("demo hash capability descriptor");
-    let registered =
-        register_program_from_source_with_catalogs(capability_source(), &catalogs);
+    let registered = register_program_from_source_with_catalogs(capability_source(), &catalogs);
 
     // Executor path (prepare_executor) runs validate_core_first_program which
     // rejects capability calls. The verifier path is IR-free and does not

@@ -1,8 +1,10 @@
 //! Prepared prover handle for one registered native program.
 //!
 //! [`PreparedProver`] is the canonical way to get a prove-capable
-//! runtime handle. It owns the prepared-once state (`PreparedVerifierState`,
-//! machine, chip-kit registry, root backend bundle) and exposes
+//! runtime handle. It owns the prepared-once state
+//! (`PreparedRuntimeState` for execution semantics,
+//! `PreparedVerifierState` for verification state,
+//! chip-kit registry, and root backend bundle) and exposes
 //! [`PreparedProver::prove`] for per-batch proving. The handle is
 //! `Send + Sync` and cheap to share via `Arc`.
 

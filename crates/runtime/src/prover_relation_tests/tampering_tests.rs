@@ -12,8 +12,8 @@ use super::{
 
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
-use tabula_chips::relation_table::{RELATION_TABLE_WITNESS_LABEL, RelationTableWitnessRow};
 use tabula_chips::execution::trace::{InstructionRecord, Opcode};
+use tabula_chips::relation_table::{RELATION_TABLE_WITNESS_LABEL, RelationTableWitnessRow};
 use tabula_chips::relation_transcript::{
     RELATION_TRANSCRIPT_WITNESS_LABEL, RelationTranscriptCall,
 };

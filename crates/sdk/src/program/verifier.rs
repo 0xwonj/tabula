@@ -12,9 +12,7 @@ pub struct Verifier {
 impl Verifier {
     pub(crate) fn new(program: &super::Program) -> Result<Self, SdkError> {
         Ok(Self {
-            prepared: program
-                .sdk()
-                .prepare_prepared_verifier(program.artifact())?,
+            prepared: program.sdk().prepare_verifier(program.artifact())?,
         })
     }
 

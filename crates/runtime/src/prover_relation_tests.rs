@@ -207,9 +207,9 @@ pub fn enroll_batch(executor: &PreparedExecutor) -> ir::EntryBatch {
     }])
 }
 
-#[path = "prover_relation_tests/witness_labels_tests.rs"]
-mod witness_labels_tests;
 #[path = "prover_relation_tests/relation_trace_tests.rs"]
 mod relation_trace_tests;
 #[path = "prover_relation_tests/tampering_tests.rs"]
 mod tampering_tests;
+#[path = "prover_relation_tests/witness_labels_tests.rs"]
+mod witness_labels_tests;

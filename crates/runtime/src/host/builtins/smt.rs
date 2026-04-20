@@ -1,3 +1,5 @@
+//! SMT commitment scheme factory and column backend implementation.
+
 use std::sync::Arc;
 
 use tabula_chips::shards::memory::MemoryShardChip;

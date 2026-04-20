@@ -18,7 +18,7 @@
 //! backends on the `verify` / `prove` surface; end-to-end capability handler
 //! installation remains a follow-up architecture step.
 //! Verification is statement-first: [`PublicStatement`] is the proved object,
-//! `BoundStatement` is the verifier-side binding over one sealed
+//! [`BoundStatement`] is the verifier-side binding over one sealed
 //! artifact, and the prepared verifier state lives in the runtime verifier
 //! surface rather than the contract layer. Shared registered-program setup is
 //! derived in `bootstrap`, then consumed by `prover` for proving and
