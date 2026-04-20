@@ -1,6 +1,6 @@
 # SP-2 — Machine Backend Primitive Split
 
-> Status: design, ready for ultraplan
+> Status: Landed 2026-04-19 (polish follow-up 2026-04-20)
 > Date: 2026-04-18
 > Umbrella: [2026-04-18-architecture-refactoring-design.md](2026-04-18-architecture-refactoring-design.md)
 > Predecessor: [2026-04-18-sp1-contract-wire-type-consolidation-design.md](2026-04-18-sp1-contract-wire-type-consolidation-design.md)
@@ -626,3 +626,93 @@ gate — SP-2 is byte-breaking by design.
   `crates/witness/Cargo.toml:16`
 - Current journal value-types:
   `crates/executor/src/surface/journal.rs`
+
+---
+
+## 10. Landed Notes (2026-04-19)
+
+SP-2 landed in two commits on `main`:
+
+- `a5294f3 SP-2: split machine into an envelope-level backend primitive`
+  — primary refactor covering §4's seven migration steps.
+- `d16fe82 Address SP-1/SP-2 deep-review findings` — follow-up fixups
+  from the deep-review pass.
+
+All 14 completion gates from §6 hold on `main`. Two deviations from the
+original spec shipped as in-flight amendments (already documented
+inline under §2.2 and §2.3):
+
+- `BackendProver::prove_envelope(input: PreparedMachineInput) ->
+  Result<(TabulaProof, ProofEnvelope), ProveError>` — no separate
+  `binding_digest` argument (the input already carries it), and the
+  return is a tuple so the runtime can skip a decode round-trip.
+- `StateRuntimeView` moved into `tabula-types` alongside the journal
+  value types, simplifying the `tabula-executor` surface.
+
+### Polish follow-up (2026-04-20)
+
+A small surface-cleanup pass landed on top of SP-2 once SP-5 had
+stabilized:
+
+- `BackendVerifier::verify_proof(&self, proof: &TabulaProof,
+  expected_binding_digest: [u8; 32])` now performs the binding-digest
+  check before delegating to the STARK verifier. Previously this entry
+  point omitted the check and relied on upstream discipline (with a
+  "binding-digest responsibility" warning in its rustdoc). Unifying the
+  discipline removes the footgun mode: there is now exactly one rule
+  across both `verify_envelope` and `verify_proof`. `verify_envelope`
+  internally delegates to `verify_proof` so the binding check is
+  authored in one place.
+- The runtime verifier (`crates/runtime/src/verifier.rs`) keeps its
+  upstream binding check as a fail-fast guard before the expensive
+  chip-digest traversal; the backend's in-`verify_proof` check is a
+  defense-in-depth second layer.
+
+Byte-identity against the SP-5 baseline
+(`docs/superpowers/specs/2026-04-19-sp5-byte-identity-baseline.txt`)
+held after the polish pass.
+
+### Deferred polish (not urgent, candidates for a future SP)
+
+Three further surface refinements were identified during the SP-2
+post-landing analysis but deliberately deferred. None is required for
+correctness; each trades a one-day edit for incremental ergonomics.
+
+1. **`ProvedBundle` named pair.** Replace the `(TabulaProof,
+   ProofEnvelope)` tuple returned by `prove_envelope` with a named
+   struct:
+   ```rust
+   pub struct ProvedBundle { pub envelope: ProofEnvelope, pub decoded: TabulaProof }
+   ```
+   Motivation: two-field tuples where both fields are "proof-shaped"
+   are historically where argument order silently swaps in a future
+   refactor. Today the tuple is documented at
+   `crates/machine/src/backend/primitive.rs:30-37`; that documentation
+   is load-bearing.
+
+2. **Backend error taxonomy split.** `VerificationError` is a single
+   flat enum mixing envelope-level concerns (`UnsupportedProofEnvelope`,
+   `BackendMismatch`, `BindingDigestMismatch`, `ProofCodec`) with
+   STARK-level constraint failures (`ChipVerificationFailed`,
+   `CrossProofBusImbalance`, `InternalBusImbalance`, etc.). An ideal
+   post-SP-5 shape splits into `BackendVerifyError` (surface / envelope
+   / binding / decoding) and `StarkVerifyError` (internal constraint
+   failures), analogous to SP-5's runtime error narrowing. Today's
+   shape is workable because `thiserror::#[source]` chaining plus the
+   runtime's `route_to_verify` pattern already hide most of the
+   flatness from callers.
+
+3. **`BindingDigest` newtype.** `binding_digest: [u8; 32]` appears on
+   `PreparedMachineInput`, `TabulaProof`, `BackendVerifier::verify_*`,
+   and `BoundStatement::binding_digest()`. A newtype
+   `BindingDigest([u8; 32])` would prevent accidental mixing with
+   other 32-byte digests (contract metadata, artifact context, etc.)
+   and give a single authoritative name across the stack. Low value
+   relative to other polish; purely hygiene.
+
+These items are candidates for bundling into SP-6 (wire-type and
+surface cleanup) rather than a dedicated SP. The `TabulaMachine`
+visibility concern flagged in the post-landing analysis was found to
+be already addressed: `TabulaMachine::{prove, verify}` are `pub(crate)`
+(`crates/machine/src/machine.rs:88, 98`); the type itself is public
+only because the runtime crate needs to name it as a field type.

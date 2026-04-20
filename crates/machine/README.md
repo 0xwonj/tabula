@@ -34,9 +34,11 @@ configured [`TabulaMachine`]:
   (defense-in-depth against byte-level tampering that would otherwise only
   surface as a transcript failure), verifies the machine proof, and returns
   the decoded `TabulaProof` on success.
-- `BackendVerifier::new(&machine).verify_proof(&proof)` is the short path for
-  callers that already hold a decoded `TabulaProof` (for example, the runtime
-  after statement-level chip-opening checks).
+- `BackendVerifier::new(&machine).verify_proof(&proof, binding_digest)` is the
+  short path for callers that already hold a decoded `TabulaProof` (for example,
+  the runtime after statement-level chip-opening checks). It applies the same
+  binding-digest check `verify_envelope` does — a single discipline, no
+  caller-managed footgun.
 
 The machine proof binds only a 32-byte `binding_digest` into its Fiat-Shamir
 transcript — it does **not** carry the artifact-bound `PublicStatement` on the

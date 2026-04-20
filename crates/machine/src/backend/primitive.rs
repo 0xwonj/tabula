@@ -101,33 +101,30 @@ impl<'a> BackendVerifier<'a> {
             });
         }
         let proof = decode_proof_bytes(&envelope.proof_bytes)?;
-        if proof.binding_digest != binding_digest {
-            return Err(VerificationError::BindingDigestMismatch {
-                expected: binding_digest,
-                actual: proof.binding_digest,
-            });
-        }
-        self.verify_proof(&proof)?;
+        self.verify_proof(&proof, binding_digest)?;
         Ok(proof)
     }
 
     /// Verify an already-decoded machine proof against this backend's
-    /// configured setup.
+    /// configured setup and the caller's expected `binding_digest`.
     ///
     /// Callers that still hold the decoded `TabulaProof` (for example, after
     /// [`BackendProver::prove_envelope`] or while running statement-level
     /// checks against chip openings) can skip re-decoding the envelope bytes.
-    ///
-    /// **Binding-digest responsibility.** This entry point does *not* compare
-    /// `proof.binding_digest` against any caller-supplied expected value. A
-    /// valid result here only asserts "this proof was internally consistent
-    /// against its own transcript" — not "this proof is bound to the
-    /// statement you meant to verify". Callers must either
-    /// (a) assert `proof.binding_digest` matches their expected digest
-    /// upstream, as the runtime verifier does, or
-    /// (b) call [`BackendVerifier::verify_envelope`] instead, which performs
-    /// that check before running the STARK verifier.
-    pub fn verify_proof(&self, proof: &TabulaProof) -> Result<(), VerificationError> {
+    /// The binding-digest check runs before STARK verification, so a wrong
+    /// statement short-circuits with [`VerificationError::BindingDigestMismatch`]
+    /// rather than surfacing as a transcript-level failure.
+    pub fn verify_proof(
+        &self,
+        proof: &TabulaProof,
+        expected_binding_digest: [u8; 32],
+    ) -> Result<(), VerificationError> {
+        if proof.binding_digest != expected_binding_digest {
+            return Err(VerificationError::BindingDigestMismatch {
+                expected: expected_binding_digest,
+                actual: proof.binding_digest,
+            });
+        }
         self.machine.verify(proof)
     }
 }

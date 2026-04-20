@@ -275,6 +275,12 @@ a minimal dep set.
 
 ### SP-2 — Machine backend primitive split
 
+> **Status: Landed 2026-04-19** (polish follow-up 2026-04-20). See
+> [SP-2 design spec](2026-04-18-sp2-machine-backend-primitive-split-design.md)
+> and its Landed Notes section for the per-commit trail, the two
+> in-flight amendments (`prove_envelope` tuple return, `StateRuntimeView`
+> relocation), and the deferred polish candidates.
+
 **Goal:** `tabula-machine` exposes pure backend primitives; wire
 types come from contract.
 
@@ -751,8 +757,6 @@ negative test pair) can be parallelized via subagent dispatch.
 
 - **SP-1**: Does `contract → ir` get removed, or does the shared
   type live elsewhere?
-- **SP-2**: Exact final shape of `PreparedMachineInput` and
-  `TabulaProof` after public_statement removal.
 - **SP-6**: Do SDK wrapper types (`sdk::Proof` etc.) survive?
 - **SP-7**: Does `tabula-ext`'s `authoring`/`runtime`/`backend`
   vocabulary collapse into the function axis, or survive with

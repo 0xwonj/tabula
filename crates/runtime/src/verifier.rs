@@ -131,7 +131,7 @@ impl PreparedVerifier {
             _ => {}
         }
         BackendVerifier::new(&self.state.machine)
-            .verify_proof(proof)
+            .verify_proof(proof, expected_binding_digest)
             .map_err(VerifyError::Verification)?;
         Ok(bound)
     }
