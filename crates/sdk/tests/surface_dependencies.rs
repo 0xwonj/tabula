@@ -51,10 +51,7 @@ fn active_cli_docs_describe_logical_key_authoring() {
         .expect("workspace root")
         .to_path_buf();
 
-    let docs = [
-        workspace_root.join("crates/cli/README.md"),
-        workspace_root.join("docs/notes/tabula-cli-target-design.md"),
-    ];
+    let docs = [workspace_root.join("crates/cli/README.md")];
     let forbidden = [
         "tabula state set --program <PROGRAM> --state <STATE> <TABLE> <ROW> <FIELD> <VALUE>",
         "tabula state set --program program.artifact.json --state state.json balances 1 amount 100",
@@ -117,27 +114,17 @@ fn active_docs_do_not_point_to_archived_canonical_vocabulary_note() {
         workspace_root.join("README.md"),
         workspace_root.join("docs/README.md"),
         workspace_root.join("docs/design/architecture.md"),
-        workspace_root.join("docs/notes"),
     ];
     let mut violations = Vec::new();
     for doc in docs {
-        if doc.is_dir() {
-            collect_doc_violations(
-                &workspace_root,
-                &doc,
-                &["canonical-vocabulary.md"],
-                &mut violations,
-            );
-        } else {
-            let relative = doc.strip_prefix(&workspace_root).expect("relative path");
-            let source = fs::read_to_string(&doc).expect("read doc");
-            find_violations(
-                relative,
-                &source,
-                &["canonical-vocabulary.md"],
-                &mut violations,
-            );
-        }
+        let relative = doc.strip_prefix(&workspace_root).expect("relative path");
+        let source = fs::read_to_string(&doc).expect("read doc");
+        find_violations(
+            relative,
+            &source,
+            &["canonical-vocabulary.md"],
+            &mut violations,
+        );
     }
 
     assert!(
@@ -161,35 +148,6 @@ fn collect_violations(
             continue;
         }
         if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
-            continue;
-        }
-
-        let relative = path
-            .strip_prefix(workspace_root)
-            .expect("relative path")
-            .to_path_buf();
-        let source = fs::read_to_string(&path).expect("read source");
-        find_violations(&relative, &source, denylist, violations);
-    }
-}
-
-fn collect_doc_violations(
-    workspace_root: &Path,
-    dir: &Path,
-    denylist: &[&str],
-    violations: &mut Vec<String>,
-) {
-    for entry in fs::read_dir(dir).expect("read dir") {
-        let entry = entry.expect("dir entry");
-        let path = entry.path();
-        if path.is_dir() {
-            if path.ends_with("archive") {
-                continue;
-            }
-            collect_doc_violations(workspace_root, &path, denylist, violations);
-            continue;
-        }
-        if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
             continue;
         }
 

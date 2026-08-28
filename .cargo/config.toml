@@ -1,9 +1,0 @@
-# Enable CPU-native instruction sets for Plonky3 SIMD optimization.
-# BabyBear field arithmetic uses platform-specific intrinsics (NEON on
-# aarch64, AVX2/AVX-512 on x86_64) that rustc does not emit by default.
-# See: https://github.com/Plonky3/Plonky3#performance
-[target.'cfg(target_arch = "x86_64")']
-rustflags = ["-Ctarget-cpu=native"]
-
-[target.'cfg(target_arch = "aarch64")']
-rustflags = ["-Ctarget-cpu=native"]

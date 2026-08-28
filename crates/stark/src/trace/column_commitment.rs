@@ -67,7 +67,7 @@ impl EncodingWidth {
 /// Proof plan metadata for a single column.
 ///
 /// Describes which commitment scheme and encoding width a column uses.
-/// Generated during [`CommitmentPlan::generate()`].
+/// Generated while constructing a `CommitmentPlan`.
 #[derive(Clone, Debug)]
 pub struct ColumnPlan {
     /// Table this column belongs to.

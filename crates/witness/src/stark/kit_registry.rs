@@ -2,7 +2,7 @@
 //! [`prepare_execution_store`](super::prepare_execution_store).
 //!
 //! The runtime populates this registry during proving setup by
-//! collecting each configured [`tabula_ext::backend::ExecutionBackend`]'s
+//! collecting each configured `tabula_ext::backend::ExecutionBackend`'s
 //! `witness_kits()`; the witness lowering driver then iterates the
 //! kits and invokes `finalize` in registration order so every kit
 //! publishes its rows under its declared witness-store label.

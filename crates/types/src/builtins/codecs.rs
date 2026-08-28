@@ -24,8 +24,8 @@ pub fn encode_seeded_field_elements(value: &TypedValue) -> Result<Vec<KoalaBear>
         TYPE_BYTES32_ID => {
             let bytes = decode_bytes32_payload(value, TYPE_BYTES32_ID)?;
             let mut fes = Vec::with_capacity(8);
-            for (i, chunk) in bytes.chunks_exact(4).enumerate() {
-                let limb = u32::from_le_bytes(chunk.try_into().expect("chunk"));
+            for (i, chunk) in bytes.as_chunks::<4>().0.iter().enumerate() {
+                let limb = u32::from_le_bytes(*chunk);
                 if limb >= KoalaBear::ORDER_U32 {
                     return Err(TabulaError::FieldEncodingError(format!(
                         "Bytes32 chunk {i}: {limb} >= KoalaBear modulus {}",
@@ -294,7 +294,7 @@ mod tests {
             field_round_trip(&i64_typed(value), TYPE_I64_ID);
         }
         let mut bytes = [0u8; 32];
-        for (i, chunk) in bytes.chunks_exact_mut(4).enumerate() {
+        for (i, chunk) in bytes.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             chunk.copy_from_slice(&((i as u32) * 1000).to_le_bytes());
         }
         field_round_trip(&bytes32_typed([0; 32]), TYPE_BYTES32_ID);

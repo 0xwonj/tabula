@@ -4,8 +4,8 @@
 > could improve performance in the Tabula proving framework.
 >
 > Date: 2026-03-09
-> Related: [proof-optimization-architecture.md](proof-optimization-architecture.md),
-> [master-roadmap.md](master-roadmap.md)
+> Related historical notes: `proof-optimization-architecture.md`,
+> `master-roadmap.md`
 
 ---
 

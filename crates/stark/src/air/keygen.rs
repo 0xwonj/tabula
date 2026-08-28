@@ -1,13 +1,13 @@
 //! Keygen phase: extract per-chip metadata for prover integration.
 //!
-//! [`keygen`] evaluates each chip's `eval()` via column-scanning to extract
+//! `keygen` evaluates each chip's `eval()` via column-scanning to extract
 //! static [`InteractionDescriptor`]s. These descriptors encode which columns
 //! contribute to each interaction's fingerprint, enabling efficient permutation
 //! trace generation without re-running `eval()`.
 //!
 //! # Soundness
 //!
-//! After extraction, [`verify_extraction_soundness`] evaluates the chip on a
+//! After extraction, `verify_extraction_soundness` evaluates the chip on a
 //! random trace and verifies that the extracted descriptors reproduce the same
 //! interaction values. This catches any non-affine interaction that column-scanning
 //! would miss.

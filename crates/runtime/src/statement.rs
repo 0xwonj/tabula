@@ -11,6 +11,7 @@ use crate::error::VerifyError;
 use crate::error::{ExecuteError, RuntimeError};
 #[cfg(feature = "prove")]
 use crate::prepared_state::PreparedRuntimeState;
+#[cfg(feature = "prove")]
 use crate::semantics as runtime_ir;
 use crate::snapshot::CommittedStateSnapshot;
 #[cfg(feature = "prove")]

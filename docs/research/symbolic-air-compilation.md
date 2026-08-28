@@ -2,10 +2,9 @@
 
 > Status: Research
 > Date: 2026-03-13
-> Extends: [execution-chip-evolution.md](../design/execution-chip-evolution.md) Level 4
-> Related: [proof-optimization-architecture.md](../design/proof-optimization-architecture.md) §3,
->          [constraint-compilation.md](../design/constraint-compilation.md),
->          [extensibility-architecture.md](../design/extensibility-architecture.md) §3.6
+> Extends the historical `execution-chip-evolution.md` Level 4 design.
+> Related historical notes: `proof-optimization-architecture.md` §3,
+> `constraint-compilation.md`, and `extensibility-architecture.md` §3.6.
 
 ---
 
@@ -15,7 +14,7 @@ The ExecutionChip is a 278-column universal AIR that processes one instruction p
 
 The fundamental inefficiency: **the prover re-derives data flow at proof time**, even though the compiler already knows the complete data flow at registration time.
 
-[execution-chip-evolution.md](../design/execution-chip-evolution.md) describes a Level 0–4 evolution path. Level 4 (Template AIR) generates per-program circuits where each instruction occupies a fixed row with known constraints. This eliminates opcode dispatch and reduces column width to ~60–80.
+The historical `execution-chip-evolution.md` note describes a Level 0–4 evolution path. Level 4 (Template AIR) generates per-program circuits where each instruction occupies a fixed row with known constraints. This eliminates opcode dispatch and reduces column width to ~60–80.
 
 This document explores taking Level 4 to its logical conclusion: **symbolic execution collapses the entire transaction into direct algebraic relations between state reads and writes, enabling a one-row-per-transaction model**.
 
@@ -462,7 +461,8 @@ for random (params, state):
     assert_eq(compiled_bus_messages, generic_bus_messages)
 ```
 
-This is the TemplateChip equivalence harness described in [extensibility-architecture.md](../design/extensibility-architecture.md) §3.6.
+This is the TemplateChip equivalence harness described in the historical
+`extensibility-architecture.md` note §3.6.
 
 **Layer 3 — Formal argument:**
 
@@ -601,11 +601,11 @@ Equivalence testing across all registered tx types. End-to-end benchmarks (prove
 
 ## References
 
-- [execution-chip-evolution.md](../design/execution-chip-evolution.md) — Level 0–4 evolution path
-- [proof-optimization-architecture.md](../design/proof-optimization-architecture.md) — Two-axis optimization context
-- [constraint-compilation.md](../design/constraint-compilation.md) — Constraint CSE via symbolic DAG
-- [extensibility-architecture.md](../design/extensibility-architecture.md) — ChipExtension, TemplateChip trait
-- [air-chip-architecture.md](../design/air-chip-architecture.md) — Chip patterns and bus architecture
+- `execution-chip-evolution.md` — historical Level 0–4 evolution path
+- `proof-optimization-architecture.md` — historical two-axis optimization context
+- `constraint-compilation.md` — historical constraint CSE via symbolic DAG
+- `extensibility-architecture.md` — historical ChipExtension and TemplateChip design
+- `air-chip-architecture.md` — historical chip patterns and bus architecture
 - `crates/chips/src/execution/columns.rs` — Current ExecutionCols layout (278 columns)
 - `crates/ir/src/pass/typecheck.rs` — Compile-time type inference and SSA validation
 - `crates/lang/src/lower/stmt.rs` — DSL-to-IR lowering (deterministic slot allocation)

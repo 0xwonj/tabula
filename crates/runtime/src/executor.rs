@@ -160,6 +160,7 @@ pub fn prepare_executor(
         .validate_sealed_artifact()
         .map_err(|e| ExecuteError::Setup(crate::error::SetupError::CompilerValidation(e)))?;
     let host_environment: HostEnvironment = opts.host_environment().clone();
+    #[cfg(feature = "prove")]
     let machine_stark_config = opts.machine_stark_config().clone();
     #[cfg(feature = "prove")]
     let root_backend = opts.root_backend().0.clone();
@@ -169,6 +170,7 @@ pub fn prepare_executor(
     let build = build_prepared_runtime(
         &program,
         &host_environment,
+        #[cfg(feature = "prove")]
         &machine_stark_config,
         #[cfg(feature = "prove")]
         root_backend,

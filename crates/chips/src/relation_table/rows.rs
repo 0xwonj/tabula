@@ -7,7 +7,7 @@ use tabula_stark::air::interaction::BusId;
 use tabula_stark::chips::ChipId;
 use tabula_stark::witness_kit::LogicalRelationTableRow;
 
-/// Witness-store label consumed by [`RelationTableChip`].
+/// Witness-store label consumed by `RelationTableChip`.
 pub const RELATION_TABLE_WITNESS_LABEL: &str = "relation_table_rows";
 /// Chip id for the static relation lookup lane.
 pub const RELATION_TABLE_CHIP_ID: ChipId = ChipId(92);

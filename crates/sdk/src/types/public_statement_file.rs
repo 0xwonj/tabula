@@ -161,7 +161,7 @@ fn decode_hex(input: &str, field: &'static str) -> Result<Vec<u8>, PublicStateme
         });
     }
     let mut bytes = Vec::with_capacity(input.len() / 2);
-    for pair in input.chunks_exact(2) {
+    for pair in input.as_chunks::<2>().0 {
         let hi =
             decode_hex_nibble(pair[0]).ok_or_else(|| PublicStatementFileError::InvalidHex {
                 field,

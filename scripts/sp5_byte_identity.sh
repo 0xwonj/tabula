@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
-# SP-5 Byte-Identity Gate
+# SP-5 Byte-Identity Diagnostic
 #
 # Captures sha256 hashes of proof.bin and public_statement.json for the
-# "basic" and "membership" examples. These hashes constitute the SP-1.5
-# HEAD baseline; every subsequent SP-5 refactor task must reproduce them.
+# "basic" and "membership" examples for an explicit before/after comparison.
 #
-# Usage (capture baseline):
+# Capture a local baseline:
 #   scripts/sp5_byte_identity.sh | sort \
-#     > docs/superpowers/specs/2026-04-19-sp5-byte-identity-baseline.txt
+#     > /tmp/tabula-sp5-byte-identity-baseline.txt
 #
-# Verify (compare against saved baseline):
+# Compare against that baseline:
 #   diff <(scripts/sp5_byte_identity.sh | sort) \
-#        <(sort docs/superpowers/specs/2026-04-19-sp5-byte-identity-baseline.txt)
-#
-# Wiring into CI is a follow-up (no CI system is present in this repo yet).
-# When CI is added, run this on PRs touching crates/runtime/** or crates/sdk/**.
+#        <(sort /tmp/tabula-sp5-byte-identity-baseline.txt)
 
 set -euo pipefail
 

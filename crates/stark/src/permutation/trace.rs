@@ -47,7 +47,7 @@ fn write_ef4(row: &mut [KoalaBear], offset: usize, val: EF4) {
 /// Generate a permutation trace from concrete recorded interactions.
 ///
 /// Uses concrete interaction values recorded by evaluating the chip's `eval()`
-/// via [`evaluate_chip_interactions_only`]. This correctly handles non-affine
+/// via `evaluate_chip_interactions_only`. This correctly handles non-affine
 /// multiplicities (products of columns).
 ///
 /// # Trace layout

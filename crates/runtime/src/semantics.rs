@@ -1,28 +1,38 @@
 //! Proof-program semantic types: slot-indexed views over the IR for witness generation.
 
+#[cfg(feature = "prove")]
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+#[cfg(feature = "prove")]
 use p3_koala_bear::KoalaBear;
+#[cfg(feature = "prove")]
 use tabula_commitment::NativeDigest;
+#[cfg(feature = "prove")]
 use tabula_contract::PublicStatement;
+#[cfg(feature = "prove")]
 use tabula_contract::format::public_statement_transcript::{
     EncodedTranscriptValue, event_arg_block, event_header_block, event_transcript_header_block,
     public_context_header_block, public_context_item_block, tx_batch_header_block, tx_header_block,
     tx_param_block,
 };
+#[cfg(feature = "prove")]
 use tabula_contract::format::typed_tuple::TupleEncodingDefaults;
 use tabula_core::error::TabulaError;
+#[cfg(feature = "prove")]
 use tabula_core::{Digest, PortableValue};
 use tabula_executor as exec;
+#[cfg(feature = "prove")]
 use tabula_ext::backend::prelude::PrimeCharacteristicRing;
 use tabula_ir as ir;
+#[cfg(feature = "prove")]
 use tabula_types::{
     ContextValues, EncodingRuntimeRegistry, RelationEffect, StatePropertyEffect,
     TypeRuntimeRegistry, TypedEventEffect, TypedStateEffect, TypedValue,
 };
 
 /// A state column slot in the proof layout, identifying a (table, field) pair.
+#[cfg(feature = "prove")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofStateSlot {
     /// Target table.
@@ -34,6 +44,7 @@ pub struct ProofStateSlot {
 }
 
 /// A capability slot in the proof layout, covering all journaled invocations.
+#[cfg(feature = "prove")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityProofSlot {
     /// The capability ID this slot covers.
@@ -43,6 +54,7 @@ pub struct CapabilityProofSlot {
 }
 
 /// A relation slot in the proof layout, covering all lookups for one relation.
+#[cfg(feature = "prove")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelationProofSlot {
     /// The relation ID this slot covers.
@@ -52,6 +64,7 @@ pub struct RelationProofSlot {
 }
 
 /// An IR program pre-indexed for proof witness generation and slot allocation.
+#[cfg(feature = "prove")]
 #[derive(Debug, Clone)]
 pub struct ResolvedProofProgram {
     program: Arc<ir::ValidatedProgram>,
@@ -64,6 +77,7 @@ pub struct ResolvedProofProgram {
     relation_index: BTreeMap<ir::RelationId, usize>,
 }
 
+#[cfg(feature = "prove")]
 impl ResolvedProofProgram {
     /// Build a resolved proof program from a validated program, taking ownership.
     pub fn from_validated_program(program: ir::ValidatedProgram) -> Result<Self, TabulaError> {
@@ -166,6 +180,7 @@ impl ResolvedProofProgram {
 #[derive(Debug, Clone)]
 pub struct RuntimeProgram {
     execution: exec::ResolvedExecutionProgram,
+    #[cfg(feature = "prove")]
     proof: ResolvedProofProgram,
 }
 
@@ -174,8 +189,13 @@ impl RuntimeProgram {
     pub fn from_validated_program(program: ir::ValidatedProgram) -> Result<Self, TabulaError> {
         let shared = Arc::new(program);
         let execution = exec::ResolvedExecutionProgram::from_shared_program(shared.clone())?;
+        #[cfg(feature = "prove")]
         let proof = ResolvedProofProgram::from_shared_program(shared)?;
-        Ok(Self { execution, proof })
+        Ok(Self {
+            execution,
+            #[cfg(feature = "prove")]
+            proof,
+        })
     }
 
     /// Borrow the execution-facing program view.
@@ -184,12 +204,14 @@ impl RuntimeProgram {
     }
 
     /// Borrow the proof-facing program view.
+    #[cfg(feature = "prove")]
     pub fn proof(&self) -> &ResolvedProofProgram {
         &self.proof
     }
 }
 
 /// Per-slot execution effects for a single state column in one batch.
+#[cfg(feature = "prove")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofStateSlotJournal {
     /// The state slot this journal covers.
@@ -201,6 +223,7 @@ pub struct ProofStateSlotJournal {
 }
 
 /// Per-slot execution effects for a single journaled capability in one batch.
+#[cfg(feature = "prove")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofCapabilitySlotJournal {
     /// The capability slot this journal covers.
@@ -210,6 +233,7 @@ pub struct ProofCapabilitySlotJournal {
 }
 
 /// Per-slot execution effects for a single relation in one batch.
+#[cfg(feature = "prove")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofRelationSlotJournal {
     /// The relation slot this journal covers.
@@ -219,6 +243,7 @@ pub struct ProofRelationSlotJournal {
 }
 
 /// The complete proof-visible journal for one executed batch.
+#[cfg(feature = "prove")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProofJournal {
     /// Committed public context values.
@@ -234,6 +259,7 @@ pub(crate) struct ProofJournal {
 }
 
 /// Execution-derived values supplied by the runtime when materializing one public statement.
+#[cfg(feature = "prove")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PublicStatementMaterialization {
     /// Canonical digest of the applied transaction batch.
@@ -245,6 +271,7 @@ pub(crate) struct PublicStatementMaterialization {
 }
 
 /// Proof-visible emitted event with its batch position.
+#[cfg(feature = "prove")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofEventEffect {
     /// Zero-based transaction index within the batch.
@@ -254,6 +281,7 @@ pub struct ProofEventEffect {
 }
 
 /// Internal canonical public-context binding used while materializing proof-visible statements.
+#[cfg(feature = "prove")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PublicContextBinding {
     /// The context field identifier.
@@ -263,6 +291,7 @@ pub(crate) struct PublicContextBinding {
 }
 
 /// Reduce an execution journal into per-slot proof journals.
+#[cfg(feature = "prove")]
 pub(crate) fn reduce_execution_journal(
     resolved_program: &ResolvedProofProgram,
     context: &ContextValues,
@@ -388,6 +417,7 @@ pub(crate) fn reduce_execution_journal(
 }
 
 /// Materialize the proved public statement from program, context, and execution journal.
+#[cfg(feature = "prove")]
 pub(crate) fn materialize_public_statement(
     resolved_program: &ResolvedProofProgram,
     context: &ContextValues,
@@ -409,6 +439,7 @@ pub(crate) fn materialize_public_statement(
 }
 
 /// Build the proved public statement directly from one pre-reduced [`ProofJournal`].
+#[cfg(feature = "prove")]
 pub(crate) fn build_public_statement_from_journal(
     proof_journal: &ProofJournal,
     materialization: PublicStatementMaterialization,
@@ -441,6 +472,7 @@ pub(crate) fn build_public_statement_from_journal(
     })
 }
 
+#[cfg(feature = "prove")]
 fn parse_native_digest(bytes: Digest, label: &'static str) -> Result<NativeDigest, TabulaError> {
     NativeDigest::from_bytes(&bytes).map_err(|error| TabulaError::ProofError {
         phase: label,
@@ -448,6 +480,7 @@ fn parse_native_digest(bytes: Digest, label: &'static str) -> Result<NativeDiges
     })
 }
 
+#[cfg(feature = "prove")]
 pub(crate) fn encode_public_context(
     resolved_program: &ResolvedProofProgram,
     context: &ContextValues,
@@ -484,6 +517,7 @@ pub(crate) fn encode_public_context(
         .collect()
 }
 
+#[cfg(feature = "prove")]
 pub(crate) fn canonical_public_context(
     bindings: &[PublicContextBinding],
 ) -> Result<Vec<PublicContextBinding>, TabulaError> {
@@ -504,6 +538,7 @@ pub(crate) fn canonical_public_context(
 }
 
 /// Canonical field-block payload for the public-context commitment.
+#[cfg(feature = "prove")]
 pub(crate) fn canonical_public_context_payload(
     bindings: &[PublicContextBinding],
     type_runtimes: &TypeRuntimeRegistry,
@@ -523,6 +558,7 @@ pub(crate) fn canonical_public_context_payload(
 }
 
 /// Compute the canonical public-context digest from canonicalized context bindings.
+#[cfg(feature = "prove")]
 pub(crate) fn compute_public_context_digest(
     bindings: &[PublicContextBinding],
     type_runtimes: &TypeRuntimeRegistry,
@@ -538,6 +574,7 @@ pub(crate) fn compute_public_context_digest(
 }
 
 /// Canonical field-block payload for the applied transaction batch commitment.
+#[cfg(feature = "prove")]
 pub fn canonical_batch_payload(
     batch: &ir::EntryBatch,
     type_runtimes: &TypeRuntimeRegistry,
@@ -563,6 +600,7 @@ pub fn canonical_batch_payload(
 }
 
 /// Compute the canonical applied transaction digest for one batch input.
+#[cfg(feature = "prove")]
 pub fn compute_applied_tx_digest(
     batch: &ir::EntryBatch,
     type_runtimes: &TypeRuntimeRegistry,
@@ -578,6 +616,7 @@ pub fn compute_applied_tx_digest(
 }
 
 /// Canonical field-block payload for the emitted-event commitment.
+#[cfg(feature = "prove")]
 pub fn canonical_event_log_payload(
     events: &[ProofEventEffect],
     encoding_runtimes: &EncodingRuntimeRegistry,
@@ -608,6 +647,7 @@ pub fn canonical_event_log_payload(
 }
 
 /// Compute the canonical emitted-event digest for one proof journal.
+#[cfg(feature = "prove")]
 pub fn compute_event_digest(
     events: &[ProofEventEffect],
     encoding_runtimes: &EncodingRuntimeRegistry,
@@ -620,6 +660,7 @@ pub fn compute_event_digest(
     )?))
 }
 
+#[cfg(feature = "prove")]
 pub(crate) fn encode_public_statement_value(
     value: &TypedValue,
     encoding_runtimes: &EncodingRuntimeRegistry,
@@ -645,6 +686,7 @@ pub(crate) fn encode_public_statement_value(
     })
 }
 
+#[cfg(feature = "prove")]
 fn digest_from_blocks(blocks: &[[KoalaBear; 8]]) -> Digest {
     tabula_contract::format::public_statement_transcript::compute_public_statement_transcript_digest(
         blocks.iter(),
@@ -652,7 +694,7 @@ fn digest_from_blocks(blocks: &[[KoalaBear; 8]]) -> Digest {
     .to_bytes()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "prove"))]
 mod tests {
     use borsh::to_vec;
     use tabula_contract::{TupleEncodingDefaults, TupleEncodingSelection};

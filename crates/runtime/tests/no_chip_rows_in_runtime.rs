@@ -19,8 +19,8 @@
 //! semantics live inline at `crates/runtime/src/prover_relation_tests.rs`
 //! and are allowed to name the chip row types directly.
 //!
-//! See SP-5 review findings (`docs/notes/sp5-review-findings.md`) blocker
-//! B-1 and the spec §8.1 / §8.2 / §12.
+//! This keeps the production runtime boundary independent of chip-internal
+//! row layouts while allowing test-only construction for rejection tests.
 
 #![allow(missing_docs)]
 

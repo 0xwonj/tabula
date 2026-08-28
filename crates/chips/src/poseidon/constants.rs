@@ -110,8 +110,7 @@ fn apply_mat4(x: &mut [KoalaBear; 4]) {
 /// Applies M_4 to each block of 4 elements, then column mixing.
 pub fn external_linear_layer(state: &mut [KoalaBear; WIDTH]) {
     // Apply M_4 to each block of 4
-    for chunk in state.chunks_exact_mut(4) {
-        let block: &mut [KoalaBear; 4] = chunk.try_into().unwrap();
+    for block in state.as_chunks_mut::<4>().0 {
         apply_mat4(block);
     }
     // Column mixing: each element gets the sum of its column added

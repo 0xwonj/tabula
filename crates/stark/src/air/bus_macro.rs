@@ -1,7 +1,7 @@
 //! Macro for generating typed bus extension traits from schema declarations.
 //!
-//! The [`define_bus!`] macro generates a trait + blanket impl for each bus,
-//! encoding the tuple schema (field order, width, [`BusId`]) once.
+//! The `define_bus!` macro generates a trait + blanket impl for each bus,
+//! encoding the tuple schema (field order, width, `BusId`) once.
 
 /// Define one or more LogUp bus extension traits.
 ///

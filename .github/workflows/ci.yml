@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      full_tests:
+        description: Run the full all-features integration suite
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Show pinned toolchain
+        run: rustc --version --verbose
+      - name: Cache Cargo downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Check feature matrix
+        run: scripts/sp5_feature_matrix.sh
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-features --lib --bins --examples --locked -- -D warnings
+      - name: Run unit tests
+        run: cargo test --workspace --all-features --lib --bins --locked
+      - name: Run lightweight integration smoke tests
+        run: |
+          cargo test -p tabula-runtime --all-features --test prepared_executor --locked
+          cargo test -p tabula-runtime --all-features --test prepared_handle_bounds --locked
+          cargo test -p tabula-sdk --no-default-features --features verify --test sdk_verify_only --locked
+      - name: Run full integration suite
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_tests }}
+        run: cargo test --workspace --all-features --locked

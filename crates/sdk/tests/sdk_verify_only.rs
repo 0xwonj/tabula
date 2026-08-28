@@ -49,7 +49,7 @@ fn open_program(sdk: &Sdk) -> Program {
 fn snapshot(program: &Program) -> State {
     program
         .state()
-        .set("accounts", 7, "balance", 11u64)
+        .set("accounts", (7u64,), "balance", 11u64)
         .expect("seed balance")
         .build()
 }

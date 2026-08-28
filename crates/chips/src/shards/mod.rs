@@ -6,7 +6,7 @@
 //!
 //! ## Dynamic ChipId allocation
 //!
-//! Each commitment scheme allocates unique [`ChipId`]s for its per-column shard
+//! Each commitment scheme allocates unique `ChipId`s for its per-column shard
 //! chips via [`ChipIdAllocator`]. Core chips use IDs 0–99; shard allocation
 //! starts at 100.
 

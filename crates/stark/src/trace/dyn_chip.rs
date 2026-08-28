@@ -25,7 +25,7 @@ use crate::trace::contributor::TraceContributor;
 /// # WitnessStore contract
 ///
 /// Each chip's [`TraceContributor::contribute()`] reads specific entries from a
-/// [`WitnessStore`]. The required labels are defined in
+/// `WitnessStore`. The required labels are defined in
 /// [`witness_labels`](crate::trace::witness_labels):
 ///
 /// | Phase | Chip | Required Label(s) |
@@ -42,7 +42,7 @@ use crate::trace::contributor::TraceContributor;
 /// | Dependent | RangeCheckChip | `RANGE_CHECK_MULTS` (populated by `BusConsumer`) |
 ///
 /// Labels for Dependent-phase chips are populated automatically by the
-/// orchestrator's [`BusConsumer::collect()`] step between Phase 1 and Phase 2.
+/// orchestrator's `BusConsumer::collect()` step between Phase 1 and Phase 2.
 pub trait DynChip:
     ChipSpec
     + TraceContributor

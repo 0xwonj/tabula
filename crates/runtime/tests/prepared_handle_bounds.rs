@@ -5,8 +5,6 @@
 //! for every handle so the invariant is visible in CI output and greppable
 //! by name (complementing the inline `const _: fn() = ...` assertions in
 //! each handle module).
-//!
-//! Spec: `docs/superpowers/specs/2026-04-19-sp5-runtime-decomposition-design.md` §12.
 
 #![allow(missing_docs)]
 

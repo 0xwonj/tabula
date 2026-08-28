@@ -137,7 +137,7 @@ pub(crate) fn encode_proof_bytes(proof: &TabulaProof) -> Result<Vec<u8>, ProofCo
 ///
 /// # Visibility Asymmetry
 ///
-/// `decode_proof_bytes` is `pub` while [`encode_proof_bytes`] is `pub(crate)`.
+/// `decode_proof_bytes` is `pub` while `encode_proof_bytes` is `pub(crate)`.
 /// This is intentional and reflects the envelope contract:
 ///
 /// - **Encoding is privileged.** Only `BackendProver::prove_envelope` may

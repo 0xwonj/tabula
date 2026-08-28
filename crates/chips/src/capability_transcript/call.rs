@@ -15,7 +15,7 @@ use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 
 use crate::poseidon::constants::poseidon2_permutation;
 
-/// Witness-store label for transcript calls consumed by [`CapabilityTranscriptChip`].
+/// Witness-store label for transcript calls consumed by `CapabilityTranscriptChip`.
 pub const CAPABILITY_TRANSCRIPT_WITNESS_LABEL: &str = "capability_transcript_calls";
 
 /// Fixed chip id for the generic capability transcript lane.

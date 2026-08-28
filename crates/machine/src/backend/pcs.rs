@@ -2,7 +2,7 @@
 //!
 //! Wraps BLAKE3 to operate in KoalaBear field-element space, producing
 //! `[KoalaBear; 8]` digests. This keeps compatibility with the
-//! [`DuplexChallenger`] which only observes `Hash<F, F, N>` commitments.
+//! `DuplexChallenger`, which only observes `Hash<F, F, N>` commitments.
 //!
 //! BLAKE3 replaces Poseidon2 for Merkle tree hashing only — the in-circuit
 //! hash (PoseidonChip) and Fiat-Shamir challenger remain Poseidon2.
@@ -32,8 +32,8 @@ pub struct Blake3FieldCompressor;
 /// at most one subtraction, preserving near-uniform distribution.
 fn bytes_to_field_8(bytes: &[u8; 32]) -> [KoalaBear; 8] {
     let mut out = [KoalaBear::ZERO; 8];
-    for (i, chunk) in bytes.chunks_exact(4).enumerate() {
-        let val = u32::from_le_bytes(chunk.try_into().expect("chunk is 4 bytes"));
+    for (i, chunk) in bytes.as_chunks::<4>().0.iter().enumerate() {
+        let val = u32::from_le_bytes(*chunk);
         out[i] = KoalaBear::from_u64(val as u64);
     }
     out

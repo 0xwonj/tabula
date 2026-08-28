@@ -16,11 +16,6 @@ The supported subset is:
 - unary native user-state keys only
 - public examples: `basic` and `membership`
 
-Paper-planning notes in `docs/notes/` may describe broader
-submission-time goals such as a StarkEx-class workload, provenance
-verification, or Dockerized reproduction. Those capabilities are **not**
-part of the current public artifact until they are documented here.
-
 The following are intentionally out of scope:
 
 - query proving
@@ -30,11 +25,12 @@ The following are intentionally out of scope:
 ## Requirements
 
 - macOS or Linux
-- Rust stable toolchain
-- `wasm32-unknown-unknown` Rust target
+- `rustup` and Cargo
 
-The repository already pins the toolchain in
-[rust-toolchain.toml](rust-toolchain.toml).
+The repository pins Rust 1.98.0 and the required `rustfmt` and `clippy`
+components in [rust-toolchain.toml](rust-toolchain.toml). `rustup` selects and
+installs that toolchain automatically when a Cargo command is run in the
+repository.
 
 ## Build
 

@@ -467,7 +467,7 @@ pub(crate) fn prepare_proof_artifacts(
     let prepared_columns = runtime_program
         .column_slots
         .iter()
-        .zip(column_slots.into_iter())
+        .zip(column_slots)
         .map(|(slot, mut prepared)| {
             synthesize_missing_init_cells(runtime_program, slot, &mut prepared)?;
             prepare_column_slot(runtime_program, slot, prepared)

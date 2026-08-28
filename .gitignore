@@ -1,9 +1,11 @@
 /target
+.DS_Store
 .claude/
 .vscode/
 tasks/
 docs/archive/
-book/build/
+/docs/notes/
+/docs/superpowers/
 .omx/
 .codex
 .codex/

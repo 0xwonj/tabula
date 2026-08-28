@@ -1,4 +1,4 @@
-//! Fluent builder API for constructing [`TabulaMachine`] instances.
+//! Fluent builder API for constructing `TabulaMachine` instances.
 //!
 //! The machine consumes fully built proof columns plus execution/root extensions.
 //! Scheme registry ownership and semantic capability validation live in the
@@ -22,7 +22,7 @@ use crate::setup::registry::{ChipRegistry, SetupError};
 use crate::setup::root::{RootProofBackend, SmtRootProofBackend};
 use crate::setup::topology::{MachineTopology, ProofTopology, TierTopology};
 
-/// Fluent builder for [`TabulaMachine`] construction.
+/// Fluent builder for `TabulaMachine` construction.
 pub struct MachineBuilder {
     columns: Vec<Arc<dyn ProofColumn>>,
     config: TabulaStarkConfig,

@@ -9,9 +9,6 @@
 //!   [`KitScratch`] entry and writes them into the execution
 //!   [`WitnessStore`].
 //!
-//! See SP-3 design spec
-//! `docs/superpowers/specs/2026-04-19-sp3-witness-chip-kit-design.md`.
-//!
 //! ## Authoring modes
 //!
 //! A kit populates its scratchpad in one of two ways, selected by the
@@ -157,12 +154,11 @@ pub mod sealed {
 /// Logical opcode tag for execution-prelude records constructed by the
 /// runtime.
 ///
-/// Each variant corresponds to the subset of chip [`Opcode`] variants that
+/// Each variant corresponds to the subset of chip `Opcode` variants that
 /// the runtime prelude builder emits when staging context/tx items. The
 /// chip-side `From` impl (in `tabula-chips`) maps each tag onto its
 /// chip-internal counterpart.
 ///
-/// [`Opcode`]: tabula_chips::execution::trace::Opcode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogicalOpcodeTag {
     /// Canonical public-context load item.

@@ -157,7 +157,7 @@ impl Default for WitnessStore {
 /// Labels for Independent/Memory-phase chips must be populated before
 /// calling [`build_all_traces()`]. Labels for Dependent-phase chips
 /// (`POSEIDON_INPUTS`, `RANGE_CHECK_MULTS`) are populated automatically
-/// by [`BusConsumer::collect()`] during orchestration.
+/// by `BusConsumer::collect()` during orchestration.
 ///
 /// Extension chips may define additional labels in their own crates.
 /// Pre-populate the [`WitnessStore`] with custom data before passing it

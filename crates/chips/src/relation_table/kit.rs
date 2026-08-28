@@ -9,7 +9,7 @@ use super::{RELATION_TABLE_CHIP_ID, RELATION_TABLE_WITNESS_LABEL, RelationTableW
 /// Witness kit for [`super::RelationTableChip`]. Uses the
 /// *runtime-pre-stuff* authoring pattern: the runtime materializes the
 /// row buffer from the prepared relation proof and inserts it into
-/// [`KitScratch`] via [`insert_rows`] before `finalize` runs; `finalize`
+/// [`KitScratch`] via `insert_rows` before `finalize` runs; `finalize`
 /// then drains the buffer and publishes it under
 /// [`RELATION_TABLE_WITNESS_LABEL`].
 #[derive(Clone, Copy, Debug, Default)]

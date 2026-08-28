@@ -13,7 +13,8 @@
 //! Public module layout:
 //! - [`primitives`]: shared commitment primitives: digests, hashers, codecs, and domain/depth constants
 //! - [`schemes`]: scheme-specific native commitment implementations (`smt`, `ssmc`, `tags`)
-//! - [`roots`]: column/table/global root-binding helpers
+//! - `roots`: private column/table/global root-binding helpers exposed through
+//!   the crate-level re-exports
 //!
 //! All meaningful native APIs are behind the `stark` feature flag. Without it,
 //! the crate remains only a minimal shell.

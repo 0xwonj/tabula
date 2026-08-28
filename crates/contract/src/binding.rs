@@ -97,7 +97,7 @@ fn decode_hex_digest(input: &str) -> Result<Digest, String> {
         return Err("expected lowercase hex characters".to_string());
     }
     let mut out = [0u8; 32];
-    for (index, chunk) in input.as_bytes().chunks_exact(2).enumerate() {
+    for (index, chunk) in input.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let chunk = std::str::from_utf8(chunk).map_err(|error| error.to_string())?;
         out[index] = u8::from_str_radix(chunk, 16)
             .map_err(|error| format!("invalid hex digest byte at offset {}: {error}", index * 2))?;

@@ -10,22 +10,25 @@ use std::sync::Arc;
 
 use tabula_compiler::RegisteredProgram;
 #[cfg(feature = "prove")]
+use tabula_contract::StaticTableArtifact;
+#[cfg(feature = "prove")]
 use tabula_contract::TupleEncodingDefaults;
-use tabula_contract::{ArtifactContext, SealedRelationPolicy, StaticTableArtifact};
+use tabula_contract::{ArtifactContext, SealedRelationPolicy};
 #[cfg(feature = "prove")]
 use tabula_core::{ColId, TableId};
 #[cfg(feature = "prove")]
 use tabula_ext::root::RootBackendBundle;
-#[cfg(all(feature = "verify", not(feature = "prove")))]
+#[cfg(not(feature = "prove"))]
 use tabula_ext::root::RootProofBackend;
+#[cfg(feature = "prove")]
 use tabula_machine::{TabulaMachine, TabulaStarkConfig};
 use tabula_types::{EncodingRuntimeRegistry, TypeRuntimeRegistry};
 #[cfg(feature = "prove")]
 use tabula_witness::stark::ChipKitRegistry;
 
-use crate::bootstrap::program::{
-    build_registered_program_machine, resolve_program_setup, validate_core_first_program,
-};
+#[cfg(feature = "prove")]
+use crate::bootstrap::program::build_registered_program_machine;
+use crate::bootstrap::program::{resolve_program_setup, validate_core_first_program};
 use crate::error::{RuntimeError, SetupError};
 use crate::host::HostEnvironment;
 use crate::semantics as runtime_ir;
@@ -59,6 +62,7 @@ pub(crate) struct PreparedRuntimeState {
     pub(crate) relation_policy: SealedRelationPolicy,
     #[cfg(feature = "prove")]
     pub(crate) uses_ir_hash: bool,
+    #[cfg(feature = "prove")]
     pub(crate) static_table_artifact: StaticTableArtifact,
     #[cfg(feature = "prove")]
     pub(crate) tuple_encoding_defaults: TupleEncodingDefaults,
@@ -71,6 +75,7 @@ pub(crate) struct PreparedRuntimeState {
 #[cfg(feature = "verify")]
 pub(crate) struct PreparedRuntimeBuild {
     pub(crate) state: PreparedRuntimeState,
+    #[cfg(feature = "prove")]
     pub(crate) machine: TabulaMachine,
     #[cfg(feature = "prove")]
     pub(crate) root_backend_bundle: RootBackendBundle,
@@ -98,7 +103,7 @@ pub(crate) fn build_chip_kit_registry(state: &PreparedRuntimeState) -> ChipKitRe
 pub(crate) fn build_prepared_runtime(
     registered_program: &RegisteredProgram,
     host_environment: &HostEnvironment,
-    machine_stark_config: &TabulaStarkConfig,
+    #[cfg(feature = "prove")] machine_stark_config: &TabulaStarkConfig,
     #[cfg(feature = "prove")] root_backend_bundle: RootBackendBundle,
     #[cfg(not(feature = "prove"))] root_proof_backend: Arc<dyn RootProofBackend>,
 ) -> Result<PreparedRuntimeBuild, RuntimeError> {
@@ -144,6 +149,7 @@ pub(crate) fn build_prepared_runtime(
         detail: error.to_string(),
     })?;
 
+    #[cfg(feature = "prove")]
     let machine =
         build_registered_program_machine(&program_setup, machine_stark_config, proof_backend)?;
 
@@ -156,6 +162,7 @@ pub(crate) fn build_prepared_runtime(
         relation_policy: program_setup.relation_policy,
         #[cfg(feature = "prove")]
         uses_ir_hash: program_setup.uses_ir_hash,
+        #[cfg(feature = "prove")]
         static_table_artifact: registered_program.static_table_artifact().clone(),
         #[cfg(feature = "prove")]
         tuple_encoding_defaults: registered_program.tuple_encoding_defaults().clone(),
@@ -165,6 +172,7 @@ pub(crate) fn build_prepared_runtime(
 
     Ok(PreparedRuntimeBuild {
         state,
+        #[cfg(feature = "prove")]
         machine,
         #[cfg(feature = "prove")]
         root_backend_bundle,

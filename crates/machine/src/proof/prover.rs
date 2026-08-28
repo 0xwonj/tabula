@@ -196,7 +196,7 @@ impl<'a> Prover<'a> {
         });
 
         for (((table_id, col_id), tier_topology), column_trace) in
-            topology.columns.iter().zip(column_traces.into_iter())
+            topology.columns.iter().zip(column_traces)
         {
             let key = column_trace.key;
             let expected = ColumnSlotKey {

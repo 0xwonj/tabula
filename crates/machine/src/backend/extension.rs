@@ -34,9 +34,9 @@ pub trait ExecutionTierExtension: Send + Sync {
 
     /// Dynamic chips for trace generation.
     ///
-    /// Each chip's [`TraceContributor::contribute()`] is called during
-    /// trace building. Chips should read from the [`WitnessStore`] using
-    /// custom labels populated by [`populate_witness()`](Self::populate_witness).
+    /// Each chip's `TraceContributor::contribute()` method is called during
+    /// trace building. Chips should read from the `WitnessStore` using custom
+    /// labels populated before machine trace construction.
     fn dyn_chips(&self) -> Vec<Box<dyn DynChip>>;
 
     /// Bus consumers for interaction-driven trace building.

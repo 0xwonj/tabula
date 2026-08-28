@@ -20,13 +20,13 @@ pub struct PoseidonCols<T> {
 
     // ── Round constants (witness, NOT constrained in M8) ──
     /// Round constants for this round. Full rounds: all 16 populated.
-    /// Partial rounds: only rc[0] is nonzero.
+    /// Partial rounds: only `rc[0]` is nonzero.
     pub rc: [T; WIDTH],
 
     // ── S-box intermediates ──
-    /// y^2 where y = state[i] + rc[i]. For partial rounds, only [0] is meaningful.
+    /// `y^2` where `y = state[i] + rc[i]`. For partial rounds, only index 0 is meaningful.
     pub sbox_y2: [T; WIDTH],
-    /// y^3 = y * y^2. For partial rounds, only [0] is meaningful.
+    /// `y^3 = y * y^2`. For partial rounds, only index 0 is meaningful.
     pub sbox_y3: [T; WIDTH],
 
     // ── Round control ──
